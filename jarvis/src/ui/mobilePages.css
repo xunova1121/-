@@ -150,95 +150,6 @@
 :root body.compact.companion-edition :is(dialog::backdrop, .drawer-scrim, .mp-scrim, .weiyang-menu-shade) {
   background: var(--overlay);
 }
-/* 正文不再占据大角色头部；每条回答保留小头像和统一的阅读面板。 */
-:root body.compact.companion-edition .transcript {
-  padding-inline: 20px;
-}
-:root body.compact.companion-edition .transcript:has(> .home-reference) {
-  padding-inline: 0;
-}
-:root body.compact.companion-edition .msg.agent {
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--wy-radius);
-  background: var(--surface);
-  font-size: 0.875rem;
-  line-height: 1.65;
-  box-shadow: none;
-  min-width: 0;
-  max-width: 100%;
-}
-:root body.compact.companion-edition .msg.agent > .who,
-:root body.compact.companion-edition .msg.agent:not(:last-child) > .who {
-  display: flex !important;
-  align-items: center;
-  gap: 8px !important;
-  min-height: 32px;
-  height: auto !important;
-  margin: 0 0 6px !important;
-  font-size: 0.8125rem;
-}
-:root body.compact.companion-edition .msg.agent > .who .who-mood,
-:root body.compact.companion-edition .msg.agent:not(:last-child) > .who .who-mood {
-  --mascot-size: 32px !important;
-  position: static !important;
-  width: 32px;
-  height: 32px;
-  margin: 0 !important;
-}
-:root body.compact.companion-edition .msg.agent > .who .wy-reply-greeting {
-  display: none;
-}
-:root body.compact.companion-edition .msg.agent .body {
-  font-size: 0.875rem;
-  line-height: 1.65;
-  overflow-wrap: anywhere;
-}
-:root body.compact.companion-edition .msg.agent .body :is(h1, h2, h3) {
-  font-size: 1.0625rem;
-  line-height: 1.5;
-  font-weight: 600;
-  letter-spacing: 0;
-}
-:root body.compact.companion-edition .msg.user {
-  max-width: 86%;
-  padding: 8px 12px;
-  background: var(--accent-soft);
-  color: var(--text);
-  border-radius: 18px 18px 5px 18px;
-  font-size: 0.875rem;
-  line-height: 1.55;
-}
-:root[data-theme='light'] body.compact.companion-edition .msg.user {
-  background: linear-gradient(120deg, #9a90fb, #8355f1);
-  color: #fff;
-}
-:root[data-theme='light'] body.compact.companion-edition .msg.user :is(.who, .who-time, button) {
-  color: rgba(255, 255, 255, 0.94);
-}
-:root body.compact.companion-edition .msg-actions {
-  border-top: 1px solid var(--line);
-  padding-top: 10px;
-}
-:root body.compact.companion-edition .msg-actions button {
-  color: var(--accent);
-  min-width: 36px;
-  min-height: 36px;
-}
-:root body.compact.companion-edition .progress-card {
-  background: var(--surface-2);
-  border-color: var(--line);
-  border-radius: 16px;
-}
-:root body.compact.companion-edition .msg.agent.streaming > .who::after {
-  content: attr(data-status);
-  color: var(--muted);
-  font-size: 0.75rem;
-  white-space: normal;
-  min-width: 0;
-  flex: 1;
-  max-width: 60%;
-}
 /* 模型底部选择器和全息陪伴也继承同一套手机主题。 */
 :root body.compact.companion-edition :is(.ml-picker, .mc-sheet, .holo-dialog) {
   --ml-ink: var(--text);
@@ -257,32 +168,63 @@
   color: var(--text);
 }
 
-/* 文字、段落与消息操作栏一起收紧，短句不再留出大块气泡空白。 */
-:root body.compact.companion-edition .msg :is(.actions, .msg-actions) {
-  gap: 4px;
-  margin-top: 6px;
+
+/* 内页保持同一排版节奏：标题清楚、分组轻盈，不叠加装饰阴影。 */
+:root body.compact.companion-edition .pane-head {
+  padding-block: 8px 12px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--line);
 }
-:root body.compact.companion-edition .msg :is(.actions, .msg-actions) button {
-  width: 30px;
-  height: 30px;
-  min-height: 30px;
-  padding: 6px;
+:root body.compact.companion-edition .pane-head::after {
+  display: none;
 }
-:root body.compact.companion-edition .msg.user .who {
-  font-size: 0.625rem;
-  margin-bottom: 4px;
+:root body.compact.companion-edition :is(.pane-head h2, .mc-title, .drawer-title) {
+  font-size: 1.0625rem;
+  font-weight: 600;
 }
-:root body.compact.companion-edition .msg.agent .body p {
-  margin-block: 0.4em;
+:root body.compact.companion-edition :is(.setting, .set-more, .mc-ability, .ml-card) {
+  border: 1px solid var(--line);
+  border-radius: 18px;
 }
-:root body.compact.companion-edition .msg.agent .body li {
-  margin-block: 0.2em;
+:root body.compact.companion-edition :is(.setting p, .setting small) {
+  line-height: 1.6;
 }
-/* 用户正文原先单独指定了字号，不能只改气泡父级。 */
-:root body.compact.companion-edition .msg.user .body {
-  font-size: 0.875rem;
-  line-height: 1.55;
+:root body.compact.companion-edition :is(.seg, .ml-tabs, .mc-nav, .mc-picker-tabs) {
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
 }
-:root body.compact.companion-edition .msg.user .meta {
-  margin-top: 4px;
+:root body.compact.companion-edition :is(.seg button, .ml-tabs button, .mc-nav-tab) {
+  border: 0;
+  border-radius: 10px;
+}
+:root body.compact.companion-edition :is(.seg button.active, .mc-nav-tab.active, .ml-tabs button.active) {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+:root body.compact.companion-edition :is(.setting, .pane, .mc-picker, .mp-sheet) :is(input, select, textarea):focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+}
+:root body.compact.companion-edition :is(.btn, .drawer-new, .home-suggestion, .msg-act):active {
+  filter: brightness(0.97);
+}
+
+/* 系统仪表也使用普通信息卡，移除旧科技风角标；数值和图表仍由原模块更新。 */
+:root body.compact.companion-edition .dashboard .panel {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: none;
+}
+:root body.compact.companion-edition .dashboard .panel::before,
+:root body.compact.companion-edition .dashboard .panel::after {
+  display: none;
+}
+:root body.compact.companion-edition .dashboard h3 {
+  letter-spacing: 0;
 }

@@ -227,6 +227,12 @@ try {
     for (const pane of ['sessions', 'workspace', 'knowledge', 'mind', 'skills', 'models', 'system', 'settings']) {
       await page.evaluate((value) => window.__jarvis.showPanel(value), pane);
       await page.waitForTimeout(150);
+      // 上一页的页尾检查会改变共享滚动容器，拍首屏前显式恢复位置。
+      await page.evaluate((value)=>{
+        document.querySelector('#panel').scrollTop=0;
+        document.querySelector(`[data-pane="${value}"]`).scrollTop=0;
+      },pane);
+
       const panelMetrics = await page.evaluate((value) => {
         const panel = document.querySelector('#panel');
         const content = panel.querySelector(`[data-pane="${value}"]`);
@@ -248,6 +254,18 @@ try {
         JSON.stringify(panelMetrics)
       );
       await page.screenshot({ path: path.join(output, `theme-${pane}-${width}.png`) });
+      if (width === 390) {
+        // 不只看首屏：滚到面板底部检查长表单和页尾入口。
+        const bottomMetrics=await page.evaluate((value)=>{
+          const content=document.querySelector(`[data-pane="${value}"]`);
+          const panel=document.querySelector('#panel');
+          for(const el of [panel,content]) el.scrollTop=el.scrollHeight;
+          return {width:panel.scrollWidth,doc:document.documentElement.scrollWidth,title:parseFloat(getComputedStyle(content.querySelector('h2')||content).fontSize)};
+        },pane);
+        check(`${pane} 页尾保持统一字号且无横向溢出`,bottomMetrics.width<=width&&bottomMetrics.doc<=width&&bottomMetrics.title<=18,JSON.stringify(bottomMetrics));
+        await page.screenshot({path:path.join(output,`theme-${pane}-bottom-${width}.png`)});
+      }
+
     }
     await page.click('#btn-theme');
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
