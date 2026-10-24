@@ -314,9 +314,12 @@ try {
       msg.remove();
       return result;
     });
+    // 切换系统动效设置后，页面要过一会儿才更新 reduced-motion 标记（慢机器上更明显）：等它生效再量
     await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.waitForFunction(() => !document.body.classList.contains('reduced-motion'), null, { timeout: 5000 }).catch(() => {});
     const waiting = await probeWaiting();
     await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.waitForFunction(() => document.body.classList.contains('reduced-motion'), null, { timeout: 5000 }).catch(() => {});
     const still = await probeWaiting();
     check(`${width} 正在回答时角色放大并一直动、状态前有转圈`, waiting.size >= 56 && waiting.name !== 'none' && waiting.count === 'infinite' && waiting.spinner, JSON.stringify(waiting));
     check(`${width} 系统减少动态效果时正在回答的角色不动`, still.name === 'none', JSON.stringify(still));
