@@ -83,7 +83,8 @@ export function createPanels(app) {
     getConfig: () => panels.config,
     patchConfig: (fn) => panels.patchConfig(fn),
     getGateway: () => app.gateway,
-    toast: (t) => toast(t)
+    toast: (t) => toast(t),
+    patchServer: (patch) => app.server?.putConfig(patch)
   });
   const modelPicker = initModelPicker({
     getWorkspace: () => app.modelWorkspace,

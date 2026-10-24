@@ -392,6 +392,7 @@
           <p class="muted small" id="route-status" role="status"></p>
         </div>
         <label class="inline-check"><input type="checkbox" id="fast-chat" /> 日常对话让推理模型少想一点（首字更快；不支持的模型自动忽略）</label>
+        <label class="inline-check"><input type="checkbox" id="hedge-backup" /> 主模型 10 秒没反应时，同时请求备用模型，谁先回答用谁（要先设备用模型；换用的那次会多花一点费用）</label>
         <h3 class="sub desktop-only">本机模型（免费 · 离线 · 数据不出电脑）</h3>
         <div class="local-status desktop-only" id="local-status" role="status"></div>
         <ul class="lm-list desktop-only" id="local-list"></ul>

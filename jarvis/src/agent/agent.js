@@ -4,6 +4,7 @@ import { createModelRequest } from './agentModelRequest.js';
 import { creativeWithoutLookup, CREATIVE_NOTE } from '../core/imageFollowup.js';
 import { executeToolCalls } from './agentToolExecution.js';
 import { wantsPreSearch, preSearch, preSearchNote, reusesPreSearch } from './preSearch.js';
+import { runHedged } from './hedgedRequest.js';
 import { finishAgentRun } from './agentCompletion.js';
 import { measureModelInput } from '../../shared/modelMetrics.js';
 import { QUICK_MODEL_ATTEMPTS } from './lookupWindow.js';
@@ -179,7 +180,7 @@ export function trimComputerScreenshots(messages,keep=2) {
   for(const m of shots.slice(0,Math.max(0,shots.length-keep))){delete m.images;m.content=`${m.content}\n（旧界面截图已从模型输入移除；请以最新截图为准。）`;}
 }
 
-async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false, describeImages = null, visionLabel = '看图模型', readImageText = null, modelNote = '' }) {
+async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false, describeImages = null, visionLabel = '看图模型', readImageText = null, modelNote = '', hedgeMs = 0 }) {
   if (light && needsActionTools(userText, history)) light = false;
   const capabilities = capabilityBlock(tools);
   // 环境完全没有产物/计算核验能力时，直接说明未验收，不空转两轮模型。
@@ -220,6 +221,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     }
   };
   // 只做一个文件、要求也不长（一份周报、一张表、几页汇报）：不给任务清单工具——评测里模型照样列计划、改计划四五次，每次多等一轮
+  // 要做文件（Word、PPT、表格……）：模型要先在后台写很长的内容，前面很久没动静是正常的
+  const makingFile = taskContract(requirementText).formats.length > 0;
   const oneFile = taskContract(requirementText).formats.length === 1 && String(requirementText).length <= 150 && !/方案|调研|研究|论文|多份|分别/.test(requirementText);
   const own = [...(oneFile ? [] : [plan.tool]), review.tool, executionTool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: availableTools })] : []), ...(lookupDeadline && lookupControl?.release ? [moreTimeTool] : [])].filter((t) => !tools.some((x) => x.name === t.name));
   // 工具按需加载：工具多时只带常用的完整说明，其余列名字、用 tool_search 加载（见 toolLoader.js）
@@ -329,10 +332,12 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       showText(text);
     };
     let r;
-    const request = createModelRequest({ current: cur, effort, signal, lookupDeadline, lookupControl, light, closing, retrieval, emit, allowWebSearch, onNativeSearch: () => { nativeSearchCalls++; }, onText: acceptVisible, onRetry: (attempt) => {
+    let primaryActivity = null;
+    const makeRequest = (current, onText, onActivity) => createModelRequest({ current, effort, signal, lookupDeadline, lookupControl, light, closing, retrieval, emit, allowWebSearch, onNativeSearch: () => { nativeSearchCalls++; }, onText, onActivity, onRetry: (attempt) => {
       stripper = new EmotionTagStripper();
       emit({ type: 'retry', attempt, resume: Boolean(stepText.trim()) });
     } });
+    const request = makeRequest(cur, acceptVisible, () => primaryActivity?.());
     // 测量实际发送的提示与工具说明，动态规则和短说明均计入字符数。
     // 用的哪个模型：中途换了备用的，也照实写
     const usingNote = modelNote && (cur.model !== model ? `${modelNote}\n（原定的 ${model} 出错了，这一轮实际换成了 ${cur.model}。）` : modelNote);
@@ -342,7 +347,26 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     emit({ type: 'diagnostic', phase: 'model_start', model: cur.model, protocol: cur.adapter.kind, closing, ...measureModelInput({ system: measuredSystem, messages: convo, tools: requestTools }), inputChars: convo.reduce((sum, item) => sum + String(item.content || '').length, 0) });
     try {
     modelAttempts++;
-    r = await request.run({ system: measuredSystem, messages: convo, tools: requestTools });
+    const input = { system: measuredSystem, messages: convo, tools: requestTools };
+    // 主模型 hedgeMs 内没反应：同时问备用模型，谁先有反应用谁（写文件的任务前面本来就要等很久，不这样做）
+    if (hedgeMs > 0 && backups.length && !holding && !makingFile) {
+      const next = backups[0];
+      const { result } = await runHedged({
+        primary: request,
+        onPrimaryActivity: (fn) => { primaryActivity = fn; },
+        makeBackup: ({ onText, onActivity }) => makeRequest(next, onText, onActivity),
+        input,
+        hedgeMs,
+        onText: acceptVisible,
+        onHedge: () => emit({ type: 'tool_progress', id: 'hedge', text: `${cur.model} ${Math.round(hedgeMs / 1000)} 秒没有反应，同时请求备用模型 ${next.model}` }),
+        onSwitch: () => {
+          emit({ type: 'fallback', from: cur.model, to: next.model, slow: true, reason: `${Math.round(hedgeMs / 1000)} 秒没有反应` });
+          backups.shift();
+          cur = next;
+        }
+      });
+      r = result;
+    } else r = await request.run(input);
     // 服务档位（快速档）实际有没有生效：告诉界面，回答底下显示
     if (r?.tier) emit({ type: 'tier', ...r.tier });
     } catch (e) {

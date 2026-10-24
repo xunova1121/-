@@ -31,7 +31,7 @@ export async function measureFirstToken(adapter, model, { timeoutMs = 45000, now
   return Math.round((first || now()) - t0);
 }
 
-export function initRoutingPanel({ getConfig, patchConfig, getGateway, toast }) {
+export function initRoutingPanel({ getConfig, patchConfig, getGateway, toast, patchServer }) {
   const grid = $('#route-grid');
   const inputs = {};
   const speeds = {};
@@ -79,6 +79,7 @@ export function initRoutingPanel({ getConfig, patchConfig, getGateway, toast }) 
       inputs[id].value = v;
     }
     $('#fast-chat').checked = cfg.fastChat !== false;
+    $('#hedge-backup').checked = cfg.hedgeBackup !== false;
     const p = providerById(cfg.provider);
     $('#route-section').hidden = p.kind === 'mock';
     status.textContent = r.enabled && !same ? '服务商换了：模型分工需要重新设置' : '';
@@ -90,12 +91,17 @@ export function initRoutingPanel({ getConfig, patchConfig, getGateway, toast }) 
     return { enabled, provider: cfg.provider, multi: Object.values(routes).some((v) => parseRoute(v).provider), routes };
   }
   const save = (quiet) => {
-    patchConfig((c) => ({ ...c, routing: collect(), fastChat: $('#fast-chat').checked }));
+    patchConfig((c) => ({ ...c, routing: collect(), fastChat: $('#fast-chat').checked, hedgeBackup: $('#hedge-backup').checked }));
     if (!quiet) toast($('#route-on').checked ? '模型分工已开启：每句话会按内容自动选模型' : '已保存（模型分工未开启）');
   };
 
   $('#route-on').addEventListener('change', () => save());
   $('#fast-chat').addEventListener('change', () => save(true));
+  $('#hedge-backup').addEventListener('change', () => {
+    save(true);
+    // 服务器模式：服务器上的任务也照这个开关
+    patchServer?.({ hedgeBackup: $('#hedge-backup').checked })?.catch?.(() => toast('服务器上的设置没改成，稍后再试'));
+  });
   for (const i of Object.values(inputs)) i.addEventListener('change', () => save(true));
 
   $('#btn-route-suggest').addEventListener('click', async (e) => {

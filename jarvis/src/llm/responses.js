@@ -124,7 +124,7 @@ export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearc
           if (e === '[DONE]') { finished = true; break; }
           let ev;
           try { ev = JSON.parse(e); } catch { continue; } // 心跳等非 JSON 行
-          if (/^response\.(output_|function_call|reasoning|completed|failed|incomplete)/.test(ev.type || '')) guard.touch();
+          if (/^response\.(output_|function_call|reasoning|completed|failed|incomplete)/.test(ev.type || '')) guard.alive();
           if (typeof ev.response?.service_tier === 'string') servedTier = ev.response.service_tier;
           acc.push(ev);
           if (ev.type === 'response.completed' || ev.type === 'response.incomplete') finished = true;

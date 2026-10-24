@@ -19,6 +19,7 @@ import { SentenceChunker } from '../core/sentenceChunker.js';
 import { followUpSuggestions, interruptionMark } from '../core/suggest.js';
 import { savePending, clearPending } from '../core/pendingTask.js';
 import { runRemote } from '../core/serverClient.js';
+import { HEDGE_MS } from '../agent/hedgedRequest.js';
 import { createTaskKeeper } from '../mobile/backgroundTasks.js';
 import { noteAction } from '../mobile/renderDiagnostics.js';
 import { providerLabel, modelNote } from '../llm/modelLibrary.js';
@@ -336,6 +337,7 @@ export function createTurn(app) {
         requirements: collectRequirements(app.history, app.session.requirements),
         requirementText: userText, // 保留斜杠命令展开前的原话，避免当成缺失历史重复注入
         fallbacks,
+        hedgeMs: app.llmConfig.hedgeBackup === false ? 0 : HEDGE_MS,
         modelNote: modelNote(app.llmConfig, { provider: route.cfg.provider, model }),
         describeImages: sight?.describe,
         visionLabel: sight?.label,
@@ -397,13 +399,13 @@ export function createTurn(app) {
       const remote = st.serverRoute;
       const modelTag =
         app.server && !here
-          ? `服务器 · ${seen}${remote ? `${st.fellFrom ? `${st.usedModel}（${remote.model} 出错后换用）` : `${remote.model}${remote.routed ? `（${TASKS[remote.task]?.name ?? remote.task}）` : ''}`} · ` : ''}`
+          ? `服务器 · ${seen}${remote ? `${st.fellFrom ? `${st.usedModel}（${remote.model} ${st.fellSlow ? '没反应' : '出错'}后换用）` : `${remote.model}${remote.routed ? `（${TASKS[remote.task]?.name ?? remote.task}）` : ''}`} · ` : ''}`
           : here
             ? `本机工具 · ${st.usedModel} · `
             : providerById(app.llmConfig.provider)?.kind === 'mock'
               ? ''
               : st.usedModel !== model
-                ? `${seen}${st.usedModel}（${model} 出错后换用） · `
+                ? `${seen}${st.usedModel}（${model} ${st.fellSlow ? '没反应' : '出错'}后换用） · `
                 : `${seen}${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
       bubble.done(
         `${modelTag}${tierTag}${team ? `团队 ${result.steps} 步 · ` : ''}${st.ctxMs !== null && st.ctxMs >= 300 ? `准备 ${(st.ctxMs / 1000).toFixed(1)}s · ` : ''}${st.firstToken ? `首字 ${((st.firstToken - t0) / 1000).toFixed(1)}s · ` : ''}${serverSlowTag(result.timing)}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}${MOBILE && st.textChunks ? ` · 分 ${st.textChunks} 次收到${globalThis.__jarvisNetVia?.(app.llmConfig.baseURLs?.[app.llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`,

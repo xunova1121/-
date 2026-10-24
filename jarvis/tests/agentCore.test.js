@@ -9,7 +9,7 @@ const ctx = { dynamic: '测试', kbHits: [] };
 const done = (text) => ({ async stream({ onText }) { onText(text); return { text, toolCalls: [], stop: 'end_turn' }; } });
 
 it('电视剧原话使用较短问答说明，并把快速卡住检测与零内部重试传给模型',async()=>{
- const adapter={async stream(o){expect(o.stallTimeouts).toEqual({first:20_000,between:25_000});expect(o.maxTransientRetries).toBe(0);expect(o.system[0].length).toBeLessThan(agent.STABLE_PROMPT.length);o.onText('已核实的回答');return{text:'已核实的回答',toolCalls:[],stop:'end_turn'};}};
+ const adapter={async stream(o){expect(o.stallTimeouts).toMatchObject({first:20_000,between:25_000});expect(o.maxTransientRetries).toBe(0);expect(o.system[0].length).toBeLessThan(agent.STABLE_PROMPT.length);o.onText('已核实的回答');return{text:'已核实的回答',toolCalls:[],stop:'end_turn'};}};
  await agent.runAgent({adapter,model:'m',history:[],userText:'现在播放的电视剧伟大的长征播放哪一集了，内容是什么',tools:[],context:ctx,emit:()=>{},quiet:true});
 });
 

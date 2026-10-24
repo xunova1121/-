@@ -3,7 +3,7 @@ import { OutputBoundary } from '../llm/outputBoundary.js';
 import { requestUsesNativeSearch } from '../llm/nativeSearch.js';
 
 /** 管理单次请求的搜索计时与输出边界；重试和切换决策仍由主循环负责。 */
-export function createModelRequest({ current, effort, signal, lookupDeadline, lookupControl, light = false, closing, retrieval, emit, onNativeSearch, onText, onRetry, allowWebSearch = true }) {
+export function createModelRequest({ current, effort, signal, lookupDeadline, lookupControl, light = false, closing, retrieval, emit, onNativeSearch, onText, onRetry, onActivity, allowWebSearch = true }) {
   let searchTimer,
     searchTimedOut = false;
   const requestCtrl = new AbortController();
@@ -33,6 +33,10 @@ export function createModelRequest({ current, effort, signal, lookupDeadline, lo
     clearSearchTimer() {
       clearTimeout(searchTimer);
     },
+    /** 不要这个请求了（同时问的备用模型先答上了） */
+    abort() {
+      requestCtrl.abort();
+    },
     async run(input) {
       const searchOptions = {
         tools: input.tools,
@@ -46,7 +50,7 @@ export function createModelRequest({ current, effort, signal, lookupDeadline, lo
           model: current.model,
           effort,
           // 闲聊（你好、在吗）：12 秒没动静就算卡住，不重试，直接换备用模型（评测里主模型卡住、等了十几秒才换）
-          stallTimeouts: light ? { first: 12_000, between: 15_000 } : lookupDeadline ? { first: 20_000, between: 25_000 } : { first: 45_000, between: 60_000 },
+          stallTimeouts: { ...(light ? { first: 12_000, between: 15_000 } : lookupDeadline ? { first: 20_000, between: 25_000 } : { first: 45_000, between: 60_000 }), onActivity: () => !requestCtrl.signal.aborted && onActivity?.() },
           maxTransientRetries: light || lookupDeadline || closing ? 0 : 1,
           maxPartialRetries: closing ? 0 : 1, // 已输出的回答允许一次续写，仍受本轮总时限约束
           system: input.system,
@@ -59,6 +63,7 @@ export function createModelRequest({ current, effort, signal, lookupDeadline, lo
           onRetry,
           onText: (delta, meta) => {
             if (requestCtrl.signal.aborted) return;
+            if (delta || meta?.serverTool) onActivity?.();
             if (delta || meta?.serverTool) observeOutput();
             if (meta?.serverTool) {
               emit({ type: 'server_tool', name: meta.serverTool });

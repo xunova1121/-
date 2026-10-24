@@ -37,7 +37,7 @@ export async function readAnthropicStream(stream, { guard, signal, onText, onSer
         const message = checkedMessage(await guard.race(stream.finalMessage()));
         return { text, message };
       }
-      if (event.type !== 'ping') guard.touch();
+      if (event.type !== 'ping') (event.type === 'message_start' ? guard.touch() : guard.alive());
       if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
         text += event.delta.text;
         onText?.(event.delta.text);

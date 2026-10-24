@@ -144,7 +144,7 @@ export const STALL_MS = { first: 45_000, between: 60_000 };
  * 给一次流式请求加“卡住检测”：用 guard.signal 发请求，每收到数据调 touch()，读数据用 race() 包一下（卡住时立刻结束等待）
  * 卡住时抛出带 stalled 的错误，按临时故障自动重试；用户自己点停止时照常是 AbortError
  */
-export function stallGuard(outer, { first = STALL_MS.first, between = STALL_MS.between } = {}) {
+export function stallGuard(outer, { first = STALL_MS.first, between = STALL_MS.between, onActivity } = {}) {
   const ctrl = new AbortController();
   let timer = null, stalledMs = 0;
   let fail;
@@ -164,6 +164,8 @@ export function stallGuard(outer, { first = STALL_MS.first, between = STALL_MS.b
   return {
     signal: ctrl.signal,
     touch: () => arm(between),
+    /** 收到了模型的实际数据（含思考内容，不只是响应头）：既重置卡住计时，也告诉上层“模型在动” */
+    alive: () => { arm(between); onActivity?.(); },
     race: (p) => Promise.race([p, stalled]),
     /** 把底层报的 AbortError 换成“卡住了”（只在是卡住检测断开的时候） */
     error: (err) => stalledMs && !outer?.aborted ? Object.assign(new Error(`模型 ${Math.round(stalledMs / 1000)} 秒没有任何输出，连接卡住了`), { stalled: true }) : err,
@@ -277,7 +279,7 @@ function createOnce({ baseURL, apiKey, headers = {}, serviceTier = '' }) {
           let data;
           try { data = JSON.parse(frame); } catch { continue; }
           if (data.error) throw Object.assign(new Error(data.error.message || '模型流返回错误'), {kind:'api', code:data.error.code || 'MODEL_STREAM_ERROR'});
-          if (data.choices?.length) guard.touch();
+          if (data.choices?.length) guard.alive();
           if (typeof data.service_tier === 'string') servedTier = data.service_tier;
           acc.push(data);
           if (data.choices?.[0]?.finish_reason) finished = true;

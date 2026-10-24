@@ -54,7 +54,8 @@ export function createTurnEvents(app) {
       } else if (e.type === 'fallback') {
         st.usedModel = e.to;
         st.fellFrom = st.fellFrom || e.from;
-        const note = `${e.from} 出错（${e.reason}），已换成 ${e.to} 接着做`;
+        st.fellSlow = st.fellSlow ?? Boolean(e.slow);
+        const note = e.slow ? `${e.from} ${e.reason}，已换用备用模型 ${e.to}` : `${e.from} 出错（${e.reason}），已换成 ${e.to} 接着做`;
         app.hud.think(`⇄ ${note}`, 'sub');
         toast(note);
         app.setTask('processing', `已换成 ${e.to}`.slice(0, 30));
