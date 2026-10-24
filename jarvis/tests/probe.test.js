@@ -55,6 +55,31 @@ describe('手机原生网络', () => {
   });
 });
 
+describe('手机连自己的服务器：回答要边收边显示', () => {
+  it('服务器地址设成走原生网络后，普通请求走原生，事件流仍走 WebView（原生要等整个回答结束才一次给）', async () => {
+    const g = {};
+    const used = [];
+    const f = wrapFetch(async () => { used.push('web'); return new Response('w'); }, async () => { used.push('native'); return new Response('n'); }, 'https://localhost', g);
+    g.__jarvisPreferNative('d.example.com');
+    await f('https://d.example.com/api/sessions');
+    await f('https://d.example.com/api/tasks/t1/events?after=0', { stream: true });
+    expect(used).toEqual(['native', 'web']);
+  });
+  it('WebView 连不上（跨域被拦）时事件流退回原生网络，不至于收不到', async () => {
+    const used = [];
+    const f = wrapFetch(async () => { throw new TypeError('Failed to fetch'); }, async () => { used.push('native'); return new Response('n'); }, 'https://localhost', {});
+    expect(await (await f('https://d.example.com/api/tasks/t1/events', { stream: true })).text()).toBe('n');
+    expect(used).toEqual(['native']);
+  });
+  it('服务器客户端取事件流时带上 stream 标记', async () => {
+    const { createServerClient } = await import('../src/core/serverClient.js');
+    let seen;
+    const c = createServerClient({ base: 'https://d.example.com', token: 't', fetchImpl: async (url, init) => { seen = init; return new Response(''); } });
+    await c.events('t1', 0);
+    expect(seen.stream).toBe(true);
+  });
+});
+
 describe('手机原生网络上传文件', () => {
   it('FormData 转成插件的 formData 格式（文件 Base64）', async () => {
     let req;

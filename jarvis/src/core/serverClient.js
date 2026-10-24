@@ -86,7 +86,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     timings.length = Math.min(timings.length, 8);
     return timings[0];
   };
-  async function send(path, { method, body, signal, headers, binary, timeout, attempt = 1 }) {
+  async function send(path, { method, body, signal, headers, binary, stream, timeout, attempt = 1 }) {
     // 超时：网络卡住时不一直等，报错让上层重试或提示（事件流不设，它本来就一直开着）
     const ctrl = new AbortController();
     const stop = () => ctrl.abort(signal?.reason);
@@ -98,6 +98,8 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
         method, signal: ctrl.signal,
         // 手机 App 退到原生网络时：binary 让它按原始字节读（不然 Word、图片这类文件会被当成文字读坏）
         ...(binary && { binary: true }),
+        // stream：要边收边显示（事件流），手机 App 不走一次性返回的原生网络
+        ...(stream && { stream: true }),
         headers: { ...(token && { Authorization: `Bearer ${token}` }), ...(body !== undefined && !(body instanceof Blob) && { 'Content-Type': 'application/json' }), ...headers },
         ...(body !== undefined && { body: body instanceof Blob ? body : JSON.stringify(body) })
       });
@@ -114,15 +116,15 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
       signal?.removeEventListener('abort', stop);
     }
   }
-  async function req(path, { method = 'GET', body, raw = false, signal, headers = {}, binary = false, timeout = raw ? 0 : timeoutMs } = {}) {
+  async function req(path, { method = 'GET', body, raw = false, signal, headers = {}, binary = false, stream = false, timeout = raw ? 0 : timeoutMs } = {}) {
     let res;
     try {
-      res = await send(path, { method, body, signal, headers, binary, timeout });
+      res = await send(path, { method, body, signal, headers, binary, stream, timeout });
     } catch (e) {
       // 读数据的请求网络一抖就失败：再试一次（写数据的不重试，免得做两遍）
       if (method !== 'GET' || signal?.aborted || e?.code === 'RETRIEVAL_BUDGET' || !['network', 'timeout'].includes(errorKind(e))) throw e;
       await sleep(retryWait(250, e), signal);
-      res = await send(path, { method, body, signal, headers, binary, timeout, attempt: 2 });
+      res = await send(path, { method, body, signal, headers, binary, stream, timeout, attempt: 2 });
     }
     if (raw) return res;
     const data = await res.json().catch((error) => {
@@ -162,7 +164,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     getTask: (id) => req(`/api/tasks/${id}`),
     stopTask: (id) => req(`/api/tasks/${id}/stop`, { method: 'POST' }),
     // 要求事件流：手机 App 退到原生网络时也边收边显示（见 mobile/nativeFetch.js 的 wantsStream）
-    events: (id, after, signal) => req(`/api/tasks/${id}/events?after=${after}`, { raw: true, signal, timeout: timeoutMs, headers: { Accept: 'text/event-stream' } }),
+    events: (id, after, signal) => req(`/api/tasks/${id}/events?after=${after}`, { raw: true, stream: true, signal, timeout: timeoutMs, headers: { Accept: 'text/event-stream' } }),
     listSessions: () => req('/api/sessions'),
     getSession: (id) => req(`/api/sessions/${encodeURIComponent(id)}`).catch((e) => { if (e.status === 404) return null; throw e; }),
     patchSession: (id, patch) => req(`/api/sessions/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }),

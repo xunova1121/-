@@ -68,6 +68,15 @@ export function wrapFetch(webFetch, native, selfOrigin, g = globalThis) {
   return async (input, init = {}) => {
     const url = new URL(typeof input === 'string' ? input : input.url, selfOrigin);
     if (url.origin === selfOrigin || !/^https?:$/.test(url.protocol)) return webFetch(input, init);
+    // 要边收边显示的（服务器推回答的事件流）：原生网络要等整个回答结束才一次给，所以先用 WebView；它连不上再退回原生
+    if (init.stream) {
+      try {
+        return await webFetch(input, init);
+      } catch (e) {
+        if (e?.name === 'AbortError' || init.signal?.aborted || !(e instanceof TypeError)) throw e;
+        return native(url.href, init);
+      }
+    }
     if (nativeHosts.has(url.host)) return native(url.href, init);
     try {
       return await webFetch(input, init);
