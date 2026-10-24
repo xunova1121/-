@@ -40,6 +40,10 @@ import { routeFor, fallbackRoutes, classifyTask, effortFor, isSmallTalk, visionR
 import { providerLabel, modelNote } from '../src/llm/modelLibrary.js';
 import { INTERRUPTED_MARK, interruptionMark, errorKind } from '../src/core/suggest.js';
 import { uid } from '../src/agent/store.js';
+import * as skillPacks from '../src/agent/skillPacks.js';
+import * as ws from '../src/agent/workspace.js';
+import { needsRunner } from '../src/agent/skillDeps.js';
+import { skillRunnerTool } from './skillRunner.mjs';
 
 /** 服务器上不提供的工具：浏览器里的代码沙箱、预览窗口、本机指标、定时任务（定时任务还在手机 / 电脑上跑） */
 export const SERVER_BLOCKED = new Set(['run_javascript', 'run_python', 'preview', 'get_local_metrics', 'schedule_task', 'list_schedules', 'cancel_schedule']);
@@ -95,7 +99,7 @@ const clip = (s, n) => (typeof s === 'string' && s.length > n ? `${s.slice(0, n)
 /**
  * @param {{ getConfig: () => Promise<object>, maxRunning?: number, maxSteps?: number, idleMs?: number, makeTools?: (ctx: object) => object[], makeAdapter?: typeof createAdapter, now?: () => number }} o
  */
-export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now }) {
+export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now, skillRunner = null }) {
   const tasks = new Map();
   const waiting = [];
   let running = 0;
@@ -240,6 +244,14 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     }).filter((t) => !SERVER_BLOCKED.has(t.name)), task.evaluationId);
     const projectTool = projectExecutionTool({ image: process.env.JARVIS_CODE_SANDBOX_IMAGE });
     if (projectTool) tools.push(projectTool);
+    // 装了带脚本的技能：给模型“运行技能命令”的工具（在服务器的隔离 Docker 里跑，见 skillRunner.mjs；没装运行器时会照实说怎么装）
+    if (skillRunner && !task.evaluationId && (await skillPacks.enabled().catch(() => [])).some(needsRunner)) {
+      tools.push(skillRunnerTool({
+        runner: skillRunner,
+        getPack: (name) => skillPacks.get(name),
+        saveFile: async (p, data) => { await ws.write(p, new Blob([data])); task.files.add(p); record(task, { type: 'file', path: p }); }
+      }));
+    }
 
     let shown = '';
     const usedTools = [];

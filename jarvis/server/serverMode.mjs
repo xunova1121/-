@@ -35,6 +35,9 @@ import { createFileStore } from './fileStore.mjs';
 import { createTaskRunner } from './taskRunner.mjs';
 import { useBackend } from '../src/agent/store.js';
 import { seedBuiltins } from '../src/agent/skillPacks.js';
+import * as skillPacks from '../src/agent/skillPacks.js';
+import { needsRunner } from '../src/agent/skillDeps.js';
+import { createSkillRunner, SKILL_RUNNER_IMAGE } from './skillRunner.mjs';
 import * as sessions from '../src/agent/sessions.js';
 import * as ws from '../src/agent/workspace.js';
 import { DEFAULT_CONFIG } from '../src/llm/config.js';
@@ -87,7 +90,9 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     try { return { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(configFile, 'utf8')) }; } catch { return { ...DEFAULT_CONFIG }; }
   };
   const saveConfig = (cfg) => { fs.writeFileSync(`${configFile}.tmp`, JSON.stringify(cfg, null, 2), { mode: 0o600 }); fs.renameSync(`${configFile}.tmp`, configFile); };
-  const runner = injected ?? createTaskRunner({ getConfig: async () => loadConfig(), maxRunning });
+  // 技能脚本运行器：技能里的 Python / Node 命令在隔离的 Docker 里跑（没装 Docker 或镜像时照实告诉模型怎么装）
+  const skillRunner = createSkillRunner({ image: process.env.JARVIS_SKILL_RUNNER_IMAGE || SKILL_RUNNER_IMAGE, baseDir: path.join(dataDir, 'skill-runner') });
+  const runner = injected ?? createTaskRunner({ getConfig: async () => loadConfig(), maxRunning, skillRunner });
   const want = Buffer.from(tokenFor(password));
   const failures = new Map(); // IP → 最近登录失败的时间（防止暴力猜密码）
   let activePCModels=0;
@@ -156,7 +161,7 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
   async function handle(req, res, pathname) {
     const url = new URL(req.url, 'http://x');
     if (pathname === '/api/server/login' && req.method === 'POST') { login(req, res, await readJson(req)); return true; }
-    if (pathname === '/api/server/status' && req.method === 'GET') { json(res, 200, { ok: true, features:{evaluationMemoryIsolation:true,taskRequestIds:true,taskNotes:true,taskCheckpoints:true,pcModelBridge:true}, running: runner.running, tasks: runner.list().filter((t) => t.status === 'running' || t.status === 'queued') }); return true; }
+    if (pathname === '/api/server/status' && req.method === 'GET') { json(res, 200, { ok: true, features:{evaluationMemoryIsolation:true,taskRequestIds:true,taskNotes:true,taskCheckpoints:true,pcModelBridge:true,skillSync:true}, running: runner.running, tasks: runner.list().filter((t) => t.status === 'running' || t.status === 'queued') }); return true; }
     if(pathname==='/api/server/pc-model'&&req.method==='POST'){
       if(!authorized(req)){json(res,401,{error:'服务器登录已失效'});return true;}
       if(activePCModels>=2){json(res,429,{error:'PC模型请求繁忙，请稍后重试'});return true;}
@@ -180,6 +185,23 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       const status = embedder ? await vectorStatus() : { model: null, total: 0, embedded: 0, lastError: null };
       if (embedder && status.embedded < status.total) backfillVectors().catch(() => {});
       json(res, 200, status);
+      return true;
+    }
+    // 技能：手机 / 电脑装好的技能传到服务器（服务器模式下任务在服务器上做，技能也得在服务器上）
+    if (pathname === '/api/server/skills' && req.method === 'GET') {
+      const list = await skillPacks.list();
+      json(res, 200, { runner: { available: await skillRunner.available(), image: skillRunner.image }, skills: list.map((p) => ({ name: p.name, description: p.description, source: p.source, enabled: p.enabled !== false, builtin: p.source === '内置', needsRunner: needsRunner(p), installedAt: p.installedAt })) });
+      return true;
+    }
+    if (pathname === '/api/server/skills' && req.method === 'POST') {
+      const body = await readJson(req, UPLOAD_LIMIT);
+      if (!body?.files || typeof body.files !== 'object' || Array.isArray(body.files)) { json(res, 400, { error: '缺少技能文件' }); return true; }
+      try {
+        const pack = await skillPacks.installFromFiles(body.files, { source: String(body.source || '手机 / 电脑同步').slice(0, 200) });
+        json(res, 200, { name: pack.name, needsRunner: needsRunner(pack), runner: await skillRunner.available() });
+      } catch (e) {
+        json(res, 400, { error: e.message });
+      }
       return true;
     }
     if (pathname === '/api/server/document-styles' && req.method === 'GET') {

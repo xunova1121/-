@@ -74,6 +74,25 @@ export const keepLocalBinaries = (incoming, local) => ({
   files: Object.fromEntries(Object.entries(incoming.files || {}).map(([k, f]) => [k, f?.stub && isBinaryFile(local?.files?.[k]) && !isRemoteFile(local.files[k]) ? local.files[k] : f]))
 });
 
+/**
+ * 装好的技能 → 一组文件（SKILL.md + 附件），传给服务器重新安装用。
+ * 二进制附件合计不超过 maxBinary 就带上内容；更大的有下载地址的只传地址，没有的不传（服务器用到时会说缺附件）
+ */
+export function packToFiles(pack, { maxBinary = 20 * 1024 * 1024 } = {}) {
+  // description 用多行块写，里面有冒号、引号也不会解析错
+  const desc = String(pack.description || '').split('\n').map((l) => `  ${l}`).join('\n');
+  const head = ['---', `name: ${pack.name}`, 'description: |', desc, '---', ''].join('\n');
+  const files = { 'SKILL.md': `${head}${pack.body || ''}` };
+  let bin = 0;
+  for (const [k, f] of Object.entries(pack.files || {})) {
+    if (isRemoteFile(f)) { if (f.url) files[k] = { remote: true, url: f.url, size: f.size || 0, ...(f.binary && { binary: true }) }; continue; }
+    if (!isBinaryFile(f)) { files[k] = f; continue; }
+    if (bin + f.size <= maxBinary) { files[k] = f; bin += f.size; }
+    else if (f.url) files[k] = { remote: true, url: f.url, size: f.size, binary: true };
+  }
+  return files;
+}
+
 // ---------------------------------------------------------------- SKILL.md 解析
 
 /** 解析 YAML 头（只支持技能文件里常见的写法：key: value、引号、| 和 > 多行块） */

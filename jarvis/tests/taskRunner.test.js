@@ -280,6 +280,23 @@ describe('服务器模式补齐：和手机 / 电脑上一样', () => {
     expect((await sessions.get(id0)).messages.at(-1)).toMatchObject({ role: 'assistant', content: '记住了' });
   });
 
+  it('装了带脚本的技能：服务器任务里有“运行技能命令”工具，命令交给技能运行器，结果回到对话', async () => {
+    const packs = await import('../src/agent/skillPacks.js');
+    await packs.installFromFiles({ 'SKILL.md': '---\nname: score-demo\ndescription: |\n  查比分\n---\n运行 `python3 scripts/score.py`', 'scripts/score.py': 'print(1)' }, { source: '测试' });
+    const ran = [];
+    const skillRunner = { image: 'img', available: async () => true, run: async (pack, command) => { ran.push([pack.name, command]); return { exitCode: 0, timedOut: false, stdout: '山东泰山 3-1', stderr: '', files: [] }; } };
+    let sawTool = false;
+    const steps = [{ tools: [{ id: 'r1', name: 'run_skill_command', args: { skill: 'score-demo', command: 'python3 scripts/score.py' } }] }, { text: '比分是 3-1' }];
+    let i = 0;
+    const adapter = { stream: async ({ tools, onText }) => { if (tools?.some((t) => t.name === 'run_skill_command')) sawTool = true; const s = steps[Math.min(i++, steps.length - 1)]; if (s.text) onText?.(s.text); return { text: s.text ?? '', toolCalls: s.tools ?? [], stop: s.tools ? 'tool_use' : 'end_turn' }; } };
+    const runner = createTaskRunner({ getConfig: mockCfg, skillRunner, makeAdapter: () => ({ adapter, model: 'm' }), makeTools: () => [] });
+    const { id } = await runner.start({ text: '用 score-demo 技能查一下山东泰山比分，直接运行脚本' });
+    await until(() => runner.get(id).status === 'done');
+    expect(sawTool).toBe(true);
+    expect(ran).toEqual([['score-demo', 'python3 scripts/score.py']]);
+    await packs.remove('score-demo');
+  });
+
   it('整理记忆、压缩对话等服务器空下来再做，不和下一句话抢模型；settled() 时马上做完', async () => {
     const id0 = 'idle-chat';
     const old = Array.from({ length: 34 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `第 ${i} 句`, ts: i + 1 }));

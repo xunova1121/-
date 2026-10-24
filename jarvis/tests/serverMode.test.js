@@ -29,6 +29,18 @@ async function readSse(res) {
 }
 
 describe('服务器模式接口', () => {
+  it('手机 / 电脑装好的技能传到服务器：装上并列出，带脚本的标出来；技能运行器状态照实报告', async () => {
+    const files = { 'SKILL.md': '---\nname: score-demo\ndescription: |\n  查比分\n---\n运行 `python3 scripts/score.py`', 'scripts/score.py': 'print("3-1")' };
+    const r = await api('/api/server/skills', { method: 'POST', body: JSON.stringify({ files, source: '测试同步' }) });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toMatchObject({ name: 'score-demo', needsRunner: true });
+    const list = await (await api('/api/server/skills')).json();
+    expect(typeof list.runner.available).toBe('boolean');
+    expect(list.skills.find((p) => p.name === 'score-demo')).toMatchObject({ needsRunner: true, source: '测试同步', builtin: false });
+    expect((await api('/api/server/skills', { method: 'POST', body: JSON.stringify({ files: { 'a.txt': 'x' } }) })).status).toBe(400);
+    expect((await fetch(base + '/api/server/skills')).status).toBe(401);
+  });
+
   it('服务器自行拉取模型：使用服务器密钥，不接受手机传入的地址和密钥', async () => {
     const configFile=path.join(dir,'config.json');
     const previous=fs.existsSync(configFile)?fs.readFileSync(configFile):null;

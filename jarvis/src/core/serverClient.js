@@ -180,6 +180,10 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     // 要求事件流：手机 App 退到原生网络时也边收边显示（见 mobile/nativeFetch.js 的 wantsStream）
     events: (id, after, signal) => req(`/api/tasks/${id}/events?after=${after}`, { raw: true, stream: streaming, signal, timeout: streaming ? STREAM_FIRST_MS : timeoutMs, headers: { Accept: 'text/event-stream' } }),
     listSessions: () => req('/api/sessions'),
+    /** 服务器上的技能和技能运行器状态 */
+    listSkills: () => req('/api/server/skills'),
+    /** 把手机 / 电脑上装好的技能传到服务器（files：packToFiles 的结果；大技能多等一会儿） */
+    installSkill: (files, source) => req('/api/server/skills', { method: 'POST', body: { files, source }, timeout: 120000 }),
     getSession: (id) => req(`/api/sessions/${encodeURIComponent(id)}`).catch((e) => { if (e.status === 404) return null; throw e; }),
     patchSession: (id, patch) => req(`/api/sessions/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }),
     deleteSession: (id) => req(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),

@@ -13,6 +13,8 @@ export function skillCompatibility(pack, { mobile = false } = {}) {
     return { status: 'blocked', label: '手机用不了', reason: '依赖电脑系统、桌面控制或本机运行环境，请在 Windows 版使用' };
   }
   if (/\b(python|python3|pip|npm|node(?:\.js)?|ffmpeg|libreoffice|pandoc|cuda|pytorch)\b|API.?Key|密钥|付费|联网|浏览器自动化/i.test(relevant) || Object.keys(pack.files || {}).some(p => /\.(py|sh|ps1|bat|js)$/i.test(p))) {
+    // 服务器模式：任务在服务器上做，脚本在服务器的隔离环境（技能运行器）里跑
+    if (globalThis.__jarvisServerMode) return { status: 'conditional', label: '经服务器可用', reason: '脚本在你服务器的隔离环境里运行（会联网），服务器要装好技能运行器；只装可信来源的技能' };
     return { status: 'conditional', label: '手机有条件可用', reason: '文字和文件流程可用；脚本、外部服务和大文件需额外检查，未保证全部兼容' };
   }
   return { status: 'available', label: '适合手机', reason: '以文字、资料整理和已有文件工具为主' };

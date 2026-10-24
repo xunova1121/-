@@ -120,6 +120,48 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
       MOBILE ? badge(c) : null, btn);
   }
 
+  // 服务器模式：任务在服务器上做，技能也要在服务器上。手机 / 电脑装好就传过去（服务器连 GitHub 常常很慢，在这边下好再传更稳）
+  const server = () => (globalThis.__jarvisServerMode ? globalThis.__jarvisServerClient : null);
+  async function pushToServer(list) {
+    const c = server();
+    if (!c?.installSkill) return '';
+    const done = [];
+    const failed = [];
+    for (const p of list) {
+      try {
+        const r = await c.installSkill(packs.packToFiles(p), `从${MOBILE ? '手机' : '电脑'}同步（原来源：${p.source || '本地'}）`);
+        done.push(r.needsRunner && !r.runner ? `${p.name}（带脚本：服务器还没装技能运行器）` : p.name);
+      } catch (e) {
+        failed.push(`${p.name}：${e.message}`);
+      }
+    }
+    refreshServer();
+    return `${done.length ? `；已同步到服务器：${done.join('、')}` : ''}${failed.length ? `；没传到服务器：${failed.join('；')}` : ''}`;
+  }
+  const serverLine = el('p', { className: 'muted small', id: 'skill-server', hidden: true });
+  const syncBtn = el('button', { type: 'button', className: 'btn ghost sm', textContent: '把已装技能同步到服务器', hidden: true });
+  status.after(serverLine, syncBtn);
+  syncBtn.addEventListener('click', async () => {
+    syncBtn.disabled = true;
+    status.textContent = '正在同步到服务器…';
+    const mine = installed.filter((p) => p.source !== '内置');
+    status.textContent = mine.length ? `同步完成${await pushToServer(mine)}` : '没有要同步的技能（内置技能服务器上本来就有）';
+    syncBtn.disabled = false;
+  });
+  async function refreshServer() {
+    const c = server();
+    serverLine.hidden = syncBtn.hidden = !c?.listSkills;
+    if (!c?.listSkills) return;
+    try {
+      const r = await c.listSkills();
+      const scripts = r.skills.filter((p) => p.needsRunner && !p.builtin).length;
+      serverLine.textContent = `服务器上有 ${r.skills.length} 个技能；技能运行器（运行技能里的 Python / Node 脚本）：${r.runner.available ? '已装好' : '还没装（带脚本的技能只能读说明，装法见部署说明“技能运行器”一节）'}${scripts ? `；带脚本的技能 ${scripts} 个` : ''}`;
+    } catch {
+      serverLine.textContent = '服务器版本太旧，不能同步技能：请先在设置里“立即更新服务器”';
+    }
+  }
+  refreshServer();
+
   async function fromGitHub(url) {
     status.textContent = '正在连接 GitHub…';
     try {
@@ -129,6 +171,7 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
       const files = all.reduce((n, x) => n + Object.keys(x.files || {}).length, 0);
       const skipped = all.flatMap((x) => x.skipped);
       status.textContent = `已安装${names}，共 ${files + all.length} 个文件${skipped.length ? `；${skipped.length} 个没装上：${skipped.slice(0, 5).join('、')}${skipped.length > 5 ? ' …（点“查看”看全部）' : ''}` : ''}`;
+      if (server()) status.textContent += await pushToServer(all);
       await refresh();
       return p;
     } catch (e) {
@@ -157,6 +200,7 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
     try {
       const p = /\.zip$/i.test(f.name) ? await packs.installFromZip(await f.arrayBuffer(), f.name) : await packs.installFromText(await f.text(), f.name);
       status.textContent = `已安装「${p.name}」${p.skipped.length ? `（${p.skipped.length} 个文件没装上：${p.skipped.slice(0, 5).join('、')}${p.skipped.length > 5 ? ' …' : ''}）` : ''}`;
+      if (server()) status.textContent += await pushToServer([p]);
       toast(`已安装技能：${p.name}${MOBILE ? `（${skillCompatibility(p, { mobile: true }).label}）` : ''}`);
       await refresh();
       return p;
