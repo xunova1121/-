@@ -216,3 +216,65 @@ describe('手机放久了再发：旧连接断了不白等', () => {
     expect(health).toBe(1);
   });
 });
+
+describe('边收边显示的路不通时自动退回', () => {
+  const sse = (evs) => new Response(evs.map((e) => `data: ${JSON.stringify(e)}\n\n`).join(''), { status: 200 });
+  const hang = (signal) => new Response(new ReadableStream({ start(c) { signal?.addEventListener('abort', () => { try { c.error(new Error('aborted')); } catch { /* 已关 */ } }); } }), { status: 200 });
+
+  it('边收边显示几秒收不到任何东西：改用一次给全的方式拿到回答，不会一直转圈', async () => {
+    const calls = [];
+    let streaming = true;
+    const client = {
+      get streaming() { return streaming; },
+      streamFailed() { if (!streaming) return false; streaming = false; return true; },
+      getTask: async () => ({ status: 'running', seq: 0 }),
+      events: async (id, after, signal) => { calls.push(streaming ? 'stream' : 'whole'); return streaming ? hang(signal) : sse([{ seq: 1, type: 'text', delta: '你好' }, { seq: 2, type: 'task_state', status: 'done', text: '你好' }]); }
+    };
+    const got = [];
+    const t0 = Date.now();
+    const end = await followTask(client, 't1', { onEvent: (e) => got.push(e), firstMs: 50, retryMs: [10] });
+    expect(end.status).toBe('done');
+    expect(calls).toEqual(['stream', 'whole']);
+    expect(got[0].delta).toBe('你好');
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
+  it('边收边显示一连就报错（还没收到东西）：马上换方式，不原样重试', async () => {
+    const calls = [];
+    let streaming = true;
+    const client = {
+      get streaming() { return streaming; },
+      streamFailed() { if (!streaming) return false; streaming = false; return true; },
+      getTask: async () => ({ status: 'running', seq: 0 }),
+      events: async () => { calls.push(streaming ? 'stream' : 'whole'); if (streaming) throw new TypeError('Failed to fetch'); return sse([{ seq: 1, type: 'task_state', status: 'done', text: '好' }]); }
+    };
+    const end = await followTask(client, 't1', { firstMs: 50, retryMs: [5000] });
+    expect(end.status).toBe('done');
+    expect(calls).toEqual(['stream', 'whole']);
+  });
+
+  it('能边收边显示时照常用，不退回', async () => {
+    let failed = 0;
+    const client = { streaming: true, streamFailed() { failed++; return true; }, getTask: async () => ({}), events: async () => sse([{ seq: 1, type: 'task_state', status: 'done', text: '好' }]) };
+    await followTask(client, 't1', { firstMs: 50 });
+    expect(failed).toBe(0);
+  });
+
+  it('客户端：退回后取事件流不再带 stream 标记，并记下来（一天内不再试）', async () => {
+    const { createServerClient } = await import('../src/core/serverClient.js');
+    const store = new Map();
+    const orig = globalThis.localStorage;
+    globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) };
+    try {
+      const inits = [];
+      const c = createServerClient({ base: 'https://d.example.com', token: 't', fetchImpl: async (u, init) => { inits.push(init); return new Response(''); } });
+      await c.events('t1', 0);
+      expect(c.streamFailed()).toBe(true);
+      await c.events('t1', 0);
+      expect(inits.map((i) => Boolean(i.stream))).toEqual([true, false]);
+      expect(createServerClient({ base: 'https://d.example.com', fetchImpl: async () => new Response('') }).streaming).toBe(false);
+    } finally {
+      globalThis.localStorage = orig;
+    }
+  });
+});

@@ -57,6 +57,8 @@ const sleep = (ms, signal) => new Promise((resolve, reject) => {
  */
 /** 发任务第一次最多等多久（之后换新连接重发） */
 export const FIRST_WRITE_MS = 6000;
+/** 边收边显示：这么久还没收到任何东西就算这条路不通，退回一次给全的方式 */
+export const STREAM_FIRST_MS = 6000;
 /** 唤醒连接的最短间隔 */
 const WARM_GAP_MS = 30_000;
 
@@ -136,7 +138,19 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     return data;
   }
   let warmedAt = 0;
+  // 回答边收边显示（WebView 收事件流）：有的手机网络下 WebView 连不上或收不到，试过不行就退回原生网络（一次给全），记一天
+  const streamKey = `jarvis.server.noStream:${root}`;
+  let streaming = true;
+  try { streaming = !(Number(globalThis.localStorage?.getItem(streamKey)) > Date.now() - 86_400_000); } catch { /* 读不了就照常试 */ }
   return {
+    get streaming() { return streaming; },
+    /** 边收边显示这次没收到东西：之后改用一次给全的方式（返回 true 表示刚切换） */
+    streamFailed() {
+      if (!streaming) return false;
+      streaming = false;
+      try { globalThis.localStorage?.setItem(streamKey, String(Date.now())); } catch { /* 存不了就只管这次 */ }
+      return true;
+    },
     base: root,
     timings,
     /** 唤醒连接：点输入框、回到 App 时先轻轻问一下服务器，断掉的旧连接在发消息前就换掉（30 秒内只问一次） */
@@ -164,7 +178,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     getTask: (id) => req(`/api/tasks/${id}`),
     stopTask: (id) => req(`/api/tasks/${id}/stop`, { method: 'POST' }),
     // 要求事件流：手机 App 退到原生网络时也边收边显示（见 mobile/nativeFetch.js 的 wantsStream）
-    events: (id, after, signal) => req(`/api/tasks/${id}/events?after=${after}`, { raw: true, stream: true, signal, timeout: timeoutMs, headers: { Accept: 'text/event-stream' } }),
+    events: (id, after, signal) => req(`/api/tasks/${id}/events?after=${after}`, { raw: true, stream: streaming, signal, timeout: streaming ? STREAM_FIRST_MS : timeoutMs, headers: { Accept: 'text/event-stream' } }),
     listSessions: () => req('/api/sessions'),
     getSession: (id) => req(`/api/sessions/${encodeURIComponent(id)}`).catch((e) => { if (e.status === 404) return null; throw e; }),
     patchSession: (id, patch) => req(`/api/sessions/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }),
@@ -188,7 +202,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
  * 收一个任务的进度：断线自动重连（从收到的最后一个序号接着收），直到任务结束
  * @returns {Promise<object>} 结束时的 task_state 事件
  */
-export async function followTask(client, id, { onEvent, signal, after = 0, retryMs = [1000, 2000, 4000, 8000], checkMs = 10000, idleMs = 45000 } = {}) {
+export async function followTask(client, id, { onEvent, signal, after = 0, retryMs = [1000, 2000, 4000, 8000], checkMs = 10000, idleMs = 45000, firstMs = STREAM_FIRST_MS } = {}) {
   let last = after, failures = 0, reader = null, attempt = null;
   let touched = Date.now(), checking = false;
   const aborted = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
@@ -213,6 +227,8 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
       if (signal?.aborted) throw aborted();
       attempt = new AbortController();
       touched = Date.now();
+      let got = false, firstTimer = null;
+      const trying = Boolean(client.streaming);
       try {
         const res = await client.events(id, last, attempt.signal);
         if (signal?.aborted) throw aborted();
@@ -223,12 +239,15 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
         if (!res.ok || !res.body) throw new Error(`服务器返回 ${res.status}`);
         reader = res.body.getReader();
         if (signal?.aborted || attempt.signal.aborted) { await reader.cancel(); if (signal?.aborted) throw aborted(); continue; }
+        // 服务器一连上就会先补发已有的进度：几秒都没收到任何东西，说明这条边收边显示的路不通
+        if (trying) firstTimer = setTimeout(() => { if (!got) { client.streamFailed?.(); reconnect(); } }, firstMs);
         const dec = new TextDecoder();
         let buf = '';
         for (;;) {
           const { value, done } = await reader.read();
           if (signal?.aborted) throw aborted();
           if (done) break;
+          got = true;
           touched = Date.now(); // 服务器心跳只维持观察连接，不冒充模型进展。
           failures = 0;
           const { events, rest } = parseSse(buf + dec.decode(value, { stream: true }));
@@ -243,8 +262,11 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
       } catch (e) {
         if (signal?.aborted) throw aborted();
         if (e.final) throw e;
+        // 边收边显示的路一点东西都没收到就断了：马上改用一次给全的方式重连，不再原样重试
+        if (trying && !got && client.streamFailed?.()) { failures = 0; continue; }
         // 观察连接自行中断（含失活检测）时继续按序号重连。
       } finally {
+        clearTimeout(firstTimer);
         reader?.cancel().catch(() => {});
         reader = null;
         attempt?.abort();
