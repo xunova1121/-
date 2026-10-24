@@ -39,6 +39,11 @@ describe('服务器模式接口', () => {
     expect(list.skills.find((p) => p.name === 'score-demo')).toMatchObject({ needsRunner: true, source: '测试同步', builtin: false });
     expect((await api('/api/server/skills', { method: 'POST', body: JSON.stringify({ files: { 'a.txt': 'x' } }) })).status).toBe(400);
     expect((await fetch(base + '/api/server/skills')).status).toBe(401);
+    // 手机上卸载：服务器上的也删掉；再删一次不报错
+    expect(await (await api('/api/server/skills/score-demo', { method: 'DELETE' })).json()).toMatchObject({ ok: true, removed: true });
+    expect((await (await api('/api/server/skills')).json()).skills.some((p) => p.name === 'score-demo')).toBe(false);
+    expect(await (await api('/api/server/skills/score-demo', { method: 'DELETE' })).json()).toMatchObject({ ok: true, removed: false });
+    expect((await fetch(base + '/api/server/skills/score-demo', { method: 'DELETE' })).status).toBe(401);
   });
 
   it('服务器自行拉取模型：使用服务器密钥，不接受手机传入的地址和密钥', async () => {

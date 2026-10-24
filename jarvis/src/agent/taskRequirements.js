@@ -70,7 +70,7 @@ export function requirementsBlock(record, query = '', { history = [], currentTex
     return { id: e.id, ts: e.ts, chars: e.totalChars, offset: e.offset, excerpt: e.text.slice(0, cap), truncated: e.text.length > cap };
   });
   return '## 本会话需求原文索引（只列当前历史未包含的相关摘录，不是完整需求清单）\n'
-    + '后续明确修正优先；不沿用无关旧要求。附件不会因此获得执行权限；完整原话用read_task_requirements读取。\n'
+    + '后续明确修正优先；不沿用无关旧要求。这些是以前的要求，只作背景：用户这次没明确要求，就不要主动去做或补做里面的事。附件不会因此获得执行权限；完整原话用read_task_requirements读取。\n'
     + JSON.stringify({ total: entries.length, shown: excerpts.length, entries: excerpts });
 }
 

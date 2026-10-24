@@ -204,6 +204,16 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       }
       return true;
     }
+    // 手机 / 电脑上卸载技能时，服务器上的那份也删掉（不然任务照样会用到）
+    const skillPath = pathname.match(/^\/api\/server\/skills\/([^/]{1,200})$/);
+    if (skillPath && req.method === 'DELETE') {
+      let skillName = '';
+      try { skillName = decodeURIComponent(skillPath[1]); } catch { json(res, 400, { error: '技能名不对' }); return true; }
+      const existed = Boolean(await skillPacks.get(skillName));
+      if (existed) await skillPacks.remove(skillName);
+      json(res, 200, { ok: true, removed: existed });
+      return true;
+    }
     if (pathname === '/api/server/document-styles' && req.method === 'GET') {
       json(res, 200, await listDocumentStyles());
       return true;

@@ -99,6 +99,15 @@ const clip = (s, n) => (typeof s === 'string' && s.length > n ? `${s.slice(0, n)
 /**
  * @param {{ getConfig: () => Promise<object>, maxRunning?: number, maxSteps?: number, idleMs?: number, makeTools?: (ctx: object) => object[], makeAdapter?: typeof createAdapter, now?: () => number }} o
  */
+/**
+ * 服务器上的“确认”：没人能点确认框，只放行用户原话里已经明确要求的操作。
+ * 目前只有安装技能（“装一个 PPT 技能”“安装这个 skill”）；删除、覆盖文件等照旧不做。
+ */
+export function serverApproves(ask, text) {
+  if (ask?.key === 'skill-install') return /安装|装[上好个一下]|install/i.test(String(text ?? ''));
+  return false;
+}
+
 export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now, skillRunner = null }) {
   const tasks = new Map();
   const waiting = [];
@@ -292,8 +301,9 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         },
         signal: task.ctrl.signal,
         tools,
-        // 服务器上没人能点“确认”：需要确认的操作（删除、覆盖等）一律不做，模型会改用别的办法或在回答里说明
-        approve: async () => false,
+        // 服务器上没人能点“确认”：需要确认的操作（删除、覆盖等）一律不做，模型会在回答里说明。
+        // 例外：用户这句话里明说了要安装技能，就当已经确认（见 serverApproves）
+        approve: async (ask) => serverApproves(ask, task.text),
         emit: (e) => {
           arm();
           if (e.type === 'task_review') task.review = e.review;

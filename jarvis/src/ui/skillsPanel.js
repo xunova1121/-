@@ -9,6 +9,7 @@ import * as packs from '../agent/skillPacks.js';
 import { BUILTIN_SKILLS, MORE_BUILTIN_SKILLS, GITHUB_SKILLS } from '../agent/skillCatalog.js';
 import { parseFrontmatter } from '../agent/skillPacks.js';
 import { renderBlocks } from './transcript.js';
+import { createSkillBulk } from './skillBulk.js';
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, props = {}, ...kids) => {
@@ -23,12 +24,34 @@ const el = (tag, props = {}, ...kids) => {
 export function initSkillsPanel({ toast, onUse, onChange }) {
   const status = $('#skill-status');
   let installed = [];
+  // 服务器模式：服务器上自己装的技能（对话里让未央装的）本机没有，也列出来，能搜、能删
+  let serverOnly = [];
+
+  // 卸载：本机删掉；服务器模式下服务器上的也删掉（任务在服务器上做，不删的话照样会用到）
+  async function removeSkills(names) {
+    for (const n of names) await packs.remove(n);
+    if ($('#skill-viewer').dataset.name && names.includes($('#skill-viewer').dataset.name)) $('#skill-viewer').hidden = true;
+    const c = server();
+    let note = '';
+    if (c?.removeSkill) {
+      const failed = [];
+      for (const n of names) await c.removeSkill(n).catch(() => failed.push(n));
+      note = failed.length ? `；服务器上没删掉：${failed.join('、')}（服务器版本太旧或连不上，更新服务器后再删一次）` : '（服务器上也删了）';
+      refreshServer();
+    }
+    toast(names.length === 1 ? `已卸载技能：${names[0]}${note}` : `已删除 ${names.length} 个技能${note}`);
+    await refresh();
+  }
+  const bulk = createSkillBulk({ list: $('#skill-list'), onDelete: removeSkills });
 
   async function refresh() {
     installed = await packs.list().catch(() => []);
     $('#skill-count').textContent = `${installed.filter((p) => p.enabled).length} / ${installed.length} 个启用`;
     const list = $('#skill-list');
-    list.replaceChildren(...(installed.length ? installed.map(card) : [el('li', { className: 'empty', textContent: '还没有安装技能。从下方推荐里一键安装，或粘贴 GitHub 地址。' })]));
+    const mine = new Set(installed.map((p) => p.name));
+    const extra = serverOnly.filter((p) => !mine.has(p.name)).map(serverCard);
+    list.replaceChildren(...(installed.length || extra.length ? [...installed.map(card), ...extra] : [el('li', { className: 'empty', textContent: '还没有安装技能。从下方推荐里一键安装，或粘贴 GitHub 地址。' })]));
+    bulk.apply();
     renderRecommend();
     onChange?.(installed);
   }
@@ -49,13 +72,10 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
     const del = el('button', { type: 'button', className: 'btn ghost sm danger', textContent: '卸载' });
     del.addEventListener('click', async () => {
       if (del.dataset.confirm !== '1') { del.dataset.confirm = '1'; del.textContent = '确认卸载'; setTimeout(() => { del.dataset.confirm = ''; del.textContent = '卸载'; }, 3000); return; }
-      await packs.remove(p.name);
-      if ($('#skill-viewer').dataset.name === p.name) $('#skill-viewer').hidden = true;
-      toast(`已卸载技能：${p.name}`);
-      refresh();
+      await removeSkills([p.name]);
     });
     const files = Object.keys(p.files || {}).length;
-    return el('li', { className: `skill${p.enabled ? '' : ' off'}` },
+    return bulk.decorate(el('li', { className: `skill${p.enabled ? '' : ' off'}` },
       el('strong', { className: 'wb-skill-title', textContent: builtinTitle || p.name }),
       el('div', { className: 'skill-top' },
         el('label', { className: 'switch', title: '启用 / 停用' }, toggle, el('span')),
@@ -64,7 +84,23 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
       el('p', { className: 'skill-desc', textContent: p.description || '（没有描述）' }),
       MOBILE ? badge(compatibility) : null,
       el('div', { className: 'skill-actions' },
-        el('span', { className: 'muted small', textContent: files ? `附带 ${files} 个文件` : '' }), view, use, del));
+        el('span', { className: 'muted small', textContent: files ? `附带 ${files} 个文件` : '' }), view, use, del)), p, builtinTitle);
+  }
+
+  /** 只在服务器上的技能：本机没有内容，只能看说明、删除 */
+  function serverCard(p) {
+    const del = el('button', { type: 'button', className: 'btn ghost sm danger', textContent: '卸载' });
+    del.addEventListener('click', async () => {
+      if (del.dataset.confirm !== '1') { del.dataset.confirm = '1'; del.textContent = '确认卸载'; setTimeout(() => { del.dataset.confirm = ''; del.textContent = '卸载'; }, 3000); return; }
+      await removeSkills([p.name]);
+    });
+    return bulk.decorate(el('li', { className: `skill server-only${p.enabled ? '' : ' off'}` },
+      el('strong', { className: 'wb-skill-title', textContent: p.name }),
+      el('div', { className: 'skill-top' },
+        el('code', { className: 'skill-name', textContent: `/${p.name}` }),
+        el('span', { className: 'skill-src', textContent: `只在服务器上 · ${p.source || ''}`, title: p.source || '' })),
+      el('p', { className: 'skill-desc', textContent: p.description || '（没有描述）' }),
+      el('div', { className: 'skill-actions' }, el('span', { className: 'muted small', textContent: '在对话里让未央装的，任务在服务器上能用' }), del)), { ...p, source: `服务器 ${p.source || ''}` });
   }
 
   const missing = (p) => Object.entries(p.files || {}).filter(([, f]) => f?.stub).map(([k]) => k);
@@ -154,6 +190,9 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
     if (!c?.listSkills) return;
     try {
       const r = await c.listSkills();
+      const before = serverOnly.map((p) => p.name).join();
+      serverOnly = r.skills.filter((p) => !p.builtin);
+      if (serverOnly.map((p) => p.name).join() !== before) refresh();
       const scripts = r.skills.filter((p) => p.needsRunner && !p.builtin).length;
       serverLine.textContent = `服务器上有 ${r.skills.length} 个技能；技能运行器（运行技能里的 Python / Node 脚本）：${r.runner.available ? '已装好' : '还没装（带脚本的技能只能读说明，装法见部署说明“技能运行器”一节）'}${scripts ? `；带脚本的技能 ${scripts} 个` : ''}`;
     } catch {
@@ -161,6 +200,9 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
     }
   }
   refreshServer();
+  // 打开“技能”页时再问一次服务器：对话里刚让未央装的技能也能马上看到
+  const pane = document.querySelector('[data-pane=skills]');
+  if (pane) new MutationObserver(() => { if (!pane.hidden) refreshServer(); }).observe(pane, { attributes: true, attributeFilter: ['hidden'] });
 
   async function fromGitHub(url) {
     status.textContent = '正在连接 GitHub…';

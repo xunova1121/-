@@ -198,6 +198,22 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.click('.wb-library-tabs button:nth-child(1)'); // 回到“我的技能”
   await page.waitForFunction((n) => document.querySelectorAll('#skill-list .skill').length === n, SKILLS, { timeout: 5000 }).catch(() => {});
   check('卸载后可从推荐里重新安装', (await page.locator('#skill-list .skill', { hasText: '/weekly-report' }).count()) === 1);
+  // 搜索已安装技能、多选删除
+  await page.fill('.skill-search', '会议纪要');
+  const shownSkills = () => page.evaluate(() => [...document.querySelectorAll('#skill-list > .skill')].filter((e) => !e.hidden).map((e) => e.dataset.name));
+  check('搜索已安装技能（中文标题也能搜）', JSON.stringify(await shownSkills()) === '["meeting-minutes"]', JSON.stringify(await shownSkills()));
+  await page.fill('.skill-search', '');
+  await page.click('.skill-bulk button:has-text("多选")');
+  for (const n of ['meeting-minutes', 'code-review']) await page.locator(`#skill-list > .skill[data-name="${n}"] .skill-pick input`).check();
+  await page.click('.skill-bulk-delete');
+  check('删除要再点一次确认', (await page.textContent('.skill-bulk-delete')).includes('确认删除 2 个'));
+  await page.click('.skill-bulk-delete');
+  await page.waitForFunction((n) => document.querySelectorAll('#skill-list > .skill').length === n, SKILLS - 2, { timeout: 5000 }).catch(() => {});
+  check('多选一次删掉两个技能', (await page.locator('#skill-list > .skill').count()) === SKILLS - 2 && !(await page.isVisible('#skill-list .skill-pick')));
+  await page.click('.wb-library-tabs button:nth-child(2)');
+  for (const n of ['meeting-minutes', 'code-review']) await page.locator('.skill-tile', { hasText: `/${n}` }).locator('button').click();
+  await page.click('.wb-library-tabs button:nth-child(1)');
+  await page.waitForFunction((n) => document.querySelectorAll('#skill-list > .skill').length === n, SKILLS, { timeout: 5000 }).catch(() => {});
   await closeSide(page);
   await page.fill('#prompt', '/wee');
   await page.waitForTimeout(150);

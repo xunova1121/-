@@ -184,6 +184,8 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     listSkills: () => req('/api/server/skills'),
     /** 把手机 / 电脑上装好的技能传到服务器（files：packToFiles 的结果；大技能多等一会儿） */
     installSkill: (files, source) => req('/api/server/skills', { method: 'POST', body: { files, source }, timeout: 120000 }),
+    /** 手机 / 电脑上卸载技能时，服务器上的也删掉 */
+    removeSkill: (name) => req(`/api/server/skills/${encodeURIComponent(name)}`, { method: 'DELETE' }),
     getSession: (id) => req(`/api/sessions/${encodeURIComponent(id)}`).catch((e) => { if (e.status === 404) return null; throw e; }),
     patchSession: (id, patch) => req(`/api/sessions/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }),
     deleteSession: (id) => req(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),

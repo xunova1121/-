@@ -428,3 +428,14 @@ describe('服务器上看图：主模型是 DeepSeek 文字模型', () => {
     expect(events.find((e) => e.type === 'seeing')).toMatchObject({ model: 'deepseek-v4-flash-vision-exp' });
   });
 });
+
+describe('服务器上的确认', () => {
+  it('用户原话里明说要安装技能才放行；删除、覆盖等照旧不做', async () => {
+    const { serverApproves } = await import('../server/taskRunner.mjs');
+    expect(serverApproves({ key: 'skill-install' }, '你查下git安装一个你觉得好用的PPT制作skill')).toBe(true);
+    expect(serverApproves({ key: 'skill-install' }, '帮我装个足球技能')).toBe(true);
+    expect(serverApproves({ key: 'skill-install' }, '找几个好用的技能给我看看')).toBe(false);
+    expect(serverApproves({ key: 'delete' }, '安装并删除旧文件')).toBe(false);
+    expect(serverApproves(null, '安装')).toBe(false);
+  });
+});

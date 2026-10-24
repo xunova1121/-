@@ -152,7 +152,7 @@ export function createExecutionReview(goal = '') {
     if (result.codeExecution === 'not_run') issues.push('已修改代码但没有实际运行记录；先运行适用测试，无法执行就明确未验证');
     if (result.artifacts.some((item) => item.errors > 0)) issues.push('文档仍有生成器报告的问题，不能宣称排版或公式全部通过');
     if (result.failures.length)
-      issues.push('本轮这些操作失败后没有成功补做：' + [...new Set(result.failures)].join('、') + '；没补救的在回答里一句话说明，不要为此重新读取已交付的文件');
+      issues.push('本轮这些操作失败后没有成功补做：' + [...new Set(result.failures)].join('、') + '；补做只指重试失败的这一步（不能改做用户这次没要求的别的事），没补救的在回答里一句话说明，不要为此重新读取已交付的文件');
     return issues.length ? '交付回执核对：' + issues.join('；') + '。不要重复操作或编造测试通过。' : '';
   };
   const tool = {

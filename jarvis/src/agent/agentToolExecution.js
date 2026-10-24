@@ -60,7 +60,8 @@ export async function executeToolCalls(
       if (newScreenThisStep && /^computer_(click|type|key|scroll|drag)$/.test(c.name))
         throw new Error('本步已有新的屏幕截图，请先查看返回的截图，再在下一步决定操作，不能连续盲点或盲输');
       const ask = tool.approval?.(c.args);
-      if (ask && approve && !(await approve(ask, tool))) throw new Error('用户拒绝了这个操作。请换一种方式，或询问用户的意见。');
+      // 没确认：可能是用户点了拒绝，也可能是在服务器上运行、没法弹确认框。别让模型改做别的事来“补”
+      if (ask && approve && !(await approve(ask, tool))) throw Object.assign(new Error('这个操作需要用户确认，这次没有得到确认（用户拒绝了，或在服务器上运行没法弹出确认框）。不要改做别的事来代替；在回答里说明没做成，并告诉用户可以自己在界面上操作（比如安装技能：在“技能”页粘贴地址安装）。'), { code: 'NOT_APPROVED' });
       if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
       await checkpoint?.({ type: 'tool_start', id: c.id, name: c.name, args: c.args });
       if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
