@@ -1,8 +1,20 @@
 import './mascot.css';
 
 export const MASCOT_LABELS = {
-  idle: '陪伴', wink: '眨眼', rub: '搓手期待', think: '思考',
-  wave: '挥手', shy: '害羞', love: '比心', dance: '跳舞', pet: '摸摸头', sleep: '睡觉', run: '忙碌查找', happy: '高兴', spin: '转圈', listen: '正在听'
+  idle: '陪伴',
+  wink: '眨眼',
+  rub: '搓手期待',
+  think: '思考',
+  wave: '挥手',
+  shy: '害羞',
+  love: '比心',
+  dance: '跳舞',
+  pet: '摸摸头',
+  sleep: '睡觉',
+  run: '忙碌查找',
+  happy: '高兴',
+  spin: '转圈',
+  listen: '正在听'
 };
 
 export function poseForEmotion(value) {
@@ -41,24 +53,43 @@ export function initMascots() {
   const marks = () => [...document.querySelectorAll('.brand-mark, .as-logo, .welcome-hero .cloud, .drawer-logo, .wb-mark, .wb-hero-mark')];
   for (const mark of marks()) {
     mark.classList.add('wy-brand');
-    if (mark.matches('.brand-mark, .welcome-hero .cloud, .wb-mark, .wb-hero-mark')) { mark.removeAttribute('aria-hidden'); mark.setAttribute('role', 'button'); mark.tabIndex = 0; mark.setAttribute('aria-label', '打开未央，和我说话'); mark.closest('.welcome-hero')?.removeAttribute('aria-hidden'); }
-    mark.replaceChildren(createMascot(mark.matches('.as-logo') ? 'spin' : 'idle'));
+    if (mark.matches('.brand-mark, .welcome-hero .cloud, .wb-mark, .wb-hero-mark')) {
+      mark.removeAttribute('aria-hidden');
+      mark.setAttribute('role', 'button');
+      mark.tabIndex = 0;
+      mark.setAttribute('aria-label', '打开未央，和我说话');
+      mark.closest('.welcome-hero')?.removeAttribute('aria-hidden');
+    }
+    mark.replaceChildren(createMascot(mark.matches('.as-logo') ? 'wave' : 'idle'));
   }
   let task = 'idle';
   let sleeping = false;
   let timer;
   const refresh = () => {
-    const state = sleeping && task === 'idle' ? 'sleep' : document.body.classList.contains('speaking') ? 'happy' : document.body.classList.contains('voice-on') && task === 'idle' ? 'listen' : task;
+    const state =
+      sleeping && task === 'idle'
+        ? 'sleep'
+        : document.body.classList.contains('speaking')
+          ? 'happy'
+          : document.body.classList.contains('voice-on') && task === 'idle'
+            ? 'listen'
+            : task;
     for (const mark of marks()) {
       if (mark.matches('.as-logo')) continue;
-      if (!mark.querySelector('.wy-mascot')) { mark.classList.add('wy-brand'); mark.replaceChildren(createMascot()); }
+      if (!mark.querySelector('.wy-mascot')) {
+        mark.classList.add('wy-brand');
+        mark.replaceChildren(createMascot());
+      }
       if (mark.firstElementChild.dataset.state !== state) setMascotState(mark.firstElementChild, state);
     }
   };
   const wake = () => {
     sleeping = false;
     clearTimeout(timer);
-    timer = setTimeout(() => { sleeping = true; refresh(); }, 45000);
+    timer = setTimeout(() => {
+      sleeping = true;
+      refresh();
+    }, 45000);
     refresh();
   };
   new MutationObserver(refresh).observe(document.body, { attributes: true, attributeFilter: ['class'] });
@@ -71,12 +102,24 @@ export function initMascots() {
   const mount = () => {
     for (const mark of marks()) {
       if (!mark.querySelector('.wy-mascot')) {
-        mark.classList.add('wy-brand'); mark.replaceChildren(createMascot());
-        if (mark.matches('.welcome-hero .cloud')) { mark.setAttribute('role', 'button'); mark.tabIndex = 0; mark.setAttribute('aria-label', '打开未央，和我说话'); mark.closest('.welcome-hero')?.removeAttribute('aria-hidden'); }
+        mark.classList.add('wy-brand');
+        mark.replaceChildren(createMascot());
+        if (mark.matches('.welcome-hero .cloud')) {
+          mark.setAttribute('role', 'button');
+          mark.tabIndex = 0;
+          mark.setAttribute('aria-label', '打开未央，和我说话');
+          mark.closest('.welcome-hero')?.removeAttribute('aria-hidden');
+        }
       }
     }
   };
   new MutationObserver(mount).observe(document.querySelector('#transcript'), { childList: true });
   wake();
-  return { task(state, detail) { task = poseForTask(state, detail); sleeping = false; refresh(); } };
+  return {
+    task(state, detail) {
+      task = poseForTask(state, detail);
+      sleeping = false;
+      refresh();
+    }
+  };
 }

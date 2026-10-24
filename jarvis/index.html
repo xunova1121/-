@@ -6,6 +6,14 @@
   <meta name="color-scheme" content="dark" />
   <title>未央 · 智能工作台</title>
   <link rel="stylesheet" href="/src/styles.css" />
+  <link rel="stylesheet" href="/src/ui/mobileStartup.css" />
+  <style>
+    /* 原生桥尚未返回时也不允许展示旧版静态骨架。 */
+    html[data-mode="mobile"] { background: #eef0ff; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+    html[data-mode="mobile"] body { background: #eef0ff; }
+    html[data-mode="mobile"]:not(.mobile-ui-ready) .app { visibility: hidden; }
+    html[data-mode="mobile"] #boot { display: none !important; }
+  </style>
   <script>
     try {
       if (document.documentElement.dataset.mode === 'mobile') {
@@ -23,11 +31,23 @@
   </script>
 </head>
 <body>
-  <!-- 手机 App 的启动页：logo 动效，至少显示一会儿再进界面（main.js 加载完后淡出；万一脚本出错 8 秒后也会消失） -->
+  <!-- 手机 App 的启动页：轻量眨眼挥手动效，界面就绪后立即淡出；脚本未就绪时8秒显示重试提示，避免露出旧骨架 -->
   <div id="app-splash" aria-hidden="true">
-    <div class="as-inner"><div class="as-glow"></div><div class="as-logo"><i class="as-lid l"></i><i class="as-lid r"></i><i class="as-spark"></i><i class="as-star a"></i><i class="as-star b"></i><i class="as-shine"></i></div><div class="as-name"><span>未</span><span>央</span></div><div class="as-sub">WEIYANG AI</div><div class="as-dots"><i></i><i></i><i></i></div></div>
+    <div class="as-inner"><div class="as-glow"></div><div class="as-logo"><i class="as-lid l"></i><i class="as-lid r"></i><i class="as-spark"></i><i class="as-star a"></i><i class="as-star b"></i><i class="as-shine"></i></div><div class="as-name"><span>未</span><span>央</span></div><div class="as-sub">我在，和你一起开始。</div><div class="as-dots"><i></i><i></i><i></i></div></div>
   </div>
-  <script>setTimeout(function () { var s = document.getElementById('app-splash'); if (s) s.remove(); }, 8000);</script>
+  <script>
+    window.__jarvisSplashWatchdog = setTimeout(function () {
+      var splash = document.getElementById('app-splash');
+      if (!splash) return;
+      splash.removeAttribute('aria-hidden');
+      splash.querySelector('.as-sub').textContent = '启动较慢，请稍候或重新打开';
+      var retry = document.createElement('button');
+      retry.className = 'as-retry';
+      retry.textContent = '重新打开';
+      retry.onclick = function () { location.reload(); };
+      splash.querySelector('.as-inner').append(retry);
+    }, 8000);
+  </script>
   <div class="boot" id="boot" aria-hidden="true">
     <div class="boot-inner"><div class="boot-mark"></div><div class="boot-title">WEIYANG</div><div class="boot-lines" id="boot-lines"></div></div>
   </div>
