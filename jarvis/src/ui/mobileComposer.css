@@ -1,35 +1,36 @@
-/* 两行以上长输入仍会自然长高；模型从胶囊内移到上方，按钮保持原语义及键盘顺序。 */
+/* 模型收回输入框第二行，正文与按钮分层；长输入只增长正文区。 */
 :root body.compact.companion-edition .conversation-composer,
 :root body.compact.companion-edition .main:has(.wy-home) .conversation-composer {
   position: relative;
   flex-shrink: 0;
-  width: calc(100% - 32px);
-  margin: 42px 16px 8px;
-  padding: 7px 8px;
+  width: calc(100% - 28px);
+  margin: 6px 14px 6px;
+  padding: 5px 8px 6px;
   border: 1px solid var(--line);
-  border-radius: 28px;
+  border-radius: 23px;
   background: var(--surface);
   box-shadow: none;
 }
 :root body.compact.companion-edition .conversation-composer .composer-row {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) 40px 42px;
-  grid-template-rows: auto;
+  grid-template-columns: 32px minmax(0, 1fr) 36px 36px;
+  grid-template-rows: auto 36px;
   align-items: center;
-  gap: 4px;
+  gap: 2px 5px;
   padding: 0;
 }
 :root body.compact.companion-edition .conversation-composer .composer-row > #prompt,
-:root body.compact.companion-edition .main:has(.wy-home) .conversation-composer #prompt {
-  grid-column: 2;
+:root body.compact.companion-edition .main:has(.wy-home) .conversation-composer #prompt,
+:root body.compact.companion-edition .conversation-composer.has-draft:not(.is-working) #prompt {
+  grid-column: 1 / -1;
   grid-row: 1;
-  padding: 10px 2px;
+  padding: 7px 7px 3px;
   margin: 0;
-  min-height: 44px;
-  max-height: 116px;
+  min-height: 32px;
+  max-height: 96px;
   min-width: 0;
   width: 100%;
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
   line-height: 1.5;
   color: var(--text);
   border-radius: 0;
@@ -41,49 +42,59 @@
 }
 :root body.compact.companion-edition .conversation-composer .composer-row > #btn-attach {
   grid-column: 1;
-  grid-row: 1;
-  width: 40px;
-  height: 44px;
+  grid-row: 2;
+  width: 32px;
+  height: 36px;
+  padding: 7px;
   border: 0;
   background: transparent;
-  color: var(--text);
+  color: var(--muted);
 }
 :root body.compact.companion-edition .conversation-composer .composer-row > #model-chip {
-  position: absolute;
-  top: -39px;
-  left: 0;
+  position: static;
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: start;
   width: auto;
-  max-width: calc(100% - 8px);
-  min-width: 70px;
+  max-width: 100%;
+  min-width: 0;
   min-height: 36px;
   margin: 0;
-  padding: 5px 12px;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  font-size: 0.75rem;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 11px;
+  font-size: 0.6875rem;
+  line-height: 1.4;
   color: var(--muted);
-  background: var(--surface);
+  background: transparent;
+}
+:root body.compact.companion-edition #model-chip-text {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 :root body.compact.companion-edition .conversation-composer .composer-row > #btn-mic,
 :root body.compact.companion-edition .conversation-composer .composer-row > #btn-stop {
   grid-column: 3;
-  grid-row: 1;
-  height: 44px;
-  width: 40px;
-  padding: 9px;
+  grid-row: 2;
+  height: 36px;
+  width: 36px;
+  padding: 7px;
   margin: 0;
   border-radius: 50%;
-  border: 1px solid var(--line);
+  border: 0;
   color: var(--accent);
-  background: var(--surface);
+  background: transparent;
 }
 :root body.compact.companion-edition .conversation-composer .composer-row > #btn-call,
 :root body.compact.companion-edition .conversation-composer .composer-row > #btn-send {
   grid-column: 4;
-  grid-row: 1;
-  width: 42px;
-  height: 44px;
-  padding: 10px;
+  grid-row: 2;
+  width: 36px;
+  height: 36px;
+  padding: 8px;
   margin: 0;
   border: 0;
   border-radius: 50%;
@@ -91,25 +102,21 @@
   color: #fff;
   box-shadow: none;
 }
-:root body.compact.companion-edition .conversation-composer.has-draft:not(.is-working) #prompt {
-  grid-column: 2 / 4;
-}
 :root body.compact.companion-edition .conversation-composer .composer-row > #vad-meter {
-  grid-row: 2;
+  grid-row: 3;
 }
 :root body.compact.companion-edition .composer-more {
   background: var(--surface-2);
   border-color: var(--line);
-  border-radius: 20px;
-  box-shadow: 0 8px 24px rgba(46, 35, 90, 0.1);
+  border-radius: 18px;
 }
 :root body.compact.companion-edition .composer-more button {
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   background: var(--surface);
   border-color: var(--line);
 }
 :root body.compact.companion-edition .voice-call-panel {
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   background: var(--accent-soft);
   color: var(--text);
 }
@@ -117,25 +124,13 @@
   max-width: 100%;
   min-width: 0;
 }
-@media (max-width: 350px) {
-  :root body.compact.companion-edition .conversation-composer {
-    width: calc(100% - 24px);
-    margin-inline: 12px;
-  }
-  :root body.compact.companion-edition .conversation-composer .composer-row {
-    grid-template-columns: 36px minmax(0, 1fr) 36px 40px;
-    gap: 2px;
-  }
+/* 快捷追问压成一行，仍可横向滑动查看全部；不挤高输入区。 */
+:root body.compact.companion-edition .chip-bar {
+  gap: 6px;
+  padding: 4px 14px;
 }
-/* 极窄屏列宽缩小时同步缩小按钮，避免相邻点击区域出现两像素重叠。 */
-@media (max-width: 350px) {
-  :root body.compact.companion-edition .conversation-composer .composer-row > #btn-attach,
-  :root body.compact.companion-edition .conversation-composer .composer-row > #btn-mic,
-  :root body.compact.companion-edition .conversation-composer .composer-row > #btn-stop {
-    width: 36px;
-  }
-  :root body.compact.companion-edition .conversation-composer .composer-row > #btn-call,
-  :root body.compact.companion-edition .conversation-composer .composer-row > #btn-send {
-    width: 40px;
-  }
+:root body.compact.companion-edition .chip-bar button {
+  font-size: 0.6875rem;
+  min-height: 28px;
+  padding: 4px 9px;
 }

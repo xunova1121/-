@@ -1,13 +1,23 @@
 /* 启动帧固定浅色，不受上次夜间主题影响；原黑色终端自检不在App中出现。 */
-html[data-mode='mobile'] #boot { display: none !important; }
+html[data-mode='mobile'] #boot {
+  display: none !important;
+}
 html[data-mode='mobile'] #app-splash {
   background: linear-gradient(165deg, #eef0ff, #eeecfc 55%, #e8edfc);
   color: #343448;
   transition: opacity 180ms ease;
 }
-html[data-mode='mobile'] #app-splash.out { opacity: 0; transform: none; }
-html[data-mode='mobile'] #app-splash .as-inner { gap: 12px; margin-top: -3vh; }
-html[data-mode='mobile'] #app-splash .as-glow { display: none; }
+html[data-mode='mobile'] #app-splash.out {
+  opacity: 0;
+  transform: none;
+}
+html[data-mode='mobile'] #app-splash .as-inner {
+  gap: 12px;
+  margin-top: -3vh;
+}
+html[data-mode='mobile'] #app-splash .as-glow {
+  display: none;
+}
 html[data-mode='mobile'] #app-splash .as-logo,
 html[data-mode='mobile'] #app-splash .as-logo.wy-brand {
   display: block !important;
@@ -29,33 +39,92 @@ html[data-mode='mobile'] #app-splash .as-logo.wy-brand {
   animation: startup-wave-blink 1.6s steps(1, end) infinite !important;
 }
 html[data-mode='mobile'] #app-splash .as-logo > *,
-html[data-mode='mobile'] #app-splash .as-logo::after { display: none !important; }
+html[data-mode='mobile'] #app-splash .as-logo::after {
+  display: none !important;
+}
 html[data-mode='mobile'] #app-splash .as-name {
-  font: 550 24px/1.4 'HarmonyOS Sans SC', 'MiSans', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
+  font:
+    550 24px/1.4 'HarmonyOS Sans SC',
+    'MiSans',
+    'PingFang SC',
+    'Noto Sans SC',
+    system-ui,
+    sans-serif;
   color: #343448;
   gap: 0;
-  letter-spacing: .08em;
+  letter-spacing: 0.08em;
 }
-html[data-mode='mobile'] #app-splash .as-name span { animation: none; }
+html[data-mode='mobile'] #app-splash .as-name span {
+  animation: none;
+}
 html[data-mode='mobile'] #app-splash .as-sub {
-  font: 400 14px/1.6 'HarmonyOS Sans SC', 'MiSans', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
+  font:
+    400 14px/1.6 'HarmonyOS Sans SC',
+    'MiSans',
+    'PingFang SC',
+    'Noto Sans SC',
+    system-ui,
+    sans-serif;
   color: #777b92;
   letter-spacing: 0;
   animation: none;
 }
-html[data-mode='mobile'] #app-splash .as-dots { display: none; }
+html[data-mode='mobile'] #app-splash .as-dots {
+  display: none;
+}
 /* 八格眨眼/挥手帧只切素材，不旋转角色或整个启动页。 */
 @keyframes startup-wave-blink {
-  0%, 100% { background-position: 0 0; }
-  12.5% { background-position: 33.333333% 0; }
-  25% { background-position: 66.666667% 0; }
-  37.5% { background-position: 100% 0; }
-  50% { background-position: 0 100%; }
-  62.5% { background-position: 33.333333% 100%; }
-  75% { background-position: 66.666667% 100%; }
-  87.5% { background-position: 100% 100%; }
+  0%,
+  100% {
+    background-position: 0 0;
+  }
+  12.5% {
+    background-position: 33.333333% 0;
+  }
+  25% {
+    background-position: 66.666667% 0;
+  }
+  37.5% {
+    background-position: 100% 0;
+  }
+  50% {
+    background-position: 0 100%;
+  }
+  62.5% {
+    background-position: 33.333333% 100%;
+  }
+  75% {
+    background-position: 66.666667% 100%;
+  }
+  87.5% {
+    background-position: 100% 100%;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
-  html[data-mode='mobile'] #app-splash .as-logo { animation: none !important; }
+  html[data-mode='mobile'] #app-splash .as-logo {
+    animation: none !important;
+  }
 }
-html.safe-render[data-mode='mobile'] #app-splash { display: none !important; }
+html.safe-render[data-mode='mobile'] #app-splash {
+  display: none !important;
+}
+
+/* 资源超时仍有可见标志，不用空白头像代替加载失败。 */
+html[data-mode='mobile'] body.mascot-unavailable .wy-mascot,
+html[data-mode='mobile'] body.mascot-unavailable #app-splash .as-logo {
+  background-image: url('./logo.svg') !important;
+  background-size: contain !important;
+  background-position: center !important;
+  animation: none !important;
+}
+html[data-mode='mobile'] #app-splash .as-retry {
+  margin-top: 10px;
+  padding: 7px 18px;
+  border: 1px solid #d7d0ef;
+  border-radius: 18px;
+  color: #7550e6;
+  background: #ffffffaa;
+  font:
+    400 13px/1.5 system-ui,
+    sans-serif;
+}

@@ -46,7 +46,7 @@
   padding: 14px;
 }
 :root body.compact.companion-edition :is(.setting label, .setting .label, .setting > span, .set-more summary, .drawer-item-t, .skill-name) {
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
   line-height: 1.6;
   color: var(--text);
 }
@@ -67,7 +67,7 @@
   background: var(--surface);
   border: 1px solid var(--line-strong);
   border-radius: 12px;
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
   line-height: 1.5;
   min-height: 44px;
 }
@@ -98,7 +98,7 @@
 :root body.compact.companion-edition :is(.file-list .fn, .viewer-name, .skill-name, .drawer-item-t, .ml-model-name, .mc-ability-model) {
   min-width: 0;
   overflow-wrap: anywhere;
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
 }
 :root body.compact.companion-edition :is(.file-list .fs, .file-time, .badge, .tag) {
   font-size: 0.75rem;
@@ -162,7 +162,7 @@
   border: 1px solid var(--line);
   border-radius: var(--wy-radius);
   background: var(--surface);
-  font-size: 1rem;
+  font-size: 0.875rem;
   line-height: 1.65;
   box-shadow: none;
   min-width: 0;
@@ -173,24 +173,24 @@
   display: flex !important;
   align-items: center;
   gap: 8px !important;
-  min-height: 44px;
+  min-height: 32px;
   height: auto !important;
-  margin: 0 0 10px !important;
+  margin: 0 0 6px !important;
   font-size: 0.8125rem;
 }
 :root body.compact.companion-edition .msg.agent > .who .who-mood,
 :root body.compact.companion-edition .msg.agent:not(:last-child) > .who .who-mood {
-  --mascot-size: 44px !important;
+  --mascot-size: 32px !important;
   position: static !important;
-  width: 44px;
-  height: 44px;
+  width: 32px;
+  height: 32px;
   margin: 0 !important;
 }
 :root body.compact.companion-edition .msg.agent > .who .wy-reply-greeting {
   display: none;
 }
 :root body.compact.companion-edition .msg.agent .body {
-  font-size: 1rem;
+  font-size: 0.875rem;
   line-height: 1.65;
   overflow-wrap: anywhere;
 }
@@ -202,11 +202,11 @@
 }
 :root body.compact.companion-edition .msg.user {
   max-width: 86%;
-  padding: 12px 14px;
+  padding: 8px 12px;
   background: var(--accent-soft);
   color: var(--text);
   border-radius: 18px 18px 5px 18px;
-  font-size: 1rem;
+  font-size: 0.875rem;
   line-height: 1.55;
 }
 :root[data-theme='light'] body.compact.companion-edition .msg.user {
@@ -255,4 +255,34 @@
   background: var(--surface);
   border-color: var(--line);
   color: var(--text);
+}
+
+/* 文字、段落与消息操作栏一起收紧，短句不再留出大块气泡空白。 */
+:root body.compact.companion-edition .msg :is(.actions, .msg-actions) {
+  gap: 4px;
+  margin-top: 6px;
+}
+:root body.compact.companion-edition .msg :is(.actions, .msg-actions) button {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 6px;
+}
+:root body.compact.companion-edition .msg.user .who {
+  font-size: 0.625rem;
+  margin-bottom: 4px;
+}
+:root body.compact.companion-edition .msg.agent .body p {
+  margin-block: 0.4em;
+}
+:root body.compact.companion-edition .msg.agent .body li {
+  margin-block: 0.2em;
+}
+/* 用户正文原先单独指定了字号，不能只改气泡父级。 */
+:root body.compact.companion-edition .msg.user .body {
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+:root body.compact.companion-edition .msg.user .meta {
+  margin-top: 4px;
 }

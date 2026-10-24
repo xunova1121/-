@@ -200,7 +200,7 @@ export function createHomeWeather({ client, onAdvice, locate = locateOnce } = {}
   const unsubscribe = client.subscribe((state) => {
     const { city, data, status, stale, error } = state,
       kind = weatherKind(data?.code);
-    root.querySelector('.home-city b').textContent = city ? `${city.name}${data ? ' ' + degrees(data.temp) : ''}` : '选择城市';
+    root.querySelector('.home-city b').textContent = city ? `${city.name.replace(/市$/, '')}${data ? ' · ' + degrees(data.temp) : ''}` : '选择城市';
     root.querySelector('.home-weather-location').setAttribute('aria-label', city ? `切换天气位置，当前${city.name}` : '切换天气位置');
     root.querySelector('.home-weather-icon').innerHTML = weatherSVG(data ? kind.icon : 'cloud', data && !data.isDay);
     root.querySelector('.home-weather-summary').textContent = data
