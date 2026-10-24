@@ -213,3 +213,18 @@
 :root body.compact.companion-edition :is(.btn, .drawer-new, .home-suggestion, .msg-act):active {
   filter: brightness(0.97);
 }
+
+/* 系统仪表也使用普通信息卡，移除旧科技风角标；数值和图表仍由原模块更新。 */
+:root body.compact.companion-edition .dashboard .panel {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: none;
+}
+:root body.compact.companion-edition .dashboard .panel::before,
+:root body.compact.companion-edition .dashboard .panel::after {
+  display: none;
+}
+:root body.compact.companion-edition .dashboard h3 {
+  letter-spacing: 0;
+}

@@ -227,6 +227,12 @@ try {
     for (const pane of ['sessions', 'workspace', 'knowledge', 'mind', 'skills', 'models', 'system', 'settings']) {
       await page.evaluate((value) => window.__jarvis.showPanel(value), pane);
       await page.waitForTimeout(150);
+      // 上一页的页尾检查会改变共享滚动容器，拍首屏前显式恢复位置。
+      await page.evaluate((value)=>{
+        document.querySelector('#panel').scrollTop=0;
+        document.querySelector(`[data-pane="${value}"]`).scrollTop=0;
+      },pane);
+
       const panelMetrics = await page.evaluate((value) => {
         const panel = document.querySelector('#panel');
         const content = panel.querySelector(`[data-pane="${value}"]`);
