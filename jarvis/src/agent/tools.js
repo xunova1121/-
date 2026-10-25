@@ -1,3 +1,4 @@
+import { createWorkRecordsTool } from './workLedger.js';
 import { readGovernmentGuide } from './governmentGuide.js';
 import { formatPageResult } from './pageLinks.js';
 import { createDocumentTools } from './documentTools.js';
@@ -92,6 +93,7 @@ export function createTools(ctx) {
   const overwriteWarned = new Set();
   const tools = [
     createVerificationTool(),
+    createWorkRecordsTool(),
     createSongTool(ctx),
     createOcrTool(ctx),
     createInspectImageTool(ctx),

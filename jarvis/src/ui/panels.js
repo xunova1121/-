@@ -1,7 +1,8 @@
+import { initWorkspaceView } from './workspaceView.js';
 /**
  * 右侧面板：工作区 / 知识库 / 记忆与进化 / 模型。
  */
-import { FILE_CATEGORIES, organizeFiles } from './fileOrganization.js';
+import { FILE_CATEGORIES } from './fileOrganization.js';
 import './mobileImprovements.css';
 import * as ws from '../agent/workspace.js';
 import * as kb from '../agent/knowledge.js';
@@ -24,7 +25,7 @@ const el = (tag, props = {}, ...kids) => {
   return e;
 };
 
-export function initPanels({ toast, getGateway, onConfigChange, getHistory, settings, onReflect, onAutoMemory, searchFetch }) {
+export function initPanels({ toast, getGateway, onConfigChange, getHistory, settings, onReflect, onAutoMemory, searchFetch, getWorkRecords, getWorkspaceScope = () => 'local', onOpenSession, onRenameWorkRecord, onRemoveWorkRecord }) {
   const fresh = new Set();
   let current = null; // 当前预览的文件
   let objectUrls = [];
@@ -43,10 +44,11 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   }
   const counter = el('span', { textContent:'最新更新优先' });
   const hideFiles = el('button', { type:'button', className:'ws-list-toggle' });
-  function syncListVisibility() { $('#file-list').hidden = wsTab !== 'files' || fileListHidden; controls.hidden = wsTab !== 'files'; hideFiles.textContent = fileListHidden ? '展开文件列表' : '隐藏文件列表'; hideFiles.setAttribute('aria-expanded',String(!fileListHidden)); }
+  function syncListVisibility() { workspaceView.setHidden(wsTab !== 'files' || fileListHidden); $('#file-list').hidden = wsTab !== 'files' || fileListHidden; controls.hidden = wsTab !== 'files'; hideFiles.textContent = fileListHidden ? '展开文件列表' : '隐藏文件列表'; hideFiles.setAttribute('aria-expanded',String(!fileListHidden)); }
   hideFiles.onclick = () => { fileListHidden = !fileListHidden; try { localStorage.setItem('jarvis.files.hidden',String(fileListHidden)); } catch {} syncListVisibility(); };
   search.oninput = () => { fileQuery = search.value; refreshFiles(); };
-  controls.append(search,categories,el('div',{className:'ws-sort-note'},counter,hideFiles)); $('#file-list').before(controls);
+  const workspaceView = initWorkspaceView({ list: $('#file-list'), refresh: () => refreshFiles(), toast, openFile: path => openFile(path), getScope: getWorkspaceScope, getRecords: getWorkRecords, onOpenSession, onRenameWorkRecord, onRemoveWorkRecord });
+  controls.append(search, workspaceView.control, categories, el('div',{className:'ws-sort-note'},counter,hideFiles)); $('#file-list').before(controls);
   syncListVisibility();
 
   const changes = initChangesPanel({ toast, desktop: globalThis.window?.jarvisDesktop ?? null, onRestored: () => refreshFiles() });
@@ -64,6 +66,9 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     const generation = ++fileRefresh;
     if (wsTab === 'changes') changes.refresh();
     const list = $('#file-list');
+    list.setAttribute('aria-busy', 'true');
+    list.inert = true;
+    $('.ws-batch').inert = true;
     const mode = ws.mode();
     $('#ws-mode').textContent = mode === 'folder' ? `本地：${ws.folderName()}` : '浏览器内';
     $('#ws-mode').classList.toggle('on', mode === 'folder');
@@ -75,32 +80,14 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     let files;
     try { files = await ws.list(); } catch (e) { files = []; toast(`读取工作区失败：${e.message}`); }
     if (generation !== fileRefresh) return;
-    const total = files.length; files = organizeFiles(files, { category: fileCategory, query: fileQuery });
-    counter.textContent = `最新更新优先 · ${files.length} / ${total} 个文件`;
+    const total = files.length;
+    const result = await workspaceView.render(files, { category: fileCategory, query: fileQuery, fresh, current, isCurrent: () => generation === fileRefresh });
+    if (!result || generation !== fileRefresh) return;
+    list.setAttribute('aria-busy', 'false');
+    list.inert = false;
+    $('.ws-batch').inert = false;
+    counter.textContent = `${result.groups} 项成果 · ${result.files} / ${total} 个文件`;
     syncListVisibility();
-    list.replaceChildren(...(files.length ? files.map((f) => {
-      const li = el('li', { title: f.path },
-        el('span', { className: 'fx', textContent: ws.ext(f.path) || '—' }),
-        el('span', { className: 'fn', textContent: f.path }),
-        el('span', { className: 'fs', textContent: fmtSize(f.size) }));
-      li.dataset.path = f.path; li.tabIndex = 0; li.setAttribute('role','button');
-      li.append(el('span', { className:'file-time', textContent:f.mtime ? new Date(f.mtime).toLocaleDateString('zh-CN',{month:'numeric',day:'numeric'}) : '' }));
-      li.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFile(f.path); } });
-      if (fresh.has(f.path)) li.classList.add('fresh');
-      if (current === f.path) li.classList.add('active');
-      li.addEventListener('click', () => openFile(f.path));
-      if (mode === 'virtual') {
-        const x = el('button', { type: 'button', className: 'x-btn', title: '删除', textContent: '✕' });
-        x.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          await ws.removeVirtual(f.path);
-          if (current === f.path) { current = null; $('#viewer').hidden = true; }
-          refreshFiles();
-        });
-        li.append(x);
-      }
-      return li;
-    }) : [el('li', { className: 'empty', textContent: total ? '没有匹配的文件，试试其他分类或关键词。' : '还没有文件。让我“写一个网页”或“生成一份 PPT”，或者上传文件。' })]));
   }
 
   $('#btn-folder').addEventListener('click', async () => {

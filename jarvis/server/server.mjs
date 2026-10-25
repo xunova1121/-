@@ -42,7 +42,7 @@ import { attachQwenGateway } from './qwenRealtime.mjs';
 
 const CORS_PATHS = /^\/api\/(health|local\/metrics|llm\/.+|tts\/edge|voice\/qwen\/voices)$/;
 /** 服务器模式里允许跨域调用的接口（手机 App、电脑版连自己的服务器） */
-const SERVER_CORS = /^\/api\/(health|server\/.+|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?|voice\/qwen\/voices)$/;
+const SERVER_CORS = /^\/api\/(health|server\/.+|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?|work-records(\/[^/]+)?|voice\/qwen\/voices)$/;
 export const EXTRA_UPSTREAMS = { tavily: 'https://api.tavily.com', bocha: 'https://api.bochaai.com', elevenlabs: 'https://api.elevenlabs.io', fal: 'https://queue.fal.run' };
 // 读取网页时用常见浏览器的请求头：不少网站（包括搜索引擎）会拒绝或降级陌生的客户端
 const FETCH_HEADERS = {

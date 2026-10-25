@@ -8,12 +8,24 @@ import { visualFields } from './visualFields.js';
 export function createInspectImageTool(ctx) {
   return {
     name: 'inspect_image',
-    description: '重新读取工作区原图，核对场景、仪表数字或参考图。数字看不清或用户纠错时指定region局部裁剪放大；每个字段逐项给原始数字与单位，看不清不补零，冲突保留。',
-    input_schema: { type: 'object', properties: {
-      path: { type: 'string' }, question: { type: 'string', maxLength: 1000 },
-      region: { type: 'object', properties: Object.fromEntries(['x', 'y', 'width', 'height'].map(key => [key, { type: 'number', minimum: 0, maximum: 1 }])), required: ['x', 'y', 'width', 'height'], additionalProperties: false },
-      readText: { type: 'boolean', description: '需要读数字或文字时同时尝试OCR；没有配置则明确提示' }
-    }, required: ['path', 'question'], additionalProperties: false },
+    description:
+      '重新读取工作区原图，核对场景、仪表数字或参考图。数字看不清或用户纠错时指定region局部裁剪放大；每个字段逐项给原始数字与单位，看不清不补零，冲突保留。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+        question: { type: 'string', maxLength: 1000 },
+        region: {
+          type: 'object',
+          properties: Object.fromEntries(['x', 'y', 'width', 'height'].map((key) => [key, { type: 'number', minimum: 0, maximum: 1 }])),
+          required: ['x', 'y', 'width', 'height'],
+          additionalProperties: false
+        },
+        readText: { type: 'boolean', description: '需要读数字或文字时同时尝试OCR；没有配置则明确提示' }
+      },
+      required: ['path', 'question'],
+      additionalProperties: false
+    },
     run: async ({ path, question, region, readText = true }, { signal } = {}) => {
       visualRegion(region);
       if (!/\.(png|jpe?g|webp|gif|bmp)$/i.test(path)) throw Object.assign(new Error('局部复核仅支持图片文件'), { code: 'IMAGE_INPUT', kind: 'input' });
@@ -37,8 +49,17 @@ export function createInspectImageTool(ctx) {
       let failure = null;
       if (ctx.visionLlm) {
         try {
-        const text = String(await ctx.visionLlm({ system: '读取本次提供的原始图片。只写可见事实；数字逐字段写“标签：原始数字 单位”，保留前导零和小数点，看不清写看不清，不按常识补位。区分观察与推测。用户纠错后不得引用旧描述作识别依据。', prompt: String(question).slice(0, 1000) + (region && !cropped ? '\n仅关注归一化区域：' + JSON.stringify(region) : ''), images: [await imageData(image)], signal }));
-        results.push({ kind: 'vision', text });
+          const text = String(
+            (await ctx.visionLlm({
+              system:
+                '读取本次提供的原始图片。只写可见事实；数字逐字段写“标签：原始数字 单位”，保留前导零和小数点，看不清写看不清，不按常识补位。区分观察与推测。用户纠错后不得引用旧描述作识别依据。',
+              prompt: String(question).slice(0, 1000) + (region && !cropped ? '\n仅关注归一化区域：' + JSON.stringify(region) : ''),
+              images: [await imageData(image)],
+              signal
+            })) || ''
+          ).trim();
+          if (!text) throw Object.assign(new Error('视觉模型未返回识别内容'), { code: 'IMAGE_INSPECT_EMPTY', kind: 'api' });
+          results.push({ kind: 'vision', text });
         } catch (error) {
           throwControl(error, signal);
           failure = error;
@@ -56,9 +77,22 @@ export function createInspectImageTool(ctx) {
         }
       } else if (readText) notes.push(region && !cropped ? '未把整图OCR冒充局部识别。' : '当前未配置OCR，仅有视觉模型结果。');
       if (!results.length && failure) throw failure;
-      if (!results.length) throw Object.assign(new Error(notes.join(' ') || '请先配置看图模型或OCR'), { code: 'IMAGE_INSPECT_UNAVAILABLE', kind: 'capability' });
-      const receipt = { kind: results.some(result => result.kind === 'ocr') ? 'ocr' : 'vision', ok: true, imageHash, cropped, fields: results.flatMap(result => visualFields(result.text)).slice(0, 20) };
-      return visualReceiptText(receipt) + '\n' + notes.join('\n') + '\n识别结果是候选，来源冲突必须报告；数字不合理不能擅自改数。\n' + results.map(result => `【${result.kind}${cropped ? ' · 已裁剪放大' : ' · 原图'}】\n${String(result.text).slice(0, 12000)}`).join('\n');
+      if (!results.length)
+        throw Object.assign(new Error(notes.join(' ') || '请先配置看图模型或OCR'), { code: 'IMAGE_INSPECT_UNAVAILABLE', kind: 'capability' });
+      const receipt = {
+        kind: results.some((result) => result.kind === 'ocr') ? 'ocr' : 'vision',
+        ok: true,
+        imageHash,
+        cropped,
+        fields: results.flatMap((result) => visualFields(result.text)).slice(0, 20)
+      };
+      return (
+        visualReceiptText(receipt) +
+        '\n' +
+        notes.join('\n') +
+        '\n识别结果是候选，来源冲突必须报告；数字不合理不能擅自改数。\n' +
+        results.map((result) => `【${result.kind}${cropped ? ' · 已裁剪放大' : ' · 原图'}】\n${String(result.text).slice(0, 12000)}`).join('\n')
+      );
     }
   };
 }

@@ -1,3 +1,4 @@
+import { dropSessionWork } from './workLedger.js';
 /**
  * 多会话：每段对话单独保存（本机 IndexedDB），可以新建、切换、搜索、重命名、导出、删除。
  * 消息只存文本（用户原话与未央的回答），工具调用记录只存名字，用于回看时显示“用了哪些工具”。
@@ -68,7 +69,7 @@ export async function setPinned(id, pinned) {
 
 export function remove(id) {
   evidence.drop(id).catch(() => {}); // 这段对话读过的网页证据一起删
-  return remote ? remote.remove(id) : sessions.delete(id);
+  return remote ? remote.remove(id) : Promise.all([sessions.delete(id), dropSessionWork(id)]);
 }
 
 /** 按标题和内容搜索；返回带命中片段的会话 */

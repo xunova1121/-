@@ -1,3 +1,5 @@
+import { answerWorkHistory } from './workHistoryAnswer.js';
+import { workHistoryBlock } from './workLedger.js';
 import { safeNewsPartial, newsCandidateLinks } from './newsDelivery.js';
 import { conversationEvidence } from './conversationEvidence.js';
 import { singleDocumentTask } from './documentExecutionPolicy.js';
@@ -193,6 +195,13 @@ export function trimComputerScreenshots(messages,keep=2) {
 }
 
 async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false, describeImages = null, visionLabel = '看图模型', readImageText = null, modelNote = '', hedgeMs = 0 }) {
+  const workStartedAt = Date.now();
+  const workAnswer = await answerWorkHistory(requirementText, sessionId, { signal, now: now(), onStart: () => emit({ type: 'tool_start', id: 'work-history', name: 'list_work_records', args: {} }) });
+  if (workAnswer) {
+    emit({ type: 'tool_end', id: 'work-history', name: 'list_work_records', ok: true, output: JSON.stringify(workAnswer.result), ms: Date.now() - workStartedAt });
+    emit({ type: 'text', delta: workAnswer.text });
+    return { text: workAnswer.text, toolCalls: 1 };
+  }
   if (light && needsActionTools(userText, history)) light = false;
   const availableTools = tools;
   let questionProfile = light ? null : questionToolProfile(requirementText, { images, history });
@@ -208,6 +217,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   let retrievalStopped = false;
   emit({ type: 'state', value: 'processing' });
   const { ctx, record, requirementContext, archive } = await prepareAgentContext({ userText, priorMessages: history, context, sessionId, summary, light: light || Boolean(questionProfile), requirements, depth, requirementText, emit, buildContext });
+  ctx.dynamic = (ctx.dynamic || '') + await workHistoryBlock(requirementText, sessionId, { signal });
   const convo = [...history.map((m) => ({ ...m })), { role: 'user', content: userText, ...(images.length && { images }) }];
   if (images.length || /OCR|读数|数值|重新看|看错|识图|截图/i.test(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n图片核对：用户纠正读数或要求OCR时，先用inspect_image读取工作区原图（需要时指定region），不要复述旧识别结果。成功回执只能证明本次执行，不能证明数字正确；来源冲突明确报告。没有原图或能力时说明缺失，不声称已重新识别。';
   // 当前模型看不了图：图片先交给看图模型写成文字（见 imageSight.js）

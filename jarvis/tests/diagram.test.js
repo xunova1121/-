@@ -58,4 +58,5 @@ it('参考Word材料不等于要求交Word，明确PPT交付仍保留', async ()
   expect(taskContract('按照上传/招标文件.docx画一张架构图，只需要图').formats).toEqual([]);
   expect(mediaRequirement('按照上传/招标文件.docx画一张架构图')).toMatchObject({ tool: 'create_diagram' });
   expect(taskContract('用PPT制作架构图').formats).toEqual(['pptx']);
+  expect(mediaRequirement('用PPT制作架构图')).toBeNull();
 });

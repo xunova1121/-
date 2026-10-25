@@ -232,6 +232,7 @@ jobs:
           node e2e/qwen-voices.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/image-inspection.mjs
           node e2e/diagram-layout.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/workspace-management.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/image-followup.mjs
           node e2e/settings-layout.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/mobile-theme.mjs "$RUNNER_TEMP/jarvis-e2e"

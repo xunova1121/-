@@ -4,7 +4,7 @@ import { webBody } from '../agent/webBody.js';
 import { throwControl } from '../core/networkRequest.js';
 
 /** 编辑必须把真实原图传给/images/edits；接口不支持时明确失败，不退化为凭文字重画。 */
-export async function editImage(cfg, { prompt, images, size = '1024x1024', gateway = null, fetchImpl = globalThis.fetch, download = fetchImpl, signal } = {}) {
+export async function editImage(cfg, { prompt: imagePrompt, images, size = '1024x1024', gateway = null, fetchImpl = globalThis.fetch, download = fetchImpl, signal } = {}) {
   if (!Array.isArray(images) || !images.length || images.length > 3 || images.some(image => !(image instanceof Blob) || image.size > 10e6)) throw Object.assign(new Error('图片编辑需1～3张原图，每张不超过10MB'), { code: 'IMAGE_EDIT_INPUT', kind: 'input' });
   const { main } = abilityLines(cfg, 'image');
   const lines = main ? [main] : [{ provider: cfg.provider, model: imageModelOf(cfg) }];
@@ -15,7 +15,7 @@ export async function editImage(cfg, { prompt, images, size = '1024x1024', gatew
       const { base, headers } = providerEndpoint(cfgForLine(cfg, line), gateway);
       const form = new FormData();
       form.append('model', line.model);
-      form.append('prompt', String(prompt).slice(0, 12000));
+      form.append('prompt', String(imagePrompt).slice(0, 12000));
       form.append('size', size);
       form.append('n', '1');
       images.forEach((image, index) => form.append(images.length === 1 ? 'image' : 'image[]', image, `reference-${index + 1}.${/jpeg/.test(image.type) ? 'jpg' : /webp/.test(image.type) ? 'webp' : 'png'}`));

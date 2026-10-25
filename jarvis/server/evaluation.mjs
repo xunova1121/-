@@ -3,7 +3,7 @@ const MEMORY_WRITES = new Set(['remember', 'forget', 'core_memory_update', 'save
 
 export function evaluationTools(tools, evaluationId) {
   if (!evaluationId) return tools;
-  return tools.map((tool) => MEMORY_WRITES.has(tool.name) ? {
+  return tools.map((tool) => tool.name === 'list_work_records' ? { ...tool, run: async () => JSON.stringify({ total: 0, items: [], completeHistory: false, note: '评测隔离，不读取正式成果记录' }) } : MEMORY_WRITES.has(tool.name) ? {
     ...tool,
     run: async () => '本条测试信息已保留在当前评测会话中，未写入、修改或删除正式长期记忆；本会话后续可继续引用。'
   } : tool);

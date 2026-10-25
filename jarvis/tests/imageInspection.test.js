@@ -66,3 +66,7 @@ it('视觉暂不可用时仍尝试已配置OCR，不靠重复问同一模型空�
   expect(text).toContain('视觉模型读取失败');
   expect(text).toContain('0044');
 });
+it('视觉返回空文本不算成功，不允许用空回执声称重新看清', async () => {
+  await workspace.write('inspection-empty.png', new Blob(['original'], { type: 'image/png' }));
+  await expect(createInspectImageTool({ visionLlm: async () => '' }).run({ path: 'inspection-empty.png', question: '核对数字', readText: false })).rejects.toMatchObject({ code: 'IMAGE_INSPECT_EMPTY' });
+});
