@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { baselineCases, suiteVersion } from './baseline-cases.mjs';
 import { checkResult, metricsFor, compareBaseline } from './baseline-report.mjs';
-import { runBaselineCase, validateBaselineConfig } from './baseline.mjs';
+import { runBaselineCase, validateBaselineConfig, validateLiveConfig } from './baseline.mjs';
 import { createTaskTiming } from '../shared/taskTiming.js';
 import { applyReviews } from './baseline-review.mjs';
 
@@ -93,4 +93,18 @@ test('审查须逐检查点给依据，不能把机械失败或缺项盖章通�
 test('数字千分位不应把正确金额误判为缺失', () => {
   const item = baselineCases[10];
   assert.equal(checkResult(item, { status: 'done', answer: '净重821.4公斤，货款15,195.90元' }).mechanical, 'passed');
+});
+
+// 用户默认配置可测；不修改原官方对照门禁及记忆隔离要求。
+test('普通评测使用当前自定义服务商模型，不写死DeepSeek', () => {
+  assert.deepEqual(validateLiveConfig({ provider: 'custom', models: { custom: 'chosen-model' }, routing: { enabled: true } }), { provider: 'custom', model: 'chosen-model', routingEnabled: true });
+  assert.throws(() => validateLiveConfig({ provider: 'mock', models: { mock: 'demo' } }));
+  assert.throws(() => validateLiveConfig({ provider: 'custom', models: {} }));
+});
+
+test('禁止时间、数值失败与实际页数错误不能机械盖章通过', () => {
+  const item = {prompt:'会议通知，不要时间',checks:{}};
+  assert.equal(checkResult(item,{status:'done',answer:'时间地点另行通知'}).mechanical,'failed');
+  assert.equal(checkResult({prompt:'核对货款',checks:{}},{status:'done',answer:'校验失败请复核',review:{calculation:'failed'}}).mechanical,'failed');
+  assert.equal(checkResult({prompt:'5页PPT',checks:{}},{status:'done',answer:'已生成',review:{artifacts:[{slides:5,pages:6,pdfPageMatch:'failed'}]}}).mechanical,'failed');
 });

@@ -6,6 +6,14 @@ import { baselineCases, suiteVersion } from './baseline-cases.mjs';
 import { runCase, serverAPI } from './runner.mjs';
 import { baselineSummary, checkResult, metricsFor, assessmentVersion } from './baseline-report.mjs';
 
+/** 默认测当前选择，不改生产配置；官方单模型对照通过显式参数启用。 */
+export function validateLiveConfig(cfg) {
+  const provider = String(cfg.provider || '');
+  const model = cfg.models?.[provider];
+  if (!provider || provider === 'mock' || typeof model !== 'string' || !model.trim()) throw Object.assign(new Error('请在服务器明确选择真实服务商及模型后再评测'), { code: 'EVAL_CONFIG', kind: 'api' });
+  return { provider, model, routingEnabled: Boolean(cfg.routing?.enabled) };
+}
+
 /** 不改生产配置。混合分工或第三方线路不得冒充DeepSeek官方单模型基线。 */
 export function validateBaselineConfig(cfg) {
   if (cfg.provider !== 'deepseek') throw Object.assign(new Error('基线需选DeepSeek官方服务商'), { code: 'EVAL_CONFIG', kind: 'api' });
@@ -40,15 +48,17 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   if (!env.JARVIS_EVAL_URL || !env.JARVIS_EVAL_TOKEN) throw Object.assign(new Error('缺少服务器地址或登录令牌'), { code: 'EVAL_CONFIG', kind: 'api' });
   const api = serverAPI(env.JARVIS_EVAL_URL, env.JARVIS_EVAL_TOKEN);
   const cfg = await api('/api/server/config');
-  const selected = validateBaselineConfig(cfg);
+  const selected = args.includes('--official-deepseek') ? validateBaselineConfig(cfg) : validateLiveConfig(cfg);
   const serverStatus = await api('/api/server/status');
   if (serverStatus.running || serverStatus.tasks?.length) throw Object.assign(new Error('服务器有其他任务，请单独评测'), { code: 'EVAL_CONFIG', kind: 'api' });
   if (!serverStatus.features?.evaluationMemoryIsolation) throw Object.assign(new Error('服务器缺少评测记忆隔离，请更新服务器后再测；不向旧服务器提交测试任务'), { code: 'EVAL_CONFIG', kind: 'api' });
   if (!serverStatus.features?.taskRequestIds) throw Object.assign(new Error('服务器不支持独立评测任务'), { code: 'EVAL_CONFIG', kind: 'api' });
+  const update = await api('/api/server/update').catch(() => null);
+  const serverVersion = typeof update?.version === 'string' && /^\d+\.\d+\.\d+$/.test(update.version) ? update.version : null;
   const directory = args.find((arg) => arg.startsWith('--out-dir='))?.slice(10);
   if (!directory) throw Object.assign(new Error('请指定全新的--out-dir私有报告目录'), { code: 'EVAL_CONFIG', kind: 'api' });
   await fs.mkdir(directory, { mode: 0o700 });
-  const report = { schemaVersion: 1, suiteVersion, assessmentVersion, executionProfile: 'server_memory_write_isolated_v1', ...selected, location: new URL(env.JARVIS_EVAL_URL).origin, startedAt: new Date().toISOString(), runId: randomUUID(), results: [], limitations: ['未做语义复核不能计为通过；Office文件必须下载打开与校验。', '统计主循环及工具辅助逻辑调用，正文字符不含系统提示和工具schema；不是全部HTTP请求或Token。', '配置验证不证明每一请求的上游；回退发生时必须标记混合模型，不能作为单模型对照。'] };
+  const report = { schemaVersion: 1, suiteVersion, assessmentVersion, executionProfile: 'server_memory_write_isolated_v1', serverVersion, ...selected, location: new URL(env.JARVIS_EVAL_URL).origin, startedAt: new Date().toISOString(), runId: randomUUID(), results: [], limitations: ['未做语义复核不能计为通过；Office文件必须下载打开与校验。', '统计主循环及工具辅助逻辑调用，正文字符不含系统提示和工具schema；不是全部HTTP请求或Token。', '配置验证不证明每一请求的上游；回退发生时必须标记混合模型，不能作为单模型对照。'] };
   const destination = path.join(directory, 'report.json');
   const save = () => fs.writeFile(destination, JSON.stringify(report, null, 2), { mode: 0o600 });
   await save();
@@ -62,7 +72,7 @@ export async function main(args = process.argv.slice(2), env = process.env) {
       const result = await runBaselineCase(api, item, { runId: report.runId, evaluationId: report.runId, signal: controller.signal });
       report.results.push(result);
       report.summary = baselineSummary(report.results);
-      report.mixedModel = report.results.some((entry) => entry.turns.some((turn) => turn.timing?.fallbacks > 0));
+      report.mixedModel = Boolean(selected.routingEnabled) || report.results.some((entry) => entry.turns.some((turn) => turn.timing?.fallbacks > 0));
       await save();
       console.log(`${item.id}: ${result.status}; ${result.metrics.totalMs}ms; ${result.quality}`);
       if (result.turns.some((turn) => turn.status === 'submission_unknown' || turn.cleanupWarning)) break;

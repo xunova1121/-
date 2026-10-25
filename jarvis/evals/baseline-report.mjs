@@ -1,4 +1,5 @@
-export const assessmentVersion = 'baseline-rules-v2';
+import { answerConstraintIssues } from '../src/agent/answerRequirements.js';
+export const assessmentVersion = 'baseline-rules-v3';
 
 /** 机械检查只能发现明显失败；语义、实时事实及实际Office产物必须复核。 */
 export function checkResult(item, result) {
@@ -6,6 +7,13 @@ export function checkResult(item, result) {
   const comparableText = answer.replace(/(\d)[,，](?=\d{3}(?:\D|$))/g, '$1');
   const failures = [];
   const warnings = [];
+  const request = [item.prompt, item.followup].filter(Boolean).join('\n');
+  failures.push(...answerConstraintIssues(request, answer));
+  if (result.review?.calculation === 'failed') failures.push('关键数值校验失败，需复核');
+  if (result.review?.sourceIssue) failures.push('具体来源或渠道未核实');
+  for (const artifact of result.review?.artifacts || []) {
+    if (artifact.pdfPageMatch === 'failed' || (artifact.expectedSlides != null && artifact.slides !== artifact.expectedSlides)) failures.push('实际产物页数未满足要求');
+  }
   if (result.status !== 'done' || result.protocolIssue) failures.push('执行未完整成功');
   if (!answer.trim()) failures.push('无回答正文');
   for (const text of item.checks.contains || []) {
