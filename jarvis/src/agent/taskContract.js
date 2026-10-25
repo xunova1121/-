@@ -1,3 +1,4 @@
+import { mediaRequirement } from './actionDelivery.js';
 /** 合约只提取明确交付类型，完整要求仍由需求账本保存，不用它猜用户意图。 */
 export function taskContract(text = '') {
   const value = String(text).slice(0, 8000);
@@ -26,7 +27,9 @@ export function taskContract(text = '') {
   const asking =
     /(?:记住|记下|记进去|放进记忆|记到记忆|记得)(?:了)?(?:吗|么|没有|没)[？?]?\s*$/m.test(value) || /有没有(?:记|放进)|你有(?:记|放进)[^。！!]*[吗么]/.test(value);
   const remembering = !asking && /记住|记下来|记下这|记到记忆|放进记忆|别忘了|长点记性/.test(value);
+  const media = mediaRequirement(value);
   return {
+    media,
     formats,
     remembering,
     askingMemory: asking,
@@ -34,6 +37,7 @@ export function taskContract(text = '') {
     calculation,
     researching: /查|搜索|核实|调研|研究|最新|今天|行情/.test(value),
     criteria: [
+      ...(media ? [`实际调用${media.tool}并取得${media.label}文件回执，排队或口头承诺不算完成`] : []),
       ...(calculation ? ['先用verify_numbers或代码核对数值和日期基准，再给结论'] : []),
       ...(/日K|K线|最高价|最低价/i.test(value) ? ['历史日K优先get_stock_kline，明确证券代码、日期、复权和返回范围，不用搜索摘要冒充日K数据'] : []),
       ...(formats.length ? ['实际文件存在且可读回', '分别报告结构、内容、渲染和未解决问题'] : []),

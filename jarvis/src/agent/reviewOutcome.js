@@ -12,6 +12,10 @@ export function reviewOutcome(report, { interrupted = false, nativeSearchCalls =
     warnings.push('当前内容限制或具体来源要求尚未全部满足，不能当作完整交付。');
     partial = true;
   }
+  if (report.media && report.media.state !== 'completed') {
+    warnings.push(`${report.media.label}还没有取得真实文件回执，当前为${report.media.state}；不能当作生成完成。`);
+    partial = true;
+  }
   if (report.pendingFormats?.length) {
     warnings.push(`尚未取得 ${report.pendingFormats.join('、')} 文件的有效读回结果。`);
     partial = true;

@@ -74,5 +74,5 @@ export function createVisualEvidence(initiallyPresent = false) {
     if (present && claims.some((line) => /(?:OCR|识别|识图).{0,20}(?:必然正确|绝对准确|百分之百)/.test(line))) return 'OCR成功不等于内容核实，不能承诺识别必然准确';
     return '';
   };
-  return { note, issue, active: () => present, snapshot: () => receipts.map((receipt) => ({ ...receipt, rows: receipt.rows.map((row) => ({ ...row })) })) };
+  return { note, issue, active: () => present, snapshot: () => receipts.map(({ rows, ...metadata }) => ({ ...metadata, rowCount: rows.length })) };
 }

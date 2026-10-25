@@ -36,6 +36,13 @@ describe('图片执行依据', () => {
     expect(ledger.snapshot()).toHaveLength(12);
     expect(JSON.stringify(ledger.snapshot())).not.toContain('敏感正文');
   });
+  it('验收快照只存识别元数据，候选行只留在本轮内存', () => {
+    const ledger = createVisualEvidence(true);
+    ledger.note({ kind: 'ocr', ok: true, rows: [{ match: '私有候选队名', score: '0-1' }] });
+    expect(ledger.snapshot()[0]).toMatchObject({ rowCount: 1, ok: true });
+    expect(JSON.stringify(ledger.snapshot())).not.toContain('私有候选队名');
+    expect(ledger.snapshot()[0]).not.toHaveProperty('rows');
+  });
   it('主循环不先显示虚构OCR草稿，至多修正一次', async () => {
     let calls = 0;
     const shown = [];

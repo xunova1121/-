@@ -48,6 +48,8 @@ export async function executeToolCalls(
       // 一模一样的调用已经做过两次：结果不会变，不再执行，让模型换思路
       if (times >= 3 && !/^computer_(look|click|type|key|scroll|drag|screenshot)$/.test(c.name))
         throw new Error(`这个操作（同样的参数）已经做过 ${times - 1} 次了，结果不会变。请换一种方法，或者直接根据已有结果继续。`);
+      const scopeIssue = review.toolBlock?.(c.name);
+      if (scopeIssue) throw Object.assign(new Error(scopeIssue), { code: 'TASK_SCOPE_AFTER_DENIAL', kind: 'input' });
       const bad = c.parseError || validateArgs(tool, c.args);
       if (bad) throw new Error(`${bad}。请检查参数后重新调用。`);
       // 文件已验过可用（能读回、没报错、之后没改过）且已经核实过一次：不再读，免得“读取 → 核实 → 再核实”绕圈
@@ -105,7 +107,7 @@ export async function executeToolCalls(
     await checkpoint?.({ type: 'tool_end', id: c.id, name: c.name, ok, output });
     emit({ type: 'tool_end', id: c.id, name: c.name, ok, output, ...(failure && { errorKind: errorKind(failure), code: failure.code }), ms: Date.now() - t0 });
     if (failure?.code !== 'RETRIEVAL_BUDGET') throwControl(failure, signal);
-    review.record({ name: c.name, args: c.args, ok, output });
+    review.record({ name: c.name, args: c.args, ok, output, code: failure?.code });
     return { c, ok, output, outImages };
   };
   // 互不影响的只读调用（搜索、读文件、读网页……）同时做；其余按顺序一个个做

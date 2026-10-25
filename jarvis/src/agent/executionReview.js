@@ -1,3 +1,4 @@
+import { mediaReceipt, mediaDelivery, blockedAfterDenial } from './actionDelivery.js';
 import { createVisualEvidence, readVisualReceipt } from './visualEvidence.js';
 import { taskContract } from './taskContract.js';
 import { isReadOnlyTool } from '../../shared/taskCheckpoint.js';
@@ -14,6 +15,8 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   const receipts = [];
   const visualEvidence = createVisualEvidence(visual || /截图|识图|OCR|看图|图片识字/.test(goal));
   let visualIssue = '';
+  let declinedTool = '';
+  const toolBlock = (toolName) => blockedAfterDenial(request, declinedTool, toolName);
   const files = new Map();
   const artifacts = new Map();
   const reads = new Map(); // 文件路径 → 验过可用之后又读了几次（最多 32 个文件）
@@ -30,6 +33,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
       && /^(?:改成|改为|换成|换为)/.test(String(text).trim()) && creativeWithoutLookup(text);
     request = (request + '\n补充：' + String(text)).slice(-4000);
     version++;
+    declinedTool = '';
     answerIssues = [];
     sourceIssue = '';
     calculationIssue = '';
@@ -41,16 +45,20 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
       artifacts.clear();
     }
   };
-  const record = ({ name: toolName, args = {}, ok, validation, output = '' }) => {
+  const record = ({ name: toolName, args = {}, ok, validation, output = '', code = '' }) => {
     if (ok) for (const url of sourceCandidates(request, toolName, output, args)) {
       if (candidateSources.size < 8) candidateSources.add(url);
     }
     if (toolName === 'read_image_text') visualEvidence.note(ok ? readVisualReceipt(output) || { kind: 'ocr', ok: true } : { kind: 'ocr', ok: false });
+    if (!ok && code === 'NOT_APPROVED') declinedTool = toolName;
+    const media = mediaReceipt(toolName, ok, output);
     const path = typeof args.path === 'string' ? args.path.slice(0, 400) : '';
     sequence++;
     receipts.push({
       tool: toolName,
       ok: Boolean(ok),
+      ...(media && { media }),
+      ...(['NOT_APPROVED', 'TASK_SCOPE_AFTER_DENIAL'].includes(code) && { code }),
       path,
       version,
       sequence,
@@ -106,7 +114,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   const rereadBlocked = (name, args = {}) => VERIFY_TOOLS.test(name) && verified(args.path) && (reads.get(String(args.path).slice(0, 400)) ?? 0) >= 1;
   const required = () => {
     const contract = taskContract(request);
-    return Boolean(concreteSourceRequirement(request)) || answerIssues.length > 0 || contract.formats.length > 0 || contract.coding || contract.remembering || contract.askingMemory || files.size > 0 || artifacts.size > 0 || receipts.some(receipt => receipt.tool === 'verify_numbers' && !receipt.ok || receipt.ok && /^(?:create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet|write_file|edit_file|run_javascript|run_python|computer_run|run_project_tests)$/.test(receipt.tool));
+    return Boolean(contract.media) || Boolean(concreteSourceRequirement(request)) || answerIssues.length > 0 || contract.formats.length > 0 || contract.coding || contract.remembering || contract.askingMemory || files.size > 0 || artifacts.size > 0 || receipts.some(receipt => receipt.tool === 'verify_numbers' && !receipt.ok || receipt.ok && /^(?:create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet|write_file|edit_file|run_javascript|run_python|computer_run|run_project_tests)$/.test(receipt.tool));
   };
   const contractNote = () => {
     if (!required()) return '';
@@ -126,7 +134,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     // 同一份文档：改失败后又用别的文档工具成功生成 / 改好了，也算已解决
     const sameDoc = (a, b) => a.path && a.path === b.path && DOC_TOOLS.test(a.tool) && DOC_TOOLS.test(b.tool);
     const unresolved = (receipt) =>
-      !receipt.ok &&
+      !receipt.ok && receipt.code !== 'TASK_SCOPE_AFTER_DENIAL' &&
       (!isReadOnlyTool(receipt.tool) || receipt.tool === 'run_project_tests') &&
       !current.some((later) => later.sequence > receipt.sequence && later.ok && (later.tool === receipt.tool || sameDoc(later, receipt)));
     const ran = receipts.some(
@@ -134,6 +142,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     );
     const pending = codeFiles.filter((file) => !file.verified).map((file) => file.path);
     return {
+      media: mediaDelivery(request, receipts.filter((receipt) => receipt.version === version)),
       pendingFormats: taskContract(request).formats.filter(
         (format) => ![...artifacts.values()].some((item) => item.format === format && item.readback === 'passed' && !item.errors)
       ),
@@ -171,6 +180,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     const issues = [];
     issues.push(...result.answerIssues);
     if (result.visualIssue) issues.push(result.visualIssue);
+    if (result.media && result.media.state !== 'completed') issues.push(`用户要求生成${result.media.label}，当前${result.media.state}；应实际调用${result.media.tool}取得文件，不能只写“我来做”收尾。已有歌词/文字保留，失败明确区分，不能虚构下载或播放。`);
     if (result.sourceIssue) issues.push(result.sourceIssue);
     if (result.calculation === 'failed') issues.push('关键verify_numbers校验失败；先根据工具错误修正参数重算，无法核验则明确校验失败、请人工复核，不能声称已通过');
     if (result.pendingFormats.length)
@@ -205,5 +215,5 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     const rules = answerConstraints(request);
     return visualEvidence.active() || rules.noTime || rules.literals.length > 0 || rules.todayNews || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
   };
-  return { noteVisual: visualEvidence.note, record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked, checkAnswer, guardsAnswer };
+  return { toolBlock, noteVisual: visualEvidence.note, record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked, checkAnswer, guardsAnswer };
 }
