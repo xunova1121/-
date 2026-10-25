@@ -15,8 +15,11 @@ export function reviewOutcome(report, { interrupted = false, nativeSearchCalls =
     warnings.push(`尚未取得 ${report.pendingFormats.join('、')} 文件的有效读回结果。`);
     partial = true;
   }
-  if (report.contract?.calculation && report.calculation === 'not_checked') {
-    warnings.push('数值计算尚未通过计算工具核对。');
+  if (report.calculation === 'failed') {
+    warnings.push('关键数值校验失败，请人工复核。');
+    partial = true;
+  } else if (report.contract?.calculation && report.calculation === 'not_checked') {
+    warnings.push('关键数值尚未完成工具校验，请人工复核。');
     partial = true;
   }
   if (report.pendingReadback?.length) {

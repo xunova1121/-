@@ -20,7 +20,8 @@ export function taskContract(text = '') {
         })
         .map(([, format]) => format)
     : [];
-  const calculation = /\d/.test(value) && /盈亏|收益率|孕周|多少天|相差|日期差|百分比|合计|加起来/.test(value);
+  const codeOnly = /代码|函数|JavaScript|TypeScript|Python/i.test(value) && /不运行|不执行|直接展示|只给代码/.test(value);
+  const calculation = !codeOnly && /\d/.test(value) && /计算|算式|净重|货款|净盈利|手续费|相隔|权重|盈亏|收益率|孕周|多少天|相差|日期差|百分比|合计|加起来/.test(value);
   // 用户要她记住（不是在问“记住了吗”）：必须真的调用记忆工具；问有没有记住：必须先查
   const asking =
     /(?:记住|记下|记进去|放进记忆|记到记忆|记得)(?:了)?(?:吗|么|没有|没)[？?]?\s*$/m.test(value) || /有没有(?:记|放进)|你有(?:记|放进)[^。！!]*[吗么]/.test(value);

@@ -18,6 +18,7 @@ export function createExecutionReview(goal = '') {
   let sequence = 0;
   let answerIssues = [];
   let sourceIssue = '';
+  let calculationIssue = '';
   const candidateSources = new Set();
   const revise = (text) => {
     const previous = taskContract(request);
@@ -28,6 +29,7 @@ export function createExecutionReview(goal = '') {
     version++;
     answerIssues = [];
     sourceIssue = '';
+    calculationIssue = '';
     candidateSources.clear();
     // 仅简单查询明确转创作时替换目标；文档“改成两页”等仍须保留原交付要求。
     if (/^(?:取消|不用|别做|停止)/.test(String(text).trim()) || replaceLookup) {
@@ -96,7 +98,7 @@ export function createExecutionReview(goal = '') {
   const rereadBlocked = (name, args = {}) => VERIFY_TOOLS.test(name) && verified(args.path) && (reads.get(String(args.path).slice(0, 400)) ?? 0) >= 1;
   const required = () => {
     const contract = taskContract(request);
-    return Boolean(concreteSourceRequirement(request)) || answerIssues.length > 0 || contract.formats.length > 0 || contract.coding || contract.remembering || contract.askingMemory || files.size > 0 || artifacts.size > 0 || receipts.some(receipt => receipt.ok && /^(?:create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet|write_file|edit_file|run_javascript|run_python|computer_run|run_project_tests)$/.test(receipt.tool));
+    return Boolean(concreteSourceRequirement(request)) || answerIssues.length > 0 || contract.formats.length > 0 || contract.coding || contract.remembering || contract.askingMemory || files.size > 0 || artifacts.size > 0 || receipts.some(receipt => receipt.tool === 'verify_numbers' && !receipt.ok || receipt.ok && /^(?:create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet|write_file|edit_file|run_javascript|run_python|computer_run|run_project_tests)$/.test(receipt.tool));
   };
   const contractNote = () => {
     if (!required()) return '';
@@ -109,6 +111,7 @@ export function createExecutionReview(goal = '') {
     const codeFiles = [...files.values()].filter((file) => /\.(?:[cm]?js|jsx|tsx?|py|html|css|json)$/i.test(file.path));
     const lastWrite = Math.max(0, ...codeFiles.map((file) => file.written));
     const current = receipts.filter((receipt) => receipt.version === version);
+    const lastNumeric = current.filter(receipt => receipt.tool === 'verify_numbers').at(-1);
     const latest = new Map(current.map((receipt) => [receipt.key, receipt]));
     // 算“失败回执”的只有改东西、跑测试的操作：查资料没查到（门票没搜到）是信息缺口，在交付里标明即可；
     // 后来同一个工具又成功了（换了文件名重新生成）也算已解决
@@ -132,6 +135,7 @@ export function createExecutionReview(goal = '') {
       calls: sequence,
       answerIssues: [...answerIssues],
       sourceIssue,
+      calculationIssue,
       sourceRequirement: concreteSourceRequirement(request),
       candidateSources: [...candidateSources],
       // 说“记住了 / 记进去了”必须有真实的记忆工具回执
@@ -141,7 +145,7 @@ export function createExecutionReview(goal = '') {
           ? 'saved'
           : 'not_saved',
       memoryChecked: !taskContract(request).askingMemory || current.some((receipt) => receipt.ok && receipt.tool === 'recall'),
-      calculation: receipts.some((receipt) => receipt.version === version && receipt.ok && /^(?:verify_numbers|run_javascript|run_python)$/.test(receipt.tool))
+      calculation: lastNumeric && !lastNumeric.ok ? 'failed' : receipts.some((receipt) => receipt.version === version && receipt.ok && /^(?:verify_numbers|run_javascript|run_python)$/.test(receipt.tool))
         ? 'tool_checked'
         : 'not_checked',
       contract: taskContract(request),
@@ -157,6 +161,7 @@ export function createExecutionReview(goal = '') {
     const issues = [];
     issues.push(...result.answerIssues);
     if (result.sourceIssue) issues.push(result.sourceIssue);
+    if (result.calculation === 'failed') issues.push('关键verify_numbers校验失败；先根据工具错误修正参数重算，无法核验则明确校验失败、请人工复核，不能声称已通过');
     if (result.pendingFormats.length)
       issues.push('这些要求的文件还没有有效产物读回回执：' + result.pendingFormats.join('、') + '；先实际生成并核对，不能只说已完成');
     if (result.contract.calculation && result.calculation === 'not_checked')
@@ -180,11 +185,13 @@ export function createExecutionReview(goal = '') {
   const checkAnswer = (text, now) => {
     answerIssues = answerConstraintIssues(request, text, now);
     sourceIssue = sourceAnswerIssue(request, text, [...candidateSources]);
-    return [...answerIssues, ...(sourceIssue ? [sourceIssue] : [])];
+    const result = report();
+    calculationIssue = result.calculation === 'failed' ? '关键verify_numbers校验失败，修正输入重算；不能核验时必须明确校验失败、请人工复核' : result.contract.calculation && result.calculation === 'not_checked' ? '关键计算尚无工具校验，请先调用verify_numbers核对，不能用心算冒充工具结果' : '';
+    return [...answerIssues, ...(sourceIssue ? [sourceIssue] : []), ...(calculationIssue ? [calculationIssue] : [])];
   };
   const guardsAnswer = () => {
     const rules = answerConstraints(request);
-    return rules.noTime || rules.literals.length > 0 || rules.todayNews || Boolean(concreteSourceRequirement(request));
+    return rules.noTime || rules.literals.length > 0 || rules.todayNews || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
   };
   return { record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked, checkAnswer, guardsAnswer };
 }

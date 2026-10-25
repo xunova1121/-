@@ -52,7 +52,8 @@ export async function finishAgentRun({
   }
   const acceptance = { ...review.report(), ...reviewOutcome(review.report(), { interrupted: retrievalStopped && !quickStop, nativeSearchCalls }) };
   const unmet = review.guidance();
-  if (acceptance.notice && !light) {
+  const alreadyExplained = acceptance.warnings?.length && acceptance.warnings.every(warning => finalText.includes(warning));
+  if (acceptance.notice && !light && !alreadyExplained) {
     finalText += acceptance.notice;
     emit({ type: 'text', delta: acceptance.notice });
   }

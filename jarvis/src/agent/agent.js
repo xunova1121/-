@@ -344,7 +344,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     const releaseSafePartial = () => {
       if (!guardedAnswer || !held) return;
       review.checkAnswer(held, now());
-      if (!review.report().answerIssues.length) releaseHeld();
+      if (!review.report().answerIssues.length && !review.report().calculationIssue) releaseHeld();
     };
     const acceptVisible = fragment => {
       const { text, hint } = stripper.push(fragment);
@@ -435,7 +435,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     }
     if (guardedAnswer && !r.toolCalls.length && r.stop !== 'pause_turn') {
       const issues = review.checkAnswer(held, now());
-      if (issues.length && answerRepairs < 1 && !closing && !signal?.aborted) {
+      const canCheckNumbers = availableTools.some(tool => /^(?:verify_numbers|run_javascript|run_python)$/.test(tool.name));
+      if (issues.length && answerRepairs < 1 && !closing && !signal?.aborted && cur.adapter.kind !== 'mock' && (!review.report().calculationIssue || canCheckNumbers)) {
         answerRepairs++;
         convo.push({ role: 'assistant', content: held, toolCalls: [], raw: r.raw });
         convo.push({ role: 'user', content: '（系统交付检查，仅修正本轮要求，不回应检查、不改做旧任务：' + issues.join('；') + '。最多本次修正，无法完成则如实说明。）' });
@@ -443,6 +444,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       }
       // 违约草稿未先推给用户；不能修好时也不把违禁内容当正式回答。
       if (review.report().answerIssues.length) held = '本轮未能生成符合当前要求的答复，请重新生成。';
+      if (review.report().calculation === 'failed') held = '关键数值校验失败，请人工复核。';
+      else if (review.report().calculationIssue && ACK_ONLY.test(held.trim())) held = '关键数值尚未完成工具校验，请人工复核。';
     }
     if (!guardedAnswer || !r.toolCalls.length) releaseHeld();
     finalText += stepText;
@@ -455,10 +458,13 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         if (finalText && !/\n$/.test(finalText)) { emit({ type: 'text', delta: '\n\n' }); finalText += '\n\n'; }
         continue;
       }
+      // 纯计算已经做过有界纠正，不再叠一轮同样的收尾核验；文件/代码/记忆任务仍走原验收。
+      const acceptance = review.report();
+      if (guardedAnswer && acceptance.calculationIssue && !acceptance.contract.formats.length && !acceptance.contract.coding && !acceptance.contract.remembering && !acceptance.contract.askingMemory && !acceptance.sourceRequirement && !unfinished(plan.steps).length) break;
       // 收尾核对：写代码的任务最多提醒两次；文档等其他任务只提醒一次，文件验过能用就交付，不反复核实
       // 普通问题也算数时照样提醒用计算工具核对（核一下几秒；不然回答末尾挂“数值计算尚未核对”）
       const maxChecks = wroteCode || review.report().contract.coding ? 2 : 1;
-      const calcPending = canReview && review.report().contract?.calculation && review.report().calculation === 'not_checked';
+      const calcPending = !guardedAnswer && canReview && review.report().contract?.calculation && review.report().calculation === 'not_checked';
       const note = (!closing || retrieval.extensive) && checks < maxChecks && (review.required() || calcPending || unfinished(plan.steps).length > 0) && !light && cur.adapter.kind !== 'mock' ? [finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }), (review.required() && canReview && !lookupDeadline) || calcPending ? review.guidance() : ''].filter(Boolean).join('\n') : '';
       if (!note) break;
       checks++;

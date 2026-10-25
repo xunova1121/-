@@ -15,6 +15,17 @@ const dateValue = (value) => {
 export function verifyNumbers(action, data = {}) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw invalid('输入需为对象');
   const note = '仅校验给定输入的运算和适用规则，不代表行情实时、输入属实或保证成交。';
+  if (action === 'weighing') {
+    const gross = number(data.gross, '毛重');
+    const tare = number(data.tare, '筐重');
+    const count = data.count === undefined ? 1 : number(data.count, '箱数');
+    if (tare > gross || !Number.isSafeInteger(count) || count > 1e7 || gross > 1e10) throw invalid('毛重不能小于筐重，箱数需为安全范围内的非负整数');
+    const netPerUnit = Math.round((gross - tare) * 1e6) / 1e6;
+    const net = Math.round(netPerUnit * count * 1e6) / 1e6;
+    const price = data.unitPrice === undefined ? null : number(data.unitPrice, '单价');
+    if (price !== null && (!Number.isFinite(net * price) || net * price > 1e12)) throw invalid('货款超过安全计算范围');
+    return { gross, tare, count, netPerUnit, net, ...(price !== null && { unitPrice: price, amount: round(net * price) }), note: '重量单位须一致，单价须与输入重量单位对应；净重保留6位小数，货款保留两位小数。' };
+  }
   if (action === 'date_difference') {
     const start = dateValue(data.startDate);
     const end = dateValue(data.endDate);
@@ -81,15 +92,15 @@ export function verifyNumbers(action, data = {}) {
 export function createVerificationTool() {
   return {
     name: 'verify_numbers',
-    description: '确定性计算自然日期差/加减、金额合计、百分比、盈亏、孕周日期、普通A股T+1可卖数量和委托价范围。先提供有来源的输入，不能用此工具把缓存价格变成已核实行情。',
+    description: '确定性计算称重货款、自然日期差/加减、金额合计、百分比、盈亏、孕周日期、普通A股T+1可卖数量和委托价范围。先提供有来源的输入，不能用此工具把缓存价格变成已核实行情。',
     input_schema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['pnl', 'gestational_age', 'a_share_order', 'date_difference', 'date_add', 'percentage', 'money_total'] },
+        action: { type: 'string', enum: ['weighing', 'pnl', 'gestational_age', 'a_share_order', 'date_difference', 'date_add', 'percentage', 'money_total'] },
         data: {
           type: 'object',
           description:
-            'date_difference:startDate,endDate；date_add:date,days；percentage:part,total；money_total:amounts；pnl:cost,price,shares可选,fees可选；gestational_age:weeks,days,baseDate,targetDate；a_share_order:totalShares,todayBuyShares,sellShares,orderPrice,lowerLimit,upperLimit',
+            'weighing:gross毛重,tare筐重,count箱数可选(默认1),unitPrice单价可选；date_difference:startDate,endDate；date_add:date,days；percentage:part,total；money_total:amounts；pnl:cost,price,shares可选,fees可选；gestational_age:weeks,days,baseDate,targetDate；a_share_order:totalShares,todayBuyShares,sellShares,orderPrice,lowerLimit,upperLimit',
           additionalProperties: true
         }
       },
