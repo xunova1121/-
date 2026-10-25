@@ -7,6 +7,10 @@ const TOOL_NAMES = { create_document: '生成文档', write_long_document: '写�
 export function reviewOutcome(report, { interrupted = false, nativeSearchCalls = 0 } = {}) {
   const warnings = [];
   let partial = interrupted;
+  if (report.answerIssues?.length || report.sourceIssue) {
+    warnings.push('当前内容限制或具体来源要求尚未全部满足，不能当作完整交付。');
+    partial = true;
+  }
   if (report.pendingFormats?.length) {
     warnings.push(`尚未取得 ${report.pendingFormats.join('、')} 文件的有效读回结果。`);
     partial = true;

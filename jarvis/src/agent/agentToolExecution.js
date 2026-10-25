@@ -103,7 +103,7 @@ export async function executeToolCalls(
     await checkpoint?.({ type: 'tool_end', id: c.id, name: c.name, ok, output });
     emit({ type: 'tool_end', id: c.id, name: c.name, ok, output, ...(failure && { errorKind: errorKind(failure), code: failure.code }), ms: Date.now() - t0 });
     if (failure?.code !== 'RETRIEVAL_BUDGET') throwControl(failure, signal);
-    review.record({ name: c.name, args: c.args, ok });
+    review.record({ name: c.name, args: c.args, ok, output });
     return { c, ok, output, outImages };
   };
   // 互不影响的只读调用（搜索、读文件、读网页……）同时做；其余按顺序一个个做

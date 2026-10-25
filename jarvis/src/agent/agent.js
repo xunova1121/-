@@ -240,6 +240,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   const loadGUI=()=>{if(availableTools.some(t=>t.name==='computer_look'))for(const name of ['computer_look','computer_click','computer_type','computer_key','computer_scroll','computer_drag'])loader.get(name);};
   if(!light&&(computerTask==='gui'||computerTaskKind(requirementText,{history})==='gui'))loadGUI();
   let outputRepairs = 0;
+  let answerRepairs = 0;
   let checks = 0; // 收尾核对提醒过几次（最多两次，避免来回拉扯）
   let wroteCode = false, ranCode = false;
   let toolHint = loader.hint();
@@ -310,7 +311,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     if (lookupDeadline && lookupControl?.released?.()) { lookupDeadline = false; infoPrompt = false; }
     takeInbox();
     const allowWebSearch = !questionProfile && !creativeWithoutLookup(currentRequest);
-    if (!retrieval.reason && lookupDeadline && lookupControl && (lookupControl.retrievalRemaining() <= 0 || retrieval.active && modelAttempts >= QUICK_MODEL_ATTEMPTS)) {
+    const quickAttempts = review.report().sourceRequirement ? Math.max(5, QUICK_MODEL_ATTEMPTS) : QUICK_MODEL_ATTEMPTS;
+    if (!retrieval.reason && lookupDeadline && lookupControl && (lookupControl.retrievalRemaining() <= 0 || retrieval.active && modelAttempts >= quickAttempts)) {
       retrieval.close('已停止新增检索，正在整理已有资料');
     }
     const closing = allowWebSearch && Boolean(retrieval.reason);
@@ -325,7 +327,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     let stripper = new EmotionTagStripper();
     // 收尾核对之后的步骤：整段写完再显示——模型把刚才的答案又写一遍、或只回一句“收到”的，不显示（评测里出现过答案重复两遍）
     let held = '';
-    const holding = Boolean(checkedText);
+    const guardedAnswer = review.guardsAnswer();
+    const holding = Boolean(checkedText) || guardedAnswer;
     const showText = (text) => {
       request.clearSearchTimer();
       stepText += text;
@@ -334,8 +337,14 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     };
     const releaseHeld = () => {
       if (!holding || !held) return;
-      if (!ACK_ONLY.test(held.trim()) && !repeats(checkedText, held)) showText(held);
+      if (!checkedText || !ACK_ONLY.test(held.trim()) && !repeats(checkedText, held)) showText(held);
       held = '';
+    };
+    // 阶段超时仍保留合规半成品；不能因新增缓冲把旧恢复路径变成空答后重跑。
+    const releaseSafePartial = () => {
+      if (!guardedAnswer || !held) return;
+      review.checkAnswer(held, now());
+      if (!review.report().answerIssues.length) releaseHeld();
     };
     const acceptVisible = fragment => {
       const { text, hint } = stripper.push(fragment);
@@ -384,11 +393,13 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     if (r?.tier) emit({ type: 'tier', ...r.tier });
     } catch (e) {
       if (e.code === 'LOOKUP_RETRIEVAL_END' && !signal?.aborted) {
+        releaseSafePartial();
         retrieval.close('已预留时间整理现有资料');
         if (stepText.trim()) { finalText += stepText + '\n\n'; emit({ type: 'text', delta: '\n\n' }); }
         continue;
       }
       if (lookupControl && closing && !signal?.aborted && (e.code === 'LOOKUP_SUMMARY_TIMEOUT' || errorKind(e) === 'timeout' || errorKind(e) === 'network')) {
+        releaseSafePartial();
         if (stepText.trim()) finalText += stepText;
         retrievalStopped = true;
         break;
@@ -400,6 +411,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         continue;
       }
       if (request.searchTimedOut && !signal?.aborted) {
+        releaseSafePartial();
         if (stepText.trim()) { finalText += stepText + '\n\n'; emit({ type: 'text', delta: '\n\n' }); }
         continue; // 本次不完整的原生搜索协议不再续传；下一轮关闭搜索、仅整理已有资料
       }
@@ -421,7 +433,18 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       if (rest.hint) emit({ type: 'emotion', value: rest.hint });
       if (rest.text) { if (holding) held += rest.text; else { stepText += rest.text; emit({ type: 'text', delta: rest.text }); } }
     }
-    releaseHeld();
+    if (guardedAnswer && !r.toolCalls.length && r.stop !== 'pause_turn') {
+      const issues = review.checkAnswer(held, now());
+      if (issues.length && answerRepairs < 1 && !closing && !signal?.aborted) {
+        answerRepairs++;
+        convo.push({ role: 'assistant', content: held, toolCalls: [], raw: r.raw });
+        convo.push({ role: 'user', content: '（系统交付检查，仅修正本轮要求，不回应检查、不改做旧任务：' + issues.join('；') + '。最多本次修正，无法完成则如实说明。）' });
+        continue;
+      }
+      // 违约草稿未先推给用户；不能修好时也不把违禁内容当正式回答。
+      if (review.report().answerIssues.length) held = '本轮未能生成符合当前要求的答复，请重新生成。';
+    }
+    if (!guardedAnswer || !r.toolCalls.length) releaseHeld();
     finalText += stepText;
     convo.push({ role: 'assistant', content: stepText, toolCalls: r.toolCalls, raw: r.raw });
     if (r.stop === 'pause_turn') continue; // 服务端工具（联网搜索）还没跑完，原样继续

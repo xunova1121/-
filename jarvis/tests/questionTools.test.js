@@ -13,7 +13,7 @@ describe('基础问题按需注入工具', () => {
     expect(questionToolProfile('每箱毛重23.6公斤，筐重1.4公斤，共37箱，单价18.5元/公斤。算净重和货款')).toBe('calculation');
   });
   it('文件、当前行情、个人记忆、图片与延续任务保留完整能力', () => {
-    for (const q of ['今天股价为什么上涨', '查一下我之前的计算结果', '解释附件里的三角形', '一公斤等于多少克，写入Word文件', '月球最新新闻', '继续计算这个净重', '安装数学技能']) expect(questionToolProfile(q), q).toBeNull();
+    for (const q of ['今天股价为什么上涨', '查一下我之前的计算结果', '解释附件里的三角形', '一公斤等于多少克，写入Word文件', '月球最新新闻', '继续计算这个净重', '安装数学技能', '为什么太阳能股票上涨']) expect(questionToolProfile(q), q).toBeNull();
     expect(questionToolProfile('为什么月亮有圆缺', { images: [{}] })).toBeNull();
     expect(questionToolProfile('为什么月亮有圆缺', { history: [{ role: 'tool', content: '继续' }] })).toBeNull();
   });

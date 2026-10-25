@@ -1,6 +1,7 @@
 import { taskContract } from './taskContract.js';
 import { isReadOnlyTool } from '../../shared/taskCheckpoint.js';
 import { creativeWithoutLookup } from '../core/imageFollowup.js';
+import { answerConstraints, answerConstraintIssues, concreteSourceRequirement, sourceCandidates, sourceAnswerIssue } from './answerRequirements.js';
 
 /** 核实文件内容的工具：同一文件验过可用后只再放行一次 */
 export const VERIFY_TOOLS = /^(?:read_file|computer_read_file|check_document)$/;
@@ -15,6 +16,9 @@ export function createExecutionReview(goal = '') {
   const reads = new Map(); // 文件路径 → 验过可用之后又读了几次（最多 32 个文件）
   let version = 0;
   let sequence = 0;
+  let answerIssues = [];
+  let sourceIssue = '';
+  const candidateSources = new Set();
   const revise = (text) => {
     const previous = taskContract(request);
     const replaceLookup = previous.researching && !previous.formats.length && !previous.coding && !previous.remembering && !previous.askingMemory
@@ -22,6 +26,9 @@ export function createExecutionReview(goal = '') {
       && /^(?:改成|改为|换成|换为)/.test(String(text).trim()) && creativeWithoutLookup(text);
     request = (request + '\n补充：' + String(text)).slice(-4000);
     version++;
+    answerIssues = [];
+    sourceIssue = '';
+    candidateSources.clear();
     // 仅简单查询明确转创作时替换目标；文档“改成两页”等仍须保留原交付要求。
     if (/^(?:取消|不用|别做|停止)/.test(String(text).trim()) || replaceLookup) {
       request = '用户最新修正：' + String(text).slice(0, 3900);
@@ -29,7 +36,10 @@ export function createExecutionReview(goal = '') {
       artifacts.clear();
     }
   };
-  const record = ({ name: toolName, args = {}, ok, validation }) => {
+  const record = ({ name: toolName, args = {}, ok, validation, output = '' }) => {
+    if (ok) for (const url of sourceCandidates(request, toolName, output, args)) {
+      if (candidateSources.size < 8) candidateSources.add(url);
+    }
     const path = typeof args.path === 'string' ? args.path.slice(0, 400) : '';
     sequence++;
     receipts.push({
@@ -86,7 +96,7 @@ export function createExecutionReview(goal = '') {
   const rereadBlocked = (name, args = {}) => VERIFY_TOOLS.test(name) && verified(args.path) && (reads.get(String(args.path).slice(0, 400)) ?? 0) >= 1;
   const required = () => {
     const contract = taskContract(request);
-    return contract.formats.length > 0 || contract.coding || contract.remembering || contract.askingMemory || files.size > 0 || artifacts.size > 0 || receipts.some(receipt => receipt.ok && /^(?:create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet|write_file|edit_file|run_javascript|run_python|computer_run|run_project_tests)$/.test(receipt.tool));
+    return Boolean(concreteSourceRequirement(request)) || answerIssues.length > 0 || contract.formats.length > 0 || contract.coding || contract.remembering || contract.askingMemory || files.size > 0 || artifacts.size > 0 || receipts.some(receipt => receipt.ok && /^(?:create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet|write_file|edit_file|run_javascript|run_python|computer_run|run_project_tests)$/.test(receipt.tool));
   };
   const contractNote = () => {
     if (!required()) return '';
@@ -120,6 +130,10 @@ export function createExecutionReview(goal = '') {
       retrievalReceipts: receipts.filter((receipt) => receipt.version === version && receipt.ok && /^(?:web_search|fetch_url|fact_check|deep_research|get_weather|get_stock_kline|get_sports_scores|read_evidence)$/.test(receipt.tool)).length,
       version,
       calls: sequence,
+      answerIssues: [...answerIssues],
+      sourceIssue,
+      sourceRequirement: concreteSourceRequirement(request),
+      candidateSources: [...candidateSources],
       // 说“记住了 / 记进去了”必须有真实的记忆工具回执
       memory: !taskContract(request).remembering
         ? 'not_required'
@@ -141,6 +155,8 @@ export function createExecutionReview(goal = '') {
   const guidance = () => {
     const result = report();
     const issues = [];
+    issues.push(...result.answerIssues);
+    if (result.sourceIssue) issues.push(result.sourceIssue);
     if (result.pendingFormats.length)
       issues.push('这些要求的文件还没有有效产物读回回执：' + result.pendingFormats.join('、') + '；先实际生成并核对，不能只说已完成');
     if (result.contract.calculation && result.calculation === 'not_checked')
@@ -161,5 +177,14 @@ export function createExecutionReview(goal = '') {
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
     run: async () => JSON.stringify(report())
   };
-  return { record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked };
+  const checkAnswer = (text, now) => {
+    answerIssues = answerConstraintIssues(request, text, now);
+    sourceIssue = sourceAnswerIssue(request, text, [...candidateSources]);
+    return [...answerIssues, ...(sourceIssue ? [sourceIssue] : [])];
+  };
+  const guardsAnswer = () => {
+    const rules = answerConstraints(request);
+    return rules.noTime || rules.literals.length > 0 || rules.todayNews || Boolean(concreteSourceRequirement(request));
+  };
+  return { record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked, checkAnswer, guardsAnswer };
 }
