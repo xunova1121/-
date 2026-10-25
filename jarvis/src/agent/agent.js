@@ -40,6 +40,7 @@ import * as packs from './skillPacks.js';
 import { summaryBlock } from './compress.js';
 import { DOCUMENT_TOOLS, createToolLoader } from './toolLoader.js';
 import { taskContract } from './taskContract.js';
+import { questionToolProfile, toolsForQuestion, BASIC_ANSWER_PROMPT } from './questionTools.js';
 
 import { createPlanTool, unfinished } from './plan.js';
 import { loadRules, rulesBlock } from './projectRules.js';
@@ -188,9 +189,12 @@ export function trimComputerScreenshots(messages,keep=2) {
 
 async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false, describeImages = null, visionLabel = '看图模型', readImageText = null, modelNote = '', hedgeMs = 0 }) {
   if (light && needsActionTools(userText, history)) light = false;
-  const capabilities = capabilityBlock(tools);
+  const availableTools = tools;
+  let questionProfile = light ? null : questionToolProfile(requirementText, { images, history });
+  tools = toolsForQuestion(tools, questionProfile);
+  const capabilities = capabilityBlock(availableTools);
   // 环境完全没有产物/计算核验能力时，直接说明未验收，不空转两轮模型。
-  const canReview = tools.some(tool => /^(?:create_document|write_long_document|edit_office_document|read_file|write_file|run_javascript|run_python|computer_run|computer_read_file|verify_numbers)$/.test(tool.name));
+  const canReview = availableTools.some(tool => /^(?:create_document|write_long_document|edit_office_document|read_file|write_file|run_javascript|run_python|computer_run|computer_read_file|verify_numbers)$/.test(tool.name));
   const review = createExecutionReview(requirementText);
   const retrieval = createRetrievalBudget(lookupDeadline ? '普通查询' : images.length ? `逐项核验 ${requirementText}` : requirementText, { now, timeBudgetMs });
   let modelAttempts = 0;
@@ -198,7 +202,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   let closingTurns = 0;
   let retrievalStopped = false;
   emit({ type: 'state', value: 'processing' });
-  const { ctx, record, requirementContext, archive } = await prepareAgentContext({ userText, priorMessages: history, context, sessionId, summary, light, requirements, depth, requirementText, emit, buildContext });
+  const { ctx, record, requirementContext, archive } = await prepareAgentContext({ userText, priorMessages: history, context, sessionId, summary, light: light || Boolean(questionProfile), requirements, depth, requirementText, emit, buildContext });
   const convo = [...history.map((m) => ({ ...m })), { role: 'user', content: userText, ...(images.length && { images }) }];
   // 当前模型看不了图：图片先交给看图模型写成文字（见 imageSight.js）
   const see = createImageSight({ model, describe: describeImages, label: visionLabel, emit, readText: readImageText });
@@ -206,7 +210,6 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   // 任务清单（update_plan）和子任务分身（delegate_task，只有主线能派）由循环自己提供
   const plan = createPlanTool((steps) => emit({ type: 'plan', steps }));
   // 简单闲聊（light）：不带工具，回得快
-  const availableTools = tools;
   let computerNote = tools.some(t => t.name === 'computer_search') && (computerTask || needsComputer(requirementText,{history})) ? COMPUTER_NOTE : '';
   if (light) tools = [];
   const executionTool = {
@@ -233,7 +236,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   const own = [...(oneFile ? [] : [plan.tool]), review.tool, executionTool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: availableTools })] : []), ...(lookupDeadline && lookupControl?.release ? [moreTimeTool] : [])].filter((t) => !tools.some((x) => x.name === t.name));
   // 工具按需加载：工具多时只带常用的完整说明，其余列名字、用 tool_search 加载（见 toolLoader.js）
   // 普通问答、查资料：做文档的工具先只列名字（用到时按名字调用或 tool_search 加载）
-  let loader = createToolLoader(light ? [] : [...tools, ...own], { defer: isQuickLookup(requirementText, images) ? DOCUMENT_TOOLS : null });
+  let loader = createToolLoader(light ? [] : questionProfile ? tools : [...tools, ...own], { defer: isQuickLookup(requirementText, images) ? DOCUMENT_TOOLS : null });
   const loadGUI=()=>{if(availableTools.some(t=>t.name==='computer_look'))for(const name of ['computer_look','computer_click','computer_type','computer_key','computer_scroll','computer_drag'])loader.get(name);};
   if(!light&&(computerTask==='gui'||computerTaskKind(requirementText,{history})==='gui'))loadGUI();
   let outputRepairs = 0;
@@ -268,6 +271,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     seen.clear(); // 用户追加了新指令，同样参数可能是新的明确要求
     if (availableTools.some(t => t.name === 'computer_search') && said.some(needsComputer)) computerNote = COMPUTER_NOTE;
     review.revise(said.join('\n'));
+    // 常识期间追加动作也必须恢复原能力，不能把文件、记忆或电脑任务裁掉。
+    if (questionProfile) { questionProfile = null; tools = availableTools; loader = createToolLoader([...tools, ...own]); toolHint = loader.hint(); }
     onTaskUpdate?.(said.join("\n"));
     if (COMPLEX.test(said.join("\n")) || creativeWithoutLookup(currentRequest) || computerNote) { infoPrompt = false; lookupDeadline = false; }
     if (light) { light=false; tools=availableTools; loader=createToolLoader([...tools,...own]); toolHint=loader.hint(); }
@@ -304,7 +309,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     // 一分钟时限已解除（模型判断要更多时间，或开始画图、写文件）：之后按普通任务做
     if (lookupDeadline && lookupControl?.released?.()) { lookupDeadline = false; infoPrompt = false; }
     takeInbox();
-    const allowWebSearch = !creativeWithoutLookup(currentRequest);
+    const allowWebSearch = !questionProfile && !creativeWithoutLookup(currentRequest);
     if (!retrieval.reason && lookupDeadline && lookupControl && (lookupControl.retrievalRemaining() <= 0 || retrieval.active && modelAttempts >= QUICK_MODEL_ATTEMPTS)) {
       retrieval.close('已停止新增检索，正在整理已有资料');
     }
@@ -349,7 +354,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     // 测量实际发送的提示与工具说明，动态规则和短说明均计入字符数。
     // 用的哪个模型：中途换了备用的，也照实写
     const usingNote = modelNote && (cur.model !== model ? `${modelNote}\n（原定的 ${model} 出错了，这一轮实际换成了 ${cur.model}。）` : modelNote);
-    const measuredSystem = light ? [LIGHT_PROMPT, [ctx.dynamic, usingNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, usingNote, dialoguePolicy(review.report().request), capabilities, computerNote, requirementContext, toolHint, review.contractNote(), !allowWebSearch && CREATIVE_NOTE, voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
+    const measuredSystem = questionProfile ? [BASIC_ANSWER_PROMPT, [ctx.dynamic, usingNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : light ? [LIGHT_PROMPT, [ctx.dynamic, usingNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, usingNote, dialoguePolicy(review.report().request), capabilities, computerNote, requirementContext, toolHint, review.contractNote(), !allowWebSearch && CREATIVE_NOTE, voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
     const measuredTools = closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list();
     const requestTools = measuredTools.filter((tool) => allowWebSearch || !WEB_TOOLS.has(tool.name) && tool.name !== 'delegate_task').map(conciseTool);
     emit({ type: 'diagnostic', phase: 'model_start', model: cur.model, protocol: cur.adapter.kind, closing, ...measureModelInput({ system: measuredSystem, messages: convo, tools: requestTools }), inputChars: convo.reduce((sum, item) => sum + String(item.content || '').length, 0) });
