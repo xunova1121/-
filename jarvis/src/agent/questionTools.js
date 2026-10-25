@@ -6,14 +6,17 @@ const QUESTION = /为什么|为何|什么是|是什么|解释|介绍|区别|原�
 
 export const BASIC_ANSWER_PROMPT = '你是未央。直接回答当前基础问题，遵守用户的格式、数量和否定要求。不编造来源、执行或工具核验；有计算校验工具时先核对再给结果。不要输出内部分析或表情标签。';
 
-export function questionToolProfile(text, { images = [], history = [] } = {}) {
+export function questionToolProfile(text, { images = [], history: priorMessages = [] } = {}) {
   const value = String(text).trim();
   if (!value || value.length > 220 || images.length || EXTERNAL.test(value)) return null;
   // 代词追问和工具续传不凭短句猜成新常识题。
-  if (history.at(-1)?.role === 'tool' || /^(?:它|他|她|那|这|再|还有|然后)/.test(value)) return null;
+  if (priorMessages.at(-1)?.role === 'tool' || /^(?:它|他|她|那|这|再|还有|然后)/.test(value)) return null;
   if ((UNITS.test(value) || BASIC.test(value) && QUESTION.test(value)) && !/股票|证券|基金|持仓|政策|机构|公司|银行/.test(value)) return 'knowledge';
   const numbers = value.match(/\d+(?:\.\d+)?/g) || [];
-  if (numbers.length >= 2 && /计算|算式|净重|货款|单价|毛重|筐重|皮重|净盈利|手续费|相隔|相差|多少天|合计|权重|百分比|[+×÷=]/.test(value)) return 'calculation';
+  // 专用工具未覆盖的通用计算仍保留代码执行能力，不能为省说明而裁掉正确的计算路径。
+  if (/权重|加权|体积|面积|方程|阶乘|开方|复利|汇率|概率/.test(value)) return null;
+  const supported = /毛重|筐重|皮重/.test(value) && /净重|货款/.test(value) || /净盈利|盈亏|手续费|百分比|金额合计/.test(value) || /(?:相隔|相差|多少).{0,6}天/.test(value);
+  if (numbers.length >= 2 && supported) return 'calculation';
   return null;
 }
 

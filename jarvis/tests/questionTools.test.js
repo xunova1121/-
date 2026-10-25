@@ -17,6 +17,9 @@ describe('基础问题按需注入工具', () => {
     expect(questionToolProfile('为什么月亮有圆缺', { images: [{}] })).toBeNull();
     expect(questionToolProfile('为什么月亮有圆缺', { history: [{ role: 'tool', content: '继续' }] })).toBeNull();
   });
+  it('专用工具未覆盖的通用运算保留代码计算能力', () => {
+    for (const question of ['计算2+2', '计算120和80按权重0.3和0.7的加权结果', '计算长2宽3的面积', '计算本金1000按年利率5%复利3年']) expect(questionToolProfile(question), question).toBeNull();
+  });
   it('实际请求常识不含工具schema、技能目录提示和原生搜索', async () => {
     const diagnostics = [];
     const adapter = { async stream(input) {
