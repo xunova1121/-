@@ -1,3 +1,4 @@
+import { sportsWindow, inSportsWindow, inferSportsWindow } from './sportsWindow.js';
 import { httpError, throwControl } from '../core/networkRequest.js';
 import { withWebDeadline } from './retrievalBudget.js';
 import { errorKind } from '../core/suggest.js';
@@ -168,10 +169,11 @@ function lineOf(e) {
 }
 
 /** 整理成给模型看的文字（按北京日期、赛事分组） */
-export function formatScores({ events, from, to, asked, failed, now = Date.now() }) {
+export function formatScores({ events, from, to, asked, failed, now = Date.now(), window = null }) {
   const lines = [`北京时间 ${from}（${weekday(from)}）${to !== from ? ` 至 ${to}（${weekday(to)}）` : ''}的赛程和赛果，来源 ESPN（espn.com），查询于北京时间 ${beijingDate(now)} ${beijingClock(now)}。时间均已换算成北京时间。`];
   const shown = events.slice(0, MAX_EVENTS);
-  if (!shown.length) lines.push('\n查到的赛事在这段时间都没有比赛。');
+  if (window?.label) lines.push('时间筛选：' + window.label + '；不代表全天完整赛程。');
+  if (!shown.length) lines.push(window?.label ? '\n这个时间窗口未返回符合条件的比赛，不代表其他时段或联赛没有比赛。' : '\n查到的赛事在这段时间都没有比赛。');
   let day = '';
   let league = '';
   for (const e of shown) {
@@ -231,7 +233,9 @@ async function fetchLeague(league, range, { get, signal }) {
  */
 export async function getSportsScores(args = {}, { get, signal, retrieval, now = Date.now(), progress } = {}) {
   const from = args.date ? checkDate(args.date) : beijingDate(now);
-  const to = args.end_date ? checkDate(args.end_date) : from;
+  const window = sportsWindow(args, now);
+  let to = args.end_date ? checkDate(args.end_date) : from;
+  if (window.period === 'upcoming' && !args.end_date && from === beijingDate(now)) to = beijingDate(now + window.minutes * 60_000);
   if (to < from) throw invalid('结束日期不能早于开始日期');
   if ((Date.parse(to) - Date.parse(from)) / DAY_MS >= MAX_DAYS) throw invalid(`一次最多查 ${MAX_DAYS} 天`);
   const asked = pickLeagues(args);
@@ -243,7 +247,7 @@ export async function getSportsScores(args = {}, { get, signal, retrieval, now =
   try {
     progress?.('正在查直播吧的赛程和比分');
     const list = await fetchZhibo8({ get, signal });
-    const r = zhibo8Result(list, { from, to, today: beijingDate(now), sports: zhibo8Sports(args, asked, named), team: args.team, focus: named, clock: `${beijingDate(now)} ${beijingClock(now)}` });
+    const r = zhibo8Result(list, { from, to, today: beijingDate(now), sports: zhibo8Sports(args, asked, named), team: args.team, focus: named, clock: `${beijingDate(now)} ${beijingClock(now)}`, window });
     if (r.covered) return r.text;
     if (r.count) partial = r;
   } catch (error) {
@@ -303,14 +307,14 @@ export async function getSportsScores(args = {}, { get, signal, retrieval, now =
       if (e.id && seen.has(e.id)) continue;
       if (team && !`${e.home.name} ${e.away.name}`.toLowerCase().includes(team)) continue;
       seen.add(e.id);
-      events.push(e);
+      if (inSportsWindow(e.time, e.state, window)) events.push(e);
     }
   }
   // 按日期、赛事（按列表顺序：国内、亚洲在前）、开球时间排
   const order = new Map(LEAGUES.map((l, i) => [l.name, i]));
-  events.sort((a, b) => beijingDate(a.time).localeCompare(beijingDate(b.time)) || order.get(a.league) - order.get(b.league) || a.time - b.time);
+  events.sort((a, b) => window.period !== 'all' ? a.time - b.time : beijingDate(a.time).localeCompare(beijingDate(b.time)) || order.get(a.league) - order.get(b.league) || a.time - b.time);
   progress?.(`查到 ${events.length} 场（${done - failed.length}/${asked.length} 个赛事有数据）`);
-  return formatScores({ events, from, to, asked, failed, now });
+  return formatScores({ events, from, to, asked, failed, now, window });
 }
 
 /** 直播吧按项目筛：用户点名的联赛决定项目（CBA、中甲这类 ESPN 没有的也认得） */
@@ -336,6 +340,8 @@ export function createSportsScoresTool(ctx = {}) {
     input_schema: {
       type: 'object',
       properties: {
+        period: { type: 'string', enum: ['all', 'upcoming', 'afternoon'], description: 'all全天；upcoming只看未来未开赛；afternoon北京时间12:00含至18:00不含' },
+        window_minutes: { type: 'integer', minimum: 1, maximum: 360, description: 'upcoming未来分钟数，默认60' },
         date: { type: 'string', description: '北京时间日期 YYYY-MM-DD，默认今天' },
         end_date: { type: 'string', description: '可选：查到哪天（含），最多跨 3 天' },
         sport: { type: 'string', enum: ['all', 'football', 'basketball', 'tennis'], description: '用户没说哪项运动就填 all' },
@@ -344,7 +350,7 @@ export function createSportsScoresTool(ctx = {}) {
       },
       additionalProperties: false
     },
-    run: (args, { signal, retrieval, progress } = {}) => getSportsScores(args, { get, signal, retrieval, progress })
+    run: (args, { signal, retrieval, progress, requestText = '', rawRequestText = '' } = {}) => getSportsScores({ ...args, ...inferSportsWindow(requestText || rawRequestText) }, { get, signal, retrieval, progress })
   };
 }
 
@@ -360,7 +366,7 @@ export function sportsPreCall(text, now = Date.now()) {
   if (!/[？?]|什么|哪|几|吗|呢|查|有没有|怎么样|多少|安排|列|看/.test(t)) return null;
   if (/排球|乒乓|羽毛球|F1|赛车|台球|高尔夫|棋|田径|游泳|写|生成|做一?[份个张]|文档|表格|PPT/i.test(t)) return null;
   const today = beijingDate(now);
-  const args = {};
+  const args = inferSportsWindow(t);
   const md = t.match(/(\d{1,2})\s*[月/-]\s*(\d{1,2})\s*[日号]?/);
   if (/前天/.test(t)) args.date = shiftDate(today, -2);
   else if (/昨晚|昨夜/.test(t)) Object.assign(args, { date: shiftDate(today, -1), end_date: today });
