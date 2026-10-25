@@ -6,6 +6,8 @@
  *   - 没有看图模型时图片照旧发过去；已知只认文字的模型（DeepSeek 等）附一句：看不到就如实说、教用户去设看图模型
  *   - 要的是图里的字（提取、识别、整理成表格……）且有文字识别（GLM-OCR）：先把字原样抄出来附上，比看图模型读字准
  */
+import { throwControl } from '../core/networkRequest.js';
+import { imageFingerprint, scoreRows } from './visualEvidence.js';
 import { seesImages } from '../llm/router.js';
 
 export const NO_SIGHT_NOTE =
@@ -30,23 +32,26 @@ const SYSTEM = `你是看图助手，替一个看不到图片的模型看图。�
  * @returns {(message: object, o?: { hint?: string, signal?: AbortSignal, ocr?: boolean }) => Promise<void>}  就地把消息里的图片换成文字
  *   ocr：这条消息要不要做文字识别（只给这次发的图和工具读到的图做，历史里的不重复做）
  */
-export function createImageSight({ model, describe = null, label = '看图模型', emit = () => {}, readText = null }) {
+export function createImageSight({ model, describe = null, label = '看图模型', emit = () => {}, readText = null, onEvidence = () => {} }) {
   const blind = !seesImages(model);
   return async function see(message, { hint = '', signal, ocr = false } = {}) {
     if (!message?.images?.length) return;
     if (ocr && readText && WANTS_TEXT.test(hint) && !message.textRead) {
-      message.textRead = true;
+
       const parts = [];
       for (const [i, image] of message.images.slice(0, 4).entries()) {
         emit({ type: 'seeing', text: '正在识别图里的文字…', model: 'GLM-OCR' });
         try {
           const r = await readText(image, { signal });
+          message.textRead = true;
+          onEvidence({ kind: 'ocr', ok: true, model: r.model, imageHash: await imageFingerprint(image), rows: scoreRows(r.text) });
           parts.push(`${message.images.length > 1 ? `图${i + 1}：` : ''}${r.text}`);
         } catch (e) {
-          if (signal?.aborted) throw e;
+          throwControl(e, signal);
+          onEvidence({ kind: 'ocr', ok: false, model: 'GLM-OCR' });
         }
       }
-      if (parts.length) message.content = `${message.content ?? ''}\n\n【图片里的文字（文字识别原样抄录，比看图读字准；按它整理，不要改字）】\n${parts.join('\n\n')}`;
+      if (parts.length) message.content = `${message.content ?? ''}\n\n【图片里的文字（OCR识别结果，可能有错字或串行；与原图逐行核对，不自动视为已核实）】\n${parts.join('\n\n')}`;
     }
     if (!blind) return;
     if (!describe) {
@@ -59,9 +64,11 @@ export function createImageSight({ model, describe = null, label = '看图模型
     try {
       text = String(await describe({ system: SYSTEM, prompt: `${images.length > 1 ? `一共 ${images.length} 张图。` : ''}用户这次说的是：${String(hint).slice(0, 500) || '（没说，按图片本身描述）'}\n请描述图片。`, images, signal })).trim();
     } catch (e) {
-      if (signal?.aborted) throw e;
+      throwControl(e, signal);
+      onEvidence({ kind: 'vision', ok: false, model: label });
       text = '';
     }
+    if (text) onEvidence({ kind: 'vision', ok: true, model: label });
     delete message.images;
     message.content = text
       ? `${message.content ?? ''}\n\n【图片内容：你本身看不到图片，下面是${label}看图后写的描述，按它回答；描述里没有的细节不要编】\n${text}`

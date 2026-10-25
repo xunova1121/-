@@ -1,3 +1,4 @@
+import { createVisualEvidence, readVisualReceipt } from './visualEvidence.js';
 import { taskContract } from './taskContract.js';
 import { isReadOnlyTool } from '../../shared/taskCheckpoint.js';
 import { creativeWithoutLookup } from '../core/imageFollowup.js';
@@ -8,9 +9,11 @@ export const VERIFY_TOOLS = /^(?:read_file|computer_read_file|check_document)$/;
 /** 每轮仅存最多64条回执摘要，不保存正文、代码或网页。不同任务不共享。 */
 const DOC_TOOLS = /^(?:create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet)$/;
 
-export function createExecutionReview(goal = '') {
+export function createExecutionReview(goal = '', { visual = false } = {}) {
   let request = String(goal).slice(0, 4000);
   const receipts = [];
+  const visualEvidence = createVisualEvidence(visual || /截图|识图|OCR|看图|图片识字/.test(goal));
+  let visualIssue = '';
   const files = new Map();
   const artifacts = new Map();
   const reads = new Map(); // 文件路径 → 验过可用之后又读了几次（最多 32 个文件）
@@ -42,6 +45,7 @@ export function createExecutionReview(goal = '') {
     if (ok) for (const url of sourceCandidates(request, toolName, output, args)) {
       if (candidateSources.size < 8) candidateSources.add(url);
     }
+    if (toolName === 'read_image_text') visualEvidence.note(ok ? readVisualReceipt(output) || { kind: 'ocr', ok: true } : { kind: 'ocr', ok: false });
     const path = typeof args.path === 'string' ? args.path.slice(0, 400) : '';
     sequence++;
     receipts.push({
@@ -139,6 +143,8 @@ export function createExecutionReview(goal = '') {
       calls: sequence,
       answerIssues: [...answerIssues],
       sourceIssue,
+      visualIssue,
+      visualReceipts: visualEvidence.snapshot(),
       calculationIssue,
       sourceRequirement: concreteSourceRequirement(request),
       candidateSources: [...candidateSources],
@@ -164,6 +170,7 @@ export function createExecutionReview(goal = '') {
     const result = report();
     const issues = [];
     issues.push(...result.answerIssues);
+    if (result.visualIssue) issues.push(result.visualIssue);
     if (result.sourceIssue) issues.push(result.sourceIssue);
     if (result.calculation === 'failed') issues.push('关键verify_numbers校验失败；先根据工具错误修正参数重算，无法核验则明确校验失败、请人工复核，不能声称已通过');
     if (result.pendingFormats.length)
@@ -188,14 +195,15 @@ export function createExecutionReview(goal = '') {
   };
   const checkAnswer = (text, now) => {
     answerIssues = answerConstraintIssues(request, text, now);
+    visualIssue = visualEvidence.issue(text);
     sourceIssue = sourceAnswerIssue(request, text, [...candidateSources]);
     const result = report();
     calculationIssue = result.calculation === 'failed' ? '关键verify_numbers校验失败，修正输入重算；不能核验时必须明确校验失败、请人工复核' : result.contract.calculation && result.calculation === 'not_checked' ? '关键计算尚无工具校验，请先调用verify_numbers核对，不能用心算冒充工具结果' : '';
-    return [...answerIssues, ...(sourceIssue ? [sourceIssue] : []), ...(calculationIssue ? [calculationIssue] : [])];
+    return [...answerIssues, ...(visualIssue ? [visualIssue] : []), ...(sourceIssue ? [sourceIssue] : []), ...(calculationIssue ? [calculationIssue] : [])];
   };
   const guardsAnswer = () => {
     const rules = answerConstraints(request);
-    return rules.noTime || rules.literals.length > 0 || rules.todayNews || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
+    return visualEvidence.active() || rules.noTime || rules.literals.length > 0 || rules.todayNews || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
   };
-  return { record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked, checkAnswer, guardsAnswer };
+  return { noteVisual: visualEvidence.note, record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked, checkAnswer, guardsAnswer };
 }

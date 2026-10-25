@@ -6,7 +6,8 @@ const TOOL_NAMES = { create_document: '生成文档', write_long_document: '写�
 /** 执行结束不等于任务验收通过；这里只报告可确定的缺口，不自动评判语义正确率。 */
 export function reviewOutcome(report, { interrupted = false, nativeSearchCalls = 0 } = {}) {
   const warnings = [];
-  let partial = interrupted;
+  if (report.visualIssue) warnings.push('图像识别的执行依据不足，不能视为已核实。');
+  let partial = interrupted || Boolean(report.visualIssue);
   if (report.answerIssues?.length || report.sourceIssue) {
     warnings.push('当前内容限制或具体来源要求尚未全部满足，不能当作完整交付。');
     partial = true;

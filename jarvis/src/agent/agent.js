@@ -196,7 +196,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   const capabilities = capabilityBlock(availableTools);
   // 环境完全没有产物/计算核验能力时，直接说明未验收，不空转两轮模型。
   const canReview = availableTools.some(tool => /^(?:create_document|write_long_document|edit_office_document|read_file|write_file|run_javascript|run_python|computer_run|computer_read_file|verify_numbers)$/.test(tool.name));
-  const review = createExecutionReview(requirementText);
+  const review = createExecutionReview(requirementText, { visual: images.length > 0 || history.some(message => message.images?.length) });
   const retrieval = createRetrievalBudget(lookupDeadline ? '普通查询' : images.length ? `逐项核验 ${requirementText}` : requirementText, { now, timeBudgetMs });
   let modelAttempts = 0;
   let nativeSearchCalls = 0;
@@ -206,7 +206,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   const { ctx, record, requirementContext, archive } = await prepareAgentContext({ userText, priorMessages: history, context, sessionId, summary, light: light || Boolean(questionProfile), requirements, depth, requirementText, emit, buildContext });
   const convo = [...history.map((m) => ({ ...m })), { role: 'user', content: userText, ...(images.length && { images }) }];
   // 当前模型看不了图：图片先交给看图模型写成文字（见 imageSight.js）
-  const see = createImageSight({ model, describe: describeImages, label: visionLabel, emit, readText: readImageText });
+  const see = createImageSight({ model, describe: describeImages, label: visionLabel, emit, readText: readImageText, onEvidence: review.noteVisual });
   for (const m of convo) await see(m, { hint: requirementText, signal, ocr: m === convo.at(-1) });
   // 任务清单（update_plan）和子任务分身（delegate_task，只有主线能派）由循环自己提供
   const plan = createPlanTool((steps) => emit({ type: 'plan', steps }));
@@ -351,7 +351,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     const releaseSafePartial = () => {
       if (!guardedAnswer || !held) return;
       review.checkAnswer(held, now());
-      if (!review.report().answerIssues.length && !review.report().calculationIssue) releaseHeld();
+      if (!review.report().answerIssues.length && !review.report().calculationIssue && !review.report().visualIssue) releaseHeld();
     };
     const acceptVisible = fragment => {
       const { text, hint } = stripper.push(fragment);
@@ -450,6 +450,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         continue;
       }
       // 违约草稿未先推给用户；不能修好时也不把违禁内容当正式回答。
+      if (review.report().visualIssue) held = '本轮没有足够的识别依据确认截图细节，需要重新核对原图；不能把未确认的识别结果当结论。';
       if (review.report().answerIssues.length) held = '本轮未能生成符合当前要求的答复，请重新生成。';
       if (review.report().calculation === 'failed') held = '关键数值校验失败，请人工复核。';
       else if (review.report().calculationIssue && ACK_ONLY.test(held.trim())) held = '关键数值尚未完成工具校验，请人工复核。';
@@ -467,7 +468,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       }
       // 纯计算已经做过有界纠正，不再叠一轮同样的收尾核验；文件/代码/记忆任务仍走原验收。
       const acceptance = review.report();
-      if (guardedAnswer && acceptance.calculationIssue && !acceptance.contract.formats.length && !acceptance.contract.coding && !acceptance.contract.remembering && !acceptance.contract.askingMemory && !acceptance.sourceRequirement && !unfinished(plan.steps).length) break;
+      if (guardedAnswer && (acceptance.calculationIssue || acceptance.visualIssue) && !acceptance.contract.formats.length && !acceptance.contract.coding && !acceptance.contract.remembering && !acceptance.contract.askingMemory && !acceptance.sourceRequirement && !unfinished(plan.steps).length) break;
       // 收尾核对：写代码的任务最多提醒两次；文档等其他任务只提醒一次，文件验过能用就交付，不反复核实
       // 普通问题也算数时照样提醒用计算工具核对（核一下几秒；不然回答末尾挂“数值计算尚未核对”）
       const maxChecks = wroteCode || review.report().contract.coding ? 2 : 1;
