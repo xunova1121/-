@@ -6,6 +6,7 @@
  *   - 没有看图模型时图片照旧发过去；已知只认文字的模型（DeepSeek 等）附一句：看不到就如实说、教用户去设看图模型
  *   - 要的是图里的字（提取、识别、整理成表格……）且有文字识别（GLM-OCR）：先把字原样抄出来附上，比看图模型读字准
  */
+import { visualFields } from './visualFields.js';
 import { throwControl } from '../core/networkRequest.js';
 import { imageFingerprint, scoreRows } from './visualEvidence.js';
 import { seesImages } from '../llm/router.js';
@@ -44,7 +45,7 @@ export function createImageSight({ model, describe = null, label = '看图模型
         try {
           const r = await readText(image, { signal });
           message.textRead = true;
-          onEvidence({ kind: 'ocr', ok: true, model: r.model, imageHash: await imageFingerprint(image), rows: scoreRows(r.text) });
+          onEvidence({ kind: 'ocr', ok: true, model: r.model, imageHash: await imageFingerprint(image), rows: scoreRows(r.text), fields: visualFields(r.text) });
           parts.push(`${message.images.length > 1 ? `图${i + 1}：` : ''}${r.text}`);
         } catch (e) {
           throwControl(e, signal);

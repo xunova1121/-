@@ -37,6 +37,7 @@ import { preferenceClaim, preferenceSupported } from './memoryPreference.js';
 import { evidence as evidenceStore } from './evidenceStore.js';
 import { createSongTool } from './music.js';
 import { createOcrTool } from './ocrTool.js';
+import { createInspectImageTool } from './inspectImage.js';
 
 const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const str = (description) => ({ type: 'string', description });
@@ -92,6 +93,7 @@ export function createTools(ctx) {
     createVerificationTool(),
     createSongTool(ctx),
     createOcrTool(ctx),
+    createInspectImageTool(ctx),
     createStockKlineTool(ctx),
     createSportsScoresTool(ctx),
     queryGuardTool(),

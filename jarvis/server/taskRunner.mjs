@@ -1,3 +1,4 @@
+import { cropImageRegion } from './imageRegion.mjs';
 import { qweatherConfig } from '../src/core/qweather.js';
 import { deepseekSearchOptions } from '../src/agent/deepseekSearch.js';
 import { evaluationTools, bindEvaluation } from './evaluation.mjs';
@@ -244,6 +245,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       onFileChanged: (p) => { if (!/^skills\//.test(p)) { task.files.add(p); record(task, { type: 'file', path: p }); } },
       // 画图、做视频：用服务器上的模型设置；生成的文件照常存进工作区，手机按文件下载后显示在对话里
       imageGen: (o) => generateImage(cfg, o),
+      cropImage: cropImageRegion,
+      visionLlm: sight(cfg).describeImages || null,
       ocr: ocrLine(cfg) ? (file, o) => recognizeText(cfg, file, o) : null, // 文字识别（智谱 GLM-OCR）
       videoGen: (o) => generateVideo(cfg, o),
       // 显示工作区里已有的图片：让手机按文件取回来显示

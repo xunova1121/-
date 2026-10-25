@@ -1,3 +1,4 @@
+import { visualFieldConflict } from './visualFields.js';
 /** 识别成功只证明收到结果，不证明文字及行对应正确；回执最多12条、每条12行，不留原图和整段正文。 */
 export async function imageFingerprint(file) {
   if (!globalThis.crypto?.subtle) return null;
@@ -46,14 +47,18 @@ export function createVisualEvidence(initiallyPresent = false) {
   const receipts = [];
   const note = (item) => {
     present = true;
-    receipts.push({ kind: item.kind === 'ocr' ? 'ocr' : 'vision', ok: Boolean(item.ok), imageHash: /^[a-f0-9]{64}$/.test(item.imageHash || '') ? item.imageHash : null, model: String(item.model || '').slice(0, 100), rows: (Array.isArray(item.rows) ? item.rows : []).slice(0, 12).map((row) => ({ match: String(row.match || '').slice(0, 160), score: String(row.score || '').slice(0, 8) })) });
+    receipts.push({ kind: item.kind === 'ocr' ? 'ocr' : 'vision', ok: Boolean(item.ok), imageHash: /^[a-f0-9]{64}$/.test(item.imageHash || '') ? item.imageHash : null, model: String(item.model || '').slice(0, 100), fields: (Array.isArray(item.fields) ? item.fields : []).slice(0, 20).map(field => ({ label: String(field.label).slice(0, 20), value: String(field.value).slice(0, 30), unit: String(field.unit || '').slice(0, 20) })), rows: (Array.isArray(item.rows) ? item.rows : []).slice(0, 12).map((row) => ({ match: String(row.match || '').slice(0, 160), score: String(row.score || '').slice(0, 8) })) });
     if (receipts.length > 12) receipts.shift();
   };
   const issue = (answer) => {
     const text = String(answer);
     // 明确说未调用、未确认属于如实报告；提到工具名称本身不算伪造执行。
-    const claims = text.split(/[。！!；;\n]/).filter((line) => !/没有|未能|未调用|没调用|无法确认|不能确认|未核实|尚未|不代表/.test(line));
-    const claimsOcr = claims.some((line) => /OCR|read_image_text|识字工具|文字识别工具|识图工具|图片识字/.test(line) && /(?:用|调用|识别|核对|确认|结果|写着|显示)/.test(line));
+    const claims = text.split(/[。！!；;，,\n]/).filter((line) => !/没有|未能|未调用|没调用|无法确认|不能确认|未核实|尚未|不代表/.test(line));
+    const claimsOcr = claims.some((line) => /OCR|read_image_text|识字工具|文字识别工具|图片识字/.test(line) && /(?:用|调用|识别|核对|确认|结果|写着|显示)/.test(line));
+    const latest = receipts.at(-1);
+    const fields = latest?.fields || [];
+    if (claims.some(line => /inspect_image|识图工具/.test(line) && /调用|结果|确认|核对|识别/.test(line)) && !latest?.ok) return '没有本轮成功识图回执，不能声称已经调用工具重新核对';
+    if (fields.length && !/冲突|不一致|看不清|无法确认|不能确认|未核实/.test(text) && (visualFieldConflict(fields, text) || fields.some(field => fields.some(other => other.label === field.label && other.value !== field.value)))) return '仪表字段读数与本轮识别候选冲突；须局部放大复核，不能改数、补零或把任一路径当真值';
     const latestOcr = receipts.filter((receipt) => receipt.kind === 'ocr').at(-1);
     if (claimsOcr && !latestOcr?.ok) return '没有本轮OCR成功回执，不能声称已调用识别工具并确认；原图看不清时如实说明';
     // 候选OCR行与答复冲突时要求重新核图，不能擅自把任一来源升级为真值。
@@ -74,5 +79,5 @@ export function createVisualEvidence(initiallyPresent = false) {
     if (present && claims.some((line) => /(?:OCR|识别|识图).{0,20}(?:必然正确|绝对准确|百分之百)/.test(line))) return 'OCR成功不等于内容核实，不能承诺识别必然准确';
     return '';
   };
-  return { note, issue, active: () => present, snapshot: () => receipts.map(({ rows, ...metadata }) => ({ ...metadata, rowCount: rows.length })) };
+  return { note, issue, active: () => present, snapshot: () => receipts.map(({ rows, fields, ...metadata }) => ({ ...metadata, rowCount: rows.length, fieldCount: fields.length })) };
 }

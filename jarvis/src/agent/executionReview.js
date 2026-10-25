@@ -57,6 +57,10 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     if (ok) for (const url of sourceCandidates(request, toolName, output, args)) {
       if (candidateSources.size < 8) candidateSources.add(url);
     }
+    if (toolName === 'inspect_image') {
+      visualEvidence.note({ kind: 'ocr', ok: false });
+      visualEvidence.note(ok ? readVisualReceipt(output) || { kind: 'vision', ok: false } : { kind: 'vision', ok: false });
+    }
     if (toolName === 'read_image_text') visualEvidence.note(ok ? readVisualReceipt(output) || { kind: 'ocr', ok: true } : { kind: 'ocr', ok: false });
     if (!ok && code === 'NOT_APPROVED') declinedTool = toolName;
     const media = mediaReceipt(toolName, ok, output);
