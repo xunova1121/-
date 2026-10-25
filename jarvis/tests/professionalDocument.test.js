@@ -75,3 +75,16 @@ it('生成器失败后恢复已审查正文，不再次调用模型，并能明�
   expect(calls).toBe(3);
   expect((await ws.readBlob('恢复方案.docx')).size).toBeGreaterThan(1000);
 });
+
+it('同轮同要求重复调用自动恢复，不重新起草；新轮仍独立', async () => {
+  let calls = 0;
+  const tool = createTools({ llm: async () => { calls++; return '# 简报\n\n完成称重接口联调。'; } }).find(item => item.name === 'write_professional_document');
+  const args = { task: '写一份简短的联调情况说明', depth: 'simple', format: 'md', path: '简报.md', research: false };
+  const executionScope = {};
+  await tool.run(args, { executionScope, sessionId: 'same' });
+  const again = await tool.run(args, { executionScope, sessionId: 'same' });
+  expect(calls).toBe(1);
+  expect(again).toContain('没有重新生成');
+  await tool.run(args, { executionScope: {}, sessionId: 'same' });
+  expect(calls).toBe(2);
+});

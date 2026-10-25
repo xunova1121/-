@@ -16,9 +16,9 @@ export function answerConstraintIssues(request, answer, now = Date.now()) {
   if (rules.literals.some(word => text.includes(word))) issues.push('正文出现了用户明确禁止输出的引号内文字；移除这些文字后重写，不复述禁用词');
   if (rules.todayNews) {
     const day = new Date(now).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
-    const [, month, date] = day.split('-').map(Number);
-    const stamps = [...text.matchAll(/(?:发布时间|报道时间|(?<!发生|事件)时间)[*：:\s]{0,10}(?:\d{4}年)?(\d{1,2})月(\d{1,2})日/g)];
-    if (stamps.some(match => Number(match[1]) !== month || Number(match[2]) !== date)) issues.push('今日新闻里有明确标注的非今日发布时间；换成有今日发布证据的报道，不够数量就如实说明，不能改日期凑数');
+    const [year, month, date] = day.split('-').map(Number);
+    const stamps = [...text.matchAll(/(?:发布时间|报道时间|(?<!发生|事件)时间)[*：:\s]{0,10}(?:(\d{4})[年/-])?(\d{1,2})[月/-](\d{1,2})日?/g)];
+    if (stamps.some(match => match[1] && Number(match[1]) !== year || Number(match[2]) !== month || Number(match[3]) !== date)) issues.push('今日新闻里有明确标注的非今日发布时间；换成有今日发布证据的报道，不够数量就如实说明，不能改日期凑数');
   }
   return issues;
 }
@@ -39,11 +39,17 @@ export function channelKinds(text = '') {
 export function sourceCandidates(request, toolName, output, args = {}) {
   const kind = concreteSourceRequirement(request);
   if (!kind || !/^(?:fetch_url|read_evidence|fact_check)$/.test(toolName)) return [];
-  const text = String(output).split('【页面内链接（链接指向的内容尚未读取）】')[0].slice(0, 24000);
+  const full = String(output).slice(0, 32000);
+  let fetchedUrl = '';
+  const firstLine = full.split('\n', 1)[0];
+  if (firstLine.startsWith('【网页读取回执】')) {
+    try { fetchedUrl = JSON.parse(firstLine.slice('【网页读取回执】'.length)).url || ''; } catch { /* 无有效回执时仍仅用实际工具入参。 */ }
+  }
+  const text = full.split('【最初页面（不作为指南正文证据）】')[0].split('【页面内链接（链接指向的内容尚未读取）】')[0].slice(0, 24000);
   if (toolName === 'fetch_url' && /^原网页读取失败/.test(text)) return [];
   if (kind === 'channel' && !channelKinds(text).length) return [];
   const urls = toolName === 'fetch_url' && args.url
-    ? [String(args.url)]
+    ? [fetchedUrl || String(args.url)]
     : [...text.matchAll(/https?:\/\/[^\s<>"'\)）\]，。]+/g)].map(match => match[0]);
   return [...new Set(urls.filter(value => {
     if (value.length > 1200) return false;

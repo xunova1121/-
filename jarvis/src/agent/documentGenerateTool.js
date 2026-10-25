@@ -33,8 +33,9 @@ const keep = (map, key, value) => {
 };
 
 export function createDocumentGenerateTool(ctx) {
-  const memo = sameRun.get(ctx) ?? { results: new Map(), reviewed: new Map(), scopes: new WeakMap() };
-  sameRun.set(ctx, memo);
+  const memoOwner = ctx.documentMemoOwner || ctx;
+  const memo = sameRun.get(memoOwner) ?? { results: new Map(), reviewed: new Map(), scopes: new WeakMap() };
+  sameRun.set(memoOwner, memo);
   return {
     name: 'create_document',
     description: `生成 Office / 文档文件并保存到工作区；需要模板时先get_document_template。生成后自动检查文件结构、读回内容，可用时由本机LibreOffice生成真实PDF预览。结构/估算检查不等于Office视觉验收。排版自动完成（A4、标题样式、编号列表、带表头底色的表格、页码；Word / PDF 的二级标题有 3 个以上时自动加目录）。
@@ -93,7 +94,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       const goal = requestText || rawRequestText || requirements || '';
       const forbidCover = /(?:不要|不用|无需|不加|不含|去掉|去除).{0,3}封面/.test(goal);
       const expectedSlides = format === 'pptx' ? requestedSlides('PPT ' + goal) : null;
-      const callKey = await keyOf({ format, path, title, content, theme, style, kind, cover, subtitle, author, issuer, docNo, toc, template, templateId, requirements, goal });
+      const callKey = await keyOf({ format, path, title, content, theme, style, kind, cover, subtitle, author, issuer, docNo, toc, template, templateId, requirements, goal, workflow: ctx.documentContentReview?.workflowFile || null });
       // 记住的结果只管 10 分钟（同一个任务里重复调用）；隔得久了照常重新生成
       const fresh = (m, key, ms) => m.has(key) && Date.now() - m.get(key).at < ms;
       const cached = cache.results.get(callKey);
@@ -214,7 +215,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       if (ctx.documentContentReview && finalContent !== content) {
         ctx.documentContentReview.business = 'needs_recheck';
       }
-      const r = await deliverDocument(ctx, out, target, { progress, signal, checkpoint, plan, issues: lint(format, finalContent), generatorReview: looked });
+      const r = await deliverDocument(ctx, out, target, { progress, signal, checkpoint, plan, issues: lint(format, finalContent), generatorReview: looked, requirements: goal || requirements });
       const notes = [
         `主题：${out.theme.name}`,
         ...(design.label ? [`设计：${design.label}（${design.reason}）`] : []),

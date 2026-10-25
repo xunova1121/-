@@ -1,3 +1,4 @@
+import { newsCandidates } from './newsDelivery.js';
 import { mediaReceipt, mediaDelivery, blockedAfterDenial } from './actionDelivery.js';
 import { createVisualEvidence, readVisualReceipt } from './visualEvidence.js';
 import { taskContract } from './taskContract.js';
@@ -26,6 +27,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   let sourceIssue = '';
   let calculationIssue = '';
   const candidateSources = new Set();
+  const newsLinks = new Map(); // 仅本轮最多8条候选标题/网址，不保存摘要。
   const revise = (text) => {
     const previous = taskContract(request);
     const replaceLookup = previous.researching && !previous.formats.length && !previous.coding && !previous.remembering && !previous.askingMemory
@@ -38,6 +40,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     sourceIssue = '';
     calculationIssue = '';
     candidateSources.clear();
+    newsLinks.clear();
     // 仅简单查询明确转创作时替换目标；文档“改成两页”等仍须保留原交付要求。
     if (/^(?:取消|不用|别做|停止)/.test(String(text).trim()) || replaceLookup) {
       request = '用户最新修正：' + String(text).slice(0, 3900);
@@ -46,6 +49,11 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     }
   };
   const record = ({ name: toolName, args = {}, ok, validation, output = '', code = '' }) => {
+    if (ok && toolName === 'web_search' && answerConstraints(request).todayNews) {
+      for (const item of newsCandidates(output)) {
+        if (newsLinks.size < 8) newsLinks.set(item.url, item);
+      }
+    }
     if (ok) for (const url of sourceCandidates(request, toolName, output, args)) {
       if (candidateSources.size < 8) candidateSources.add(url);
     }
@@ -93,6 +101,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     artifacts.set(event.path.slice(0, 400), {
       path: event.path.slice(0, 400),
       format: String(data.format || '').slice(0, 8),
+      ...(data.wordCount && { wordCount: { count: data.wordCount.count, min: data.wordCount.min, max: data.wordCount.max, passed: data.wordCount.passed === true } }),
       readback: data.readback,
       structure: data.structure,
       render: data.render,
@@ -215,5 +224,5 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     const rules = answerConstraints(request);
     return visualEvidence.active() || rules.noTime || rules.literals.length > 0 || rules.todayNews || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
   };
-  return { toolBlock, noteVisual: visualEvidence.note, record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked, checkAnswer, guardsAnswer };
+  return { newsCandidates: () => [...newsLinks.values()], toolBlock, noteVisual: visualEvidence.note, record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked, checkAnswer, guardsAnswer };
 }

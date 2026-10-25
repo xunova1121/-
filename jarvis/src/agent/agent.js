@@ -1,3 +1,4 @@
+import { safeNewsPartial, newsCandidateLinks } from './newsDelivery.js';
 import { conversationEvidence } from './conversationEvidence.js';
 import { singleDocumentTask } from './documentExecutionPolicy.js';
 import { sessionWorkBlock } from './sessionWork.js';
@@ -454,7 +455,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       }
       // 违约草稿未先推给用户；不能修好时也不把违禁内容当正式回答。
       if (review.report().visualIssue) held = '本轮没有足够的识别依据确认截图细节，需要重新核对原图；不能把未确认的识别结果当结论。';
-      if (review.report().answerIssues.length) held = '本轮未能生成符合当前要求的答复，请重新生成。';
+      if (review.report().answerIssues.length) held = safeNewsPartial(requirementText, held, now()) || newsCandidateLinks(requirementText, review.newsCandidates()) || '本轮未能生成符合当前要求的答复，请重新生成。';
       if (review.report().calculation === 'failed') held = '关键数值校验失败，请人工复核。';
       else if (review.report().calculationIssue && ACK_ONLY.test(held.trim())) held = '关键数值尚未完成工具校验，请人工复核。';
     }

@@ -108,3 +108,12 @@ test('禁止时间、数值失败与实际页数错误不能机械盖章通过',
   assert.equal(checkResult({prompt:'核对货款',checks:{}},{status:'done',answer:'校验失败请复核',review:{calculation:'failed'}}).mechanical,'failed');
   assert.equal(checkResult({prompt:'5页PPT',checks:{}},{status:'done',answer:'已生成',review:{artifacts:[{slides:5,pages:6,pdfPageMatch:'failed'}]}}).mechanical,'failed');
 });
+
+
+test('真实产物回执不能掩盖链接丢失与字数失败', () => {
+  const item = baselineCases[19];
+  const artifact = { path: '方案.docx', format: 'docx', readback: 'passed', wordCount: { count: 100, min: 1500, max: 2500, passed: false } };
+  const result = checkResult(item, { status: 'done', answer: '更正：尚未核验', files: ['方案.docx'], review: { artifacts: [artifact] } });
+  assert(result.failures.includes('实际Word字数未满足要求'));
+  assert(result.failures.includes('有真实产物回执但最终答复缺少交付路径'));
+});

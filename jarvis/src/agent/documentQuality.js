@@ -1,3 +1,4 @@
+import { inspectLength } from './documentLength.js';
 import { checkArtifact } from './artifactCheck.js';
 import { openOfficePackage, orderedSlidePaths, xmlUnescape } from './officePackage.js';
 import { checkFormulas } from './formulaCheck.js';
@@ -40,7 +41,7 @@ export async function inspectWorkbook(blob) {
 }
 
 /** 只报告实际执行的检查；输入来源和事实准确性不由Office结构推断。 */
-export async function inspectDocument(blob, filePath, { info = {}, requiredText = [], signal } = {}) {
+export async function inspectDocument(blob, filePath, { info = {}, requiredText = [], signal, requirements = '' } = {}) {
   signal?.throwIfAborted();
   const format = String(filePath).split('.').pop().toLowerCase();
   const office = ['docx', 'pptx', 'xlsx'].includes(format);
@@ -48,6 +49,11 @@ export async function inspectDocument(blob, filePath, { info = {}, requiredText 
   const workbook = format === 'xlsx' ? await inspectWorkbook(blob) : null;
   const validation = await checkArtifact(blob, filePath);
   const issues = [...(info.formulaIssues || []), ...(info.layoutIssues || [])];
+  const wordCount = format === 'docx' ? await inspectLength(zip, requirements) : null;
+  if (wordCount) {
+    validation.wordCount = wordCount;
+    if (!wordCount.passed) issues.push({ level: 'error', text: `真实Word主文档计数${wordCount.count}字，要求${wordCount.min}至${wordCount.max}字；${wordCount.scope}` });
+  }
   if (info.missingImages?.length) issues.push({ level: 'error', text: `有${info.missingImages.length}张图片未读到，文件含占位内容` });
   if (format === 'xlsx') {
     const checked = workbook;

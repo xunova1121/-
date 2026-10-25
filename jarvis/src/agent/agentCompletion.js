@@ -1,3 +1,4 @@
+import { missingDeliveries } from './finalDelivery.js';
 import { reviewOutcome } from './reviewOutcome.js';
 import * as memory from './memory.js';
 import { MORE_TIME_ASK } from './lookupDeadline.js';
@@ -51,6 +52,11 @@ export async function finishAgentRun({
     emit({ type: 'text', delta: blank });
   }
   const acceptance = { ...review.report(), ...reviewOutcome(review.report(), { interrupted: retrievalStopped && !quickStop, nativeSearchCalls }) };
+  const delivery = missingDeliveries(finalText, acceptance);
+  if (delivery) {
+    finalText += delivery;
+    emit({ type: 'text', delta: delivery });
+  }
   const unmet = review.guidance();
   const alreadyExplained = acceptance.warnings?.length && acceptance.warnings.every(warning => finalText.includes(warning));
   if (acceptance.notice && !light && !alreadyExplained) {

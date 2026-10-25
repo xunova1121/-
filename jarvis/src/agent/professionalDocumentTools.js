@@ -1,3 +1,4 @@
+import { createProfessionalRuns } from './professionalRuns.js';
 import * as ws from './workspace.js';
 import { parseFile } from './docs.js';
 import { S, str } from './documentSchema.js';
@@ -42,6 +43,7 @@ const properties = {
 };
 
 export function createProfessionalDocumentTools(ctx) {
+  const runs = createProfessionalRuns();
   const research = createDocumentResearch(ctx);
   const workflow = createDocumentWorkflow({
     ...ctx,
@@ -58,7 +60,15 @@ export function createProfessionalDocumentTools(ctx) {
     }
     if (!args.path) throw workflowError('缺少交付路径', 'DOCUMENT_INPUT');
     ws.normalize(args.path);
-    const result = await workflow.run(input, execution);
+    const prior = await runs(input, args, execution);
+    let result;
+    try {
+      result = await workflow.run(prior?.stateFile ? { state_file: prior.stateFile } : input, execution);
+      prior?.remember(result.stateFile);
+    } catch (error) {
+      prior?.remember(error.stateFile);
+      throw error;
+    }
     const contentCheck = {
       business: result.business,
       reviewMode: result.reviewMode,
@@ -82,6 +92,7 @@ export function createProfessionalDocumentTools(ctx) {
       llm: budgeted(ctx.llm),
       reasonLlm: budgeted(ctx.reasonLlm),
       visionLlm: budgeted(ctx.visionLlm),
+      documentMemoOwner: ctx,
       documentContentReview: contentCheck
     });
     const savedState = JSON.parse(await ws.readText(result.stateFile));
@@ -127,7 +138,7 @@ export function createProfessionalDocumentTools(ctx) {
     {
       name: 'write_professional_document',
       description:
-        '重要方案、研究报告、决策PPT和复杂Excel首选。先底稿和业务推演，再起草、审查、最多修订一次并复核，生成真实文件。保留初稿/问题/终稿及恢复文件；失败用state_file继续。短文simple只起草，不声称完整审查。',
+        '重要方案、研究报告、决策PPT和复杂Excel首选。先底稿和业务推演，再起草、审查、最多修订一次并复核，生成真实文件。保留初稿/问题/终稿及恢复文件；同轮同要求重复调用自动恢复已有流程；失败优先用state_file继续，不新建整篇。短文simple只起草，不声称完整审查。',
       input_schema: S(properties, ['path']),
       run: (args, execution = {}) => execute(args, execution, false)
     }

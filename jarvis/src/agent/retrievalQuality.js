@@ -12,7 +12,7 @@ export function searchRequest(query, requestText = '', freshness, now = Date.now
   const today = newsToday(String(requestText));
   const value = String(query).trim();
   return {
-    query: today && !/新闻|资讯|时事/.test(value) ? `${value} ${beijingDay(now)} 新闻`.slice(0, 800) : value,
+    query: today && (!freshness || freshness === 'day') && !value.includes(beijingDay(now)) ? `${value} ${beijingDay(now)}${/新闻|资讯|时事/.test(value) ? '' : ' 新闻'}`.slice(0, 800) : value,
     freshness: freshness ?? (today ? 'day' : undefined)
   };
 }

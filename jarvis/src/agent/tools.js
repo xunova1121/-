@@ -1,3 +1,4 @@
+import { readGovernmentGuide } from './governmentGuide.js';
 import { formatPageResult } from './pageLinks.js';
 import { createDocumentTools } from './documentTools.js';
 import { searchRequest, screenSearchHits } from './retrievalQuality.js';
@@ -531,10 +532,14 @@ export function createTools(ctx) {
           });
           return '原网页读取失败：' + error.message + '\n以下只是聚合搜索线索，未取得原站正文，不能声称已核实：\n' + JSON.stringify(hints);
         }
+        const guide = await readGovernmentGuide({ text, url, requestText, signal, read: async address => {
+          retrieval?.consume('read');
+          return readPage(address, { signal, progress, consume: kind => retrieval?.consume(kind) });
+        } });
         // 存一份原文片段：之后要细节用 read_evidence 取，不用重新联网
         const sid = sessionId ?? ctx.currentSessionId?.();
-        const [id] = sid && text ? await evidenceStore.put(sid, { sources: [{ url, title: String(text).split('\n').find((l) => l.trim())?.trim().slice(0, 120), text }] }).catch(() => []) : [];
-        return formatPageResult(text) + (id ? `\n\n（已存为证据 ${id}，之后要看原文用 read_evidence）` : '');
+        const [id] = sid && text ? await evidenceStore.put(sid, { sources: [{ url, title: String(text).split('\n').find((l) => l.trim())?.trim().slice(0, 120), text }, ...(guide ? [{ url: guide.url, title: '政府申请指南', text: guide.text }] : [])] }).catch(() => []) : [];
+        return '【网页读取回执】' + JSON.stringify({ url: guide?.url || url }) + '\n' + (guide ? formatPageResult(guide.text) + '\n\n【最初页面（不作为指南正文证据）】\n' + formatPageResult(text) : formatPageResult(text)) + (id ? `\n\n（已存为证据 ${id}，之后要看原文用 read_evidence）` : '');
       }
     },
     {

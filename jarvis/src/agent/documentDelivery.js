@@ -5,8 +5,8 @@ import { inspectRenderedPdf } from './pdfQuality.js';
 import { documentError } from './documentPlan.js';
 
 /** 把短检查报告与真实产物放一起；正文只在工作区文件中，不进会话/检查点。 */
-export async function deliverDocument(ctx, out, target, { progress, signal, checkpoint, issues = [], plan, generatorReview, requiredText = [] } = {}) {
-  const validation = await inspectDocument(out.blob, target, { info: out.info, requiredText, signal });
+export async function deliverDocument(ctx, out, target, { progress, signal, checkpoint, issues = [], plan, generatorReview, requiredText = [], requirements = '' } = {}) {
+  const validation = await inspectDocument(out.blob, target, { info: out.info, requiredText, signal, requirements });
   if (validation.format === 'pptx' && out.info?.expectedSlides != null) {
     validation.expectedSlides = out.info.expectedSlides;
     if (validation.slides !== validation.expectedSlides) {
@@ -37,6 +37,7 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
       path: saved.path,
       validation: {
         format: validation.format,
+        wordCount: validation.wordCount,
         structure: validation.structure,
         readback: validation.readback,
         render: validation.render,
@@ -81,6 +82,7 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
     await receipt();
   }
   checkedPath = await saveReport();
+  if (validation.wordCount) notes.push(`实际文件字数${validation.wordCount.count}，要求${validation.wordCount.min}至${validation.wordCount.max}；${validation.wordCount.scope}；${validation.wordCount.passed ? '在范围内' : '不在范围内，须修改'}`);
   notes.push(qualitySummary(validation), `检查报告：${checkedPath}`);
   return { ...saved, validation, notes };
 }

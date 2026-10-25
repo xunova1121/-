@@ -5,7 +5,7 @@ export function taskContract(text = '') {
   // “把结果更新到那个 Excel 里”也是要交文件：以前没认出来，模型口头说“已更新”就收尾了
   const creating =
     !/^(?:解释|介绍|讨论|了解|如何|怎么)/.test(value.trim()) &&
-    /生成|制作|创建|编写|写一|做一|只做|做成|改为|换成|导出|保存为|开发|实现|修复|修改|重构|更新到|更新进|更新那|改到|写进|写入|填进|填入|加到|加进/.test(value);
+    /生成|制作|创建|编写|写(?:一|Word|PPT|Excel)|做一|只做|做成|改为|换成|导出|保存为|开发|实现|修复|修改|重构|更新到|更新进|更新那|改到|写进|写入|填进|填入|加到|加进/.test(value);
   const formats = creating
     ? [
         [/PPT|pptx|幻灯片|演示文稿/i, 'pptx'],
@@ -22,7 +22,7 @@ export function taskContract(text = '') {
         .map(([, format]) => format)
     : [];
   const codeOnly = /代码|函数|JavaScript|TypeScript|Python/i.test(value) && /不运行|不执行|直接展示|只给代码/.test(value);
-  const calculation = !codeOnly && /\d/.test(value) && /计算|算式|净重|货款|净盈利|手续费|相隔|权重|盈亏|收益率|孕周|多少天|相差|日期差|百分比|合计|加起来/.test(value);
+  const calculation = !codeOnly && (!formats.length || /计算|核算|验算|算出|算式|求出|数值校验/.test(value)) && /\d/.test(value) && /计算|算式|净重|货款|净盈利|手续费|相隔|权重|盈亏|收益率|孕周|多少天|相差|日期差|百分比|合计|加起来/.test(value);
   // 用户要她记住（不是在问“记住了吗”）：必须真的调用记忆工具；问有没有记住：必须先查
   const asking =
     /(?:记住|记下|记进去|放进记忆|记到记忆|记得)(?:了)?(?:吗|么|没有|没)[？?]?\s*$/m.test(value) || /有没有(?:记|放进)|你有(?:记|放进)[^。！!]*[吗么]/.test(value);
@@ -33,7 +33,7 @@ export function taskContract(text = '') {
     formats,
     remembering,
     askingMemory: asking,
-    coding: creating && /代码|程序|脚本|JavaScript|TypeScript|Python|应用|网页|网站|接口/i.test(value),
+    coding: creating && /代码|程序|脚本|JavaScript|TypeScript|Python|应用|网页|网站|接口/i.test(value) && (!formats.length || /(?:同时|另外|并且|还要|以及|并).{0,12}(?:开发|实现|编写|提供|生成|运行|测试).{0,12}(?:代码|程序|脚本|JavaScript|TypeScript|Python|网页|网站|接口代码)/i.test(value)),
     calculation,
     researching: /查|搜索|核实|调研|研究|最新|今天|行情/.test(value),
     criteria: [
