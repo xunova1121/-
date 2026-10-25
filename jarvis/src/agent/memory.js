@@ -17,6 +17,7 @@
  * 相关度 = BM25（本地，离线可用）与语义向量（配置了 embedding 服务时）混合。被取用的记忆会“巩固”：使用次数 +1、刷新最近使用时间。
  * 长期不用、重要度低的记忆会被归档（不删除，可在面板里看到）。
  */
+import { preferenceClaim, preferenceSupported, wasPreferenceRetracted } from './memoryPreference.js';
 import { collection, uid } from './store.js';
 import { buildIndex, tokenize } from './search.js';
 import { createDocumentStyles } from './documentStyles.js';
@@ -148,6 +149,11 @@ export async function remember(content, category = 'fact', { importance = 3, sou
   if (!CATEGORIES[category]) category = 'other';
   importance = Math.max(1, Math.min(5, Math.round(Number(importance) || 3)));
   const all = (await memories.all()).map(upgrade);
+  const automatic = /自动|模型工具/.test(source);
+  const preference = preferenceClaim(content, category);
+  if (automatic && wasPreferenceRetracted(content, category, all)) throw Object.assign(new Error('这条偏好此前已被用户撤回，不能从旧对话自动恢复；需要用户明确重新记录'), { code: 'MEMORY_RETRACTED', kind: 'input' });
+  const needsPreferenceConfirmation = Boolean(automatic && (preference || category === 'preference') && !preferenceSupported(content, evidence, category));
+  if (needsPreferenceConfirmation && !source.includes('待核实')) source += ' · 偏好语义待核实';
   const vec = await embedOne(content);
   let pending = source.includes('待核实');
   const duplicate = all.find(m=>!m.validTo && norm(m.content)===content);
@@ -156,7 +162,7 @@ export async function remember(content, category = 'fact', { importance = 3, sou
   const t = now();
   if (action === 'NOOP') {
     // 另一段对话里又总结出同一件事：算她自己核实过了，转正（同一段对话里重复提炼不算）
-    const repeated = pending && target.pending && sessionId && target.sessionId && sessionId !== target.sessionId;
+    const repeated = pending && target.pending && !needsPreferenceConfirmation && !target.needsPreferenceConfirmation && sessionId && target.sessionId && sessionId !== target.sessionId;
     if (repeated) {
       pending = false;
       source = target.source.replace('待核实', '两段对话都提到，已自动核实');
@@ -172,7 +178,7 @@ export async function remember(content, category = 'fact', { importance = 3, sou
       delete target.conflictsWith;
     }
     // 用户亲口要记的、原话核对过的、两段对话都提到的：自动记下的那条就算确认了
-    Object.assign(target, { updatedAt: t, lastUsed: t, importance: Math.max(target.importance, importance) }, pending ? {} : { pending: false, source: repeated ? source : target.source });
+    Object.assign(target, { needsPreferenceConfirmation, updatedAt: t, lastUsed: t, importance: Math.max(target.importance, importance) }, pending ? {} : { pending: false, source: repeated ? source : target.source });
     await memories.put(target);
     return { ...target, action };
   }
@@ -190,7 +196,7 @@ export async function remember(content, category = 'fact', { importance = 3, sou
       history: [...(target.history || []), { content: target.content, until: t }].slice(-10),
       embedding: vec ?? undefined,
       embModel: vec ? embedder.model : undefined,
-      source, evidence, pending,
+      source, evidence, pending, needsPreferenceConfirmation,
       supersedes: target.id, // 撤回时恢复它
       ...(sessionId && { sessionId })
     };
@@ -201,7 +207,7 @@ export async function remember(content, category = 'fact', { importance = 3, sou
   }
   const m = {
     id: uid('m'), content, category, importance, ts: t, updatedAt: t, lastUsed: t, validFrom: t, validTo: null,
-    uses: 0, history: [], source, evidence, pending, pinned: false,
+    uses: 0, history: [], source, evidence, pending, needsPreferenceConfirmation, pinned: false,
     ...(sessionId && { sessionId }),
     ...(action === 'UPDATE' && pending && !target.pending ? {conflictsWith:target.id} : {}),
     ...(vec ? { embedding: vec, embModel: embedder.model } : {})

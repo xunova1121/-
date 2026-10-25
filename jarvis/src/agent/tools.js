@@ -32,6 +32,7 @@ import { withWebDeadline } from './retrievalBudget.js';
 import { matchFiles, searchLines } from './fileSearch.js';
 import { deepResearch, DEPTHS } from './research.js';
 import { factCheck, formatReport } from './factCheck.js';
+import { preferenceClaim, preferenceSupported } from './memoryPreference.js';
 import { evidence as evidenceStore } from './evidenceStore.js';
 import { createSongTool } from './music.js';
 import { createOcrTool } from './ocrTool.js';
@@ -101,10 +102,11 @@ export function createTools(ctx) {
         category: { type: 'string', enum: ['profile', 'preference', 'fact', 'goal', 'lesson', 'other'], description: 'profile 身份 / preference 偏好 / fact 事实 / goal 目标 / lesson 用户纠正过的做事方式（经验教训）' },
         importance: { type: 'integer', minimum: 1, maximum: 5, description: '重要度 1–5，身份信息和明确的长期偏好给 4–5' }
       }, ['content']),
-      run: async ({ content, category, importance }, { sessionId } = {}) => {
+      run: async ({ content, category, importance }, { sessionId, requestText, rawRequestText } = {}) => {
         const currentSession = sessionId ? await sessions.get(sessionId) : null;
-        const said = [...(currentSession?.messages || [])].reverse().find(message=>message.role==='user')?.content || '';
-        const explicit = /记住|记下|我叫|我的名字|我住在/.test(said);
+        const said = requestText || rawRequestText || [...(currentSession?.messages || [])].reverse().find(message=>message.role==='user')?.content || '';
+        const preference = category === 'preference' || preferenceClaim(content, category);
+        const explicit = preference ? preferenceSupported(content, said, category) : /记住|记下|我叫|我的名字|我住在/.test(said);
         // 做事方式的教训放进“经验教训”（每轮上下文里有一节），不混在关于用户的记忆里
         if (category === 'lesson') {
           const l = await memory.addLesson(content, said);
