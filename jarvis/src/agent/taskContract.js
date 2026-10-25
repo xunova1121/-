@@ -6,6 +6,7 @@ export function taskContract(text = '') {
   const creating =
     !/^(?:解释|介绍|讨论|了解|如何|怎么)/.test(value.trim()) &&
     /生成|制作|创建|编写|写(?:一|Word|PPT|Excel)|做一|只做|做成|改为|换成|导出|保存为|开发|实现|修复|修改|重构|更新到|更新进|更新那|改到|写进|写入|填进|填入|加到|加进/.test(value);
+  const diagram = /架构图|流程图|关系图|组织图|拓扑图/.test(value) && /画|生成|制作|做|重画/.test(value);
   const formats = creating
     ? [
         [/PPT|pptx|幻灯片|演示文稿/i, 'pptx'],
@@ -13,6 +14,7 @@ export function taskContract(text = '') {
         [/Excel|xlsx|电子表格/i, 'xlsx']
       ]
         .filter(([pattern]) => {
+          if (diagram && !value.split(/[，,。；;\n]/).some(clause => pattern.test(clause) && /(?:输出|导出|生成|制作|做成|交付|保存为|用).{0,8}(?:PPT|Word|Excel|pptx|docx|xlsx)|(?:PPT|Word|Excel|pptx|docx|xlsx).{0,3}(?:格式|版本)/i.test(clause))) return false;
           const latest = value
             .split(/[,，;；。\\n]|但是|而是|只要|只做/)
             .filter((clause) => pattern.test(clause))

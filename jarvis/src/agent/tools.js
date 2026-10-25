@@ -37,6 +37,7 @@ import { preferenceClaim, preferenceSupported } from './memoryPreference.js';
 import { evidence as evidenceStore } from './evidenceStore.js';
 import { createSongTool } from './music.js';
 import { createOcrTool } from './ocrTool.js';
+import { createDiagramTool } from './diagramTool.js';
 import { createInspectImageTool } from './inspectImage.js';
 
 const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
@@ -94,6 +95,7 @@ export function createTools(ctx) {
     createSongTool(ctx),
     createOcrTool(ctx),
     createInspectImageTool(ctx),
+    createDiagramTool(ctx),
     createStockKlineTool(ctx),
     createSportsScoresTool(ctx),
     queryGuardTool(),
@@ -246,11 +248,18 @@ export function createTools(ctx) {
     },
     {
       name: 'generate_image',
-      description: '画图 / 生成图片（海报、插画、头像、配图等）：用服务商的画图模型（如 gpt-image）按描述生成一张图片，保存到工作区并显示在对话里。用户说“画一张… / 做个…的图片 / 生成图片”时使用。描述写具体：主体、风格、色调、构图。',
-      input_schema: S({ prompt: str('图片描述（中英文都可以，越具体越好）'), size: str('尺寸：1024x1024（默认）、1536x1024（横图）、1024x1536（竖图）') }, ['prompt']),
-      run: async ({ prompt, size }) => {
+      description: '画图 / 生成图片（海报、插画、头像、配图等）：用服务商的画图模型（如 gpt-image）按描述生成一张图片，保存到工作区并显示在对话里。用户说“画一张… / 做个…的图片 / 生成图片”时使用。描述先明确主体、构图、风格、光线和必须保留/避免的内容。修改或参考已有图必须传referencePaths，不能只凭文字重画冒充原图编辑；精确架构图用create_diagram。',
+      input_schema: S({ prompt: str('图片描述（中英文都可以，越具体越好）'), size: str('尺寸：1024x1024（默认）、1536x1024（横图）、1024x1536（竖图）'), referencePaths: { type: 'array', maxItems: 3, items: { type: 'string' }, description: '参考/编辑已有图片时必须传真实工作区原图路径；不传表示从零创作' } }, ['prompt']),
+      run: async ({ prompt, size, referencePaths = [] }, { signal } = {}) => {
         if (!ctx.imageGen) throw new Error('当前环境不能画图');
-        const r = await ctx.imageGen({ prompt, size: /^\d+x\d+$/.test(size || '') ? size : '1024x1024' });
+        const images = [];
+        for (const path of referencePaths) {
+          const blob = await ws.readBlob(path);
+          if (blob.size > 10e6 || !/\.(png|jpe?g|webp)$/i.test(path)) throw Object.assign(new Error('参考图需为10MB以内的PNG/JPEG/WebP'), { code: 'IMAGE_EDIT_INPUT', kind: 'input' });
+          images.push(blob);
+        }
+        if (images.length && !ctx.imageEdit) throw Object.assign(new Error('当前线路未提供原图编辑能力，不能把重新生成冒充编辑'), { code: 'IMAGE_EDIT_UNAVAILABLE', kind: 'capability' });
+        const r = await (images.length ? ctx.imageEdit : ctx.imageGen)({ prompt, images, size: /^\d+x\d+$/.test(size || '') ? size : '1024x1024', signal });
         const ext = /jpe?g/.test(r.blob.type) ? 'jpg' : /webp/.test(r.blob.type) ? 'webp' : 'png';
         const name = String(prompt).replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 16) || 'image';
         const w = await ws.write(`images/${name}-${Date.now().toString(36)}.${ext}`, r.blob);

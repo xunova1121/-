@@ -199,7 +199,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   tools = toolsForQuestion(tools, questionProfile);
   const capabilities = capabilityBlock(availableTools);
   // 环境完全没有产物/计算核验能力时，直接说明未验收，不空转两轮模型。
-  const canReview = availableTools.some(tool => /^(?:create_document|write_long_document|edit_office_document|read_file|write_file|run_javascript|run_python|computer_run|computer_read_file|verify_numbers|generate_image|sing_song|generate_video)$/.test(tool.name));
+  const canReview = availableTools.some(tool => /^(?:create_document|write_long_document|edit_office_document|read_file|write_file|run_javascript|run_python|computer_run|computer_read_file|verify_numbers|create_diagram|generate_image|sing_song|generate_video)$/.test(tool.name));
   const review = createExecutionReview(requirementText, { visual: images.length > 0 || history.some(message => message.images?.length) });
   const retrieval = createRetrievalBudget(lookupDeadline ? '普通查询' : images.length ? `逐项核验 ${requirementText}` : requirementText, { now, timeBudgetMs });
   let modelAttempts = 0;

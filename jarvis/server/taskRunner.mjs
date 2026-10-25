@@ -1,3 +1,5 @@
+import { editImage } from '../src/llm/imageEdit.js';
+import { imageData } from '../src/agent/imageRegion.js';
 import { cropImageRegion } from './imageRegion.mjs';
 import { qweatherConfig } from '../src/core/qweather.js';
 import { deepseekSearchOptions } from '../src/agent/deepseekSearch.js';
@@ -245,7 +247,9 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       onFileChanged: (p) => { if (!/^skills\//.test(p)) { task.files.add(p); record(task, { type: 'file', path: p }); } },
       // 画图、做视频：用服务器上的模型设置；生成的文件照常存进工作区，手机按文件下载后显示在对话里
       imageGen: (o) => generateImage(cfg, o),
+      imageEdit: (o) => editImage(cfg, { ...o, download: publicFetch }),
       cropImage: cropImageRegion,
+      renderDiagram: async (svg, options) => imageData(await cropImageRegion(new Blob([svg], { type: 'image/svg+xml' }), { x: 0, y: 0, width: 1, height: 1 }, options)),
       visionLlm: sight(cfg).describeImages || null,
       ocr: ocrLine(cfg) ? (file, o) => recognizeText(cfg, file, o) : null, // 文字识别（智谱 GLM-OCR）
       videoGen: (o) => generateVideo(cfg, o),
