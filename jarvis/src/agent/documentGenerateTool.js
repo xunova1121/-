@@ -1,3 +1,4 @@
+import { requestedSlides } from './documentPageBudget.js';
 import * as ws from './workspace.js';
 import { generate } from './docs.js';
 import { THEME_IDS, themeList } from './themes.js';
@@ -13,10 +14,26 @@ import { S, str, fmtSize, findTemplate } from './documentSchema.js';
 /** 保留原有一轮自修复与PPT看图检查，不额外叠加无界模型审稿。 */
 /** 同一轮里同一个文件：内容一样就直接用上次的结果；已经请模型自查过的文件，重新生成时不再自查（评测里一份 PPT 生成了四遍，每遍都等自查） */
 const sameRun = new WeakMap();
-const keyOf = (args) => JSON.stringify(args);
+// 只保存摘要键，不把整篇正文留在缓存键里；缓存条数严格有界。
+const digestOf = async (bytes) => {
+  if (!globalThis.crypto?.subtle || bytes.length > 25_000_000) return null;
+  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (x) => x.toString(16).padStart(2, '0')).join('');
+};
+const keyOf = async (args) => {
+  if (!globalThis.crypto?.subtle) return null;
+  const bytes = new TextEncoder().encode(JSON.stringify(args));
+  if (bytes.length > 2_000_000) return null;
+  return digestOf(bytes);
+};
+const keep = (map, key, value) => {
+  if (!key) return;
+  map.delete(key);
+  map.set(key, value);
+  while (map.size > 16) map.delete(map.keys().next().value);
+};
 
 export function createDocumentGenerateTool(ctx) {
-  const memo = sameRun.get(ctx) ?? { results: new Map(), reviewed: new Map() };
+  const memo = sameRun.get(ctx) ?? { results: new Map(), reviewed: new Map(), scopes: new WeakMap() };
   sameRun.set(ctx, memo);
   return {
     name: 'create_document',
@@ -65,13 +82,24 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
     ),
     run: async (
       { format, path, title, content, theme, style, kind, cover, subtitle, author, issuer, docNo, toc, template, template_id: templateId, requirements },
-      { progress, signal, checkpoint } = {}
+      { progress, signal, checkpoint, rawRequestText, requestText, executionScope } = {}
     ) => {
-      const callKey = keyOf({ format, path, title, content, theme, style, kind, cover, subtitle, author, issuer, docNo, toc, template, templateId });
+      // 每轮独立作用域，跨轮不能以旧回执跳过检查。
+      let cache = memo;
+      if (executionScope) {
+        if (!memo.scopes.has(executionScope)) memo.scopes.set(executionScope, { results: new Map(), reviewed: new Map() });
+        cache = memo.scopes.get(executionScope);
+      }
+      const goal = requestText || rawRequestText || requirements || '';
+      const forbidCover = /(?:不要|不用|无需|不加|不含|去掉|去除).{0,3}封面/.test(goal);
+      const expectedSlides = format === 'pptx' ? requestedSlides('PPT ' + goal) : null;
+      const callKey = await keyOf({ format, path, title, content, theme, style, kind, cover, subtitle, author, issuer, docNo, toc, template, templateId, requirements, goal });
       // 记住的结果只管 10 分钟（同一个任务里重复调用）；隔得久了照常重新生成
       const fresh = (m, key, ms) => m.has(key) && Date.now() - m.get(key).at < ms;
-      if (fresh(memo.results, callKey, 600_000) && (await ws.exists(memo.results.get(callKey).path).catch(() => false))) return `${memo.results.get(callKey).text}；这次的内容和上次完全一样，没有重新生成，文件就是上面这份`;
-      const pathKey = String(path).replace(/\.[a-z0-9]+$/i, '');
+      const cached = cache.results.get(callKey);
+      const unchanged = cached && await ws.readBlob(cached.path).then(async (blob) => await digestOf(new Uint8Array(await blob.arrayBuffer())) === cached.digest && cached.digest !== null).catch(() => false);
+      if (fresh(cache.results, callKey, 600_000) && unchanged) return `${cache.results.get(callKey).text}；这次的内容和上次完全一样，没有重新生成，文件就是上面这份`;
+      const pathKey = await keyOf({ path, goal });
       const loadImage = async (src) => {
         if (/^(https?:|data:)/i.test(src)) return null;
         try {
@@ -92,7 +120,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       // 生成前自查：规则检查；有原始要求或硬伤时请模型对照检查并改一轮
       // 请模型对照要求自查（十几秒）：同一个文件第一次生成、内容不算短，或规则检查查出了硬伤时才做；
       // 重新生成同一个文件（模型按检查结果改过一遍）不再自查。规则检查、排版检查、转 PDF 逐页检查照常每次都做
-      const quick = fresh(memo.reviewed, pathKey, 1_800_000) || String(content).replace(/\s/g, '').length < 1200;
+      const quick = fresh(cache.reviewed, pathKey, 1_800_000) || String(content).replace(/\s/g, '').length < 1200;
       const check = await selfCheck({
         format,
         content,
@@ -107,6 +135,9 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
           // 文件名常带“_5页”：封面标题不要这个尾巴
           title: (title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, '')).replace(/[_\s-]*\d+\s*页$/, ''),
           content: text,
+          expectedSlides,
+          requireCover: !forbidCover && /含封面|包含封面|加(?:一页)?封面|带封面/.test(goal),
+          forbidCover,
           theme: chosenTheme,
           style: design.style,
           kind: design.kind,
@@ -150,7 +181,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       // PPT：画出每页的样子，交给能看图的模型检查一轮（没配能看图的模型、或者画不出图时跳过）
       let looked = null;
       // 看图检查（十几秒）：第一次生成照样看；同一个文件重新生成、估算也没排版问题的不再看
-      const wantLook = built(out).length > 0 || !fresh(memo.reviewed, pathKey, 1_800_000);
+      const wantLook = built(out).length > 0 || !fresh(cache.reviewed, pathKey, 1_800_000);
       if (format === 'pptx' && ctx.visionLlm && out.info?.preview?.length && wantLook) {
         try {
           const errors = (o) => built(o).filter((x) => x.level === 'error').length;
@@ -213,11 +244,11 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       if (out.info?.missingImages?.length) notes.push(`这些图片没找到，用占位文字代替了：${out.info.missingImages.join('、')}`);
       if (tpl) notes.push(`${auto ? '自动' : ''}沿用了模板 ${tplPath} 的样式${auto ? '（不想用模板就传 template: "none"）' : ''}`);
       if (out.note) notes.push(out.note);
-      memo.reviewed.set(pathKey, { at: Date.now() });
+      if (!r.validation.errors) keep(cache.reviewed, pathKey, { at: Date.now() });
       // 没有硬伤：明说已经读回检查过——模型以前会再 read_file 好几遍、或者把同一份文件重新生成一遍
-      if (!left.some((x) => x.level === 'error') && r.validation.readback === 'passed') notes.push('文件已经生成并读回检查过，不需要再 read_file 核对或重新生成；直接告诉用户文件在哪、做了什么');
+      if (!r.validation.errors && !left.some((x) => x.level === 'error') && r.validation.readback === 'passed') notes.push('文件已经生成并读回检查过，不需要再 read_file 核对或重新生成；直接告诉用户文件在哪、做了什么');
       const result = `${r.path}（${fmtSize(out.blob.size)}）。${notes.join('；')}`;
-      memo.results.set(callKey, { text: result, path: r.path, at: Date.now() });
+      if (!r.validation.errors) keep(cache.results, callKey, { text: result, path: r.path, digest: await digestOf(new Uint8Array(await out.blob.arrayBuffer())), at: Date.now() });
       return result;
     }
   };

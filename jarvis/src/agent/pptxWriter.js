@@ -1,3 +1,4 @@
+import { slideBudget } from './documentPageBudget.js';
 /**
  * Markdown → PPT（.pptx），用 PptxGenJS（MIT）。16:9，配色用主题（themes.js）。
  *
@@ -310,7 +311,7 @@ function chartColumns(table) {
  * @param {{ title: string, content: string, theme: object, subtitle?: string, author?: string, date?: string, loadImage?: (src: string) => Promise<Uint8Array|null> }} o
  * @returns {Promise<{ blob: Blob, info: { slides: number, layouts: string[], missingImages: string[], preview: object[], layoutIssues: object[] } }>}
  */
-export async function makePptx({ title, content, theme, subtitle = '', author = '', date = '', loadImage = null, style = 'business' }) {
+export async function makePptx({ title, content, theme, subtitle = '', author = '', date = '', loadImage = null, style = 'business', expectedSlides = null, requireCover = false, forbidCover = false }) {
   const PptxGenJS = (await import('pptxgenjs')).default;
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
@@ -372,11 +373,12 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   for (const s of slides) {
     const items = s.blocks.length === 1 && s.blocks[0].type === 'list' ? s.blocks[0].items : null;
     // 7、8 条“标签：说明”排成两行四列的卡片，不拆页
-    if (items && items.length > 7 && !(items.length <= 8 && items.every((it) => LABEL.test(plain(it.inlines))))) {
+    if (expectedSlides == null && items && items.length > 7 && !(items.length <= 8 && items.every((it) => LABEL.test(plain(it.inlines))))) {
       for (let i = 0; i < items.length; i += 6) expanded.push({ ...s, title: i ? `${s.title}（续）` : s.title, blocks: [{ ...s.blocks[0], items: items.slice(i, i + 6) }], notes: i ? [] : s.notes });
     } else expanded.push(s);
   }
   slides = expanded;
+  const budget = slideBudget(slides.length, expectedSlides, requireCover, forbidCover);
 
   const imageData = async (src) => {
     try {
@@ -682,8 +684,9 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   };
 
   // ---------- 封面：商务是左边深色块 + 右边装饰；留白是大字 + 细线；叙事是居中大字 + 金框；数据是顶部色带
-  const cover = addSlide(title);
   const pw = 7.4;
+  if (budget.cover) {
+  const cover = addSlide(title);
   // 单位 / 署名里已经带了日期就不再重复写日期
   const coverDate = /\d{4}\s*年|\d{4}[-./]\d{1,2}/.test(author) ? '' : (date || today());
   if (T.cover === 'centered') {
@@ -723,12 +726,13 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     if (coverDate) cover.addText(coverDate, { x: 0.8, y: H - 1.1, w: pw - 1.4, h: 0.4, fontSize: 12, color: C.soft, fontFace: FONT });
   }
   layouts.push('cover');
+  }
 
   // ---------- 汇报提纲：有两个以上“第 X 部分”时自动加
   const kinds = slides.map((s, i) => layoutOf(s, { last: i === slides.length - 1 }));
   const sections = slides.filter((s, i) => kinds[i] === 'section');
   const shortTitle = (t) => String(t).replace(SECTION, '').replace(/^[\s:：、.，,]+/, '').trim() || String(t);
-  if (sections.length >= 2) {
+  if (!budget.strict && sections.length >= 2) {
     const sl = addSlide('汇报提纲');
     titleBar(sl, '汇报提纲');
     const n = Math.min(sections.length, 6);
@@ -1103,7 +1107,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   }
   const blob = await pptx.write({ outputType: 'blob' });
   const preview = records.map(({ n, title: t, items, slide }) => ({ n, title: t, items, background: slide.background?.color }));
-  return { blob, info: { slides: slides.length + 1, layouts, missingImages, preview, layoutIssues: [...layoutIssues(preview), ...monotony(pages, MONOTONY_RUN[T.id] ?? 3), ...ignored], style: T.id } };
+  return { blob, info: { slides: records.length, expectedSlides, layouts, missingImages, preview, layoutIssues: [...layoutIssues(preview), ...monotony(pages, MONOTONY_RUN[T.id] ?? 3), ...ignored], style: T.id } };
 }
 
 /**

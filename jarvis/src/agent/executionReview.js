@@ -85,6 +85,10 @@ export function createExecutionReview(goal = '') {
       structure: data.structure,
       render: data.render,
       errors: Math.max(0, Number(data.errors) || 0),
+      slides: Number.isSafeInteger(data.slides) ? data.slides : null,
+      expectedSlides: Number.isSafeInteger(data.expectedSlides) ? data.expectedSlides : null,
+      pages: Number.isSafeInteger(data.pages) ? data.pages : null,
+      pdfPageMatch: data.pdfPageMatch === 'passed' ? 'passed' : data.pdfPageMatch === 'failed' ? 'failed' : null,
       at
     });
     if (artifacts.size > 16) artifacts.delete(artifacts.keys().next().value);

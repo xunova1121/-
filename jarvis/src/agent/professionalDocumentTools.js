@@ -93,6 +93,7 @@ export function createProfessionalDocumentTools(ctx) {
           path: args.path,
           title: args.title,
           content: result.draft,
+          requirements: taskText || savedState.input.task,
           template: args.template,
           template_id: args.template_id,
           theme: args.theme,

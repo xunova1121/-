@@ -17,6 +17,7 @@ export async function executeToolCalls(
     checkpoint,
     review,
     sessionId,
+    executionScope,
     requirementText,
     lookupDeadline,
     lookupControl,
@@ -75,6 +76,7 @@ export async function executeToolCalls(
           progress,
           retrieval,
           sessionId,
+          executionScope,
           rawRequestText: requirementText,
           requestText: review.report().request,
           checkpoint: (event) => {

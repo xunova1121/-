@@ -7,6 +7,14 @@ import { documentError } from './documentPlan.js';
 /** 把短检查报告与真实产物放一起；正文只在工作区文件中，不进会话/检查点。 */
 export async function deliverDocument(ctx, out, target, { progress, signal, checkpoint, issues = [], plan, generatorReview, requiredText = [] } = {}) {
   const validation = await inspectDocument(out.blob, target, { info: out.info, requiredText, signal });
+  if (validation.format === 'pptx' && out.info?.expectedSlides != null) {
+    validation.expectedSlides = out.info.expectedSlides;
+    if (validation.slides !== validation.expectedSlides) {
+      validation.issues.push({ level: 'error', text: `PPT实际${validation.slides}页，要求${validation.expectedSlides}页` });
+      validation.errors += 1;
+      validation.issueCount += 1;
+    }
+  }
   validation.contentReview = ctx.documentContentReview || { business: 'not_checked' };
   validation.generatorVisual = generatorReview ? 'generator_preview_reviewed' : 'not_checked';
   if (generatorReview?.problems?.length && !generatorReview.changed) {
@@ -32,7 +40,11 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
         structure: validation.structure,
         readback: validation.readback,
         render: validation.render,
-        errors: validation.errors
+        errors: validation.errors,
+        slides: validation.slides,
+        expectedSlides: validation.expectedSlides,
+        pages: validation.pages,
+        pdfPageMatch: validation.pdfPageMatch
       }
     });
   const saveReport = async () => {
@@ -55,6 +67,16 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
       validation.pages = preview.pdfCheck.pages;
       validation.issues = [...validation.issues, ...preview.pdfCheck.issues].slice(0, 40);
       validation.issueCount += preview.pdfCheck.issues.length;
+      validation.errors += preview.pdfCheck.issues.filter((issue) => issue.level === 'error').length;
+      if (validation.format === 'pptx') {
+        validation.pdfPageMatch = validation.pages === validation.slides ? 'passed' : 'failed';
+        if (validation.pdfPageMatch === 'failed') {
+          validation.issues.push({ level: 'error', text: `PPT为${validation.slides}页，真实PDF为${validation.pages}页，页数不一致` });
+          validation.errors += 1;
+          validation.issueCount += 1;
+          notes.push('PPT和PDF页数不一致，文件已保留，请修复后再交付');
+        }
+      }
     }
     await receipt();
   }

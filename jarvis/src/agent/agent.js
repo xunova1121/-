@@ -1,3 +1,4 @@
+import { singleDocumentTask } from './documentExecutionPolicy.js';
 import { sessionWorkBlock } from './sessionWork.js';
 import { prepareAgentContext } from './agentPreparation.js';
 import { createModelRequest } from './agentModelRequest.js';
@@ -229,10 +230,11 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       return '已解除一分钟时限：按任务需要多查、多做，做完照常回答。';
     }
   };
-  // 只做一个文件、要求也不长（一份周报、一张表、几页汇报）：不给任务清单工具——评测里模型照样列计划、改计划四五次，每次多等一轮
+  // 短单文件不提供外层清单；长方案保留入口，但用任务说明避免重复规划。
   // 要做文件（Word、PPT、表格……）：模型要先在后台写很长的内容，前面很久没动静是正常的
   const makingFile = taskContract(requirementText).formats.length > 0;
-  const oneFile = taskContract(requirementText).formats.length === 1 && String(requirementText).length <= 150 && !/方案|调研|研究|论文|多份|分别/.test(requirementText);
+  const oneFile = singleDocumentTask(requirementText) && String(requirementText).length <= 150 && !/方案|调研|研究|论文/.test(requirementText);
+  const executionScope = {};
   const own = [...(oneFile ? [] : [plan.tool]), review.tool, executionTool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: availableTools })] : []), ...(lookupDeadline && lookupControl?.release ? [moreTimeTool] : [])].filter((t) => !tools.some((x) => x.name === t.name));
   // 工具按需加载：工具多时只带常用的完整说明，其余列名字、用 tool_search 加载（见 toolLoader.js）
   // 普通问答、查资料：做文档的工具先只列名字（用到时按名字调用或 tool_search 加载）
@@ -272,6 +274,11 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     seen.clear(); // 用户追加了新指令，同样参数可能是新的明确要求
     if (availableTools.some(t => t.name === 'computer_search') && said.some(needsComputer)) computerNote = COMPUTER_NOTE;
     review.revise(said.join('\n'));
+    if (!singleDocumentTask(said.join('\n')) && !own.some(tool => tool.name === plan.tool.name)) {
+      own.push(plan.tool);
+      loader = createToolLoader([...tools, ...own]);
+      toolHint = loader.hint();
+    }
     // 常识期间追加动作也必须恢复原能力，不能把文件、记忆或电脑任务裁掉。
     if (questionProfile) { questionProfile = null; tools = availableTools; loader = createToolLoader([...tools, ...own]); toolHint = loader.hint(); }
     onTaskUpdate?.(said.join("\n"));
@@ -296,7 +303,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       signal,
       ...(sportsArgs ? { call: { name: 'get_sports_scores', args: sportsArgs }, timeoutMs: PRE_SPORTS_MS } : {}),
       run: async (calls, s) => {
-        const results = await executeToolCalls(calls, { loader, emit, seen, closing: false, retrieval, approve, signal: s, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch: true });
+        const results = await executeToolCalls(calls, { loader, emit, seen, executionScope, closing: false, retrieval, approve, signal: s, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch: true });
         for (const r of results) retrieval.end(r.ok);
         return results;
       }
@@ -363,7 +370,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     // 测量实际发送的提示与工具说明，动态规则和短说明均计入字符数。
     // 用的哪个模型：中途换了备用的，也照实写
     const usingNote = modelNote && (cur.model !== model ? `${modelNote}\n（原定的 ${model} 出错了，这一轮实际换成了 ${cur.model}。）` : modelNote);
-    const measuredSystem = questionProfile ? [BASIC_ANSWER_PROMPT, [ctx.dynamic, usingNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : light ? [LIGHT_PROMPT, [ctx.dynamic, usingNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, usingNote, dialoguePolicy(review.report().request), capabilities, computerNote, requirementContext, toolHint, review.contractNote(), !allowWebSearch && CREATIVE_NOTE, voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
+    const measuredSystem = questionProfile ? [BASIC_ANSWER_PROMPT, [ctx.dynamic, usingNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : light ? [LIGHT_PROMPT, [ctx.dynamic, usingNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, usingNote, dialoguePolicy(review.report().request), capabilities, computerNote, requirementContext, toolHint, singleDocumentTask(review.report().request) && '单份文档由文档引擎内部规划和检查；如需外层计划只列一次，不用update_plan逐节重复同步。有效产物回执可直接交付，不重复查找、读回或重做。', review.contractNote(), !allowWebSearch && CREATIVE_NOTE, voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
     const measuredTools = closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list();
     const requestTools = measuredTools.filter((tool) => allowWebSearch || !WEB_TOOLS.has(tool.name) && tool.name !== 'delegate_task').map(conciseTool);
     emit({ type: 'diagnostic', phase: 'model_start', model: cur.model, protocol: cur.adapter.kind, closing, ...measureModelInput({ system: measuredSystem, messages: convo, tools: requestTools }), inputChars: convo.reduce((sum, item) => sum + String(item.content || '').length, 0) });
@@ -479,7 +486,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     // 执行一次工具调用：开始 / 结束事件照常发出，返回结果，按调用顺序写回对话
     // 模型又用先搜过的词搜一次：直接给上次的结果，不再白搜（也不会被“相同搜索词”拦下报错）
     const reused = new Map(r.toolCalls.filter((c) => reusesPreSearch(c, preFound)).map((c) => [c, { c, ok: true, output: preFound.output, outImages: [] }]));
-    const ran = await executeToolCalls(r.toolCalls.filter((c) => !reused.has(c)), { loader, emit, seen, closing, retrieval, approve, signal, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch });
+    const ran = await executeToolCalls(r.toolCalls.filter((c) => !reused.has(c)), { loader, emit, seen, executionScope, closing, retrieval, approve, signal, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch });
     const results = r.toolCalls.map((c) => reused.get(c) ?? ran.find((x) => x.c === c)).filter(Boolean);
     for (const { c, ok, output, outImages } of results) {
       toolCount++;
@@ -594,7 +601,7 @@ export function progressReminder({ userText, steps = [], toolCount }) {
   const ask = String(userText ?? '').replace(/\s+/g, ' ').trim();
   const progress = steps.length
     ? `计划共 ${steps.length} 步，已完成 ${done} 步${left.length ? `，还剩：${left.map((s) => s.text).join('；')}` : '，都做完了，可以核对后收尾'}。`
-    : '还没有列计划，步骤多的话先用 update_plan 列出来。';
+    : singleDocumentTask(userText) ? '单份文档由文档引擎规划、起草和检查；已有有效产物回执就直接交付，不反复读回或重做。' : '还没有列计划，步骤多的话先用 update_plan 列出来。';
   return `（进度提醒：已经调用了 ${toolCount} 次工具。用户这次要的是：“${ask.length > 200 ? `${ask.slice(0, 200)}…` : ask}”。${progress}先确认方向没跑偏再接着做，不要做用户没要的事。）`;
 }
 
