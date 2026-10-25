@@ -348,6 +348,11 @@
         <label class="field" for="tts-engine"><span>语音引擎</span><select id="tts-engine"></select></label>
         <p class="note" id="tts-note" hidden></p>
         <label class="field" for="tts-voice" id="row-tts-voice"><span>声音</span><select id="tts-voice"></select></label>
+        <div id="qwen-voice-tools" hidden>
+        <label class="field" for="qwen-voice-search"><span>搜索声音</span><input id="qwen-voice-search" type="search" maxlength="80" placeholder="名字、英文ID、男声或女声" autocomplete="off" /></label>
+        <div class="pane-actions"><button class="btn ghost" type="button" id="btn-qwen-voices">刷新官方音色</button></div>
+        <p class="muted small" id="qwen-voice-info" role="status"></p>
+        </div>
         <div class="field"><span>声线效果</span><div class="seg" role="radiogroup" aria-label="声线效果" id="tts-fx"></div></div>
         <p class="muted small" id="tts-fx-desc"></p>
         <label class="inline-check"><input type="checkbox" id="tts-cues" /> 开口 / 说完时的科幻提示音</label>

@@ -1,3 +1,4 @@
+import { initQwenVoicePicker } from './qwenVoicePicker.js';
 /**
  * “模型”面板里的声音设置：语音引擎（百炼实时 / 免费在线 / 系统自带）、声音、声线效果、提示音、试听。
  */
@@ -17,6 +18,7 @@ const opt = (value, text) => Object.assign(document.createElement('option'), { v
 export function initVoicePanel({ panels, speaker, getGateway }) {
   const vc = () => panels.config.voice;
   const patchVoice = (patch) => panels.patchConfig((c) => ({ ...c, voice: { ...c.voice, ...patch } }));
+  const qwenPicker = initQwenVoicePicker({ getConfig: () => panels.config, patchVoice, getGateway, onChanged: () => render() });
 
   const renderQwen = () => {
     $('#qwen-realtime-region').value=vc().qwenRegion||'beijing';
@@ -65,6 +67,8 @@ export function initVoicePanel({ panels, speaker, getGateway }) {
       voiceSel.replaceChildren(...e.voices.map(([id, label]) => opt(id, label)));
       voiceSel.value = v.voices[e.id] || e.voices[0][0];
     }
+
+    qwenPicker.render(e.id, v.voices?.['qwen-realtime'] || 'Bella', voiceSel);
 
     // 声线效果
     const fxOn = e.id !== 'browser';

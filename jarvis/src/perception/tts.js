@@ -11,7 +11,7 @@ import { QWEN_VOICES } from '../../shared/qwenRealtime.js';
 import { EDGE_VOICES } from '../../shared/edgeVoices.js';
 
 export const TTS_ENGINES = [
-  { id:'qwen-realtime',name:'百炼 Qwen3 实时语音（推荐）',keyFrom:'qwen',model:'qwen3-tts-flash-realtime',browser:true,voices:QWEN_VOICES,note:'实时合成并播放，支持萌宝、乖小妹和温柔女声；音色风格请先试听，不保证等同真实女童。与百炼识别共用对应地域的密钥。' },
+  { id:'qwen-realtime',name:'百炼 Qwen3 实时语音（推荐）',keyFrom:'qwen',model:'qwen3-tts-flash-realtime',browser:true,voices:QWEN_VOICES,note:'实时合成并播放，支持完整官方实时音色目录；选择声音后可试听。与百炼识别共用对应地域的密钥。' },
   {
     id: 'edge', name: '免费在线声音（Edge 朗读，免密钥）', free: true, browser: false, voices: EDGE_VOICES,
     note: '和 Edge 浏览器“大声朗读”同一套声音，不用注册。这不是微软正式开放的接口，万一失效会自动改用手机自带的声音'

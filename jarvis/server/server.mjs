@@ -1,3 +1,4 @@
+import { createQwenVoiceCatalog, qwenVoiceModel } from './qwenVoices.mjs';
 import { proxyDeepseekTool } from './deepseekProxy.mjs';
 /**
  * 未央 API 网关 + 静态资源服务（Node 18+，除 Anthropic SDK 外零依赖）。
@@ -39,9 +40,9 @@ import { edgeSpeak } from './edgeTts.mjs';
 import { createWeatherProxy } from './weather.mjs';
 import { attachQwenGateway } from './qwenRealtime.mjs';
 
-const CORS_PATHS = /^\/api\/(health|local\/metrics|llm\/.+|tts\/edge)$/;
+const CORS_PATHS = /^\/api\/(health|local\/metrics|llm\/.+|tts\/edge|voice\/qwen\/voices)$/;
 /** 服务器模式里允许跨域调用的接口（手机 App、电脑版连自己的服务器） */
-const SERVER_CORS = /^\/api\/(health|server\/.+|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?)$/;
+const SERVER_CORS = /^\/api\/(health|server\/.+|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?|voice\/qwen\/voices)$/;
 export const EXTRA_UPSTREAMS = { tavily: 'https://api.tavily.com', bocha: 'https://api.bochaai.com', elevenlabs: 'https://api.elevenlabs.io', fal: 'https://queue.fal.run' };
 // 读取网页时用常见浏览器的请求头：不少网站（包括搜索引擎）会拒绝或降级陌生的客户端
 const FETCH_HEADERS = {
@@ -67,6 +68,7 @@ export function createServer({
 } = {}) {
   const subscribers = new Set();
   const weather=createWeatherProxy({qweather:()=>serverMode?.qweather?.()||null});
+  const voiceCatalog = createQwenVoiceCatalog();
   let activeChats = 0;
 
   function broadcast(event, data) {
@@ -322,6 +324,12 @@ export function createServer({
         }
         if (pathname !== '/api/health' && pathname !== '/api/server/login' && !serverMode.authorized(req)) return json(res, 401, { error: '请先登录', login: true });
         if (await serverMode.handle(req, res, pathname)) return;
+      }
+      if (pathname === '/api/voice/qwen/voices' && req.method === 'GET') {
+        if (!serverMode && !cross && !sameOriginOnly(req)) return json(res, 403, { error: '只允许本机未央页面调用' });
+        const query = new URL(req.url, 'http://localhost').searchParams;
+        if (query.has('model') && query.get('model') !== qwenVoiceModel) return json(res, 400, { error: '仅支持Qwen实时合成音色目录' });
+        return json(res, 200, await voiceCatalog({ refresh: query.get('refresh') === '1' }));
       }
       if (pathname === '/api/chat' && req.method === 'POST') return await handleChat(req, res);
       if (pathname === '/api/local/metrics' && req.method === 'GET') return json(res, 200, await collectMetrics({ tasks: { active: activeChats } }));
