@@ -45,3 +45,11 @@ it('底稿没有登记该类关系时，不编造新视图或连接', () => {
   value.plan.relations = value.plan.relations.filter((link) => link.type !== 'dataflow');
   expect(() => projectArchitecture(value, input('dataflow'))).toThrow(/没有登记/);
 });
+it('总览的紧凑资源卡片实际绘出全部节点标题和职责，不能只有空分组', () => {
+  const value = projectArchitecture(bundle(), input('overview'));
+  const svg = sceneSvg(diagramScene(layoutDiagram(value), value.design));
+  for (const entity of architectureSpec.entities.filter((item) => item.kind !== 'system')) {
+    expect(svg, entity.id + '标题').toContain(entity.title);
+    expect(svg, entity.id + '职责').toContain(entity.responsibility);
+  }
+});

@@ -31,23 +31,34 @@ export function diagramScene(model, design = {}) {
   elements.push(rect(0, 0, model.width, model.height, theme === 'gov-blue' ? colors.wash : '#ffffff', null, 0));
   if (theme === 'gov-blue') {
     elements.push(...centerText(model.title, 54, 1440, 32, colors.ink, true, text));
-    if (design.message) elements.push(...centerText(String(design.message), diagramLines(model.title, 1344 / 32, 2).length > 1 ? 128 : 88, 1440, 16, colors.accent, true, text));
+    if (design.message)
+      elements.push(...centerText(String(design.message), diagramLines(model.title, 1344 / 32, 2).length > 1 ? 128 : 88, 1440, 16, colors.accent, true, text));
   } else {
     elements.push(text(model.title, 48, 54, model.width - 96, 30, 2, colors.ink, true));
     if (design.message) elements.push(text(String(design.message), 48, [...model.title].length > 44 ? 128 : 88, model.width - 96, 14, 1, colors.muted));
   }
-  const groupNames = [...new Set(model.layers.map(layer => layer.group).filter(Boolean))];
+  const containers = new Map();
+  const groupNames = [...new Set(model.layers.map((layer) => layer.group).filter(Boolean))];
   for (const group of groupNames) {
-    const layers = model.layers.filter(layer => layer.group === group);
+    const layers = model.layers.filter((layer) => layer.group === group);
     const y = layers[0].y - 52;
     const height = layers.at(-1).y + layers.at(-1).height + 12 - y;
-    elements.push(rect(36, y, 1368, height, '#ffffff', colors.line, 24, 1.5));
-    elements.push(rect(36, y, 1368, 44, colors.light, colors.line, 20));
-    elements.push(...centerText(group, y + 29, 1440, 22, colors.ink, true, text));
+    const body = [
+      rect(36, y, 1368, height, '#ffffff', colors.line, 24, 1.5),
+      rect(36, y, 1368, 44, colors.light, colors.line, 20),
+      ...centerText(group, y + 29, 1440, 22, colors.ink, true, text)
+    ];
+    if (model.semanticRouting) {
+      const container = { type: 'group', containerId: '平台 ' + group, children: body };
+      containers.set(group, container);
+      elements.push(container);
+    } else elements.push(...body);
   }
   for (const layer of model.layers) {
     if (model.structured) {
-      elements.push({ type: 'group', layer: layer.title, children: sectionElements(layer, colors, { rect, text }) });
+      const section = { type: 'group', layer: layer.title, children: sectionElements(layer, colors, { rect, text }) };
+      if (model.semanticRouting && layer.group) containers.get(layer.group).children.push(section);
+      else elements.push(section);
       continue;
     }
     const children = [
@@ -69,7 +80,12 @@ export function diagramScene(model, design = {}) {
     if (caption) children.push(text(caption, 72, layer.y + 62 + (headingLines - 1) * 25.2, 150, 13, 2, colors.muted));
     for (const node of layer.nodes) {
       if (isDiagramCard(node)) {
-        children.push({ type: 'group', nodeId: node.id, children: cardElements(node, colors, { rect, text }) });
+        children.push({
+          type: 'group',
+          nodeId: node.id,
+          bounds: { x: node.x, y: node.y, width: node.width, height: node.height },
+          children: cardElements(node, colors, { rect, text })
+        });
         continue;
       }
       const nodeChildren = [rect(node.x, node.y, node.width, node.height, layer.emphasis ? colors.accent : '#ffffff', null)];
@@ -86,24 +102,62 @@ export function diagramScene(model, design = {}) {
             layer.emphasis ? colors.light : colors.muted
           )
         );
-      children.push({ type: 'group', nodeId: node.id, children: nodeChildren });
+      children.push({ type: 'group', nodeId: node.id, bounds: { x: node.x, y: node.y, width: node.width, height: node.height }, children: nodeChildren });
     }
     elements.push({ type: 'group', layer: layer.title, children });
   }
   for (const edge of diagramRoutes(model)) {
-    const from = model.nodes.find(node => node.id === edge.from);
-    const stroke = edge.type ? (model.monochrome ? colors.accent : {supports:'#6683a4',dataflow:'#00856b',workflow:'#087fca',feedback:'#bd6200'}[edge.type]) : edge.label ? DIAGRAM_ACCENTS[from.accent] || colors.accent : '#8291ad';
-    elements.push({ type: 'path', points: edge.points, from: edge.from, to: edge.to, stroke, strokeWidth: edge.label ? 3 : 1.6, arrow: true, ...(edge.type && {relationType:edge.type,meaning:edge.meaning,relationId:edge.relationId,...(edge.type==='supports'?{dash:'dash'}:edge.type==='feedback'?{dash:'dot'}:{})}) });
-    if (edge.labelPosition) elements.push(text(edge.label, edge.labelPosition.x, edge.labelPosition.y, edge.labelPosition.width, 12, edge.labelPosition.maxLines||1, stroke, true));
+    const from = model.nodes.find((node) => node.id === edge.from);
+    const stroke = edge.type
+      ? model.monochrome
+        ? colors.accent
+        : { supports: '#6683a4', dataflow: '#00856b', workflow: '#087fca', feedback: '#bd6200' }[edge.type]
+      : edge.label
+        ? DIAGRAM_ACCENTS[from.accent] || colors.accent
+        : '#8291ad';
+    elements.push({
+      type: 'path',
+      points: edge.points,
+      from: edge.from,
+      to: edge.to,
+      stroke,
+      strokeWidth: edge.label ? 3 : 1.6,
+      arrow: true,
+      ...(edge.type && {
+        relationType: edge.type,
+        meaning: edge.meaning,
+        relationId: edge.relationId,
+        ...(edge.type === 'supports' ? { dash: 'dash' } : edge.type === 'feedback' ? { dash: 'dot' } : {})
+      })
+    });
+    if (edge.labelPosition)
+      elements.push(text(edge.label, edge.labelPosition.x, edge.labelPosition.y, edge.labelPosition.width, 12, edge.labelPosition.maxLines || 1, stroke, true));
     else if (edge.label) {
-      const left = Math.min(...edge.points.map(point => point.x));
+      const left = Math.min(...edge.points.map((point) => point.x));
       const width = Math.abs(edge.points[1].x - edge.points[0].x);
       elements.push(text(edge.label, left + 6, edge.points[0].y - 36, width - 12, 12, 2, stroke, true));
     }
   }
   if (model.semanticRouting) {
-    const notes={overview:'总览：容器或编号表示归属；文字说明支撑；箭头表示业务主链；数据传输见数据流视图',workflow:'业务闭环视图：实线为业务推进，点线为已登记反馈；不表示数据传输或支撑依赖',dataflow:'数据流视图：箭头只表示已登记的数据传输；业务过程与支撑依赖见其他视图'};
-    elements.push(text(notes[model.architectureView] || (model.monochrome?'业务/数据流为实线，支撑为虚线，反馈为点线；具体关系见底稿表；所属用容器或系统编号表达':'关系类型：蓝色业务流 · 绿色数据流 · 灰蓝虚线支撑 · 橙色点线反馈；所属用容器或系统编号表达'),48,model.height-18,1344,12,1,colors.muted));
+    const notes = {
+      overview: '总览：容器或编号表示归属；文字说明支撑；箭头表示业务主链；数据传输见数据流视图',
+      workflow: '业务闭环视图：实线为业务推进，点线为已登记反馈；不表示数据传输或支撑依赖',
+      dataflow: '数据流视图：箭头只表示已登记的数据传输；业务过程与支撑依赖见其他视图'
+    };
+    elements.push(
+      text(
+        notes[model.architectureView] ||
+          (model.monochrome
+            ? '业务/数据流为实线，支撑为虚线，反馈为点线；具体关系见底稿表；所属用容器或系统编号表达'
+            : '关系类型：蓝色业务流 · 绿色数据流 · 灰蓝虚线支撑 · 橙色点线反馈；所属用容器或系统编号表达'),
+        48,
+        model.height - 18,
+        1344,
+        12,
+        1,
+        colors.muted
+      )
+    );
   }
 
   if (!model.edges.length && !model.structured) {
@@ -129,8 +183,8 @@ export function diagramScene(model, design = {}) {
     title: model.title,
     width: model.width,
     height: model.height,
-    fontFace: 'Microsoft YaHei',
-    fontFamily: 'Microsoft YaHei, Noto Sans CJK SC, sans-serif',
+    fontFace: model.semanticRouting ? 'Noto Sans CJK SC' : 'Microsoft YaHei',
+    fontFamily: model.semanticRouting ? 'Noto Sans CJK SC, Microsoft YaHei, sans-serif' : 'Microsoft YaHei, Noto Sans CJK SC, sans-serif',
     elements
   };
 }
@@ -162,8 +216,10 @@ export function validateScene(scene) {
   if (
     typeof scene.title !== 'string' ||
     scene.title.length > 160 ||
-    scene.fontFace !== 'Microsoft YaHei' ||
-    scene.fontFamily !== 'Microsoft YaHei, Noto Sans CJK SC, sans-serif'
+    !(
+      (scene.fontFace === 'Microsoft YaHei' && scene.fontFamily === 'Microsoft YaHei, Noto Sans CJK SC, sans-serif') ||
+      (scene.fontFace === 'Noto Sans CJK SC' && scene.fontFamily === 'Noto Sans CJK SC, Microsoft YaHei, sans-serif')
+    )
   )
     throw invalid('设计稿标题或字体无效');
   const color = (value) => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
@@ -171,13 +227,36 @@ export function validateScene(scene) {
   for (const item of sceneElements(scene)) {
     if (!['rect', 'text', 'path', 'group', 'icon'].includes(item.type)) throw invalid('设计稿含不支持的元素');
     if (item.type === 'group') {
+      if (
+        item.bounds &&
+        (!['x', 'y', 'width', 'height'].every((key) => Number.isFinite(item.bounds[key])) ||
+          item.bounds.x < 0 ||
+          item.bounds.y < 0 ||
+          item.bounds.width <= 0 ||
+          item.bounds.height <= 0 ||
+          item.bounds.x + item.bounds.width > scene.width ||
+          item.bounds.y + item.bounds.height > scene.height)
+      )
+        throw invalid('节点分组边界无效');
+      if (item.containerId !== undefined && (typeof item.containerId !== 'string' || item.containerId.length > 160)) throw invalid('平台分组标识无效');
       if ([item.nodeId, item.layer].some((value) => value != null && (typeof value !== 'string' || value.length > 160))) throw invalid('分组标识无效');
       continue;
     }
     if (item.type !== 'path' && !color(item.fill)) throw invalid('设计稿填色无效');
-    if (item.type === 'icon' && (++iconCount > 48 || item.assetVersion !== DIAGRAM_ICON_VERSION || !DIAGRAM_ICONS.includes(item.icon) || !Number.isFinite(item.width) || item.width < 12 || item.width > 64 || item.height !== item.width || item.fill !== '#ffffff')) throw invalid('图标需为受控素材、12～64px正方形，最多48个');
+    if (
+      item.type === 'icon' &&
+      (++iconCount > 48 ||
+        item.assetVersion !== DIAGRAM_ICON_VERSION ||
+        !DIAGRAM_ICONS.includes(item.icon) ||
+        !Number.isFinite(item.width) ||
+        item.width < 12 ||
+        item.width > 64 ||
+        item.height !== item.width ||
+        item.fill !== '#ffffff')
+    )
+      throw invalid('图标需为受控素材、12～64px正方形，最多48个');
     if (item.stroke != null && !color(item.stroke)) throw invalid('设计稿描边无效');
-    if (item.dash !== undefined && !['dash','dot'].includes(item.dash)) throw invalid('设计稿线型无效');
+    if (item.dash !== undefined && !['dash', 'dot'].includes(item.dash)) throw invalid('设计稿线型无效');
     if (
       item.type === 'rect' &&
       (![item.width, item.height, item.radius, item.strokeWidth].every(Number.isFinite) ||

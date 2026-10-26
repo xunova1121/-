@@ -44,7 +44,8 @@ function sideHeight(layer) {
 /** 新组合层独立计算；旧主题的普通卡片继续走原布局，避免旧稿被统一重排。 */
 export function layoutSection(layer, y, edges, govBlue) {
   const kind = layer.kind;
-  if(layer.semanticRouting && kind==='cards' && layer.role!=='application') for(const node of layer.nodes) node.compactSummary=!node.bullets&&!node.badge;
+  if (layer.semanticRouting && kind === 'cards' && layer.role !== 'application')
+    for (const node of layer.nodes) node.compactSummary = !node.bullets && !node.badge;
   layer.y = y;
   layer.compact = kind === 'columns' && layer.nodes.every((node) => !node.subtitle && !node.detail);
   layer.sideHeading = Boolean(layer.group || kind === 'grid' || kind === 'band' || layer.compact);
@@ -129,13 +130,16 @@ export function sectionElements(layer, colors, { rect, text }) {
   for (const node of layer.nodes) {
     const parts = [];
     if (layer.kind === 'cards' && isDiagramCard(node) && !node.compactSummary) parts.push(...cardElements(node, colors, { rect, text }));
-    if (layer.kind === 'band') parts.push(text([node.title, node.detail].filter(Boolean).join(' · '), node.x + BAND_PAD, node.y + 29, node.width - BAND_PAD * 2, 15, 2, '#ffffff', true));
+    if (layer.kind === 'band')
+      parts.push(
+        text([node.title, node.detail].filter(Boolean).join(' · '), node.x + BAND_PAD, node.y + 29, node.width - BAND_PAD * 2, 15, 2, '#ffffff', true)
+      );
     if (layer.kind === 'grid') {
       parts.push(rect(node.x, node.y, node.width, node.height, colors.light, colors.line, 4));
       const lineCount = diagramLines(node.title, (node.width - 20) / 14, 2).length;
       parts.push(...centerText(node.title, node.y + (lineCount === 1 ? 27 : 18), node.width, 14, colors.ink, true, text, { left: node.x, inset: 10 }));
     }
-    if (layer.kind === 'columns' || (layer.kind === 'cards' && !isDiagramCard(node))) {
+    if (layer.kind === 'columns' || (layer.kind === 'cards' && (!isDiagramCard(node) || node.compactSummary))) {
       const metrics = columnMetrics(node, node.width, layer.compact);
       const accent = DIAGRAM_ACCENTS[node.accent] || colors.accent;
       if (!layer.compact)
@@ -178,7 +182,7 @@ export function sectionElements(layer, colors, { rect, text }) {
       if (node.subtitle) parts.push(text(node.subtitle, node.x + 18, node.y + metrics.subtitleY, node.width - 36, 14, 2, accent, true));
       if (node.detail) parts.push(text(node.detail, node.x + 18, node.y + metrics.detailY, node.width - 36, 13, 3, colors.muted));
     }
-    children.push({ type: 'group', nodeId: node.id, children: parts });
+    children.push({ type: 'group', nodeId: node.id, bounds: { x: node.x, y: node.y, width: node.width, height: node.height }, children: parts });
   }
   return children;
 }

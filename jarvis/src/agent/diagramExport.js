@@ -3,6 +3,8 @@ import { sceneSvg } from './diagramSceneSvg.js';
 import { validateScene } from './diagramScene.js';
 import { validateSvg } from './svgPreview.js';
 import { reviewDiagram } from './diagramReview.js';
+import { inspectNativeDiagram } from './diagramPptxStructure.js';
+import { sceneElements } from './diagramScene.js';
 import { makeDiagramPptx } from './diagramPptx.js';
 import { makeDiagramPdf } from './diagramPdf.js';
 import { throwControl } from '../core/networkRequest.js';
@@ -63,7 +65,14 @@ export async function deliverDiagram(ctx, { scene, svg, path, formats, pptxMode 
     const hash = await diagramDigest(blob);
     if ((await diagramDigest(await workspace.readBlob(result.path))) !== hash)
       throw Object.assign(new Error('图形产物读回不一致'), { code: 'DIAGRAM_READBACK', kind: 'api' });
-    const record = { path: result.path, format, hash, designHash, consistency };
+    const record = {
+      path: result.path,
+      format,
+      hash,
+      designHash,
+      consistency,
+      ...(format === 'pptx' && { editability: consistency === 'render_compared' ? 'editable' : 'display' })
+    };
     artifacts.push(record);
     ctx.onFileChanged?.(result.path);
     await checkpoint?.({
@@ -97,16 +106,17 @@ export async function deliverDiagram(ctx, { scene, svg, path, formats, pptxMode 
       errors: 0
     }
   });
-  if (reusePreview && (
-    reusePreview.sourceHash !== await diagramDigest(svg) ||
-    (reusePreview.designHash && reusePreview.designHash !== designHash) ||
-    (reusePreview.previewHash && reusePreview.previewHash !== await diagramDigest(await workspace.readBlob(reusePreview.previewPath)))
-  ))
+  if (
+    reusePreview &&
+    (reusePreview.sourceHash !== (await diagramDigest(svg)) ||
+      (reusePreview.designHash && reusePreview.designHash !== designHash) ||
+      (reusePreview.previewHash && reusePreview.previewHash !== (await diagramDigest(await workspace.readBlob(reusePreview.previewPath)))))
+  )
     throw Object.assign(new Error('候选预览与设计稿或PNG摘要不符，禁止导出'), { code: 'DIAGRAM_PREVIEW_CHANGED', kind: 'input' });
   if (reusePreview?.designHash && reusePreview.render === 'passed' && reusePreview.visual !== 'failed') {
     const selectedPng = await workspace.readBlob(reusePreview.previewPath);
     const delivered = await workspace.write(base + '-预览.png', selectedPng);
-    if (await diagramDigest(await workspace.readBlob(delivered.path)) !== reusePreview.previewHash)
+    if ((await diagramDigest(await workspace.readBlob(delivered.path))) !== reusePreview.previewHash)
       throw Object.assign(new Error('选中预览复制后读回不一致'), { code: 'DIAGRAM_READBACK', kind: 'api' });
     reusePreview = { ...reusePreview, previewPath: delivered.path };
     ctx.onFileChanged?.(delivered.path);
@@ -127,16 +137,28 @@ export async function deliverDiagram(ctx, { scene, svg, path, formats, pptxMode 
   const errors = [];
   let editable = null;
   for (const format of formats.filter((format) => ['pdf', 'pptx'].includes(format))) {
+    let currentFormat = format;
     try {
       progress?.('正在从同一设计稿导出' + format.toUpperCase() + '…');
       const blob = format === 'pdf' ? await makeDiagramPdf(frame, png) : await makeDiagramPptx(frame, { png });
-      await save(base + '.' + format, blob, format, 'shared_render');
+      await save(base + (format === 'pptx' && scene?.architecture ? '-展示' : '') + '.' + format, blob, format, 'shared_render');
       if (format === 'pptx' && pptxMode === 'editable') {
+        currentFormat = 'pptx-editable';
         if (!scene) throw Object.assign(new Error('旧SVG没有结构化设计稿，只能提供一致的展示PPT'), { code: 'DIAGRAM_EDITABLE_SOURCE', kind: 'capability' });
         const native = await makeDiagramPptx(scene, { editable: true });
         const held = await workspace.write('文档检查/' + base.split('/').at(-1) + '-可编辑.pptx', native);
         editable = { state: 'not_checked', note: '未提供真实PPT渲染对照环境，可编辑版未交付' };
-        if (ctx.compareDiagramPpt) editable = await ctx.compareDiagramPpt(native, png, { signal });
+        const structure = await inspectNativeDiagram(native);
+        const elements = sceneElements(scene);
+        const expectedTexts = elements
+          .filter((item) => item.type === 'text')
+          .reduce((sum, item) => sum + item.lines.filter((line) => line.text.trim()).length, 0);
+        const expectedGroups = elements.filter((item) => item.type === 'group' && item.nodeId).length;
+        const expectedAnchors = elements.filter((item) => item.type === 'path' && item.from && item.to).length * 2;
+        if (structure.textBoxes < expectedTexts || structure.nodeGroups < expectedGroups || structure.anchoredEnds < expectedAnchors)
+          throw Object.assign(new Error('原生PPT缺少可编辑文字、节点分组或连接端点'), { code: 'DIAGRAM_EDITABLE_STRUCTURE', kind: 'api' });
+        if (ctx.compareDiagramPpt) editable = { ...(await ctx.compareDiagramPpt(native, png, { signal })), structure };
+        else editable.structure = structure;
         if (editable.passed) await save(base + '-可编辑.pptx', native, 'pptx', 'render_compared');
         else
           errors.push({
@@ -147,7 +169,9 @@ export async function deliverDiagram(ctx, { scene, svg, path, formats, pptxMode 
       }
     } catch (error) {
       throwControl(error, signal);
-      errors.push({ format, code: error.code || error.name, message: String(error.message).slice(0, 200) });
+      if (currentFormat === 'pptx-editable')
+        editable = { passed: false, state: 'structure_failed', code: error.code || error.name, note: '原生结构或生成未通过，展示版另行保留，不能冒充可编辑' };
+      errors.push({ format: currentFormat, code: error.code || error.name, message: String(error.message).slice(0, 200) });
     }
   }
   const manifest = {
@@ -158,6 +182,7 @@ export async function deliverDiagram(ctx, { scene, svg, path, formats, pptxMode 
     previewHash,
     artifacts,
     editable,
+    primaryEditablePath: artifacts.find((item) => item.editability === 'editable')?.path || null,
     errors,
     visual: preview.visual,
     note: '共享渲染表示画面来自同一PNG，不等于业务内容已核实；可编辑PPT必须另经渲染比较'
@@ -188,11 +213,11 @@ export function createExportDiagramTool(ctx) {
       const isScene = /\.diagram\.json$/i.test(sourcePath);
       const scene = isScene ? validateScene(JSON.parse(await source.text())) : null;
       if (scene?.architecture) {
-        const {architecture,...body}=scene;
-        if (architecture.sceneHash !== await diagramDigest(JSON.stringify(body)))
-          throw Object.assign(new Error('架构图已修改，原业务审查不再适用，请从底稿重新生成'),{code:'ARCHITECTURE_SCENE_CHANGED',kind:'input'});
-        if (architecture.draft && formats.some(format=>['pptx','pdf'].includes(format)))
-          throw Object.assign(new Error('逻辑草图不能冒充正式文档交付，请先完成底稿审查'),{code:'ARCHITECTURE_DRAFT_ONLY',kind:'input'});
+        const { architecture, ...body } = scene;
+        if (architecture.sceneHash !== (await diagramDigest(JSON.stringify(body))))
+          throw Object.assign(new Error('架构图已修改，原业务审查不再适用，请从底稿重新生成'), { code: 'ARCHITECTURE_SCENE_CHANGED', kind: 'input' });
+        if (architecture.draft && formats.some((format) => ['pptx', 'pdf'].includes(format)))
+          throw Object.assign(new Error('逻辑草图不能冒充正式文档交付，请先完成底稿审查'), { code: 'ARCHITECTURE_DRAFT_ONLY', kind: 'input' });
       }
       const svg = scene ? sceneSvg(scene) : await source.text();
       const designHash = await diagramDigest(scene ? JSON.stringify(scene) : svg);

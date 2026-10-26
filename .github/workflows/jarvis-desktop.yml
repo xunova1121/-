@@ -196,11 +196,11 @@ jobs:
         run: node e2e/sandbox-isolation.mjs
       - name: 安装Office真实渲染环境
         # apt 源偶尔卡住不动（#248、#253、#254 都卡在这一步十几分钟）：每次最多等 6 分钟，卡住就重来，最多三次；
-        # 中文字体用文泉驿微米黑（几 MB），不用 60 多 MB 的 Noto CJK——只用来验证转 PDF，不影响 App
+        # 保留文泉驿旧稿字体，同时安装新架构稿使用的 Noto CJK，保证源图和原生PPT采用同一字体
         timeout-minutes: 20
         run: |
           for i in 1 2 3; do
-            if timeout 360 sh -c 'sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress libreoffice-calc fonts-wqy-microhei xdotool poppler-utils'; then exit 0; fi
+            if timeout 360 sh -c 'sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress libreoffice-calc fonts-wqy-microhei fonts-noto-cjk xdotool poppler-utils'; then exit 0; fi
             echo "第 $i 次安装没完成，重试"
           done
           exit 1
@@ -237,6 +237,9 @@ jobs:
           node e2e/diagram-cards.mjs "$RUNNER_TEMP/jarvis-e2e/cards"
           node e2e/diagram-platform.mjs "$RUNNER_TEMP/jarvis-e2e/platform"
           node e2e/diagram-candidates.mjs "$RUNNER_TEMP/jarvis-e2e/candidates"
+          node e2e/architecture-editable.mjs "$RUNNER_TEMP/jarvis-e2e/architecture"
+          ARCHITECTURE_VIEW=workflow node e2e/architecture-logic.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-workflow"
+          ARCHITECTURE_VIEW=dataflow node e2e/architecture-logic.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-dataflow"
           node e2e/workspace-management.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/image-followup.mjs
           node e2e/settings-layout.mjs "$RUNNER_TEMP/jarvis-e2e"
@@ -301,8 +304,9 @@ jobs:
           make_latest: true
           files: dist/*
           body: |
-            ## 本版更新 · 架构图同稿多格式
-            - 架构图以同一设计稿保存布局、逐行文字、配色和连线；SVG、PNG、PDF、PPT统一导出，不再让PPT工具另画一版。
+            ## 本版更新 · 架构逻辑与可编辑交付
+            - 架构图先整理业务底稿，区分应用、共用能力、数据、接入和基础设施，核对系统归属与关系；总览、业务闭环和数据流使用同一底稿。
+            - 原生PPT保留文字、节点分组与连接锚点；通过实际Office渲染对照后交付。缺环境、审查失败或对照超线时如实拦截，不以展示版冒充可编辑版。
             - 默认展示PPT和图片版PDF使用同一张实际渲染PNG；展示PPT不是原生可编辑图形。已有设计稿可继续换格式，摘要匹配时复用预览。
             - 原生可编辑PPT须经真实Office渲染对照；环境缺失或超出差异阈值时只保留待检查文件，不冒充一致。
             - 提供沉静蓝、青绿、石墨主题及主结论文字，保留原节点、材料核对、图片格式检查、用户停止和预算保护。

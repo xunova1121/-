@@ -14,7 +14,13 @@ export function spaceDiagram(scene, factor = 1.12) {
   const result = structuredClone(scene);
   result.height = Math.ceil(result.height * factor);
   for (const item of sceneElements(result)) {
-    if (item.type === 'group') continue;
+    if (item.type === 'group') {
+      if (item.bounds) {
+        item.bounds.y *= factor;
+        item.bounds.height *= factor;
+      }
+      continue;
+    }
     if (Number.isFinite(item.y)) item.y *= factor;
     if (item.type === 'rect') item.height *= factor;
     for (const point of item.points || item.lines || []) point.y *= factor;
