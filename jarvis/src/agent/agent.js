@@ -1,3 +1,4 @@
+import { DIAGRAM_PLANNING } from './diagramPlanning.js';
 import { answerWorkHistory } from './workHistoryAnswer.js';
 import { workHistoryBlock } from './workLedger.js';
 import { safeNewsPartial, newsCandidateLinks } from './newsDelivery.js';
@@ -221,7 +222,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   ctx.dynamic = (ctx.dynamic || '') + await workHistoryBlock(requirementText, sessionId, { signal });
   const convo = [...history.map((m) => ({ ...m })), { role: 'user', content: userText, ...(images.length && { images }) }];
   if (images.length || /OCR|读数|数值|重新看|看错|识图|截图/i.test(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n图片核对：用户纠正读数或要求OCR时，先用inspect_image读取工作区原图（需要时指定region），不要复述旧识别结果。成功回执只能证明本次执行，不能证明数字正确；来源冲突明确报告。没有原图或能力时说明缺失，不声称已重新识别。';
-  if (/架构图|流程图|关系图|原图|旧图|先前.*图|SVG|画图|改图|生成图片/i.test(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n图形任务：先明确读者、主结论及主次关系，再选主题和结构。分层架构一律create_diagram生成同一.diagram.json设计稿，SVG/PNG/PDF/PPT共用坐标与换行；换格式用export_diagram，不让普通PPT工具重新画。多页汇报里插入架构图也先生成同稿图片再引用。PPT展示版是同图，不冒充可编辑；原生可编辑版须实际渲染对比通过。Image2只做创意图片/视觉素材，不承担精确文字连线。已有图片修改必须传真实原图referencePaths。用户说先前那张时核对确切路径版本，不凭名称或时间替换；多候选无法区分需简短追问。SVG可inspect_image，转PNG可render_diagram。不把展示当验收、源图改了旧验收失效，失败只修指定问题再核。';
+  if (/架构图|流程图|关系图|原图|旧图|先前.*图|SVG|画图|改图|生成图片/i.test(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n' + DIAGRAM_PLANNING + '\n图形任务：先明确读者、主结论及主次关系，再选主题和结构。分层架构一律create_diagram生成同一.diagram.json设计稿，SVG/PNG/PDF/PPT共用坐标与换行；换格式用export_diagram，不让普通PPT工具重新画。多页汇报里插入架构图也先生成同稿图片再引用。PPT展示版是同图，不冒充可编辑；原生可编辑版须实际渲染对比通过。Image2只做创意图片/视觉素材，不承担精确文字连线。已有图片修改必须传真实原图referencePaths。用户说先前那张时核对确切路径版本，不凭名称或时间替换；多候选无法区分需简短追问。SVG可inspect_image，转PNG可render_diagram。不把展示当验收、源图改了旧验收失效，失败只修指定问题再核。';
   // 当前模型看不了图：图片先交给看图模型写成文字（见 imageSight.js）
   const see = createImageSight({ model, describe: describeImages, label: visionLabel, emit, readText: readImageText, onEvidence: review.noteVisual });
   for (const m of convo) await see(m, { hint: requirementText, signal, ocr: m === convo.at(-1) });
