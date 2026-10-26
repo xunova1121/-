@@ -191,3 +191,12 @@ it('服务器解码器之前拒绝未知格式和带实体声明的伪图片', a
   await expect(cropOnServer(new Blob(['not-an-image']), region)).rejects.toMatchObject({ code: 'IMAGE_FORMAT' });
   await expect(cropOnServer(new Blob(['<!DOCTYPE svg>' + SVG]), region)).rejects.toMatchObject({ code: 'SVG_UNSAFE' });
 });
+
+it('模型画的海报 / 信息卡 SVG：阴影滤镜、蒙版这类静态效果放行；外部资源、脚本、样式表和行内 style 照样拦，报错提醒不要改原文件', async () => {
+    const poster = '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800"><defs><filter id="s"><feDropShadow dx="0" dy="4" stdDeviation="6" flood-opacity="0.3"/></filter></defs><rect width="600" height="800" fill="#0b2545"/><g filter="url(#s)"><rect x="40" y="120" width="520" height="160" rx="16" fill="#fff" opacity="0.95"/></g><text x="300" y="80" text-anchor="middle" font-size="36" fill="#fff">今日新闻速览</text></svg>';
+    expect(validateSvg(poster)).toMatchObject({ width: 900, height: 1200 });
+    expect(() => validateSvg(poster.replace('<defs>', '<defs><style>rect{fill:red}</style>'))).toThrow(/不要为了转换修改原文件/);
+    expect(() => validateSvg(poster.replace('opacity="0.95"', 'fill="url(https://x.example/a.png)"'))).toThrow(/外部资源/);
+    expect(() => validateSvg(poster.replace('opacity="0.95"', 'style="opacity:0.95"'))).toThrow(/直接写成属性/);
+    expect(() => validateSvg(poster.replace('<rect width', '<script>alert(1)</script><rect width'))).toThrow();
+  });

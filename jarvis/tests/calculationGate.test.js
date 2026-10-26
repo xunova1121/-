@@ -69,3 +69,13 @@ describe('关键计算先核验再交付', () => {
     expect(r.text).toContain('15195.9');
   });
 });
+
+describe('贴进来的长文不当成要算数', () => {
+  it('交接记录里顺带有“重新计算摘要”“1624项”“0.78%”：不要求数值校验；长文开头就请你算的照旧要校验（用户 2026-10-26 遇到回答末尾多出“关键数值尚未完成工具校验”）', () => {
+    const pasted = `# 给 AI 编程助手的说明\n${'1. 先读约定文档，再读交接记录。\n'.repeat(30)}最终全量179文件1624项全部通过；源稿重新计算摘要与实际交付相符；展示PPT通道差0.7816%、PDF0.5441%通过。`;
+    expect(pasted.length).toBeGreaterThan(600);
+    expect(taskContract(pasted).calculation).toBe(false);
+    const ask = `帮我计算这份账单的合计金额：\n${'办公用品 120元，打印纸 35元\n'.repeat(30)}`;
+    expect(taskContract(ask).calculation).toBe(true);
+  });
+});

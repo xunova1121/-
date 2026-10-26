@@ -2,19 +2,25 @@ import { throwControl } from '../core/networkRequest.js';
 
 const fail = (text, code = 'SVG_INPUT') => Object.assign(new Error(text), { code, kind: 'input' });
 const tags = new Set(
-  'svg g defs marker path rect text tspan line polyline polygon circle ellipse title desc linearGradient radialGradient stop clipPath'.toLowerCase().split(' ')
+  // 阴影、模糊、蒙版、图案是模型画海报 / 信息卡最常用的静态效果，不加载任何外部内容（用户 2026-10-26 的新闻速览图因阴影滤镜转不了 PNG）
+  ('svg g defs marker path rect text tspan line polyline polygon circle ellipse title desc linearGradient radialGradient stop clipPath ' +
+    'filter feGaussianBlur feOffset feFlood feComposite feMerge feMergeNode feDropShadow feBlend feColorMatrix mask pattern')
+    .toLowerCase()
+    .split(' ')
 );
+/** 转换失败时给模型的提示：不许为了转换去改用户的原文件 */
+const KEEP_ORIGINAL = '。不要为了转换修改原文件：另存一份副本再改，或改用 create_diagram / generate_image 重做';
 
 /** 只渲染自包含的静态矢量子集；不加载脚本、外部字体/图片、CSS或XML实体。 */
 export function validateSvg(svg) {
   if (typeof svg !== 'string' || new TextEncoder().encode(svg).length > 2e6) throw fail('SVG超过2MB或内容无效');
-  if (/<[^>]*(?:\\|\bstyle\s*=)/i.test(svg)) throw fail('SVG不支持CSS样式或属性转义，请使用静态绘图属性', 'SVG_UNSAFE');
+  if (/<[^>]*(?:\\|\bstyle\s*=)/i.test(svg)) throw fail('SVG不支持CSS样式或属性转义，请使用静态绘图属性（fill、opacity、font-size 等直接写成属性）' + KEEP_ORIGINAL, 'SVG_UNSAFE');
   if (
     /<!DOCTYPE|<!ENTITY|<!\[CDATA|<\?(?!xml\s)|\bxml:base\s*=|\bon\w+\s*=|(?:href|src)\s*=|(?:@import|url\s*\(\s*(?!#[\w-]+\s*\)))|&(?!(?:amp|lt|gt|quot|apos);)/i.test(
       svg
     )
   )
-    throw fail('SVG包含不支持的外部资源或活动内容', 'SVG_UNSAFE');
+    throw fail('SVG包含不支持的外部资源或活动内容' + KEEP_ORIGINAL, 'SVG_UNSAFE');
   const clean = svg
     .replace(/<\?xml[^>]*>/g, '')
     .replace(/<!--[\s\S]*?-->/g, '')
@@ -23,7 +29,7 @@ export function validateSvg(svg) {
   if (!root || !/<\/svg>\s*$/i.test(clean)) throw fail('不是完整SVG文件');
   let count = 0;
   for (const match of clean.matchAll(/<\/?([\w:-]+)\b/g)) {
-    if (++count > 10000 || !tags.has(match[1].toLowerCase())) throw fail('SVG含不支持的元素或节点过多', 'SVG_UNSAFE');
+    if (++count > 10000 || !tags.has(match[1].toLowerCase())) throw fail(`SVG含不支持的元素（${match[1]}）或节点过多${KEEP_ORIGINAL}`, 'SVG_UNSAFE');
   }
   const dimension = (key) => Number(root[1].match(new RegExp(`\\b${key}=["']([\\d.]+)(?:px)?["']`, 'i'))?.[1]);
   const view = root[1]
