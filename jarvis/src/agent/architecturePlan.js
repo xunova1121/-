@@ -71,7 +71,7 @@ export function architectureMarkdown(plan) {
   const lines = [
     '# ' + plan.title + '：业务关系底稿',
     '',
-    '业务语义：未验收。已登记需求覆盖：' + plan.coverage,
+    '业务语义：' + plan.semantic + '。已登记需求覆盖：' + plan.coverage,
     '',
     '| 对象 | 类型 | 职责 | 输入 | 输出 | 依据或假设 |',
     '|---|---|---|---|---|---|'

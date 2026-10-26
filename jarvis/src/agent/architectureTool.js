@@ -1,3 +1,5 @@
+import { reviewArchitecture } from './architectureReview.js';
+import { diagramDigest } from './diagramExport.js';
 import * as workspace from './workspace.js';
 import { ARCHITECTURE_KINDS, ARCHITECTURE_RELATIONS, makeArchitecturePlan, architectureMarkdown } from './architecturePlan.js';
 import { checkSources } from './diagramSources.js';
@@ -46,7 +48,7 @@ export function createArchitecturePlanTool(ctx) {
       },
       ['title', 'entities', 'relations', 'requirements']
     ),
-    run: async (input, { signal, checkpoint, rawRequestText, progress } = {}) => {
+    run: async (input, { signal, checkpoint, rawRequestText, progress, retrieval } = {}) => {
       throwControl(null, signal);
       progress?.('正在整理业务职责、关系及原文映射…');
       const { materials, checks } = await checkSources(input.sources || [], signal);
@@ -55,8 +57,17 @@ export function createArchitecturePlanTool(ctx) {
       const base = '文档检查/架构底稿/' + crypto.randomUUID();
       throwControl(null, signal);
       const saved = await workspace.write(base + '.architecture.json', JSON.stringify(plan));
-      const markdown = await workspace.write(base + '.md', architectureMarkdown(plan));
-      for (const path of [saved.path, markdown.path]) {
+      await checkpoint?.({ type: 'file', path: saved.path });
+      let review;
+      try {
+        progress?.('正在审查业务归属、支撑方向与数据流…');
+        review = await reviewArchitecture(ctx, plan, { signal, retrieval, materials, rawRequestText });
+      } catch (error) {
+        throw Object.assign(error, { statePath: saved.path });
+      }
+      const reviewFile = await workspace.write(base + '.review.json', JSON.stringify({ ...review, planHash: await diagramDigest(JSON.stringify(plan)) }));
+      const markdown = await workspace.write(base + '.md', architectureMarkdown({ ...plan, semantic: review.semantic }));
+      for (const path of [reviewFile.path, markdown.path]) {
         ctx.onFileChanged?.(path);
         await checkpoint?.({ type: 'file', path });
       }
@@ -67,7 +78,10 @@ export function createArchitecturePlanTool(ctx) {
         relationCount: plan.relations.length,
         requirementCount: plan.requirements.length,
         coverage: plan.coverage,
-        semantic: 'not_checked',
+        semantic: review.semantic,
+        structure: review.structure,
+        reviewPath: reviewFile.path,
+        issueCount: review.issueCount,
         note: plan.note
       });
     }
