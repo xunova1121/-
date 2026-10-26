@@ -1,3 +1,4 @@
+import { DIAGRAM_ICONS } from './diagramCards.js';
 import * as workspace from './workspace.js';
 import { parseFile } from './docs.js';
 import { DIAGRAM_PLANNING, planDiagramContent } from './diagramPlanning.js';
@@ -24,14 +25,14 @@ async function checkSources(sources, signal) {
 export function createDiagramTool(ctx) {
   return {
     name: 'create_diagram',
-    description: DIAGRAM_PLANNING + ' 架构图唯一制作入口：先明确读者、主结论、层级和主关系，形成可复用.diagram.json设计稿；SVG/PNG/PDF/PPT全部从同稿导出，不能让普通PPT工具重画。PPT默认展示版同画面，editable原生版须渲染对照。修改或换格式用export_diagram复用设计稿；总体与详细流程分开表达。',
+    description: DIAGRAM_PLANNING + ' 架构图唯一制作入口：先明确读者、主结论、层级和主关系，形成可复用.diagram.json设计稿；SVG/PNG/PDF/PPT全部从同稿导出，不能让普通PPT工具重画。PPT默认展示版同画面，editable原生版须渲染对照。修改或换格式用export_diagram复用设计稿；总体与详细流程分开表达。业务端用icon、accent(orange/blue/green)、2～5条bullets、badge；同层相邻节点流程可用edge.label(最多12字)，不能给跨层边加label。',
     input_schema: { type: 'object', properties: {
       path: { type: 'string', description: '输出路径，支持.svg/.png/.pdf/.pptx；会保留同名SVG及设计稿' }, title: { type: 'string', maxLength: 80 }, direction: { type: 'string', enum: ['bottom-up', 'top-down'] },
       formats: { type: 'array', maxItems: 4, items: { type: 'string', enum: ['svg', 'png', 'pdf', 'pptx'] } },
       pptxMode: { type: 'string', enum: ['display', 'editable'] },
       design: { type: 'object', properties: { theme: { type: 'string', enum: ['navy', 'jade', 'charcoal'] }, message: { type: 'string', maxLength: 100 }, audience: { type: 'string', maxLength: 80 } }, additionalProperties: false },
-      layers: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'object', properties: { title: { type: 'string', maxLength: 48 }, emphasis: { type: 'boolean' }, nodes: { type: 'array', minItems: 1, maxItems: 12, items: { type: 'object', properties: { id: { type: 'string', maxLength: 64 }, title: { type: 'string', maxLength: 48 }, detail: { type: 'string', maxLength: 160 } }, required: ['id', 'title'], additionalProperties: false } } }, required: ['title', 'nodes'], additionalProperties: false } },
-      edges: { type: 'array', maxItems: 100, items: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } }, required: ['from', 'to'], additionalProperties: false } },
+      layers: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'object', properties: { title: { type: 'string', maxLength: 48 }, emphasis: { type: 'boolean' }, nodes: { type: 'array', minItems: 1, maxItems: 12, items: { type: 'object', properties: { id: { type: 'string', maxLength: 64 }, title: { type: 'string', maxLength: 48 }, detail: { type: 'string', maxLength: 160 }, icon: { type: 'string', enum: DIAGRAM_ICONS }, accent: { type: 'string', enum: ['orange', 'blue', 'green'] }, badge: { type: 'string', maxLength: 28 }, bullets: { type: 'array', minItems: 2, maxItems: 5, items: { type: 'object', properties: { text: { type: 'string', maxLength: 80 }, icon: { type: 'string', enum: DIAGRAM_ICONS } }, required: ['text'], additionalProperties: false } } }, required: ['id', 'title'], additionalProperties: false } } }, required: ['title', 'nodes'], additionalProperties: false } },
+      edges: { type: 'array', maxItems: 100, items: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' }, label: { type: 'string', maxLength: 12 } }, required: ['from', 'to'], additionalProperties: false } },
       contentPlan: { type: 'object', properties: { facts: { type: 'array', maxItems: 80, items: { type: 'object', properties: { text: { type: 'string', maxLength: 160 }, source: { type: 'string', maxLength: 400 }, excerpt: { type: 'string', maxLength: 240 } }, required: ['text', 'source', 'excerpt'], additionalProperties: false } }, recommendations: { type: 'array', maxItems: 20, items: { type: 'string', maxLength: 160 } } }, additionalProperties: false },
       sources: { type: 'array', maxItems: 4, items: { type: 'object', properties: { path: { type: 'string', maxLength: 400 }, excerpt: { type: 'string', maxLength: 240 } }, required: ['path', 'excerpt'], additionalProperties: false } }
     }, required: ['path', 'title', 'layers'], additionalProperties: false },

@@ -9,7 +9,10 @@ export function diagramRoutes(model) {
     const a = { x: from.x + from.width / 2, y: from.y };
     const b = { x: to.x + to.width / 2, y: to.y };
     let points;
-    if (from.y === to.y) {
+    if (edge.label) {
+      const forward = from.x < to.x;
+      points = [{ x: forward ? from.x + from.width + 4 : from.x - 4, y: from.y + from.height / 2 }, { x: forward ? to.x - 4 : to.x + to.width + 4, y: to.y + to.height / 2 }];
+    } else if (from.y === to.y) {
       const gap = from.y - 8;
       points = [a, { x: a.x, y: gap }, { x: b.x, y: gap }, b];
     } else {

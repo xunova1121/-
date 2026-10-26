@@ -1,3 +1,4 @@
+import { ICON_PNG } from './pptIcons.js';
 import { imageData } from './imageRegion.js';
 import { sceneElements, validateScene } from './diagramScene.js';
 
@@ -22,6 +23,7 @@ export async function makeDiagramPptx(scene, { png, editable = false } = {}) {
     const color = (value) => String(value || '#ffffff').replace('#', '');
     for (const item of sceneElements(scene)) {
       if (item.type === 'group') continue;
+      if (item.type === 'icon') slide.addImage({ data: 'data:image/png;base64,' + ICON_PNG[item.icon], x: item.x * scale, y: item.y * scale, w: item.width * scale, h: item.height * scale });
       if (item.type === 'rect')
         slide.addShape(item.radius ? pptx.ShapeType.roundRect : pptx.ShapeType.rect, {
           x: item.x * scale,

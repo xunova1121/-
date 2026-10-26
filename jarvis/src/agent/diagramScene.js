@@ -1,3 +1,4 @@
+import { cardElements, isDiagramCard, DIAGRAM_ACCENTS, DIAGRAM_ICONS, DIAGRAM_ICON_VERSION } from './diagramCards.js';
 import { diagramLines } from './diagramText.js';
 import { diagramRoutes } from './diagramRoutes.js';
 
@@ -46,6 +47,10 @@ export function diagramScene(model, design = {}) {
     children.push(text(heading, 72, layer.y + 36, 150, 18, caption ? 2 : 3, colors.ink, true));
     if (caption) children.push(text(caption, 72, layer.y + 62 + (headingLines - 1) * 25.2, 150, 13, 2, colors.muted));
     for (const node of layer.nodes) {
+      if (isDiagramCard(node)) {
+        children.push({ type: 'group', nodeId: node.id, children: cardElements(node, colors, { rect, text }) });
+        continue;
+      }
       const nodeChildren = [rect(node.x, node.y, node.width, node.height, layer.emphasis ? colors.accent : '#ffffff', null)];
       nodeChildren.push(text(node.title, node.x + 18, node.y + 30, node.width - 36, 20, 2, layer.emphasis ? '#ffffff' : colors.ink, true));
       if (node.detail)
@@ -64,8 +69,16 @@ export function diagramScene(model, design = {}) {
     }
     elements.push({ type: 'group', layer: layer.title, children });
   }
-  for (const edge of diagramRoutes(model))
-    elements.push({ type: 'path', points: edge.points, from: edge.from, to: edge.to, stroke: '#8291ad', strokeWidth: 1.6, arrow: true });
+  for (const edge of diagramRoutes(model)) {
+    const from = model.nodes.find(node => node.id === edge.from);
+    const stroke = edge.label ? DIAGRAM_ACCENTS[from.accent] || colors.accent : '#8291ad';
+    elements.push({ type: 'path', points: edge.points, from: edge.from, to: edge.to, stroke, strokeWidth: edge.label ? 3 : 1.6, arrow: true });
+    if (edge.label) {
+      const left = Math.min(...edge.points.map(point => point.x));
+      const width = Math.abs(edge.points[1].x - edge.points[0].x);
+      elements.push(text(edge.label, left + 6, edge.points[0].y - 36, width - 12, 12, 2, stroke, true));
+    }
+  }
   if (!model.edges.length) {
     for (let index = 1; index < model.layers.length; index++) {
       const upper = model.layers[index - 1];
@@ -127,13 +140,15 @@ export function validateScene(scene) {
   )
     throw invalid('设计稿标题或字体无效');
   const color = (value) => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+  let iconCount = 0;
   for (const item of sceneElements(scene)) {
-    if (!['rect', 'text', 'path', 'group'].includes(item.type)) throw invalid('设计稿含不支持的元素');
+    if (!['rect', 'text', 'path', 'group', 'icon'].includes(item.type)) throw invalid('设计稿含不支持的元素');
     if (item.type === 'group') {
       if ([item.nodeId, item.layer].some((value) => value != null && (typeof value !== 'string' || value.length > 160))) throw invalid('分组标识无效');
       continue;
     }
     if (item.type !== 'path' && !color(item.fill)) throw invalid('设计稿填色无效');
+    if (item.type === 'icon' && (++iconCount > 48 || item.assetVersion !== DIAGRAM_ICON_VERSION || !DIAGRAM_ICONS.includes(item.icon) || !Number.isFinite(item.width) || item.width < 12 || item.width > 64 || item.height !== item.width || item.fill !== '#ffffff')) throw invalid('图标需为受控素材、12～64px正方形，最多48个');
     if (item.stroke != null && !color(item.stroke)) throw invalid('设计稿描边无效');
     if (
       item.type === 'rect' &&

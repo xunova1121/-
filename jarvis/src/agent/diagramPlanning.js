@@ -1,5 +1,5 @@
 /** 画前规划只整理来源与覆盖，不把模型建议提升为事实，也不调用额外模型。 */
-export const DIAGRAM_PLANNING = '总体架构图先读原始材料，按展示/用户、业务应用与闭环、平台模块和能力中心、感知/数据、终端/网络/算力云、安全保障、标准规范列内容提纲，再交create_diagram。材料中的数量、系统名、设备型号及主业务关系逐项保留，不压成一句概括；缺失层不硬凑，新增通用能力标为建议。用contentPlan.facts逐条登记关键事实及来源原文，用recommendations登记建议；事实text必须实际出现在节点标题或说明中，用户原话来源用user，文件来源用确切路径。先保证内容完整，再排版；不要为塞进一张图偷偷删数量或系统名称，超限明确拆图。';
+export const DIAGRAM_PLANNING = '总体架构图先读原始材料，按展示/用户、业务应用与闭环、平台模块和能力中心、感知/数据、终端/网络/算力云、安全保障、标准规范列内容提纲，再交create_diagram。材料中的数量、系统名、设备型号及主业务关系逐项保留，不压成一句概括；缺失层不硬凑，新增通用能力标为建议。用contentPlan.facts逐条登记关键事实及来源原文，用recommendations登记建议；事实text必须实际出现在节点标题、说明、要点或标签中，用户原话来源用user，文件来源用确切路径。先保证内容完整，再排版；不要为塞进一张图偷偷删数量或系统名称，超限明确拆图。';
 
 const invalid = (message) => Object.assign(new Error(message), { code: 'DIAGRAM_CONTENT_PLAN', kind: 'input' });
 const compact = (value) => String(value || '').replace(/\s+/g, '');
@@ -19,7 +19,7 @@ export function planDiagramContent(input, materials = [], requestText = '') {
   const recommendations = supplied.recommendations || [];
   if (!Array.isArray(facts) || facts.length > 80 || !Array.isArray(recommendations) || recommendations.length > 20)
     throw invalid('内容规划最多80条关键事实、20条建议');
-  const drawn = compact(input.layers.map(layer => layer.nodes.map(node => `${node.title}\n${node.detail || ''}`).join('\n')).join('\n'));
+  const drawn = compact(input.layers.map(layer => layer.nodes.map(node => `${node.title}\n${node.detail || ''}\n${(node.bullets || []).map(item => item.text).join('\n')}\n${node.badge || ''}`).join('\n')).join('\n'));
   const checked = facts.map(fact => {
     if (typeof fact.text !== 'string' || !fact.text.trim() || fact.text.length > 160 || typeof fact.source !== 'string' || fact.source.length > 400 || typeof fact.excerpt !== 'string' || !fact.excerpt.trim() || fact.excerpt.length > 240)
       throw invalid('每条关键事实需text、source和不超过240字的原文excerpt');
