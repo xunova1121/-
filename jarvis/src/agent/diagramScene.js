@@ -1,9 +1,11 @@
+import { sectionElements, centerText } from './diagramSections.js';
 import { cardElements, isDiagramCard, DIAGRAM_ACCENTS, DIAGRAM_ICONS, DIAGRAM_ICON_VERSION } from './diagramCards.js';
 import { diagramLines } from './diagramText.js';
 import { diagramRoutes } from './diagramRoutes.js';
 
 export const DIAGRAM_SCENE_VERSION = 1;
 const palettes = {
+  'gov-blue': { ink: '#123b69', muted: '#547393', line: '#b7d7eb', surface: '#ffffff', accent: '#087fca', wash: '#eff8ff', light: '#e7f3fc' },
   navy: { ink: '#142c49', muted: '#5b6d80', line: '#dbe4ed', surface: '#f7f9fc', accent: '#174a78', wash: '#edf3f9', light: '#e2edf6' },
   jade: { ink: '#173a38', muted: '#57716c', line: '#d9e5df', surface: '#f8faf8', accent: '#246452', wash: '#edf5ef', light: '#e4f1e9' },
   charcoal: { ink: '#292f38', muted: '#68717d', line: '#dfe3e8', surface: '#fafafa', accent: '#333f50', wash: '#eef1f5', light: '#e7ebf1' }
@@ -11,7 +13,8 @@ const palettes = {
 
 /** 绝对坐标与逐行文字只在这里生成；SVG/PPT禁止各自换行或重新排版。 */
 export function diagramScene(model, design = {}) {
-  const colors = palettes[design.theme || 'navy'];
+  const theme = design.theme || (model.structured ? 'gov-blue' : 'navy');
+  const colors = palettes[theme];
   if (!colors) throw Object.assign(new Error('不支持的图形主题'), { code: 'DIAGRAM_THEME', kind: 'input' });
   const elements = [];
   const rect = (x, y, width, height, fill, stroke, radius = 12, strokeWidth = 1) => ({ type: 'rect', x, y, width, height, fill, stroke, radius, strokeWidth });
@@ -25,10 +28,28 @@ export function diagramScene(model, design = {}) {
     bold,
     lines: diagramLines(content, width / fontSize, maxLines).map((value, index) => ({ text: value, x, y: y + index * fontSize * 1.4 }))
   });
-  elements.push(rect(0, 0, model.width, model.height, '#ffffff', null, 0));
-  elements.push(text(model.title, 48, 54, model.width - 96, 30, 2, colors.ink, true));
-  if (design.message) elements.push(text(String(design.message), 48, [...model.title].length > 44 ? 128 : 88, model.width - 96, 14, 1, colors.muted));
+  elements.push(rect(0, 0, model.width, model.height, theme === 'gov-blue' ? colors.wash : '#ffffff', null, 0));
+  if (theme === 'gov-blue') {
+    elements.push(...centerText(model.title, 54, 1440, 32, colors.ink, true, text));
+    if (design.message) elements.push(...centerText(String(design.message), diagramLines(model.title, 1344 / 32, 2).length > 1 ? 128 : 88, 1440, 16, colors.accent, true, text));
+  } else {
+    elements.push(text(model.title, 48, 54, model.width - 96, 30, 2, colors.ink, true));
+    if (design.message) elements.push(text(String(design.message), 48, [...model.title].length > 44 ? 128 : 88, model.width - 96, 14, 1, colors.muted));
+  }
+  const groupNames = [...new Set(model.layers.map(layer => layer.group).filter(Boolean))];
+  for (const group of groupNames) {
+    const layers = model.layers.filter(layer => layer.group === group);
+    const y = layers[0].y - 52;
+    const height = layers.at(-1).y + layers.at(-1).height + 12 - y;
+    elements.push(rect(36, y, 1368, height, '#ffffff', colors.line, 24, 1.5));
+    elements.push(rect(36, y, 1368, 44, colors.light, colors.line, 20));
+    elements.push(...centerText(group, y + 29, 1440, 22, colors.ink, true, text));
+  }
   for (const layer of model.layers) {
+    if (model.structured) {
+      elements.push({ type: 'group', layer: layer.title, children: sectionElements(layer, colors, { rect, text }) });
+      continue;
+    }
     const children = [
       rect(
         48,
@@ -79,7 +100,7 @@ export function diagramScene(model, design = {}) {
       elements.push(text(edge.label, left + 6, edge.points[0].y - 36, width - 12, 12, 2, stroke, true));
     }
   }
-  if (!model.edges.length) {
+  if (!model.edges.length && !model.structured) {
     for (let index = 1; index < model.layers.length; index++) {
       const upper = model.layers[index - 1];
       const lower = model.layers[index];
@@ -98,7 +119,7 @@ export function diagramScene(model, design = {}) {
   }
   return {
     version: DIAGRAM_SCENE_VERSION,
-    design: { theme: design.theme || 'navy', message: String(design.message || '').slice(0, 100), audience: String(design.audience || '').slice(0, 80) },
+    design: { theme, message: String(design.message || '').slice(0, 100), audience: String(design.audience || '').slice(0, 80) },
     title: model.title,
     width: model.width,
     height: model.height,

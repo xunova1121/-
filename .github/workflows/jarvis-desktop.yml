@@ -235,6 +235,7 @@ jobs:
           node e2e/diagram-render.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/diagram-export.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/diagram-cards.mjs "$RUNNER_TEMP/jarvis-e2e/cards"
+          node e2e/diagram-platform.mjs "$RUNNER_TEMP/jarvis-e2e/platform"
           node e2e/workspace-management.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/image-followup.mjs
           node e2e/settings-layout.mjs "$RUNNER_TEMP/jarvis-e2e"

@@ -37,23 +37,28 @@ export function cardFields(node) {
 export const isDiagramCard = (node) => Boolean(node.icon || node.accent || node.badge || node.bullets);
 
 /** 量文字与真正绘制共用同一套换行；不为压高度截断要点。 */
-export function cardMetrics(node, width) {
+export function cardMetrics(node, width, { compact = false } = {}) {
   const titleWidth = width - 44 - (node.icon ? 60 : 0);
   const titleLines = diagramLines(node.title, titleWidth / 24, 2);
-  let cursor = Math.max(76, 28 + titleLines.length * 33.6);
+  let cursor = Math.max(compact ? 84 : 76, 28 + titleLines.length * 33.6);
   const detailY = cursor + 10;
   if (node.detail) cursor = detailY + diagramLines(node.detail, (width - 44) / 15, 3).length * 21;
   const bullets = (node.bullets || []).map((bullet) => {
-    const y = cursor + 15;
-    cursor = y + Math.max(24, diagramLines(bullet.text, (width - 76) / 15, 2).length * 21 + 4);
+    const y = cursor + (compact ? 6 : 15);
+    cursor = y + Math.max(compact ? 18 : 24, diagramLines(bullet.text, (width - 76) / 15, 2).length * 21 + (compact ? 0 : 4));
     return { ...bullet, y };
   });
-  return { titleWidth, detailY, bullets, height: Math.ceil(Math.max(180, cursor + 20 + (node.badge ? 46 : 0))) };
+  return {
+    titleWidth,
+    detailY,
+    bullets,
+    height: Math.ceil(Math.max(compact ? 160 : 180, cursor + (compact ? 14 : 20) + (node.badge ? (compact ? 42 : 46) : 0)))
+  };
 }
 
 export function cardElements(node, colors, { rect, text }) {
   const accent = DIAGRAM_ACCENTS[node.accent] || colors.accent;
-  const metrics = cardMetrics(node, node.width);
+  const metrics = cardMetrics(node, node.width, { compact: node.compactLayout === true });
   const children = [rect(node.x, node.y, node.width, node.height, '#ffffff', colors.line, 16, 1.5)];
   if (node.icon) {
     children.push(rect(node.x + 20, node.y + 22, 44, 44, accent, null, 22));

@@ -19,7 +19,7 @@ export function diagramRoutes(model) {
       const upward = from.y > to.y;
       if (!upward) a.y += from.height;
       if (upward) b.y += to.height;
-      if (Math.abs(rows.indexOf(from.y) - rows.indexOf(to.y)) === 1) {
+      if (!model.structured && Math.abs(rows.indexOf(from.y) - rows.indexOf(to.y)) === 1) {
         const middle = (a.y + b.y) / 2;
         points = [a, { x: a.x, y: middle }, { x: b.x, y: middle }, b];
       } else {
