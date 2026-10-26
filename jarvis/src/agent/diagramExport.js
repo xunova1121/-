@@ -97,6 +97,20 @@ export async function deliverDiagram(ctx, { scene, svg, path, formats, pptxMode 
       errors: 0
     }
   });
+  if (reusePreview && (
+    reusePreview.sourceHash !== await diagramDigest(svg) ||
+    (reusePreview.designHash && reusePreview.designHash !== designHash) ||
+    (reusePreview.previewHash && reusePreview.previewHash !== await diagramDigest(await workspace.readBlob(reusePreview.previewPath)))
+  ))
+    throw Object.assign(new Error('候选预览与设计稿或PNG摘要不符，禁止导出'), { code: 'DIAGRAM_PREVIEW_CHANGED', kind: 'input' });
+  if (reusePreview?.designHash && reusePreview.render === 'passed' && reusePreview.visual !== 'failed') {
+    const selectedPng = await workspace.readBlob(reusePreview.previewPath);
+    const delivered = await workspace.write(base + '-预览.png', selectedPng);
+    if (await diagramDigest(await workspace.readBlob(delivered.path)) !== reusePreview.previewHash)
+      throw Object.assign(new Error('选中预览复制后读回不一致'), { code: 'DIAGRAM_READBACK', kind: 'api' });
+    reusePreview = { ...reusePreview, previewPath: delivered.path };
+    ctx.onFileChanged?.(delivered.path);
+  }
   const preview = reusePreview || (await reviewDiagram(ctx, { path: sourcePath, svg, previewPath: base + '-预览.png', signal, progress, retrieval }));
   if (preview.render !== 'passed' || preview.sourceChanged || preview.visual === 'failed')
     return {
