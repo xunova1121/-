@@ -1,5 +1,7 @@
+import { architectureRoutes } from './architectureRouting.js';
 /** 相邻行在行间通道连线；跨行只走右侧独立通道，不穿标题或中间节点。 */
 export function diagramRoutes(model) {
+  if (model.semanticRouting) return architectureRoutes(model);
   const nodes = new Map(model.nodes.map((node) => [node.id, node]));
   const rows = [...new Set(model.nodes.map((node) => node.y))].sort((a, b) => a - b);
   let outer = 0;

@@ -187,6 +187,13 @@ export function createExportDiagramTool(ctx) {
       if (source.size > 2e6) throw Object.assign(new Error('设计稿超过2MB'), { code: 'DIAGRAM_SIZE', kind: 'input' });
       const isScene = /\.diagram\.json$/i.test(sourcePath);
       const scene = isScene ? validateScene(JSON.parse(await source.text())) : null;
+      if (scene?.architecture) {
+        const {architecture,...body}=scene;
+        if (architecture.sceneHash !== await diagramDigest(JSON.stringify(body)))
+          throw Object.assign(new Error('架构图已修改，原业务审查不再适用，请从底稿重新生成'),{code:'ARCHITECTURE_SCENE_CHANGED',kind:'input'});
+        if (architecture.draft && formats.some(format=>['pptx','pdf'].includes(format)))
+          throw Object.assign(new Error('逻辑草图不能冒充正式文档交付，请先完成底稿审查'),{code:'ARCHITECTURE_DRAFT_ONLY',kind:'input'});
+      }
       const svg = scene ? sceneSvg(scene) : await source.text();
       const designHash = await diagramDigest(scene ? JSON.stringify(scene) : svg);
       let reusePreview = null;

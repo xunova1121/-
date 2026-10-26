@@ -44,6 +44,7 @@ function sideHeight(layer) {
 /** 新组合层独立计算；旧主题的普通卡片继续走原布局，避免旧稿被统一重排。 */
 export function layoutSection(layer, y, edges, govBlue) {
   const kind = layer.kind;
+  if(layer.semanticRouting && kind==='cards' && layer.role!=='application') for(const node of layer.nodes) node.compactSummary=!node.bullets&&!node.badge;
   layer.y = y;
   layer.compact = kind === 'columns' && layer.nodes.every((node) => !node.subtitle && !node.detail);
   layer.sideHeading = Boolean(layer.group || kind === 'grid' || kind === 'band' || layer.compact);
@@ -78,7 +79,7 @@ export function layoutSection(layer, y, edges, govBlue) {
     rowHeight = Math.max(
       ...layer.nodes.map((node) => {
         node.compactLayout = govBlue;
-        return isDiagramCard(node) ? cardMetrics(node, width, { compact: govBlue }).height : columnMetrics(node, width).height;
+        return isDiagramCard(node) && !node.compactSummary ? cardMetrics(node, width, { compact: govBlue }).height : columnMetrics(node, width).height;
       })
     );
   }
@@ -127,7 +128,7 @@ export function sectionElements(layer, colors, { rect, text }) {
   } else children.push(...centerText(layer.title, layer.y + 24, 1440, 17, colors.ink, true, text));
   for (const node of layer.nodes) {
     const parts = [];
-    if (layer.kind === 'cards' && isDiagramCard(node)) parts.push(...cardElements(node, colors, { rect, text }));
+    if (layer.kind === 'cards' && isDiagramCard(node) && !node.compactSummary) parts.push(...cardElements(node, colors, { rect, text }));
     if (layer.kind === 'band') parts.push(text([node.title, node.detail].filter(Boolean).join(' · '), node.x + BAND_PAD, node.y + 29, node.width - BAND_PAD * 2, 15, 2, '#ffffff', true));
     if (layer.kind === 'grid') {
       parts.push(rect(node.x, node.y, node.width, node.height, colors.light, colors.line, 4));

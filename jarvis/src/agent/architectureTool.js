@@ -16,7 +16,7 @@ export function createArchitecturePlanTool(ctx) {
     input_schema: object(
       {
         title: text(80),
-        sources: list(object({ path: text(400), excerpt: text(240) }, ['path', 'excerpt']), 4),
+        sources: list(object({ path: text(400), excerpt: text(240), sectionStart: text(300), sectionEnd: text(300) }, ['path', 'excerpt']), 4),
         entities: list(
           object(
             {
@@ -53,7 +53,8 @@ export function createArchitecturePlanTool(ctx) {
       progress?.('正在整理业务职责、关系及原文映射…');
       const { materials, checks } = await checkSources(input.sources || [], signal);
       const plan = makeArchitecturePlan(input, materials, rawRequestText);
-      plan.sources = checks;
+      plan.sources = checks.map((item, index) => ({ ...item, excerpt: input.sources[index].excerpt }));
+      plan.materialHashes = await Promise.all(materials.map(async (item) => ({ path: item.path, hash: await diagramDigest(item.text) })));
       const base = '文档检查/架构底稿/' + crypto.randomUUID();
       throwControl(null, signal);
       const saved = await workspace.write(base + '.architecture.json', JSON.stringify(plan));

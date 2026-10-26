@@ -22,7 +22,7 @@ export function layoutDiagram(input) {
       ids.add(id);
       return { id, title: short(node.title, 48, '节点标题'), detail: node.detail ? short(node.detail, 160, '节点说明') : '', ...cardFields(node), ...(node.subtitle ? { subtitle: node.subtitle.trim() } : {}) };
     });
-    return { title: short(layer.title, 48, '层级标题'), emphasis: layer.emphasis === true, ...section, nodes };
+    return { title: short(layer.title, 48, '层级标题'), emphasis: layer.emphasis === true, ...(layer.role && {role:layer.role}), ...section, nodes };
   });
   const edges = input.edges || [];
   if (!Array.isArray(edges) || edges.length > 100) throw invalid('连线最多100条');
@@ -30,14 +30,14 @@ export function layoutDiagram(input) {
   const edgeLabels = new Map();
   const cleanEdges = edges.map(edge => {
     if (!ids.has(edge.from) || !ids.has(edge.to) || edge.from === edge.to) throw invalid('连线引用了不存在的节点或自身');
-    const key = edge.from + '\u0000' + edge.to;
+    const key = edge.from + '\u0000' + edge.to + (input.semanticRouting ? '\u0000' + edge.type : '');
     if (edgeIds.has(key)) {
       if (edgeLabels.get(key) !== (edge.label ?? '')) throw invalid('重复连线标签冲突，请保留一个明确标签');
       return null;
     }
     edgeLabels.set(key, edge.label ?? '');
     edgeIds.add(key);
-    return { from: edge.from, to: edge.to, ...(edge.label !== undefined ? { label: short(edge.label, 12, '连线标签') } : {}) };
+    return { from: edge.from, to: edge.to, ...(edge.label !== undefined ? { label: short(edge.label, 12, '连线标签') } : {}), ...(input.semanticRouting && {type:edge.type,meaning:edge.meaning,relationId:edge.relationId}) };
   }).filter(Boolean);
   const hasSections = layers.some(layer => layer.kind !== 'cards' || layer.group);
   const govBlue = input.design?.theme === 'gov-blue' || (!input.design?.theme && hasSections);
@@ -57,6 +57,7 @@ export function layoutDiagram(input) {
       previousGroup = layer.group;
     }
     if (structured) {
+      if(input.semanticRouting) layer.semanticRouting=true;
       layoutSection(layer, y, cleanEdges, govBlue);
       y += layer.height + 16;
       continue;
@@ -76,8 +77,8 @@ export function layoutDiagram(input) {
   }
   const nodes = ordered.flatMap(layer => layer.nodes);
   // 跨层通道在右侧，按需扩画布，不压缩节点字号。
-  const model = { title, width: width + ((structured ? cleanEdges.some(edge => nodes.find(node => node.id === edge.from).y !== nodes.find(node => node.id === edge.to).y) : cleanEdges.length) ? 80 : 0), height: y + 12, layers: ordered, nodes, edges: cleanEdges, padding, structured };
-  for (const edge of cleanEdges.filter(item => item.label)) {
+  const model = { title, width: width + ((structured ? cleanEdges.some(edge => nodes.find(node => node.id === edge.from).y !== nodes.find(node => node.id === edge.to).y) : cleanEdges.length) ? 80 : 0), height: y + (input.semanticRouting ? 52 : 12), layers: ordered, nodes, edges: cleanEdges, padding, structured, ...(input.semanticRouting && {semanticRouting:true,architectureView:input.view||'relations'}) };
+  for (const edge of cleanEdges.filter(item => item.label && !input.semanticRouting)) {
     const layer = ordered.find(item => item.nodes.some(node => node.id === edge.from));
     const from = layer.nodes.findIndex(node => node.id === edge.from);
     const to = layer.nodes.findIndex(node => node.id === edge.to);

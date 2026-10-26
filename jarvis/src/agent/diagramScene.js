@@ -92,14 +92,20 @@ export function diagramScene(model, design = {}) {
   }
   for (const edge of diagramRoutes(model)) {
     const from = model.nodes.find(node => node.id === edge.from);
-    const stroke = edge.label ? DIAGRAM_ACCENTS[from.accent] || colors.accent : '#8291ad';
-    elements.push({ type: 'path', points: edge.points, from: edge.from, to: edge.to, stroke, strokeWidth: edge.label ? 3 : 1.6, arrow: true });
-    if (edge.label) {
+    const stroke = edge.type ? (model.monochrome ? colors.accent : {supports:'#6683a4',dataflow:'#00856b',workflow:'#087fca',feedback:'#bd6200'}[edge.type]) : edge.label ? DIAGRAM_ACCENTS[from.accent] || colors.accent : '#8291ad';
+    elements.push({ type: 'path', points: edge.points, from: edge.from, to: edge.to, stroke, strokeWidth: edge.label ? 3 : 1.6, arrow: true, ...(edge.type && {relationType:edge.type,meaning:edge.meaning,relationId:edge.relationId,...(edge.type==='supports'?{dash:'dash'}:edge.type==='feedback'?{dash:'dot'}:{})}) });
+    if (edge.labelPosition) elements.push(text(edge.label, edge.labelPosition.x, edge.labelPosition.y, edge.labelPosition.width, 12, edge.labelPosition.maxLines||1, stroke, true));
+    else if (edge.label) {
       const left = Math.min(...edge.points.map(point => point.x));
       const width = Math.abs(edge.points[1].x - edge.points[0].x);
       elements.push(text(edge.label, left + 6, edge.points[0].y - 36, width - 12, 12, 2, stroke, true));
     }
   }
+  if (model.semanticRouting) {
+    const notes={overview:'总览：容器或编号表示归属；文字说明支撑；箭头表示业务主链；数据传输见数据流视图',workflow:'业务闭环视图：实线为业务推进，点线为已登记反馈；不表示数据传输或支撑依赖',dataflow:'数据流视图：箭头只表示已登记的数据传输；业务过程与支撑依赖见其他视图'};
+    elements.push(text(notes[model.architectureView] || (model.monochrome?'业务/数据流为实线，支撑为虚线，反馈为点线；具体关系见底稿表；所属用容器或系统编号表达':'关系类型：蓝色业务流 · 绿色数据流 · 灰蓝虚线支撑 · 橙色点线反馈；所属用容器或系统编号表达'),48,model.height-18,1344,12,1,colors.muted));
+  }
+
   if (!model.edges.length && !model.structured) {
     for (let index = 1; index < model.layers.length; index++) {
       const upper = model.layers[index - 1];
@@ -171,6 +177,7 @@ export function validateScene(scene) {
     if (item.type !== 'path' && !color(item.fill)) throw invalid('设计稿填色无效');
     if (item.type === 'icon' && (++iconCount > 48 || item.assetVersion !== DIAGRAM_ICON_VERSION || !DIAGRAM_ICONS.includes(item.icon) || !Number.isFinite(item.width) || item.width < 12 || item.width > 64 || item.height !== item.width || item.fill !== '#ffffff')) throw invalid('图标需为受控素材、12～64px正方形，最多48个');
     if (item.stroke != null && !color(item.stroke)) throw invalid('设计稿描边无效');
+    if (item.dash !== undefined && !['dash','dot'].includes(item.dash)) throw invalid('设计稿线型无效');
     if (
       item.type === 'rect' &&
       (![item.width, item.height, item.radius, item.strokeWidth].every(Number.isFinite) ||

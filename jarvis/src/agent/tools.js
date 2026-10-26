@@ -102,7 +102,7 @@ export function createTools(ctx) {
     createOcrTool(ctx),
     createInspectImageTool(ctx),
     createArchitecturePlanTool(ctx),
-    createDiagramTool(ctx),
+    createDiagramTool(ctx, {requireArchitecture:true}),
     createExportDiagramTool(ctx),
     createRenderDiagramTool(ctx),
     createStockKlineTool(ctx),

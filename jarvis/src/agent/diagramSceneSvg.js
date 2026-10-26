@@ -14,7 +14,7 @@ export function sceneSvg(scene) {
     if (item.type === 'text')
       return `<text font-size="${item.fontSize}" font-weight="${item.bold ? 600 : 400}" fill="${escapeSvg(item.fill)}">${item.lines.map((line) => `<tspan x="${line.x}" y="${line.y}">${escapeSvg(line.text)}</tspan>`).join('')}</text>`;
     const route = item.points.map((point, index) => `${index ? 'L' : 'M'}${point.x},${point.y}`).join(' ');
-    return `<path d="${route}" fill="none" stroke="${escapeSvg(item.stroke)}" stroke-width="${item.strokeWidth}"${item.arrow ? ` marker-end="url(#arrow-${item.stroke.slice(1)})"` : ''}${item.from ? ` data-from="${escapeSvg(item.from)}" data-to="${escapeSvg(item.to)}"` : ''}/>`;
+    return `<path d="${route}" fill="none" stroke="${escapeSvg(item.stroke)}" stroke-width="${item.strokeWidth}"${item.dash ? ` stroke-dasharray="${item.dash==='dash'?'6 4':'2 4'}"` : ''}${item.arrow ? ` marker-end="url(#arrow-${item.stroke.slice(1)})"` : ''}${item.from ? ` data-from="${escapeSvg(item.from)}" data-to="${escapeSvg(item.to)}"` : ''}/>`;
   };
   const strokes = [...new Set(sceneElements(scene).filter(item => item.type === 'path' && item.arrow).map(item => item.stroke))];
   const markers = strokes.map(stroke => `<marker id="arrow-${stroke.slice(1)}" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="${stroke}"/></marker>`).join('');
