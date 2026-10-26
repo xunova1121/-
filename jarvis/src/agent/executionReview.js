@@ -9,7 +9,7 @@ import { answerConstraints, answerConstraintIssues, concreteSourceRequirement, s
 /** 核实文件内容的工具：同一文件验过可用后只再放行一次 */
 export const VERIFY_TOOLS = /^(?:read_file|computer_read_file|check_document)$/;
 /** 每轮仅存最多64条回执摘要，不保存正文、代码或网页。不同任务不共享。 */
-const DOC_TOOLS = /^(?:create_diagram|create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet)$/;
+const DOC_TOOLS = /^(?:create_diagram|export_diagram|create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet)$/;
 
 export function createExecutionReview(goal = '', { visual = false } = {}) {
   let request = String(goal).slice(0, 4000);
@@ -109,6 +109,8 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
       readback: data.readback,
       structure: data.structure,
       render: data.render,
+      ...(data.designHash && { designHash: String(data.designHash).slice(0, 90) }),
+      ...(data.consistency && { consistency: String(data.consistency).slice(0, 40) }),
       ...(data.visual && { visual: ['passed', 'failed'].includes(data.visual) ? data.visual : 'not_checked' }),
       ...(data.business && { business: data.business === 'source_excerpts_matched' ? data.business : 'not_checked' }),
       errors: Math.max(0, Number(data.errors) || 0),

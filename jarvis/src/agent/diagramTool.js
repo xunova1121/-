@@ -1,8 +1,8 @@
 import * as workspace from './workspace.js';
 import { parseFile } from './docs.js';
 import { layoutDiagram } from './diagramModel.js';
-import { diagramSvg } from './diagramSvg.js';
-import { reviewDiagram } from './diagramReview.js';
+import { diagramScene } from './diagramScene.js';
+import { deliverDiagram, diagramFormats } from './diagramExport.js';
 
 async function checkSources(sources, signal) {
   const checks = [];
@@ -21,32 +21,31 @@ async function checkSources(sources, signal) {
 export function createDiagramTool(ctx) {
   return {
     name: 'create_diagram',
-    description: '制作精确的可编辑分层架构图，同时尝试输出真实PNG预览和视觉审查。先整理层级与支撑关系，默认输入从底到顶、emphasis突出核心；总体图只传必要主关系，详细业务流另画，不堆所有连线。sources摘录核对不等于业务全核实。',
+    description: '架构图唯一制作入口：先明确读者、主结论、层级和主关系，形成可复用.diagram.json设计稿；SVG/PNG/PDF/PPT全部从同稿导出，不能让普通PPT工具重画。PPT默认展示版同画面，editable原生版须渲染对照。修改或换格式用export_diagram复用设计稿；总体与详细流程分开表达。',
     input_schema: { type: 'object', properties: {
-      path: { type: 'string', description: '输出.svg路径' }, title: { type: 'string', maxLength: 80 }, direction: { type: 'string', enum: ['bottom-up', 'top-down'] },
+      path: { type: 'string', description: '输出路径，支持.svg/.png/.pdf/.pptx；会保留同名SVG及设计稿' }, title: { type: 'string', maxLength: 80 }, direction: { type: 'string', enum: ['bottom-up', 'top-down'] },
+      formats: { type: 'array', maxItems: 4, items: { type: 'string', enum: ['svg', 'png', 'pdf', 'pptx'] } },
+      pptxMode: { type: 'string', enum: ['display', 'editable'] },
+      design: { type: 'object', properties: { theme: { type: 'string', enum: ['navy', 'jade', 'charcoal'] }, message: { type: 'string', maxLength: 100 }, audience: { type: 'string', maxLength: 80 } }, additionalProperties: false },
       layers: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'object', properties: { title: { type: 'string', maxLength: 48 }, emphasis: { type: 'boolean' }, nodes: { type: 'array', minItems: 1, maxItems: 12, items: { type: 'object', properties: { id: { type: 'string', maxLength: 64 }, title: { type: 'string', maxLength: 48 }, detail: { type: 'string', maxLength: 160 } }, required: ['id', 'title'], additionalProperties: false } } }, required: ['title', 'nodes'], additionalProperties: false } },
       edges: { type: 'array', maxItems: 100, items: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } }, required: ['from', 'to'], additionalProperties: false } },
       sources: { type: 'array', maxItems: 4, items: { type: 'object', properties: { path: { type: 'string', maxLength: 400 }, excerpt: { type: 'string', maxLength: 240 } }, required: ['path', 'excerpt'], additionalProperties: false } }
     }, required: ['path', 'title', 'layers'], additionalProperties: false },
-    run: async (input, { signal, checkpoint, progress, retrieval } = {}) => {
-      if (!/\.svg$/i.test(input.path)) throw Object.assign(new Error('可编辑图输出需使用.svg后缀，不冒充Office文件'), { code: 'DIAGRAM_FORMAT', kind: 'input' });
+    run: async (input, { signal, checkpoint, progress, retrieval, rawRequestText } = {}) => {
+      if (!/\.(svg|png|pdf|pptx)$/i.test(input.path)) throw Object.assign(new Error('图形输出需使用SVG/PNG/PDF/PPTX后缀'), { code: 'DIAGRAM_FORMAT', kind: 'input' });
       const model = layoutDiagram(input);
       progress?.('正在核对材料和图形结构…');
       const sources = await checkSources(input.sources || [], signal);
-      const svg = diagramSvg(model);
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-      const result = await workspace.write(input.path, svg);
-      const readback = await workspace.readText(result.path);
-      if (readback !== svg) throw Object.assign(new Error('图形写入后读回不一致'), { code: 'DIAGRAM_READBACK', kind: 'api' });
-      ctx.onFileChanged?.(result.path);
-      await checkpoint?.({ type: 'artifact_validation', path: result.path, validation: { format: 'svg', readback: 'passed', structure: 'passed', render: 'not_checked', visual: 'not_checked', business: 'not_checked', errors: 0 } });
-      const preview = await reviewDiagram(ctx, { path: result.path, svg, previewPath: result.path.replace(/\.svg$/i, '-预览.png'), signal, progress, retrieval });
+      const scene = diagramScene(model, input.design);
+      const result = await deliverDiagram(ctx, { scene, path: input.path, formats: diagramFormats(input, rawRequestText), pptxMode: input.pptxMode, signal, checkpoint, progress, retrieval });
+      const { preview } = result;
       const { render, visual } = preview;
       const business = sources.length && sources.every(source => source.matched && !source.truncated) ? 'source_excerpts_matched' : 'not_checked';
-      const validation = { format: 'svg', readback: 'passed', structure: 'passed', render, visual, business, errors: visual === 'failed' ? 1 : 0 };
-      await checkpoint?.({ type: 'artifact_validation', path: result.path, validation });
-      ctx.onPreview?.(result.path);
-      return `已生成可编辑SVG：${result.path}\n${JSON.stringify({ validation, sources, preview })}\n源文件只含原生文字、形状和连线，没有嵌入整张不可编辑图片。原文摘录匹配不等于业务内容全面核实；未做的检查须如实说明。`;
+      const validation = { format: 'svg', readback: 'passed', structure: 'passed', render, visual, business, designHash: result.designHash, errors: result.errors?.length || (visual === 'failed' ? 1 : 0) };
+      await checkpoint?.({ type: 'artifact_validation', path: result.sourcePath, validation });
+      ctx.onPreview?.(result.sourcePath);
+      return `已生成可编辑SVG：${result.sourcePath}\n${JSON.stringify({ validation, sources, ...result })}\nSVG为原生图形；展示PPT与PDF复用同一PNG，展示PPT不冒充原生可编辑版。原文摘录匹配不等于业务全面核实，未做的检查及失败格式须如实说明。`;
     }
   };
 }

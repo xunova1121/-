@@ -13,7 +13,7 @@ export function checkpointEvent(previous = {}, event, at = Date.now()) {
   } else if (event.type === 'artifact_validation') {
     const value = event.validation || {};
     const item = { path: String(event.path || '').slice(0, 400), format: String(value.format || '').slice(0, 8),
-      structure: value.structure, readback: value.readback, render: value.render, ...(value.visual && { visual: ['passed', 'failed'].includes(value.visual) ? value.visual : 'not_checked' }), ...(value.business && { business: value.business === 'source_excerpts_matched' ? value.business : 'not_checked' }), errors: Math.max(0, Number(value.errors) || 0), at };
+      structure: value.structure, readback: value.readback, render: value.render, ...(value.designHash && { designHash: String(value.designHash).slice(0,90) }), ...(value.consistency && { consistency: String(value.consistency).slice(0,40) }), ...(value.visual && { visual: ['passed', 'failed'].includes(value.visual) ? value.visual : 'not_checked' }), ...(value.business && { business: value.business === 'source_excerpts_matched' ? value.business : 'not_checked' }), errors: Math.max(0, Number(value.errors) || 0), at };
     next.artifacts = [...(previous.artifacts || []).filter(record => record.path !== item.path), item].slice(-16);
   } else if (event.type === 'tool_start') {
     next.inFlight = next.inFlight.filter(x=>x.id!==event.id);

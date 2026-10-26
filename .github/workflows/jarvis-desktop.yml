@@ -200,7 +200,7 @@ jobs:
         timeout-minutes: 20
         run: |
           for i in 1 2 3; do
-            if timeout 360 sh -c 'sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress libreoffice-calc fonts-wqy-microhei xdotool'; then exit 0; fi
+            if timeout 360 sh -c 'sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress libreoffice-calc fonts-wqy-microhei xdotool poppler-utils'; then exit 0; fi
             echo "第 $i 次安装没完成，重试"
           done
           exit 1
@@ -233,6 +233,7 @@ jobs:
           node e2e/image-inspection.mjs
           node e2e/diagram-layout.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/diagram-render.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/diagram-export.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/workspace-management.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/image-followup.mjs
           node e2e/settings-layout.mjs "$RUNNER_TEMP/jarvis-e2e"
@@ -297,13 +298,12 @@ jobs:
           make_latest: true
           files: dist/*
           body: |
-            ## 本版更新 · 图形渲染与图片模型
-            - 架构图调整层级、标题、留白和连线，保留可编辑SVG；另存真实PNG预览，不再把SVG改.jpg后缀冒充图片。
-            - 已有SVG、误标后缀的SVG可按指定路径渲染和复核；区分渲染、视觉与业务检查，未做的检查不冒充通过。
-            - GPT Image 2支持画质、格式、背景和合规自定义尺寸；本机与云端分别配置，手机入口在画图卡片的“画图参数”。服务商及型号仍由用户选择。
-            - 生成与原图编辑保留真实接口，结果下载不携带模型凭据；超时、5xx或下载失败不自动切备用重新生成。单文件无网关下载保持可用。
-            - 实际开始制图或复核后解除普通查询60秒限制，用户停止仍立即生效。
-            - 本轮未用真实付费Image2、视觉/OCR或鸿蒙/Windows真机验收；自动化通过不代表识别准确率或真实画质已验证。
+            ## 本版更新 · 架构图同稿多格式
+            - 架构图以同一设计稿保存布局、逐行文字、配色和连线；SVG、PNG、PDF、PPT统一导出，不再让PPT工具另画一版。
+            - 默认展示PPT和图片版PDF使用同一张实际渲染PNG；展示PPT不是原生可编辑图形。已有设计稿可继续换格式，摘要匹配时复用预览。
+            - 原生可编辑PPT须经真实Office渲染对照；环境缺失或超出差异阈值时只保留待检查文件，不冒充一致。
+            - 提供沉静蓝、青绿、石墨主题及主结论文字，保留原节点、材料核对、图片格式检查、用户停止和预算保护。
+            - 已通过假模型自动化与实际文件转换测试；未用用户真实付费模型、Image2或鸿蒙/Windows真机验证。当前主要支持分层架构，复杂拓扑需要专用布局。
 
             ## 更新与使用
             先在设置里“立即更新服务器”，再更新电脑和手机。仅安装APK不会替换远端服务器代码。

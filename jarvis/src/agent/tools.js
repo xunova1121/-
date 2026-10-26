@@ -41,6 +41,7 @@ import { createOcrTool } from './ocrTool.js';
 import { createDiagramTool } from './diagramTool.js';
 import { createInspectImageTool } from './inspectImage.js';
 import { createRenderDiagramTool, diagramPreview } from './diagramReview.js';
+import { createExportDiagramTool } from './diagramExport.js';
 import { assertImageExtension, imageFormat } from './imageFormat.js';
 
 const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
@@ -100,6 +101,7 @@ export function createTools(ctx) {
     createOcrTool(ctx),
     createInspectImageTool(ctx),
     createDiagramTool(ctx),
+    createExportDiagramTool(ctx),
     createRenderDiagramTool(ctx),
     createStockKlineTool(ctx),
     createSportsScoresTool(ctx),

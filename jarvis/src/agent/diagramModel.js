@@ -32,7 +32,8 @@ export function layoutDiagram(input) {
   }).filter(Boolean);
   const width = 1440;
   const padding = 48;
-  let y = 112;
+  const titleRows = Math.ceil([...title].length / 44);
+  let y = input.design?.message ? titleRows > 1 ? 160 : 128 : titleRows > 1 ? 136 : 112;
   const ordered = input.direction === 'top-down' ? layers : [...layers].reverse();
   for (const layer of ordered) {
     layer.y = y;

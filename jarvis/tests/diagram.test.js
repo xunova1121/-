@@ -34,7 +34,7 @@ it('没有渲染环境只交SVG，不伪造视觉/业务通过，不生成多余
   const changed = [];
   const events = [];
   const text = await createDiagramTool({ onFileChanged: path => changed.push(path) }).run(input, { checkpoint: event => events.push(event) });
-  expect(changed).toEqual(['架构验收.svg']);
+  expect(changed).toEqual(['架构验收.svg', '架构验收.diagram.json']);
   expect(text).not.toContain('docx');
   expect(events[0].validation).toMatchObject({ structure: 'passed', readback: 'passed', render: 'not_checked', visual: 'not_checked', business: 'not_checked' });
 });
@@ -59,5 +59,5 @@ it('参考Word材料不等于要求交Word，明确PPT交付仍保留', async ()
   expect(taskContract('按照上传/招标文件.docx画一张架构图，只需要图').formats).toEqual([]);
   expect(mediaRequirement('按照上传/招标文件.docx画一张架构图')).toMatchObject({ tool: 'create_diagram' });
   expect(taskContract('用PPT制作架构图').formats).toEqual(['pptx']);
-  expect(mediaRequirement('用PPT制作架构图')).toBeNull();
+  expect(mediaRequirement('用PPT制作架构图')).toMatchObject({ tool: 'create_diagram' });
 });

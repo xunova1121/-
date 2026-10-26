@@ -8,7 +8,7 @@ const sessions = collection('sessions');
 const INDEX = 'work-ledger-v1';
 export const WORK_RECORD_LIMIT = 4096;
 const TOOLS =
-  /^(sing_song|generate_image|generate_video|create_diagram|create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet)$/;
+  /^(sing_song|generate_image|generate_video|create_diagram|export_diagram|create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet)$/;
 const scopes = new WeakMap();
 let tail = Promise.resolve();
 let pending = 0;
@@ -69,7 +69,7 @@ export async function recordWorkAttempt({ tool, args = {}, output = '', ok, sess
           ? 'image'
           : tool === 'generate_video'
             ? 'video'
-            : tool === 'create_diagram'
+            : /^(create_diagram|export_diagram)$/.test(tool)
               ? 'diagram'
               : 'document',
     title: String(args.title || files[0]?.split('/').pop() || tool).slice(0, 160),

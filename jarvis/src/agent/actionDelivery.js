@@ -5,8 +5,8 @@ export function mediaRequirement(text = '') {
   if (/(?:不要|不用|无需|别|暂不|不必|先不).{0,8}(?:生成|制作|画|谱曲|演唱|唱)/.test(value)) return null;
   if (/^(?:解释|介绍|讨论|如何|怎么|什么|有哪些)|题设|模拟|假设|提示词|写歌词|歌词模板|制作方法|技能/i.test(value)) return null;
   if (/(?:画|生成|制作|做|重画).{0,20}(?:架构图|流程图|关系图|组织图|拓扑图)/.test(value)) {
-    // 用户明确要Office图时由文档合约验收，不能额外强制交SVG。参考附件文件名不算输出要求。
-    if (/(?:用|输出|导出|生成|制作|做成|保存为).{0,8}(?:PPT|pptx|Word|docx|Excel|xlsx)|(?:PPT|pptx|Word|docx).{0,3}(?:格式|版本)/i.test(value)) return null;
+    // Word/Excel仍走文档；PPT架构图与SVG共用设计稿。参考附件文件名不算输出要求。
+    if (/(?:用|输出|导出|生成|制作|做成|保存为).{0,8}(?:Word|docx|Excel|xlsx)|(?:Word|docx).{0,3}(?:格式|版本)/i.test(value)) return null;
     return { kind: 'diagram', tool: 'create_diagram', label: '可编辑图形' };
   }
   if (/PPT|Word|Excel/i.test(value)) return null;
@@ -17,12 +17,12 @@ export function mediaRequirement(text = '') {
 }
 
 export function mediaReceipt(toolName, ok, output = '') {
-  const kinds = { create_diagram: 'diagram', generate_image: 'image', sing_song: 'audio', generate_video: 'video' };
+  const kinds = { create_diagram: 'diagram', export_diagram: 'diagram', generate_image: 'image', sing_song: 'audio', generate_video: 'video' };
   if (!kinds[toolName]) return null;
   const text = String(output).slice(0, 8000);
   const extensions = { diagram: 'svg', image: 'png|jpe?g|webp|gif', audio: 'mp3|wav|m4a|ogg', video: 'mp4|webm|mov' };
   const files = [...text.matchAll(new RegExp(`[^\\s（），。"'<>]+\\.(?:${extensions[kinds[toolName]]})\\b`, 'gi'))].slice(0, 1).map((match) => match[0].slice(0, 400));
-  const completed = ok && files.length && /已生成|已经唱好|生成完成|成功生成|保存在|已保存/.test(text);
+  const completed = ok && files.length && /已从同一设计稿导出|已生成|已经唱好|生成完成|成功生成|保存在|已保存/.test(text);
   return { kind: kinds[toolName], state: !ok ? 'failed' : completed ? 'completed' : 'pending', files: completed ? files : [] };
 }
 

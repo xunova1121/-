@@ -17,7 +17,7 @@ export const DOCUMENT_TOOLS = new Set(['write_long_document', 'create_document',
 
 /** 常驻工具：系统提示里点名的、几乎每天都用的 */
 export const CORE = new Set([
-  'create_diagram', 'render_diagram', 'list_work_records',
+  'create_diagram', 'export_diagram', 'render_diagram', 'list_work_records',
   'write_professional_document', 'generate_task_brief',
   'verify_numbers', 'get_stock_kline', 'get_sports_scores', 'check_search_terms', 'review_task', 'execution_capabilities', 'run_project_tests', 'get_current_time', 'get_weather', 'remember', 'recall', 'core_memory_update', 'save_skill', 'use_skill',
   'web_search', 'fetch_url', 'read_evidence', 'fact_check', 'deep_research', 'kb_search', 'search_conversations', 'list_my_messages', 'read_conversation',

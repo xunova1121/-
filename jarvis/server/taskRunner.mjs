@@ -1,5 +1,6 @@
 import { editImage } from '../src/llm/imageEdit.js';
 import { renderSvg } from './svgRender.mjs';
+import { compareDiagramPpt } from './diagramCompare.mjs';
 import { cropImageRegion } from './imageRegion.mjs';
 import { qweatherConfig } from '../src/core/qweather.js';
 import { deepseekSearchOptions } from '../src/agent/deepseekSearch.js';
@@ -250,6 +251,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       imageEdit: (o) => editImage(cfg, { ...o, download: publicFetch }),
       cropImage: cropImageRegion,
       renderSvg,
+      compareDiagramPpt,
       visionLlm: sight(cfg).describeImages || null,
       ocr: ocrLine(cfg) ? (file, o) => recognizeText(cfg, file, o) : null, // 文字识别（智谱 GLM-OCR）
       videoGen: (o) => generateVideo(cfg, o),
