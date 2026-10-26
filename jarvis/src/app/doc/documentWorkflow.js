@@ -4,6 +4,7 @@ import { reviewDocument } from './contentReview.js';
 import { reviseDocument } from './targetedRevision.js';
 import { boundedText, LIMITS, workflowError } from './workflowSchema.js';
 import { documentDepth, WRITING_RULES } from './workflowPolicy.js';
+import { detectRole, roleGuide, roleKey, ROLES } from './writingRoles.js';
 import { createWorkflowStore } from './workflowStore.js';
 import { writeLongDocument } from '../../agent/longDoc.js';
 
@@ -11,6 +12,7 @@ function newState(input, execution) {
   const task = boundedText(input.task, LIMITS.task, '原始要求', true);
   const material = boundedText(input.material, LIMITS.material, '用户材料');
   const format = input.format || 'docx';
+  const role = input.role === 'internal' ? null : roleKey(input.role) || detectRole(task);
   if (!['docx', 'pdf', 'html', 'md', 'pptx', 'xlsx'].includes(format)) throw workflowError('不支持的文档格式', 'DOCUMENT_INPUT');
   const id = globalThis.crypto.randomUUID();
   const referenceTime = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' });
@@ -23,8 +25,10 @@ function newState(input, execution) {
     calls: 0,
     revisionAttempts: 0,
     timings: [],
-    input: { task, material, format, allowResearch: input.research !== false, referenceTime },
-    depth: documentDepth({ task, format, depth: input.depth }),
+    // 写作角色：调用方指定的优先，internal 表示明确要内部分析口吻；auto / 没填按原话认
+    input: { task, material, format, allowResearch: input.research !== false, referenceTime, role },
+    // 有写作角色的（给客户的方案、合同、实施方案……）走完整流程：要按角色审一遍、查推辞话术
+    depth: role && ['auto', undefined].includes(input.depth) ? 'expert' : documentDepth({ task, format, depth: input.depth }),
     business: 'not_checked',
     tokens: null
   };
@@ -153,7 +157,7 @@ function sectionOutline(state) {
 
 async function draftBySections(state, outline, ask, execution) {
   execution.progress?.(`按推演出的 ${outline.length} 个章节分头起草（同时写 3 节）…`);
-  const task = `${state.input.task}\n\n任务底稿与业务推演（写作依据，不要原样抄进正文）：${JSON.stringify(state.plan)}\n\n${WRITING_RULES}每节写深写透，先给明确建议，再用流程、数据和可验证场景支撑。`;
+  const task = `${state.input.task}\n\n任务底稿与业务推演（写作依据，不要原样抄进正文）：${JSON.stringify(state.plan)}\n\n${WRITING_RULES}每节写深写透，先给明确建议，再用流程、数据和可验证场景支撑。${roleGuide(state.input.role)}`;
   // 每节的模型调用照样计数、扣预算、可停止；单节最多 4 分钟
   const llm = ({ system, prompt }) => ask('drafting', { system, prompt }, { timeoutMs: 240000 });
   const r = await writeLongDocument({
@@ -175,7 +179,7 @@ async function draftDocument(state, ask, execution) {
   const text = await ask(
     'drafting',
     {
-      system: `你是专业文档撰稿人，先给明确建议，用流程和可验证场景支撑。${WRITING_RULES}只输出交付正文，不附底稿或内部分析。`,
+      system: `你是专业文档撰稿人${ROLES[state.input.role] ? `，这篇以${ROLES[state.input.role].name}的身份写` : ''}，先给明确建议，用流程和可验证场景支撑。${WRITING_RULES}${roleGuide(state.input.role)}只输出交付正文，不附底稿或内部分析。`,
       prompt: `格式：${state.input.format}，输出适合现有Office生成器的Markdown（Excel输出分工作表的Markdown表格，公式用=开头；PPT用##分页面，观点标题、每页简洁）。\n用户原始要求：${state.input.task}\n用户材料：${state.input.material}\n${state.plan ? '任务底稿与业务推演：' + JSON.stringify(state.plan) : '这是简单任务，直接完成，不扩成冗长报告。'}\n保持精简且足够深入，不增加未经要求的封面、声明或重复免责声明。`
     },
     { timeoutMs: 240000 }

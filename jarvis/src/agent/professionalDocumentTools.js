@@ -38,6 +38,11 @@ const properties = {
   material: str('用户原始材料，不把模型建议冒充用户事实'),
   material_files: { type: 'array', items: { type: 'string' }, maxItems: 8 },
   depth: { type: 'string', enum: ['auto', 'simple', 'expert'] },
+  role: {
+    type: 'string',
+    enum: ['auto', 'presales', 'solution', 'legal', 'implementation', 'pm', 'internal'],
+    description: '写作角色：presales 给客户汇报的售前方案、solution 给技术负责人的解决方案、legal 合同法务、implementation 实施方案、pm 项目管理、internal 内部分析评审；auto 按原话自动认'
+  },
   research: { type: 'boolean', description: '允许写作前联网调研，默认true；用户禁止联网或仅按所给材料时必须false' },
   state_file: str('文档流程目录内的恢复文件；恢复原任务，不用新要求覆盖旧底稿')
 };
