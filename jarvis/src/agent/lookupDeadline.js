@@ -18,7 +18,7 @@ export function lookupRequirement(text, history = []) {
   return [...history].reverse().find(m => m.role === 'user' && !continuation(m.content))?.content || text;
 }
 /** 这些工具是在“做东西”（画图、唱歌、写文件）：一旦调用，说明不是普通查询，解除 60 秒时限 */
-const MAKING_TOOLS = new Set(['generate_image', 'sing_song', 'create_document', 'write_file']);
+const MAKING_TOOLS = new Set(['generate_image', 'sing_song', 'create_document', 'write_file', 'create_diagram', 'render_diagram', 'inspect_image', 'read_image_text']);
 /** 普通问题一分钟没查完时，回答结尾的提示；用户回“再查”就放宽重查 */
 export const MORE_TIME_ASK = '要我再查一会儿，回“再查”就行';
 export const MORE_TIME_MS = 3 * 60_000;

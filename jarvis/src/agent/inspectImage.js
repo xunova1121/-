@@ -3,6 +3,9 @@ import { throwControl } from '../core/networkRequest.js';
 import { cropImageRegion, visualRegion, imageData } from './imageRegion.js';
 import { imageFingerprint, visualReceiptText } from './visualEvidence.js';
 import { visualFields } from './visualFields.js';
+import { imageFormat } from './imageFormat.js';
+import { diagramPreview } from './diagramReview.js';
+import { assertDiagramTarget } from './diagramTarget.js';
 
 /** 一次原图复核最多各调用视觉/OCR一次；不缓存图像或识别正文。 */
 export function createInspectImageTool(ctx) {
@@ -26,18 +29,24 @@ export function createInspectImageTool(ctx) {
       required: ['path', 'question'],
       additionalProperties: false
     },
-    run: async ({ path, question, region, readText = true }, { signal } = {}) => {
+    run: async ({ path, question, region, readText = true }, { signal, rawRequestText } = {}) => {
+      assertDiagramTarget(path, rawRequestText);
       visualRegion(region);
-      if (!/\.(png|jpe?g|webp|gif|bmp)$/i.test(path)) throw Object.assign(new Error('局部复核仅支持图片文件'), { code: 'IMAGE_INPUT', kind: 'input' });
+      if (!/\.(svg|png|jpe?g|webp|gif|bmp)$/i.test(path)) throw Object.assign(new Error('局部复核仅支持图片或SVG文件'), { code: 'IMAGE_INPUT', kind: 'input' });
       const original = await workspace.readBlob(path);
       if (original.size > 10e6) throw Object.assign(new Error('原图超过10MB，需先压缩'), { code: 'IMAGE_SIZE', kind: 'input' });
       const imageHash = await imageFingerprint(original);
       let image = original;
       let cropped = false;
       const notes = [];
+      if ((await imageFormat(original))?.ext === 'svg') {
+        image = await diagramPreview(ctx, await original.text(), { signal });
+        if ((await imageFormat(image))?.ext !== 'png') throw Object.assign(new Error('SVG未转换为真实PNG'), { code: 'SVG_RENDER_INVALID', kind: 'api' });
+        notes.push('已将指定SVG内容实际渲染为PNG后复核，源文件未修改。');
+      }
       if (region) {
         try {
-          image = await (ctx.cropImage || cropImageRegion)(original, region, { signal });
+          image = await (ctx.cropImage || cropImageRegion)(image, region, { signal });
           cropped = true;
         } catch (error) {
           throwControl(error, signal);

@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
 import { visualRegion } from '../src/agent/imageRegion.js';
+import { imageFormat } from '../src/agent/imageFormat.js';
+import { validateSvg } from '../src/agent/svgPreview.js';
 
 let active = 0;
 /** 可选系统ffmpeg，仅接受有界图片和归一化坐标；无任意参数/路径，不联网，最多并发2次。 */
@@ -8,6 +10,9 @@ export async function cropImageRegion(blob, value, { signal } = {}) {
   if (!region) return blob;
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
   if (blob.size > 10e6) throw Object.assign(new Error('图片超过10MB'), { code: 'IMAGE_SIZE', kind: 'input' });
+  const format = await imageFormat(blob);
+  if (!format) throw Object.assign(new Error('图片文件头无效，不尝试交给系统解码器'), { code: 'IMAGE_FORMAT', kind: 'input' });
+  if (format.ext === 'svg') validateSvg(await blob.text());
   if (active >= 2) throw Object.assign(new Error('图片裁剪繁忙，请稍后重试'), { code: 'IMAGE_CROP_BUSY', kind: 'api' });
   active++;
   try {

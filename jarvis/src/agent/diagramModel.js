@@ -22,27 +22,32 @@ export function layoutDiagram(input) {
   });
   const edges = input.edges || [];
   if (!Array.isArray(edges) || edges.length > 100) throw invalid('连线最多100条');
+  const edgeIds = new Set();
   const cleanEdges = edges.map(edge => {
     if (!ids.has(edge.from) || !ids.has(edge.to) || edge.from === edge.to) throw invalid('连线引用了不存在的节点或自身');
+    const key = edge.from + '\u0000' + edge.to;
+    if (edgeIds.has(key)) return null;
+    edgeIds.add(key);
     return { from: edge.from, to: edge.to };
-  });
+  }).filter(Boolean);
   const width = 1440;
-  const padding = 64;
-  let y = 128;
+  const padding = 48;
+  let y = 112;
   const ordered = input.direction === 'top-down' ? layers : [...layers].reverse();
   for (const layer of ordered) {
     layer.y = y;
     layer.rows = Math.ceil(layer.nodes.length / 4);
     const columns = Math.min(layer.nodes.length, 4);
-    const boxWidth = (width - padding * 2 - 48 - (columns - 1) * 20) / columns;
+    const boxWidth = (1128 - (columns - 1) * 16) / columns;
     const lineCount = (text, size) => Math.ceil([...text].reduce((sum, letter) => sum + (/[\u0000-\u007f]/.test(letter) ? 0.58 : 1), 0) / ((boxWidth - 36) / size));
-    const rowHeight = Math.max(80, ...layer.nodes.map(node => node.detail ? 112 + Math.min(2, lineCount(node.detail, 15) - 1) * 21 : 70 + Math.min(1, lineCount(node.title, 21) - 1) * 30));
-    layer.height = 80 + layer.rows * rowHeight + (layer.rows - 1) * 20;
-    layer.nodes.forEach((node, index) => Object.assign(node, { x: padding + 24 + (index % 4) * (boxWidth + 20), y: y + 56 + Math.floor(index / 4) * (rowHeight + 20), width: boxWidth, height: rowHeight }));
-    y += layer.height + 48;
+    const rowHeight = Math.max(76, ...layer.nodes.map(node => 28 + Math.min(2, lineCount(node.title, 20)) * 28 + (node.detail ? 12 + Math.min(3, lineCount(node.detail, 15)) * 21 : 0)));
+    layer.height = Math.max(112, 32 + layer.rows * rowHeight + (layer.rows - 1) * 24);
+    layer.nodes.forEach((node, index) => Object.assign(node, { x: 240 + (index % 4) * (boxWidth + 16), y: y + 16 + Math.floor(index / 4) * (rowHeight + 24), width: boxWidth, height: rowHeight }));
+    y += layer.height + 36;
   }
   const nodes = ordered.flatMap(layer => layer.nodes);
-  const model = { title, width, height: y + 16, layers: ordered, nodes, edges: cleanEdges };
+  // 跨层通道在右侧，按需扩画布，不压缩节点字号。
+  const model = { title, width: width + (cleanEdges.length ? 80 : 0), height: y + 12, layers: ordered, nodes, edges: cleanEdges, padding };
   validateDiagramLayout(model);
   return model;
 }

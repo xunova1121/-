@@ -288,6 +288,24 @@ try {
         mediaReadback.imageModel === 'gpt-image-2' &&
         mediaReadback.model === 'chat-model-299'
     );
+    await mobileTab('能力');
+    if (width < 721) await page.locator('details.mc-image-options').evaluate(element => { element.open = true; });
+    const savedImageOptions = page.waitForResponse(response => response.url() === base + '/api/server/config' && response.request().method() === 'PUT' && response.request().postDataJSON()?.imageOptions?.quality === 'high');
+    const imageOptionBeforeSave = await page.getByLabel('画图画质', { exact: true }).elementHandle();
+    await page.getByLabel('画图画质', { exact: true }).selectOption('high');
+    await savedImageOptions;
+    await page.waitForFunction(element => !element.isConnected, imageOptionBeforeSave);
+    await page.locator('#model-workspace .ml-tabs').getByRole('button', { name: '本机', exact: true }).click();
+    await page.waitForFunction(() => [...document.querySelectorAll('#model-workspace .ml-tabs button')].some(element => element.textContent === '本机' && element.getAttribute('aria-pressed') === 'true'));
+    if (width < 721) await page.locator('details.mc-image-options').evaluate(element => { element.open = true; });
+    await page.getByLabel('画图画质', { exact: true }).selectOption('medium');
+    await page.waitForFunction(() => JSON.parse(localStorage.getItem('jarvis.llm.v1')).imageOptions?.quality === 'medium');
+    check(`${width} 画图参数本机云端独立且不改默认模型`, JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8')).imageOptions.quality === 'high' && await page.evaluate(() => JSON.parse(localStorage.getItem('jarvis.llm.v1')).models.custom === 'local-model'));
+    await page.locator('#model-workspace .ml-tabs').getByRole('button', { name: '云服务器', exact: true }).click();
+    if (width < 721) await page.locator('details.mc-image-options').evaluate(element => { element.open = true; });
+    await page.waitForFunction(() => document.querySelector('select[aria-label="画图画质"]')?.value === 'high');
+    check(`${width} 画图参数重新读取及页面不横向溢出`, await page.locator('#panel').evaluate(element => element.scrollWidth <= element.clientWidth));
+    await page.screenshot({ path: path.join(output, `image-options-${width}.png`) });
     if (width < 721) await mobileTab('服务商');
     else await card().getByRole('button', { name: '管理全部模型 · 302 ›', exact: true }).click();
     await page.locator('#toast').waitFor({ state: 'hidden' });

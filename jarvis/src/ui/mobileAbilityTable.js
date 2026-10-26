@@ -3,6 +3,7 @@ import { ABILITIES, abilityLines, setAbility } from '../llm/abilities.js';
 import { abilityCandidates } from './abilityTable.js';
 import { providerLabel, sameLine } from '../llm/modelLibrary.js';
 import { keyedProviders } from '../llm/router.js';
+import { imagePreferences } from './imagePreferences.js';
 
 const SYMBOLS = { chat: '◌', reason: '▤', code: '⌘', vision: '▧', ocr: '文', image: '◇', embed: '▱' };
 const titleOf = (ability) => ({ reason: '深度思考与写作', code: '编程', embed: '记忆检索' })[ability] || ABILITIES[ability].name;
@@ -46,6 +47,7 @@ export function mobileAbilityTable({ cfg, workspace, node, run }) {
     const card = node('div', { className: 'mc-ability' });
     card.dataset.ability = ability;
     card.append(summary, backupButton);
+    if (ability === 'image') card.append(node('details', { className: 'mc-image-options' }, node('summary', { textContent: '画图参数' }), imagePreferences({ cfg, workspace, node, run })));
     const open = (slot, anchor) => openAbilitySheet({ cfg, workspace, node, run, ability, slot, anchor, where });
     summary.addEventListener('click', () => open('main', summary));
     backupButton.addEventListener('click', () => open('backup', backupButton));

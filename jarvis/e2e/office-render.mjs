@@ -21,3 +21,9 @@ if(!preview.available)throw new Error('五页PPT真实渲染不可用，不能�
 const pdf = await inspectRenderedPdf(preview.blob);
 if(actual.slides!==5||pdf.pages!==5)throw new Error(`五页约束失败：PPT ${actual.slides}，PDF ${pdf.pages}`);
 console.log('✓ 五页PPT经真实Office转换后仍为五页PDF');
+
+// 服务器无ffmpeg/librsvg命令时仍可复用原部署已有的Office，不只测有渲染器的主路径。
+const svg = new Blob(['<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200"><rect width="400" height="200" fill="#173f70"/><text x="20" y="80" font-size="28">图形真实渲染</text></svg>'], {type:'image/svg+xml'});
+const svgResult = await renderOffice(svg, 'svg');
+if(!svgResult.available || Buffer.from(await svgResult.blob.slice(0,8).arrayBuffer()).toString('hex')!=='89504e470d0a1a0a')throw new Error('SVG经LibreOffice真实转PNG失败');
+console.log('✓ SVG经原Office环境真实转PNG');

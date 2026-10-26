@@ -232,6 +232,7 @@ jobs:
           node e2e/qwen-voices.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/image-inspection.mjs
           node e2e/diagram-layout.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/diagram-render.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/workspace-management.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/image-followup.mjs
           node e2e/settings-layout.mjs "$RUNNER_TEMP/jarvis-e2e"
@@ -296,12 +297,13 @@ jobs:
           make_latest: true
           files: dist/*
           body: |
-            ## 本版更新 · 工作区与图像能力
-            - 工作区支持最近、项目、收藏与回收站；同名多格式文件归拢，保留原路径，支持搜索和批量整理。
-            - 历史成果统计核对实际生成回执，不再依靠摘要猜歌曲或文件名称；旧记录不完整时明确只确认至少数量。
-            - 图片复核读取原图，可用环境支持局部裁剪；区分视觉与OCR回执，冲突不冒充已核实。
-            - 新增原生SVG架构图，检查节点与文字；图片编辑实际传入原图，不支持时明确报错。
-            - 本轮未进行真实付费模型、图片编辑服务或鸿蒙/Windows真机验收；自动化测试不代表实际识别准确率。
+            ## 本版更新 · 图形渲染与图片模型
+            - 架构图调整层级、标题、留白和连线，保留可编辑SVG；另存真实PNG预览，不再把SVG改.jpg后缀冒充图片。
+            - 已有SVG、误标后缀的SVG可按指定路径渲染和复核；区分渲染、视觉与业务检查，未做的检查不冒充通过。
+            - GPT Image 2支持画质、格式、背景和合规自定义尺寸；本机与云端分别配置，手机入口在画图卡片的“画图参数”。服务商及型号仍由用户选择。
+            - 生成与原图编辑保留真实接口，结果下载不携带模型凭据；超时、5xx或下载失败不自动切备用重新生成。单文件无网关下载保持可用。
+            - 实际开始制图或复核后解除普通查询60秒限制，用户停止仍立即生效。
+            - 本轮未用真实付费Image2、视觉/OCR或鸿蒙/Windows真机验收；自动化通过不代表识别准确率或真实画质已验证。
 
             ## 更新与使用
             先在设置里“立即更新服务器”，再更新电脑和手机。仅安装APK不会替换远端服务器代码。

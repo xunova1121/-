@@ -28,7 +28,7 @@ try {
     });
     return { allNodes: nodes.length === 12, nativeText: document.querySelectorAll('text').length >= 17, inBounds, noRasterImage: !document.querySelector('image,foreignObject,script'), bottomUp: document.querySelector('[data-layer="感知设备层"]').getBBox().y > document.querySelector('[data-layer="三端应用"]').getBBox().y };
   });
-  await page.screenshot({ path: path.join(output, 'editable-architecture.png'), fullPage: true });
+  await page.locator('svg').screenshot({ path: path.join(output, 'editable-architecture.png') });
   for (const [label, passed] of Object.entries(result)) {
     console.log((passed ? '✓ ' : '✗ ') + label);
     if (!passed) throw new Error(label);

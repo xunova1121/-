@@ -220,6 +220,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   ctx.dynamic = (ctx.dynamic || '') + await workHistoryBlock(requirementText, sessionId, { signal });
   const convo = [...history.map((m) => ({ ...m })), { role: 'user', content: userText, ...(images.length && { images }) }];
   if (images.length || /OCR|读数|数值|重新看|看错|识图|截图/i.test(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n图片核对：用户纠正读数或要求OCR时，先用inspect_image读取工作区原图（需要时指定region），不要复述旧识别结果。成功回执只能证明本次执行，不能证明数字正确；来源冲突明确报告。没有原图或能力时说明缺失，不声称已重新识别。';
+  if (/架构图|流程图|关系图|原图|旧图|先前.*图|SVG|画图|改图|生成图片/i.test(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n图形任务：先区分精确图形与创意图片。分层架构用create_diagram，海报插画用generate_image（型号取画图配置）；已有图修改必须传真实原图。用户说先前/原来那张时，先从本段对话的文件记录核对确切路径与版本，不因名称相近或时间最新就替换对象；多候选无法区分需简短追问。SVG复核可直接inspect_image；要PNG交付用render_diagram真实转换，不把SVG改.jpg。模型审查只算本次实际预览，未渲染不能声称视觉通过；指出问题后只修指定文件及问题再复核。';
   // 当前模型看不了图：图片先交给看图模型写成文字（见 imageSight.js）
   const see = createImageSight({ model, describe: describeImages, label: visionLabel, emit, readText: readImageText, onEvidence: review.noteVisual });
   for (const m of convo) await see(m, { hint: requirementText, signal, ocr: m === convo.at(-1) });

@@ -4,6 +4,7 @@ import { diagramSvg } from '../src/agent/diagramSvg.js';
 import { createDiagramTool } from '../src/agent/diagramTool.js';
 import { mediaRequirement } from '../src/agent/actionDelivery.js';
 import * as workspace from '../src/agent/workspace.js';
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5mQAAAAASUVORK5CYII=';
 const input = { path: '架构验收.svg', title: '业务架构', layers: [
   { title: '设备层', nodes: [{ id: 'sensor', title: '雷达与无人机' }] },
   { title: '数据与AI中台', nodes: [{ id: 'data', title: '数据清洗' }] },
@@ -39,9 +40,9 @@ it('没有渲染环境只交SVG，不伪造视觉/业务通过，不生成多余
 });
 it('读取来源原文匹配摘录，真实渲染图交视觉，失败保留半成品', async () => {
   await workspace.write('架构来源.md', '预警端识别违法，指挥端就近派单。');
-  const visionLlm = vi.fn(async ({ images }) => { expect(images[0].data).toBe('fixture'); return '{"passed":false,"issues":["连线有遮挡"]}'; });
+  const visionLlm = vi.fn(async ({ images }) => { expect(images[0].data).toBe(PNG); return '{"passed":false,"issues":["连线有遮挡"]}'; });
   const events = [];
-  const text = await createDiagramTool({ renderDiagram: async () => ({ mime: 'image/png', data: 'fixture' }), visionLlm }).run({ ...input, path: '架构视觉失败.svg', sources: [{ path: '架构来源.md', excerpt: '预警端识别违法' }] }, { checkpoint: event => events.push(event) });
+  const text = await createDiagramTool({ renderDiagram: async () => ({ mime: 'image/png', data: PNG }), visionLlm }).run({ ...input, path: '架构视觉失败.svg', sources: [{ path: '架构来源.md', excerpt: '预警端识别违法' }] }, { checkpoint: event => events.push(event) });
   expect(visionLlm).toHaveBeenCalledTimes(1);
   expect(events.at(-1).validation).toMatchObject({ render: 'passed', visual: 'failed', errors: 1, business: 'source_excerpts_matched' });
   expect(text).toContain('连线有遮挡');
