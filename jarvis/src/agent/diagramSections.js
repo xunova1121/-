@@ -3,6 +3,8 @@ import { cardMetrics, cardElements, isDiagramCard, DIAGRAM_ICON_VERSION, DIAGRAM
 
 const invalid = (message) => Object.assign(new Error(message), { code: 'DIAGRAM_SECTION', kind: 'input' });
 export const SECTION_KINDS = ['cards', 'band', 'grid', 'columns'];
+/** 通栏文字距色条左右边的距离 */
+const BAND_PAD = 16;
 export function sectionFields(layer) {
   const kind = layer.kind === undefined ? 'cards' : layer.kind;
   if (!SECTION_KINDS.includes(kind)) throw invalid('层类型只支持cards/band/grid/columns');
@@ -63,7 +65,8 @@ export function layoutSection(layer, y, edges, govBlue) {
     columns = 1;
     top = 0;
     const node = layer.nodes[0];
-    rowHeight = Math.max(48, 18 + diagramLines([node.title, node.detail].filter(Boolean).join(' · '), totalWidth / 15, 2).length * 21);
+    // 通栏文字左右各留 BAND_PAD：贴着色条边写，字体稍宽的机器上首字会出框 1 像素（2026-10-26 CI 实测）
+    rowHeight = Math.max(48, 18 + diagramLines([node.title, node.detail].filter(Boolean).join(' · '), (totalWidth - BAND_PAD * 2) / 15, 2).length * 21);
   }
   const width = (totalWidth - (columns - 1) * gap) / columns;
   layer.rows = Math.ceil(layer.nodes.length / columns);
@@ -125,7 +128,7 @@ export function sectionElements(layer, colors, { rect, text }) {
   for (const node of layer.nodes) {
     const parts = [];
     if (layer.kind === 'cards' && isDiagramCard(node)) parts.push(...cardElements(node, colors, { rect, text }));
-    if (layer.kind === 'band') parts.push(text([node.title, node.detail].filter(Boolean).join(' · '), node.x, node.y + 29, node.width, 15, 2, '#ffffff', true));
+    if (layer.kind === 'band') parts.push(text([node.title, node.detail].filter(Boolean).join(' · '), node.x + BAND_PAD, node.y + 29, node.width - BAND_PAD * 2, 15, 2, '#ffffff', true));
     if (layer.kind === 'grid') {
       parts.push(rect(node.x, node.y, node.width, node.height, colors.light, colors.line, 4));
       const lineCount = diagramLines(node.title, (node.width - 20) / 14, 2).length;

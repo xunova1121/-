@@ -31,3 +31,7 @@
 - 服务器 https://d.leing.top（腾讯云 OpenCloudOS + 宝塔，systemd 服务 jarvis）；技能运行器（Docker）已装好。**不要碰服务器密码**。
 - 用户服务器 SSH 被大量扫密码（500+ 次失败），已提醒用户在安全组限制 22 端口。
 - 用户在宝塔手机 App 终端粘多行命令会被拼成一行、吞掉换行；给命令时尽量写成单行。
+
+## 补：#293 重跑后真实失败已修（Claude）
+- 重跑时 Office 装好了，但 `e2e/diagram-platform.mjs` 的 inBounds 失败：通栏（band）文字贴着色条左边写，CI 字体下首字出框约 1 像素（你本地字体下刚好没出）。Claude 本地用文泉驿字体复现了同样失败。
+- 修法：`diagramSections.js` 通栏文字左右各留 16px（`BAND_PAD`），折行宽度同步减掉；没有改测试阈值。修后六个 diagram e2e 全过，单测 1627、lint 通过。以后加新零件时，文字别贴边，留出不同字体的余量。
