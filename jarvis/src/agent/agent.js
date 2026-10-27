@@ -1,4 +1,5 @@
 import { createDiagramRecovery } from './diagramRecovery.js';
+import { asksDocumentStyles } from './documentStyleQuery.js';
 import { IMAGE_RECHECK, IMAGE_READING_RULES } from './imageReading.js';
 import { conversationFocus } from '../core/responseRevision.js';
 import { responseGuidance } from './responseGuidance.js';
@@ -143,6 +144,10 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
   const work = sessionWorkBlock(currentSession);
   if (work) parts.push(work);
   if (evidenceContext) parts.push(evidenceContext);
+  if (asksDocumentStyles(userText, currentSession?.messages?.length ? currentSession.messages : history)) {
+    const styles = await memory.documentStyleContext();
+    if (styles) parts.push(styles);
+  }
   parts.push(ws.mode() === 'folder' ? `工作区：已连接本地文件夹「${ws.folderName()}」` : '工作区：浏览器内的虚拟工作区（用户可下载文件，或连接本地文件夹）');
   if (rules) parts.push(rulesBlock(rules));
   if (ctx.core?.human || ctx.core?.persona) parts.push(`## 核心记忆\n${ctx.core.human ? `【关于用户】${ctx.core.human}\n` : ''}${ctx.core.persona ? `【我的设定】${ctx.core.persona}` : ''}`.trim());
