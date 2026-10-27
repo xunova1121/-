@@ -4,7 +4,7 @@ const CREATIVE = /描述|描写|场景|发散|联想|构思|创意|灵感|文案
 
 export function followsImage(text, messages = [], cached = new Map()) {
   if (IMAGE_REFERENCE.test(String(text))) return true;
-  const correction = /(?:重新|再|仔细|放大).{0,8}(?:看|读|识别)|(?:读数|数值|数字|那个值|这个值|CO[₂2]|HCHO|TVOC|OCR)|(?:全|还是|又|都)?(?:不对|错了|错的|有误)/i.test(String(text));
+  const correction = /(?:重新|再|仔细|好好|继续|放大).{0,8}(?:看|读|识别)|(?:读数|数值|数字|那个值|这个值|第.{0,5}个?值|看清|CO[₂2]|HCHO|TVOC|OCR)|(?:全|还是|又|都)?(?:不对|错了|错的|有误)/i.test(String(text));
   if (!CREATIVE.test(String(text)) && !correction) return false;
   const recent = messages.filter((message) => message.role === 'user').slice(-8);
   for (let index = recent.length - 1; index >= 0; index--) {

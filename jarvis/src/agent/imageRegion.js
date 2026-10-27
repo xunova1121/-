@@ -39,5 +39,5 @@ export async function imageData(blob) {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   let text = '';
   for (let offset = 0; offset < bytes.length; offset += 0x8000) text += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-  return { mime: blob.type || 'image/png', data: btoa(text) };
+  return { mime: blob.type || 'image/png', data: btoa(text), detail: 'high' };
 }

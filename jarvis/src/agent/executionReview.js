@@ -1,3 +1,4 @@
+import { IMAGE_RECHECK } from './imageReading.js';
 import { newsCandidates } from './newsDelivery.js';
 import { mediaReceipt, mediaDelivery, blockedAfterDenial } from './actionDelivery.js';
 import { createVisualEvidence, readVisualReceipt } from './visualEvidence.js';
@@ -14,7 +15,7 @@ const DOC_TOOLS = /^(?:create_diagram|export_diagram|create_document|write_long_
 export function createExecutionReview(goal = '', { visual = false } = {}) {
   let request = String(goal).slice(0, 4000);
   const receipts = [];
-  const visualEvidence = createVisualEvidence(visual || /截图|识图|OCR|看图|图片识字/.test(goal));
+  const visualEvidence = createVisualEvidence(visual || /截图|识图|OCR|看图|图片识字/.test(goal), { requireRecheck: IMAGE_RECHECK.test(goal) });
   let visualIssue = '';
   let declinedTool = '';
   const toolBlock = (toolName) => blockedAfterDenial(request, declinedTool, toolName);

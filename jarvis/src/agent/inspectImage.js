@@ -1,3 +1,4 @@
+import { IMAGE_READING_RULES, independentImageQuestion } from './imageReading.js';
 import * as workspace from './workspace.js';
 import { throwControl } from '../core/networkRequest.js';
 import { cropImageRegion, visualRegion, imageData } from './imageRegion.js';
@@ -24,14 +25,19 @@ export function createInspectImageTool(ctx) {
           required: ['x', 'y', 'width', 'height'],
           additionalProperties: false
         },
+        regions: { type: 'array', minItems: 1, maxItems: 4, description: '密集多列文字按左到右分区，最多4区；与region不能同时使用', items: { type: 'object', properties: Object.fromEntries(['x', 'y', 'width', 'height'].map((key) => [key, { type: 'number', minimum: 0, maximum: 1 }])), required: ['x', 'y', 'width', 'height'], additionalProperties: false } },
         readText: { type: 'boolean', description: '需要读数字或文字时同时尝试OCR；没有配置则明确提示' }
       },
       required: ['path', 'question'],
       additionalProperties: false
     },
-    run: async ({ path, question, region, readText = true }, { signal, rawRequestText } = {}) => {
+    run: async ({ path, question, region, regions, readText = true }, { signal, rawRequestText } = {}) => {
       assertDiagramTarget(path, rawRequestText);
       visualRegion(region);
+      if (regions !== undefined && (!Array.isArray(regions) || regions.length < 1 || regions.length > 4 || region))
+        throw Object.assign(new Error('多区域必须1～4个且不能与region并用'), { code: 'IMAGE_REGION', kind: 'input' });
+      regions?.forEach(visualRegion);
+      signal?.throwIfAborted();
       if (!/\.(svg|png|jpe?g|webp|gif|bmp)$/i.test(path)) throw Object.assign(new Error('局部复核仅支持图片或SVG文件'), { code: 'IMAGE_INPUT', kind: 'input' });
       const original = await workspace.readBlob(path);
       if (original.size > 10e6) throw Object.assign(new Error('原图超过10MB，需先压缩'), { code: 'IMAGE_SIZE', kind: 'input' });
@@ -54,6 +60,22 @@ export function createInspectImageTool(ctx) {
           notes.push('当前环境无法物理裁剪；视觉模型只能按指定区域查看整图，不算完成局部放大。');
         }
       }
+      const views = [];
+      if (regions) {
+        for (const selected of regions) {
+          signal?.throwIfAborted();
+          try { views.push(await (ctx.cropImage || cropImageRegion)(image, selected, { signal })); }
+          catch (error) {
+            throwControl(error, signal);
+            if (error.code !== 'IMAGE_CROP_UNAVAILABLE') throw error;
+            views.length = 0;
+            notes.push('当前环境无法物理分区，仅能查看原图；不声称已分列放大。');
+            break;
+          }
+        }
+      }
+      if ([image, ...views].reduce((sum, blob) => sum + blob.size, 0) > 20e6) throw Object.assign(new Error('整体与分区合计超过20MB，请缩小区域或减少分区'), { code: 'IMAGE_SIZE', kind: 'input' });
+      signal?.throwIfAborted();
       const results = [];
       let failure = null;
       if (ctx.visionLlm) {
@@ -61,9 +83,9 @@ export function createInspectImageTool(ctx) {
           const text = String(
             (await ctx.visionLlm({
               system:
-                '读取本次提供的原始图片。只写可见事实；数字逐字段写“标签：原始数字 单位”，保留前导零和小数点，看不清写看不清，不按常识补位。区分观察与推测。用户纠错后不得引用旧描述作识别依据。',
-              prompt: String(question).slice(0, 1000) + (region && !cropped ? '\n仅关注归一化区域：' + JSON.stringify(region) : ''),
-              images: [await imageData(image)],
+                '读取本次提供的原始图片。只写可见事实；数字逐字段写“标签：原始数字 单位”。' + IMAGE_READING_RULES + ' 用户纠错后不得引用旧描述作识别依据。',
+              prompt: independentImageQuestion(question) + (region && !cropped ? '\n仅关注归一化区域：' + JSON.stringify(region) : '') + (views.length ? '\n图1为整体定位；图2起依次为用户指定的局部区域，只抄局部各自可见字符。重叠区域注明对应，不当作新增内容。' : ''),
+              images: await Promise.all([image, ...views].map(imageData)),
               signal
             })) || ''
           ).trim();
@@ -93,12 +115,14 @@ export function createInspectImageTool(ctx) {
         ok: true,
         imageHash,
         cropped,
+        regionCount: views.length,
+        visionOk: results.some(result => result.kind === 'vision'),
         fields: results.flatMap((result) => visualFields(result.text)).slice(0, 20)
       };
       return (
         visualReceiptText(receipt) +
         '\n' +
-        notes.join('\n') +
+        notes.join('\n') + (views.length ? `\n实际裁剪分区：${views.length}，OCR候选来自整图；局部视觉与整图文字不能串列。` : '') +
         '\n识别结果是候选，来源冲突必须报告；数字不合理不能擅自改数。\n' +
         results.map((result) => `【${result.kind}${cropped ? ' · 已裁剪放大' : ' · 原图'}】\n${String(result.text).slice(0, 12000)}`).join('\n')
       );

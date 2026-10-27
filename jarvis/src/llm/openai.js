@@ -9,7 +9,7 @@
  * user / tool 消息可带 images: [{ mime, data(base64) }]。OpenAI 只允许用户消息带图，
  * 所以工具返回的图片（如截屏）放在紧随其后的一条用户消息里。
  */
-const imagePart = (img) => ({ type: 'image_url', image_url: { url: `data:${img.mime};base64,${img.data}` } });
+const imagePart = (img) => ({ type: 'image_url', image_url: { url: `data:${img.mime};base64,${img.data}`, ...(img.detail === 'high' && { detail: 'high' }) } });
 
 export function toOpenAIMessages(system, messages) {
   const out = [{ role: 'system', content: system.map((s) => s.text ?? s).join('\n\n') }];

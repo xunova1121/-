@@ -1,3 +1,4 @@
+import { IMAGE_TEXT_TASK, IMAGE_READING_RULES, independentImageQuestion } from './imageReading.js';
 /**
  * 主模型看不了图（如 DeepSeek 官方的文字模型）时，图片先交给看图模型写成文字，再交给主模型思考、回答。
  *
@@ -37,7 +38,7 @@ export function createImageSight({ model, describe = null, label = '看图模型
   const blind = !seesImages(model);
   return async function see(message, { hint = '', signal, ocr = false } = {}) {
     if (!message?.images?.length) return;
-    if (ocr && readText && WANTS_TEXT.test(hint) && !message.textRead) {
+    if (ocr && readText && (WANTS_TEXT.test(hint) || IMAGE_TEXT_TASK.test(hint)) && !message.textRead) {
 
       const parts = [];
       for (const [i, image] of message.images.slice(0, 4).entries()) {
@@ -63,7 +64,7 @@ export function createImageSight({ model, describe = null, label = '看图模型
     emit({ type: 'seeing', text: `正在看图（${label}）…`, model: label });
     let text = '';
     try {
-      text = String(await describe({ system: SYSTEM, prompt: `${images.length > 1 ? `一共 ${images.length} 张图。` : ''}用户这次说的是：${String(hint).slice(0, 500) || '（没说，按图片本身描述）'}\n请描述图片。`, images, signal })).trim();
+      text = String(await describe({ system: SYSTEM + (IMAGE_TEXT_TASK.test(hint) ? "\n" + IMAGE_READING_RULES : ""), prompt: `${images.length > 1 ? `一共 ${images.length} 张图。` : ''}用户这次说的是：${independentImageQuestion(hint).slice(0, 1000) || '（没说，按图片本身描述）'}\n请描述图片。`, images, signal })).trim();
     } catch (e) {
       throwControl(e, signal);
       onEvidence({ kind: 'vision', ok: false, model: label });

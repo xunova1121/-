@@ -1,5 +1,5 @@
 /**
- * 图片准备：缩放到大模型合适的尺寸（长边 ≤ 1568 像素）、转成 JPEG base64，并生成一张小缩略图用于对话记录。
+ * 图片准备：缩放到大模型合适的尺寸（长边 ≤ 2048 像素）、转成 JPEG base64，并生成一张小缩略图用于对话记录。
  * 只在浏览器里用（依赖 createImageBitmap / canvas）。
  */
 import { imageFormat } from './imageFormat.js';
@@ -7,7 +7,7 @@ import { renderSvg } from './svgPreview.js';
 
 export const IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp)$/i;
 export const isImageName = (name) => IMAGE_EXT.test(String(name));
-const MAX_SIDE = 1568;
+const MAX_SIDE = 2048;
 
 function toCanvas(bitmap, maxSide) {
   const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
@@ -27,7 +27,7 @@ function toCanvas(bitmap, maxSide) {
  * @param {Blob} blob
  * @returns {Promise<{ mime: string, data: string, width: number, height: number, thumb: string }>}
  */
-export async function prepareImage(blob, { maxSide = MAX_SIDE, quality = 0.85 } = {}) {
+export async function prepareImage(blob, { maxSide = MAX_SIDE, quality = 0.92 } = {}) {
   if ((await imageFormat(blob))?.ext === 'svg') blob = await renderSvg(await blob.text());
   const bitmap = await createImageBitmap(blob);
   try {
