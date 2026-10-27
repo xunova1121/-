@@ -22,6 +22,7 @@ export async function prepareAgentContext({
     context ??
     (await buildContext(userText, {
       sessionId,
+      history: priorMessages,
       turns: priorMessages.filter((m) => m.role === 'user').length,
       summary: summaryForTurn(summary, [...priorMessages, { role: 'user', content: userText }]),
       light

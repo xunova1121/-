@@ -1,3 +1,4 @@
+import { communicationPreferenceSupported } from './communicationPreferences.js';
 import { createWorkRecordsTool } from './workLedger.js';
 import { readGovernmentGuide } from './governmentGuide.js';
 import { formatPageResult } from './pageLinks.js';
@@ -120,7 +121,7 @@ export function createTools(ctx) {
         const currentSession = sessionId ? await sessions.get(sessionId) : null;
         const said = requestText || rawRequestText || [...(currentSession?.messages || [])].reverse().find(message=>message.role==='user')?.content || '';
         const preference = category === 'preference' || preferenceClaim(content, category);
-        const explicit = preference ? preferenceSupported(content, said, category) : /记住|记下|我叫|我的名字|我住在/.test(said);
+        const explicit = preference ? (preferenceSupported(content, said, category) || communicationPreferenceSupported(content, said)) : /记住|记下|我叫|我的名字|我住在/.test(said);
         // 做事方式的教训放进“经验教训”（每轮上下文里有一节），不混在关于用户的记忆里
         if (category === 'lesson') {
           const l = await memory.addLesson(content, said);

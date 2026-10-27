@@ -1,3 +1,4 @@
+import { isResponseRevision } from '../core/responseRevision.js';
 /**
  * 模型分工：不同的事交给更擅长的模型。
  *   日常对话 → 快模型（首字快，便宜）
@@ -100,9 +101,9 @@ export function computerTaskKind(text, { history = [] } = {}) {
   return GUI_ACTION.test(String(text)) || /^(继续|接着|下一步|然后|点)/.test(String(text)) && lastComputerTools(history).some(t=>/^computer_(look|click|type|key|scroll|drag)$/.test(t)) ? 'gui' : 'files';
 }
 /** 要查证、分析、算结果的话：日常对话里也不能少想 */
-export const NEEDS_THOUGHT = /查|搜|核实|验证|结果|赛果|比分|中没中|中奖|最新|价格|行情|新闻|分析|计算|算一下|对比|图片|截图|图里/;
+export const NEEDS_THOUGHT = /查|搜|核实|验证|结果|赛果|比分|中没中|中奖|最新|价格|行情|新闻|分析|计算|算一下|对比|图片|截图|图里|产检|孕检|体检|糖耐|化验|评估|权衡|取舍|推演|解释原因/;
 /** 日常闲聊让推理模型少想一点（首字更快）；其余用默认档位 */
-export const effortFor = (task, text, cfg = {}) => (task === 'chat' && cfg.fastChat !== false && !NEEDS_THOUGHT.test(String(text || '')) ? 'low' : undefined);
+export const effortFor = (task, text, cfg = {}) => (task === 'chat' && cfg.fastChat !== false && !NEEDS_THOUGHT.test(String(text || '')) && !isResponseRevision(text) ? 'low' : undefined);
 
 /** 按模型名字推荐分工（名字里的常见标记；聚合平台上的模型名各不相同，推荐后请再看一眼） */
 const PREFER = {

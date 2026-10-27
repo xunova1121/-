@@ -1,3 +1,4 @@
+import { isResponseRevision } from '../core/responseRevision.js';
 import { createLookupWindow } from './lookupWindow.js';
 import { needsComputer } from '../llm/router.js';
 import { followsImage } from '../core/imageFollowup.js';
@@ -9,7 +10,7 @@ export const COMPLEX = /深度|深入|全面|详细|长篇|长文|\d+\s*[千万�
 const THINKING = /OCR|识图|读数|重新看|描述|描写|发散|想象|联想|脑暴|头脑风暴|构思|创意|灵感|点子|故事|编[个一段首]|作诗|写诗|诗歌|歌词|唱|讲讲|说说|聊聊|展开|思考|想法|出主意|主意|建议|怎么看|看法|观点|推理|推演|讨论|规划|计划|这[个张幅]图|图里|图中|照片里|画面/;
 export function isQuickLookup(text = '', images = []) {
   const value = String(text);
-  return !images.length && value.length <= 500 && !COMPLEX.test(value) && !THINKING.test(value) && !/(?:生成|制作|写|修改|重构|运行|执行|整理|翻译|总结|分析|评审|帮我做|接着做|继续|恢复|发送|删除|移动|重命名|创建|启动|打开|下载|上传|记住|记下|保存|安排|提醒|定时|设计|调整|新增|修复)/.test(value);
+  return !isResponseRevision(value) && !images.length && value.length <= 500 && !COMPLEX.test(value) && !THINKING.test(value) && !/(?:生成|制作|写|修改|重构|运行|执行|整理|翻译|总结|分析|评审|帮我做|接着做|继续|恢复|发送|删除|移动|重命名|创建|启动|打开|下载|上传|记住|记下|保存|安排|提醒|定时|设计|调整|新增|修复)/.test(value);
 }
 /** “继续”继承原问题的查询类别，不因按钮文案绕过普通查询期限。 */
 export function lookupRequirement(text, history = []) {

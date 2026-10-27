@@ -1,3 +1,5 @@
+import { conversationFocus } from '../core/responseRevision.js';
+import { responseGuidance } from './responseGuidance.js';
 import { DIAGRAM_PLANNING } from './diagramPlanning.js';
 import { answerWorkHistory } from './workHistoryAnswer.js';
 import { workHistoryBlock } from './workLedger.js';
@@ -109,10 +111,10 @@ ${STABLE_PROMPT.slice(STABLE_PROMPT.indexOf('## 不写表情标签'))}`;
 /** 语音对话：回答会被念出来 */
 export const VOICE_NOTE = '## 语音对话\n用户正在和你语音对话，你的回答会被念出来：用口语，简短（一般两三句话），不用列表、表格、标题、链接和符号；做了文件就说一句文件名和放在哪，细节让用户看屏幕。';
 
-export async function buildContext(userText, { sessionId = null, turns = 0, summary = null, light = false } = {}) {
+export async function buildContext(userText, { sessionId = null, turns = 0, summary = null, light = false, history = [] } = {}) {
   const fresh = turns <= 2; // 新对话（或刚开始）：带上最近的对话和没做完的事，方便“接着上次的”
   const [ctx, kbHits, installed, past, recentS, open, rules, currentSession, evidenceContext] = await Promise.all([
-    memory.contextFor(userText, { vector: !light }), light ? [] : kb.search(userText, 4), light ? [] : packs.enabled().catch(() => []),
+    memory.contextFor(conversationFocus(userText, history).memoryQuery, { vector: !light }), light ? [] : kb.search(userText, 4), light ? [] : packs.enabled().catch(() => []),
     light ? [] : sessions.searchMessages(userText, { exclude: sessionId, k: 2 }).catch(() => []),
     fresh && !light ? sessions.recent({ exclude: sessionId, k: 3 }).catch(() => []) : [],
     fresh && !light ? memory.openItems({ exclude: sessionId }).catch(() => []) : [],
@@ -226,6 +228,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   // 当前模型看不了图：图片先交给看图模型写成文字（见 imageSight.js）
   const see = createImageSight({ model, describe: describeImages, label: visionLabel, emit, readText: readImageText, onEvidence: review.noteVisual });
   for (const m of convo) await see(m, { hint: requirementText, signal, ocr: m === convo.at(-1) });
+  const imagePreferenceNote = images.length ? await memory.communicationImageContext({ signal }) : '';
   // 任务清单（update_plan）和子任务分身（delegate_task，只有主线能派）由循环自己提供
   const plan = createPlanTool((steps) => emit({ type: 'plan', steps }));
   // 简单闲聊（light）：不带工具，回得快
@@ -335,7 +338,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     // 一分钟时限已解除（模型判断要更多时间，或开始画图、写文件）：之后按普通任务做
     if (lookupDeadline && lookupControl?.released?.()) { lookupDeadline = false; infoPrompt = false; }
     takeInbox();
-    const allowWebSearch = !questionProfile && !creativeWithoutLookup(currentRequest);
+    const revision = conversationFocus(currentRequest, history);
+    const allowWebSearch = !questionProfile && !creativeWithoutLookup(currentRequest) && !revision.revision;
     const quickAttempts = review.report().sourceRequirement ? Math.max(5, QUICK_MODEL_ATTEMPTS) : QUICK_MODEL_ATTEMPTS;
     if (!retrieval.reason && lookupDeadline && lookupControl && (lookupControl.retrievalRemaining() <= 0 || retrieval.active && modelAttempts >= quickAttempts)) {
       retrieval.close('已停止新增检索，正在整理已有资料');
@@ -387,8 +391,9 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     const request = makeRequest(cur, acceptVisible, () => primaryActivity?.());
     // 测量实际发送的提示与工具说明，动态规则和短说明均计入字符数。
     // 用的哪个模型：中途换了备用的，也照实写
+    const responseNote = responseGuidance(currentRequest, history, { light, hasImages: images.length > 0, visibleText: String(convo.filter(m => m.role === 'user').at(-1)?.content || '').slice(0, 1800) });
     const usingNote = modelNote && (cur.model !== model ? `${modelNote}\n（原定的 ${model} 出错了，这一轮实际换成了 ${cur.model}。）` : modelNote);
-    const measuredSystem = questionProfile ? [BASIC_ANSWER_PROMPT, [ctx.dynamic, usingNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : light ? [LIGHT_PROMPT, [ctx.dynamic, usingNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, usingNote, dialoguePolicy(review.report().request), capabilities, computerNote, requirementContext, toolHint, singleDocumentTask(review.report().request) && '单份文档由文档引擎内部规划和检查；如需外层计划只列一次，不用update_plan逐节重复同步。有效产物回执可直接交付，不重复查找、读回或重做。', review.contractNote(), !allowWebSearch && CREATIVE_NOTE, voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
+    const measuredSystem = questionProfile ? [BASIC_ANSWER_PROMPT, [ctx.dynamic, usingNote, responseNote, imagePreferenceNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : light ? [LIGHT_PROMPT, [ctx.dynamic, usingNote, responseNote, imagePreferenceNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, usingNote, dialoguePolicy(review.report().request), responseNote, imagePreferenceNote, capabilities, computerNote, requirementContext, toolHint, singleDocumentTask(review.report().request) && '单份文档由文档引擎内部规划和检查；如需外层计划只列一次，不用update_plan逐节重复同步。有效产物回执可直接交付，不重复查找、读回或重做。', review.contractNote(), creativeWithoutLookup(currentRequest) && CREATIVE_NOTE, voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
     const measuredTools = closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list();
     const requestTools = measuredTools.filter((tool) => allowWebSearch || !WEB_TOOLS.has(tool.name) && tool.name !== 'delegate_task').map(conciseTool);
     emit({ type: 'diagnostic', phase: 'model_start', model: cur.model, protocol: cur.adapter.kind, closing, ...measureModelInput({ system: measuredSystem, messages: convo, tools: requestTools }), inputChars: convo.reduce((sum, item) => sum + String(item.content || '').length, 0) });

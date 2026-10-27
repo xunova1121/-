@@ -1,3 +1,4 @@
+import { WRITING_JUDGMENT } from '../app/doc/writingJudgment.js';
 /**
  * 长文档写作流程（报告、方案、总结、标书……）：一次写完的长文常常前后脱节、后半截草草收尾，所以分步写。
  *
@@ -87,11 +88,11 @@ export async function writeLongDocument({ task, title = '', material = '', words
     say('列大纲…');
     const j = parseJson(await llm({
       signal,
-      system: '你是资深的中文文字工作者，擅长写结构清楚、内容具体的报告和方案。只输出 JSON。',
+      system: WRITING_JUDGMENT + '你是资深的中文文字工作者，擅长写结构清楚、内容具体的报告和方案。只输出 JSON。',
       prompt: `写作任务：${task}${title ? `\n标题：${title}` : ''}${words ? `\n目标字数：约 ${words} 字` : ''}${mat}
 
 列出文档大纲。输出 JSON：{"title":"文档标题","sections":[{"heading":"一级标题（带序号，如“一、背景与目标”）","points":["这一节要写的 2-5 个要点，写具体"],"words":这一节的字数}]}
-要求：3-${MAX_SECTIONS} 节；按这类文档的惯常结构（如总结：基本情况、成绩、问题、计划；方案：背景目标、现状、方案、实施计划、预算、风险）；各节字数加起来接近目标字数；论证性的章节（背景、必要性、需求、方案、效益）字数给足，不要平均分配。用户提供的材料里有的章节，大纲里都要有。${genreHint(genre)}`
+要求：3-${MAX_SECTIONS} 节；从读者需要作出的判断推导章节，不套固定目录；每节列具体论点及可用依据，决策方案给备选、推荐理由和取舍；各节字数加起来接近目标字数；论证性的章节（背景、必要性、需求、方案、效益）字数给足，不要平均分配。用户提供的材料里有的章节，大纲里都要有。${genreHint(genre)}`
     }));
     const sections = Array.isArray(j?.sections) ? j.sections.filter((s) => s?.heading).slice(0, MAX_SECTIONS) : [];
     if (!sections.length) throw new Error('没能生成大纲，请把要求写得更具体一些再试');
@@ -178,7 +179,7 @@ async function writeSection({ i, s, plan, outlineText, done, task, mat, llm, sig
   const prev = done.length ? `${done.map(({ k, x }) => `${k + 1}. ${plan.sections[k].heading}：${x}`).join('\n')}\n（其余各节由同事按大纲同时在写）` : i === 0 ? '（这是第一节）' : '（其余各节由同事按大纲同时在写）';
   const raw = String(await llm({
     signal,
-    system: '你是资深的中文文字工作者。直接输出这一节的 Markdown 正文，不要寒暄、不要解释。',
+    system: WRITING_JUDGMENT + '你是资深的中文文字工作者。直接输出这一节的 Markdown 正文，不要寒暄、不要解释。',
     prompt: `写作任务：${task}
 文档标题：${plan.title}
 完整大纲：
@@ -210,7 +211,7 @@ export async function readerTest({ title, body, task, llm, signal }) {
   try {
     const j = parseJson(await llm({
       signal,
-      system: '你是这份文档的目标读者，第一次看到它，不了解写作背景。认真通读，找出真正影响理解和决策的问题。只输出 JSON。',
+      system: WRITING_JUDGMENT + '你是这份文档的目标读者，第一次看到它，不了解写作背景。认真通读，找出真正影响理解和决策的问题。只输出 JSON。',
       prompt: `文档的用途：${clip(task, 300)}
 
 《${title}》全文：
@@ -240,7 +241,7 @@ async function reviseSection({ sec, plan, outlineText, task, mat, llm, signal })
   try {
     const raw = String(await llm({
       signal,
-      system: '你是资深的中文文字工作者。直接输出修改后的这一节 Markdown，不要解释。',
+      system: WRITING_JUDGMENT + '你是资深的中文文字工作者。直接输出修改后的这一节 Markdown，不要解释。',
       prompt: `写作任务：${task}
 文档：《${plan.title}》，大纲：
 ${outlineText}
