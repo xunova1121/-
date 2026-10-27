@@ -208,6 +208,8 @@ jobs:
         run: node e2e/office-render.mjs
       - name: 验证文档场景模板、精确修改及真实PDF逐页检查
         run: node e2e/document-quality.mjs "$RUNNER_TEMP/jarvis-e2e/documents"
+      - name: 验证只排版正文保留与真实Word、PDF读回
+        run: node e2e/document-preservation.mjs "$RUNNER_TEMP/jarvis-e2e/preservation"
       - name: 构建网页版
         run: npm run build
       - name: 服务器模式端到端测试，打包服务器版

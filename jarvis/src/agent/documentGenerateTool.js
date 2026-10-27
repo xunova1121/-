@@ -10,6 +10,7 @@ import { selfCheck, lint, fixAfterBuild, reviewSlidesByImage } from './selfCheck
 import { pickSheets, sheetSvg, rasterize } from './slidePreview.js';
 import { throwControl } from '../core/networkRequest.js';
 import { S, str, fmtSize, findTemplate } from './documentSchema.js';
+import { formattingSource, verifyFormattingContent } from './documentPreservation.js';
 
 /** 保留原有一轮自修复与PPT看图检查，不额外叠加无界模型审稿。 */
 /** 同一轮里同一个文件：内容一样就直接用上次的结果；已经请模型自查过的文件，重新生成时不再自查（评测里一份 PPT 生成了四遍，每遍都等自查） */
@@ -64,6 +65,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         path: str('保存路径（扩展名会自动修正）'),
         title: str('文档标题'),
         content: str('Markdown 内容'),
+        source_requirement_id: str('只排版、内容不变时，绑定read_task_requirements中用户原文编号；不从助手旧稿重写正文'),
         theme: { type: 'string', enum: THEME_IDS, description: '配色主题，不填自动选' },
         style: { type: 'string', enum: STYLE_IDS, description: 'PPT 设计风格（构图不同，不只是颜色）：business 稳重商务（汇报、方案）/ minimal 简洁留白（产品、设计、品牌）/ story 叙事氛围（剧情、人物、历史、文化、旅行）/ data 数据报告（经营、财务、统计）。不填按用户要求和内容自动选' },
         kind: { type: 'string', enum: [...Object.keys(DOC_KINDS), ...Object.keys(SHEET_KINDS)], description: `文种 / 用途，决定结构和排法。Word：${Object.entries(DOC_KINDS).map(([k, v]) => `${k} ${v}`).join('、')}；Excel：${Object.entries(SHEET_KINDS).map(([k, v]) => `${k} ${v}`).join('、')}。不填按标题和要求自动判断` },
@@ -82,8 +84,8 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       ['format', 'path', 'content']
     ),
     run: async (
-      { format, path, title, content, theme, style, kind, cover, subtitle, author, issuer, docNo, toc, template, template_id: templateId, requirements },
-      { progress, signal, checkpoint, rawRequestText, requestText, executionScope } = {}
+      { format, path, title, content, theme, style, kind, cover, subtitle, author, issuer, docNo, toc, template, template_id: templateId, requirements, source_requirement_id: sourceId },
+      { progress, signal, checkpoint, rawRequestText, requestText, executionScope, sessionId } = {}
     ) => {
       // 每轮独立作用域，跨轮不能以旧回执跳过检查。
       let cache = memo;
@@ -92,9 +94,12 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         cache = memo.scopes.get(executionScope);
       }
       const goal = requestText || rawRequestText || requirements || '';
+      const source = format === 'docx' ? await formattingSource({ request: rawRequestText || goal, sessionId, sourceId, signal }) : null;
+      // 排版时绕过模型提供的正文和改写审稿，确定性沿用已绑定的用户原文。
+      if (source) content = source.content;
       const forbidCover = /(?:不要|不用|无需|不加|不含|去掉|去除).{0,3}封面/.test(goal);
       const expectedSlides = format === 'pptx' ? requestedSlides('PPT ' + goal) : null;
-      const callKey = await keyOf({ format, path, title, content, theme, style, kind, cover, subtitle, author, issuer, docNo, toc, template, templateId, requirements, goal, workflow: ctx.documentContentReview?.workflowFile || null });
+      const callKey = await keyOf({ format, path, title, content, theme, style, kind, cover, subtitle, author, issuer, docNo, toc, template, templateId, requirements, goal, sessionId, sourceId: source?.id, workflow: ctx.documentContentReview?.workflowFile || null });
       // 记住的结果只管 10 分钟（同一个任务里重复调用）；隔得久了照常重新生成
       const fresh = (m, key, ms) => m.has(key) && Date.now() - m.get(key).at < ms;
       const cached = cache.results.get(callKey);
@@ -127,7 +132,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         content,
         requirements: taskRules,
         quick,
-        llm: ctx.documentContentReview ? null : ctx.reasonLlm ?? ctx.llm ?? null,
+        llm: source || ctx.documentContentReview ? null : ctx.reasonLlm ?? ctx.llm ?? null,
         signal,
         onProgress: (t) => progress?.(t)
       });
@@ -158,7 +163,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       // 生成后才查得出的问题：Excel 公式错、PPT 字放不下 / 互相压住；有硬伤请模型改一轮再生成
       const built = (o) => [...(o.info?.formulaIssues ?? []), ...(o.info?.layoutIssues ?? [])];
       let post = null;
-      if (built(out).length) {
+      if (built(out).length && !source) {
         post = await fixAfterBuild({
           format,
           content: check.content,
@@ -212,10 +217,17 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         }
       }
       const target = path.replace(/\.[a-z0-9]+$/i, '') + `.${out.ext}`;
+      if (source && out.info?.missingImages?.length) throw Object.assign(new Error('只排版原文中的图片未完整载入，未覆盖目标文件'), { code: 'DOCUMENT_SOURCE', kind: 'validation' });
+      const preservation = source ? {
+        ...await verifyFormattingContent(out.blob, source.content, signal),
+        sourceId: source.id,
+        sourceSessionId: typeof sessionId === 'string' ? sessionId.slice(0, 160) : null,
+        sourceDigest: await keyOf(source.content)
+      } : null;
       if (ctx.documentContentReview && finalContent !== content) {
         ctx.documentContentReview.business = 'needs_recheck';
       }
-      const r = await deliverDocument(ctx, out, target, { progress, signal, checkpoint, plan, issues: lint(format, finalContent), generatorReview: looked, requirements: goal || requirements });
+      const r = await deliverDocument(ctx, out, target, { progress, signal, checkpoint, plan, issues: lint(format, finalContent), generatorReview: looked, requirements: goal || requirements, preservation });
       const notes = [
         `主题：${out.theme.name}`,
         ...(design.label ? [`设计：${design.label}（${design.reason}）`] : []),
@@ -223,6 +235,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         ...(plan ? ['制作方案：' + plan.templateName] : []),
         ...r.notes
       ];
+      if (preservation) notes.push('只调整排版，已按绑定原文逐段逐格核对真实Word；未改写正文');
       if (check.checked)
         notes.push(
           check.changed
