@@ -8,6 +8,8 @@ import { createHelperLlm } from '../src/llm/helper.js';
 import { createFileStore } from '../server/fileStore.mjs';
 import { useBackend } from '../src/agent/store.js';
 import * as ws from '../src/agent/workspace.js';
+import { loadArchitecture } from '../src/agent/architectureProjection.js';
+import { resumeArchitectureReview } from '../src/agent/architectureResume.js';
 
 const request = '建设预警';
 const spec = () => ({
@@ -64,6 +66,16 @@ it('持续失败只恢复一次，换输出文件名也不能绕过；错误定�
   }
   expect(ctx.llm).toHaveBeenCalledTimes(2);
   expect(JSON.parse(await ws.readText(receipt.reviewPath)).resumeAttempts).toBe(1);
+});
+
+it('旧快照晚到也不能重置恢复次数，直接复用已通过的最新报告', async () => {
+  const ctx = { llm: vi.fn().mockResolvedValueOnce('bad').mockResolvedValue(passed) };
+  const receipt = JSON.parse(await createArchitecturePlanTool(ctx).run(spec(), { rawRequestText: request }));
+  const stale = await loadArchitecture(receipt.architecturePath);
+  await createDiagramTool(ctx, { requireArchitecture: true }).run(draw(receipt));
+  const current = await resumeArchitectureReview(ctx, stale);
+  expect(current.report).toMatchObject({ semantic: 'passed', resumeAttempts: 1 });
+  expect(ctx.llm).toHaveBeenCalledTimes(2);
 });
 
 it('推理分工失败时只恢复一次到用户已配置的写作分工，不重建底稿', async () => {

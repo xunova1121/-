@@ -86,6 +86,19 @@ it('明确文件名不能用旧图的子串绕过版本选择', () => {
   expect(() => assertDiagramTarget('图.svg', '检查[原图](旧图.svg)')).toThrow();
   expect(() => assertDiagramTarget('图.svg', '检查[原图](图.svg)')).not.toThrow();
 });
+
+it('重复调用停止沿用真正的业务审查阶段，不再丢成参数结构；新轮清空旧阶段', () => {
+  const state = createDiagramRecovery();
+  const review = Object.assign(new Error('审查未完成'), { code: 'ARCHITECTURE_PROJECTION', kind: 'input', diagnostics: [{ stage: 'review' }] });
+  const duplicate = Object.assign(new Error('相同调用重复'), { code: 'DIAGRAM_DUPLICATE_CALL', kind: 'input' });
+  state.record('create_diagram', { path: '图.svg' }, review);
+  const stopped = state.record('create_diagram', { path: '图.svg' }, duplicate);
+  expect(stopped).toMatchObject({ stage: 'review', stopped: true });
+  expect(stopped.message).toContain('业务审查');
+  expect(stopped.message).not.toContain('参数结构');
+  state.reset();
+  expect(state.record('create_diagram', { path: '图.svg' }, duplicate).stage).toBe('duplicate');
+});
 it('读取选定材料，按字段提示修复后实际生成SVG，原材料不被改写', async () => {
   await workspace.write('恢复来源.md', '配置雷达8套');
   await workspace.write('旧来源.md', '配置雷达9套');

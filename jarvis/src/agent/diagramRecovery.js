@@ -1,6 +1,6 @@
 /** 单轮图形恢复：同目标同阶段最多3次确定性失败，总计最多6次；不保存正文/参数。 */
 const TOOLS = new Set(['plan_architecture', 'create_diagram', 'export_diagram', 'render_diagram']);
-const stages = { material: '材料读取', source: '来源定位', excerpt: '原文摘录', fact: '事实依据', inclusion: '事实入图', arguments: '参数结构', review: '业务审查' };
+const stages = { material: '材料读取', source: '来源定位', excerpt: '原文摘录', fact: '事实依据', inclusion: '事实入图', arguments: '参数结构', review: '业务审查', duplicate: '重复调用' };
 export const isDiagramTool = (name) => TOOLS.has(name);
 export function diagramFailureDetails(error) {
   const details = error?.diagnostics;
@@ -15,11 +15,13 @@ export function diagramFailureDetails(error) {
 }
 export function createDiagramRecovery() {
   const counts = new Map();
+  const lastStages = new Map(); // 最多24个目标，重复调用时保留最后真实失败阶段。
   let total = 0;
   let stopped = false;
   return {
     reset() {
       counts.clear();
+      lastStages.clear();
       total = 0;
       stopped = false;
     },
@@ -31,14 +33,19 @@ export function createDiagramRecovery() {
             .replace(/\.(svg|png|pdf|pptx|diagram\.json)$/i, '')
             .slice(0, 400);
           for (const key of counts.keys()) if (key.startsWith(target + '\u0000')) counts.delete(key);
+          lastStages.delete(target);
         }
         return null;
       }
       if (error.kind !== 'input' || !/^(?:DIAGRAM_|ARCHITECTURE_|SVG_)/.test(error.code || '')) return null;
-      const stage = diagramFailureDetails(error)[0]?.stage || 'arguments';
       const target = String(args?.path || args?.architecturePath || '本轮底稿')
         .replace(/\.(svg|png|pdf|pptx|diagram\.json)$/i, '')
         .slice(0, 400);
+      const duplicate = error.code === 'DIAGRAM_DUPLICATE_CALL';
+      const stage = diagramFailureDetails(error)[0]?.stage || (duplicate ? lastStages.get(target) || 'duplicate' : 'arguments');
+      lastStages.delete(target);
+      lastStages.set(target, stage);
+      if (lastStages.size > 24) lastStages.delete(lastStages.keys().next().value);
       const key = target + '\u0000' + stage;
       const failures = (counts.get(key) || 0) + 1;
       counts.set(key, failures);
