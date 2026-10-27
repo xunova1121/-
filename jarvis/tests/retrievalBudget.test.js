@@ -40,3 +40,17 @@ describe('查询预算', () => {
     } finally { vi.useRealTimers(); }
   });
 });
+
+describe('画架构图不受普通问答的预算限制', () => {
+  it('“做那个项目的架构图”按长任务算：模型调用（画完自查要用）不会3次就被拦（用户 2026-10-26 遇到“模型调用预算限制”没拿到图）', () => {
+    for (const text of ['做那个长江禁捕项目的架构图', '画一张业务流程图', '出个网络拓扑图', '做成精致海报']) expect(extensiveRetrieval(text), text).toBe(true);
+    const b = createRetrievalBudget('做那个长江禁捕项目的架构图');
+    for (let i = 0; i < 6; i++) b.consume('model');
+    expect(b.reason).toBe('');
+    // 普通问答照旧收紧
+    expect(extensiveRetrieval('这张图片里写的什么')).toBe(false);
+    const quick = createRetrievalBudget('今天天气怎么样');
+    for (let i = 0; i < 3; i++) quick.consume('model');
+    expect(() => quick.consume('model')).toThrow(/预算/);
+  });
+});

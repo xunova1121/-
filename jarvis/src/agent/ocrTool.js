@@ -3,6 +3,7 @@
  * 看懂画面（场景、人物、物体）还是用 read_file 看图；这里只抄字，大段文字、复杂表格更准。
  */
 import * as ws from './workspace.js';
+import { visualFields } from './visualFields.js';
 import { imageFingerprint, scoreRows, visualReceiptText } from './visualEvidence.js';
 
 const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', pdf: 'application/pdf' };
@@ -20,7 +21,7 @@ export function createOcrTool(ctx) {
       if (!MIME[ext]) throw Object.assign(new Error('只能识别图片（png / jpg / webp / gif / bmp）和 PDF'), { code: 'OCR_INPUT', kind: 'input' });
       const blob = await ws.readBlob(path);
       const { text, model } = await ctx.ocr({ blob, mime: MIME[ext] }, { signal });
-      const receipt = visualReceiptText({ kind: 'ocr', ok: true, imageHash: await imageFingerprint(blob), model, rows: scoreRows(text) });
+      const receipt = visualReceiptText({ kind: 'ocr', ok: true, imageHash: await imageFingerprint(blob), model, rows: scoreRows(text), fields: visualFields(text) });
       return `${receipt}\n识别成功不代表内容已核实；表格须逐行核对，看不清或来源冲突不要猜。\n【${path} 里的文字（${model} 识别，原样抄录）】\n${text}`;
     }
   };

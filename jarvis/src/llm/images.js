@@ -4,6 +4,9 @@
  */
 import { providerById, upstreamFor, customViaGateway } from '../../shared/providers.js';
 import { abilityLines, cfgForLine } from './abilities.js';
+import { imageRequestOptions } from './imageOptions.js';
+import { requestImage } from './imageResponse.js';
+import { throwControl } from '../core/networkRequest.js';
 
 /** 按名字判断模型用途：chat 对话 / image 画图 / video 视频 / audio 语音 / embed 向量、重排 */
 export function modelKind(id) {
@@ -45,6 +48,7 @@ export function imageModelOf(cfg) {
  * @returns {Promise<{ blob: Blob, model: string, revised?: string }>}
  */
 export async function generateImage(cfg, options = {}) {
+  options = { ...cfg.imageOptions, ...options };
   const { main, backup } = abilityLines(cfg, 'image');
   const lines = main ? [main, backup].filter(Boolean) : [{ provider: cfg.provider, model: imageModelOf(cfg) }];
   let failure;
@@ -52,31 +56,23 @@ export async function generateImage(cfg, options = {}) {
     try {
       return await drawWith(cfgForLine(cfg, line), line.model, options);
     } catch (e) {
-      if (options.signal?.aborted || e.name === 'AbortError') throw e;
+      throwControl(e, options.signal);
       failure = failure ?? e;
+      // 仅明确拒绝才换备用；超时、5xx或结果下载失败可能已经生成，不能再扣一次费用。
+      if (!e.rejected) throw e;
     }
   }
   throw failure;
 }
 
-async function drawWith(cfg, model, { prompt, size = '1024x1024', gateway = null, fetchImpl = globalThis.fetch, signal } = {}) {
+async function drawWith(cfg, model, { prompt: imagePrompt, gateway = null, fetchImpl = globalThis.fetch, download = fetchImpl, signal, beforeRequest, ...options } = {}) {
+  throwControl(null, signal);
+  const parameters = imageRequestOptions(model, options);
   const { base, headers } = providerEndpoint(cfg, gateway);
-  const res = await fetchImpl(`${base}/images/generations`, {
+  beforeRequest?.();
+  return requestImage(`${base}/images/generations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...headers },
-    body: JSON.stringify({ model, prompt, size, n: 1 }),
-    signal
-  });
-  const text = await res.text();
-  let j = {};
-  try { j = JSON.parse(text); } catch { /* 非 JSON */ }
-  if (!res.ok) throw new Error(`画图失败（${model}，HTTP ${res.status}）：${String(j.error?.message || j.message || text).slice(0, 200)}`);
-  const d = j.data?.[0];
-  if (d?.b64_json) return { blob: new Blob([Uint8Array.from(atob(d.b64_json), (c) => c.charCodeAt(0))], { type: 'image/png' }), model, revised: d.revised_prompt };
-  if (d?.url) {
-    const r = await fetchImpl(d.url, { signal });
-    if (!r.ok) throw new Error(`下载生成的图片失败（HTTP ${r.status}）`);
-    return { blob: await r.blob(), model, revised: d.revised_prompt };
-  }
-  throw new Error(`画图失败：服务商没有返回图片（${model}）`);
+    body: JSON.stringify({ model, prompt: imagePrompt, ...parameters, n: 1 }),
+  }, { fetchImpl, download, signal, model });
 }

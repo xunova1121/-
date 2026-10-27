@@ -5,6 +5,9 @@ import { documentError } from './documentPlan.js';
 export async function inspectRenderedPdf(blob, { signal } = {}) {
   if (blob.size > 30e6) throw documentError('PDF超过30MB检查上限', 'DOCUMENT_SIZE');
   signal?.throwIfAborted();
+  // 转换器异常或接口返回错误正文时，先拒绝无效头，避免加载解析器后长时间恢复伪PDF。
+  if (!/^%PDF-[12]\.\d(?:\s|$)/.test(await blob.slice(0,12).text())) throw documentError('PDF文件头缺少有效版本，未进行页面解析','DOCUMENT_PDF_HEADER');
+  signal?.throwIfAborted();
   const pdfjs = await loadPdfjs();
   const loading = pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()), isEvalSupported: false });
   const abort = () => {

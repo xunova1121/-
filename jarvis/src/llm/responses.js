@@ -8,7 +8,7 @@
 import { sseLines, isTransient, stallGuard, retryWait, retryAfterMs, sleep } from './openai.js';
 import { nativeSearchAllowed } from './nativeSearch.js';
 
-const imagePart = (img) => ({ type: 'input_image', image_url: `data:${img.mime};base64,${img.data}` });
+const imagePart = (img) => ({ type: 'input_image', image_url: `data:${img.mime};base64,${img.data}`, ...(img.detail === 'high' && { detail: 'high' }) });
 
 /** 统一消息 → Responses 的 input（函数调用和结果是独立的条目） */
 export function toResponsesInput(messages) {

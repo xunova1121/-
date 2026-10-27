@@ -1,3 +1,5 @@
+import { communicationPreferenceSupported } from './communicationPreferences.js';
+import { createWorkRecordsTool } from './workLedger.js';
 import { readGovernmentGuide } from './governmentGuide.js';
 import { formatPageResult } from './pageLinks.js';
 import { createDocumentTools } from './documentTools.js';
@@ -37,6 +39,12 @@ import { preferenceClaim, preferenceSupported } from './memoryPreference.js';
 import { evidence as evidenceStore } from './evidenceStore.js';
 import { createSongTool } from './music.js';
 import { createOcrTool } from './ocrTool.js';
+import { createArchitecturePlanTool } from './architectureTool.js';
+import { createDiagramTool } from './diagramTool.js';
+import { createInspectImageTool } from './inspectImage.js';
+import { createRenderDiagramTool, diagramPreview } from './diagramReview.js';
+import { createExportDiagramTool } from './diagramExport.js';
+import { assertImageExtension, imageFormat } from './imageFormat.js';
 
 const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const str = (description) => ({ type: 'string', description });
@@ -90,8 +98,14 @@ export function createTools(ctx) {
   const overwriteWarned = new Set();
   const tools = [
     createVerificationTool(),
+    createWorkRecordsTool(),
     createSongTool(ctx),
     createOcrTool(ctx),
+    createInspectImageTool(ctx),
+    createArchitecturePlanTool(ctx),
+    createDiagramTool(ctx, {requireArchitecture:true}),
+    createExportDiagramTool(ctx),
+    createRenderDiagramTool(ctx),
     createStockKlineTool(ctx),
     createSportsScoresTool(ctx),
     queryGuardTool(),
@@ -107,7 +121,7 @@ export function createTools(ctx) {
         const currentSession = sessionId ? await sessions.get(sessionId) : null;
         const said = requestText || rawRequestText || [...(currentSession?.messages || [])].reverse().find(message=>message.role==='user')?.content || '';
         const preference = category === 'preference' || preferenceClaim(content, category);
-        const explicit = preference ? preferenceSupported(content, said, category) : /记住|记下|我叫|我的名字|我住在/.test(said);
+        const explicit = preference ? (preferenceSupported(content, said, category) || communicationPreferenceSupported(content, said)) : /记住|记下|我叫|我的名字|我住在/.test(said);
         // 做事方式的教训放进“经验教训”（每轮上下文里有一节），不混在关于用户的记忆里
         if (category === 'lesson') {
           const l = await memory.addLesson(content, said);
@@ -237,24 +251,33 @@ export function createTools(ctx) {
       run: async ({ path }) => {
         if (!(await ws.exists(path))) throw new Error(`找不到文件：${path}`);
         const blob = await ws.readBlob(path);
-        const type = /\.svg$/i.test(path) ? 'image/svg+xml' : blob.type || 'image/png';
+        const type = (await imageFormat(blob))?.mime || (/\.svg$/i.test(path) ? 'image/svg+xml' : blob.type || 'image/png');
         ctx.onImage?.(URL.createObjectURL(new Blob([blob], { type })), path);
         return `已在对话里显示 ${path}`;
       }
     },
     {
       name: 'generate_image',
-      description: '画图 / 生成图片（海报、插画、头像、配图等）：用服务商的画图模型（如 gpt-image）按描述生成一张图片，保存到工作区并显示在对话里。用户说“画一张… / 做个…的图片 / 生成图片”时使用。描述写具体：主体、风格、色调、构图。',
-      input_schema: S({ prompt: str('图片描述（中英文都可以，越具体越好）'), size: str('尺寸：1024x1024（默认）、1536x1024（横图）、1024x1536（竖图）') }, ['prompt']),
-      run: async ({ prompt, size }) => {
+      description: '画图 / 生成图片（海报、插画、头像、配图等）：用服务商的画图模型（如 gpt-image）按描述生成一张图片，保存到工作区并显示在对话里。用户说“画一张… / 做个…的图片 / 生成图片”时使用。描述先明确主体、构图、风格、光线和必须保留/避免的内容。修改或参考已有图必须传referencePaths，不能只凭文字重画冒充原图编辑；精确架构图用create_diagram。',
+      input_schema: S({ prompt: str('先写主体、构图、用途、风格与精确文字；改图还要写保留和修改范围'), size: str('标准尺寸或auto；GPT Image 2可用16倍数的自定义尺寸，如1536x864'), quality: { type: 'string', enum: ['auto', 'low', 'medium', 'high'] }, outputFormat: { type: 'string', enum: ['png', 'jpeg', 'webp'] }, background: { type: 'string', enum: ['auto', 'opaque', 'transparent'] }, referencePaths: { type: 'array', maxItems: 3, items: { type: 'string' }, description: '参考/编辑已有图片时必须传真实工作区原图路径；不传表示从零创作' } }, ['prompt']),
+      run: async ({ prompt: imagePrompt, size, referencePaths = [], quality, outputFormat, background }, { signal, retrieval } = {}) => {
         if (!ctx.imageGen) throw new Error('当前环境不能画图');
-        const r = await ctx.imageGen({ prompt, size: /^\d+x\d+$/.test(size || '') ? size : '1024x1024' });
+        const images = [];
+        for (const path of referencePaths) {
+          const blob = await ws.readBlob(path);
+          if (blob.size > 10e6 || !/\.(png|jpe?g|webp)$/i.test(path)) throw Object.assign(new Error('参考图需为10MB以内的PNG/JPEG/WebP'), { code: 'IMAGE_EDIT_INPUT', kind: 'input' });
+          images.push(blob);
+        }
+        if (images.length && !ctx.imageEdit) throw Object.assign(new Error('当前线路未提供原图编辑能力，不能把重新生成冒充编辑'), { code: 'IMAGE_EDIT_UNAVAILABLE', kind: 'capability' });
+        const options = Object.fromEntries(Object.entries({ quality, outputFormat, background }).filter(([, value]) => value !== undefined));
+        const r = await (images.length ? ctx.imageEdit : ctx.imageGen)({ prompt: imagePrompt, images, size: size || '1024x1024', signal, beforeRequest: () => retrieval?.consume('model'), ...options });
         const ext = /jpe?g/.test(r.blob.type) ? 'jpg' : /webp/.test(r.blob.type) ? 'webp' : 'png';
-        const name = String(prompt).replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 16) || 'image';
+        await assertImageExtension('image.' + ext, r.blob);
+        const name = String(imagePrompt).replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 16) || 'image';
         const w = await ws.write(`images/${name}-${Date.now().toString(36)}.${ext}`, r.blob);
         ctx.onFileChanged?.(w.path);
         ctx.onImage?.(URL.createObjectURL(r.blob), w.path);
-        return `已生成图片（${r.model}）并显示在对话里，保存在工作区 ${w.path}。${r.revised ? `模型改写后的描述：${r.revised}` : ''}`;
+        return `已生成图片（${r.model}）并显示在对话里，保存在工作区 ${w.path}。生成成功不代表已通过视觉验收；需要时用inspect_image读取该文件检查。${r.revised ? `模型改写后的描述：${r.revised}` : ''}`;
       }
     },
     {
@@ -400,10 +423,11 @@ export function createTools(ctx) {
       name: 'read_file',
       description: '读取工作区里的文件。Word、PDF、PPT、Excel 会自动转换成文字；代码和文本原样返回；图片（png / jpg / webp）会直接给你看。长文件一次给 2 万字，结尾会写 offset，按它接着读，直到读完再下结论。',
       input_schema: S({ path: str('文件路径'), offset: { type: 'integer', minimum: 0, description: '从第几个字开始读（长文件接着读时填上次结尾给的数，第一次不填）' } }, ['path']),
-      run: async ({ path, offset = 0 }) => {
-        const blob = await ws.readBlob(path);
+      run: async ({ path, offset = 0 }, { signal } = {}) => {
+        let blob = await ws.readBlob(path);
         seenFiles.add(ws.normalize(path));
         if(isImageName(path)&&typeof document==='undefined'){
+          if ((await imageFormat(blob))?.ext === 'svg') blob = await diagramPreview(ctx, await blob.text(), { signal });
           if(blob.size>8e6)throw new Error('图片超过8MB，请先压缩后再补充，或作为新消息发送');
           const bytes=new Uint8Array(await blob.arrayBuffer());
           const head=String.fromCharCode(...bytes.slice(0,12));
@@ -424,6 +448,8 @@ export function createTools(ctx) {
       description: '在工作区写入文本文件（代码、网页、Markdown、CSV、JSON 等）。编写程序时把每个文件分别写入。',
       input_schema: S({ path: str('文件路径，如 app/index.html'), content: str('完整文件内容') }, ['path', 'content']),
       run: async ({ path, content }) => {
+        await assertImageExtension(path, new Blob([content]));
+        if (/\.(png|jpe?g|webp|gif|bmp)$/i.test(path)) throw Object.assign(new Error('write_file只能写文本，不能把文本或Base64当位图；请保存.svg后用render_diagram转换，或调用generate_image'), { code: 'IMAGE_BINARY_WRITE', kind: 'input' });
         // 先读后改：已经存在、这次还没读过也没写过的文件，第一次要整个覆盖时先拦一下（坚持再写一次就放行）
         const key = ws.normalize(path);
         if (ws.mode() !== 'folder' && !seenFiles.has(key) && !overwriteWarned.has(key) && await ws.exists(path).catch(() => false)) { // 本地文件夹里本来就不覆盖同名文件（会另存）
@@ -456,6 +482,7 @@ export function createTools(ctx) {
           throw seenFiles.has(ws.normalize(path)) ? e : new Error(`${e.message}。你还没读过这个文件：先用 read_file 看准原文再改`);
         }
         seenFiles.add(ws.normalize(path));
+        await assertImageExtension(path, new Blob([r.text]));
         const w = await ws.write(path, r.text);
         ctx.onFileChanged?.(w.path);
         return `已修改 ${w.path}：替换 ${r.count} 处${w.renamed ? '（本地文件夹里不覆盖同名文件，另存为此名）' : ''}${w.backup === 'saved' ? '；原来的内容已自动备份，可在“工作区 → 改动记录”里恢复' : ''}`;

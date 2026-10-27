@@ -1,3 +1,4 @@
+import { listWorkRecords, removeWorkRecord, renameWorkRecord } from '../src/agent/workLedger.js';
 import { createSearchTest } from './searchTest.mjs';
 /**
  * 服务器模式（部署在自己的云服务器上）：任务交给服务器做，手机 / 电脑只负责发任务、看进度、取结果。
@@ -339,6 +340,9 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       }
       if (req.method === 'DELETE') { await sessions.remove(s[1]); json(res, 200, { ok: true }); return true; }
     }
+    if (pathname === '/api/work-records' && req.method === 'GET') { json(res, 200, await listWorkRecords({ kind: url.searchParams.get('kind') || '', format: url.searchParams.get('format') || '', path: (url.searchParams.get('path') || '').slice(0, 600), offset: Number(url.searchParams.get('offset')) || 0, limit: Number(url.searchParams.get('limit')) || 50 })); return true; }
+    if (pathname.startsWith('/api/work-records/') && req.method === 'PATCH') { const body = await readJson(req); if (typeof body.title !== 'string' || body.title.length > 160) { json(res, 400, { error: '名称格式不正确' }); return true; } await renameWorkRecord(decodeURIComponent(pathname.slice('/api/work-records/'.length)), body.title); json(res, 200, { ok: true }); return true; }
+    if (pathname.startsWith('/api/work-records/') && req.method === 'DELETE') { await removeWorkRecord(decodeURIComponent(pathname.slice('/api/work-records/'.length))); json(res, 200, { ok: true }); return true; }
     if (pathname === '/api/files' && req.method === 'GET') { json(res, 200, await ws.list(url.searchParams.get('prefix') || '')); return true; }
     if (pathname === '/api/files/raw') {
       const p = ws.normalize(url.searchParams.get('path') || '');

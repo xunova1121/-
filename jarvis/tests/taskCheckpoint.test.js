@@ -16,3 +16,12 @@ describe('任务检查点',()=>{
   expect(checkpointRecoveryText(c)).toContain(original);expect(checkpointRecoveryText(c)).toContain('最后的补充');expect(checkpointNeedsReview(c)).toBe(true);
  });
 });
+it('图像候选读数不随工具摘要进入检查点，保留实际执行状态', () => {
+  for (const name of ['read_image_text', 'inspect_image']) {
+    const checkpoint = checkpointEvent({}, { type: 'tool_end', id: 'visual', name, ok: true, output: 'CO2：0044 ppm\n候选仪表私有内容' });
+    expect(JSON.stringify(checkpoint)).not.toContain('0044');
+    expect(JSON.stringify(checkpoint)).not.toContain('候选仪表私有内容');
+    expect(checkpoint.steps[0]).toMatchObject({ name, ok: true });
+    expect(checkpointRecoveryText(checkpoint)).toContain('重新读取原图');
+  }
+});

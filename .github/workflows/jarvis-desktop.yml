@@ -196,11 +196,11 @@ jobs:
         run: node e2e/sandbox-isolation.mjs
       - name: 安装Office真实渲染环境
         # apt 源偶尔卡住不动（#248、#253、#254 都卡在这一步十几分钟）：每次最多等 6 分钟，卡住就重来，最多三次；
-        # 中文字体用文泉驿微米黑（几 MB），不用 60 多 MB 的 Noto CJK——只用来验证转 PDF，不影响 App
+        # 保留文泉驿旧稿字体，同时安装新架构稿使用的 Noto CJK，保证源图和原生PPT采用同一字体
         timeout-minutes: 20
         run: |
           for i in 1 2 3; do
-            if timeout 360 sh -c 'sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress libreoffice-calc fonts-wqy-microhei xdotool'; then exit 0; fi
+            if timeout 360 sh -c 'sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress libreoffice-calc fonts-wqy-microhei fonts-noto-cjk xdotool poppler-utils'; then exit 0; fi
             echo "第 $i 次安装没完成，重试"
           done
           exit 1
@@ -230,6 +230,17 @@ jobs:
           node e2e/server-mobile.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/conversation-flow.mjs
           node e2e/qwen-voices.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/image-inspection.mjs
+          node e2e/diagram-layout.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/diagram-render.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/diagram-export.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/diagram-cards.mjs "$RUNNER_TEMP/jarvis-e2e/cards"
+          node e2e/diagram-platform.mjs "$RUNNER_TEMP/jarvis-e2e/platform"
+          node e2e/diagram-candidates.mjs "$RUNNER_TEMP/jarvis-e2e/candidates"
+          node e2e/architecture-editable.mjs "$RUNNER_TEMP/jarvis-e2e/architecture"
+          ARCHITECTURE_VIEW=workflow node e2e/architecture-logic.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-workflow"
+          ARCHITECTURE_VIEW=dataflow node e2e/architecture-logic.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-dataflow"
+          node e2e/workspace-management.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/image-followup.mjs
           node e2e/settings-layout.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/mobile-theme.mjs "$RUNNER_TEMP/jarvis-e2e"
@@ -293,13 +304,12 @@ jobs:
           make_latest: true
           files: dist/*
           body: |
-            ## 本版更新 · 回答质量与文档验收
-            - 简单常识和固定换算按需裁掉无关工具说明；数值计算保留确定性校验；加权、面积等通用计算保留代码计算能力，后续追加文件/电脑任务会恢复工具。
-            - 明确的“不要时间”等要求在发送前检查，最多修正一次；申请渠道要读取具体原文和链接，搜索过不等于完成。
-            - 新增称重货款运算。关键校验失败后不再输出声称已核验的数值；未校验明确提示人工复核，保留停止和超时恢复。
-            - PPT总页数包含封面，不再擅自多加一页；实际PPT与真实PDF页数分别检查，不一致明确失败并保留文件。
-            - 文档缓存限制条数、作用域与有效期，要求或文件变化重新生成；长方案保留计划能力，减少逐节重复计划提示。
-            - 30题评测默认使用服务器当前选中的服务商及模型，保留独立任务与记忆隔离。自动检查不代表语义准确率或真机验收。
+            ## 本版更新 · 对话理解、写作判断与识图复核
+            - 改写追问沿用原问题与实质答复，明确表达偏好按场景读取、纠正；重要写作加强观点、依据、备选取舍和执行检查，复用既有调用。
+            - “继续看”“能看清？”等追问保留最近原图，换话题不串旧图；提高上传图片细节，工作区保留原文件。
+            - 精读数字支持最多四个真实局部分区同次视觉复核，保留前导零、小数、重复行与行列位置；用户纠正值不冒充独立识别。
+            - 高清复核参数仅显式用于识图，不改变原架构图验收格式；四格式同稿和原生PPT真实对照门槛保留。
+            - 原完整自动化门禁通过，新增测试使用虚构材料和假模型。真实原图识别准确率、用户真实模型的共情写作质量及安卓/鸿蒙/Windows真机尚未实测，不承诺模糊数字可恢复。
 
             ## 更新与使用
             先在设置里“立即更新服务器”，再更新电脑和手机。仅安装APK不会替换远端服务器代码。

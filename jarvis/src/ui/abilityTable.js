@@ -7,6 +7,7 @@ import { ABILITIES, CAPABILITIES, abilityLines, setAbility } from '../llm/abilit
 import { keyedProviders, seesImages } from '../llm/router.js';
 import { modelKind } from '../llm/images.js';
 import { providerLabel, favoriteLines, catalogKey, sameLine, currentLine } from '../llm/modelLibrary.js';
+import { imagePreferences } from './imagePreferences.js';
 
 const KIND = { image: 'image', embed: 'embed' };
 const PER_PROVIDER = 30;
@@ -45,7 +46,7 @@ function describe(cfg, ability) {
   const { main, backup } = abilityLines(cfg, ability);
   if (!main && ability === 'ocr') return '现在：没有能做文字识别的服务商（填上智谱的 Key 就自动用 GLM-OCR）；图片里的字先交给看图模型读';
   if (!main) return ability === 'embed' ? '现在：没有能做向量的服务商，记忆只按关键字找（填智谱、百炼或硅基流动的 Key 就能用）' : '现在：还没有能做这件事的服务商——先在上面填一家的 Key（如智谱、百炼、OpenAI）';
-  return `现在：${label(cfg, main)}${backup ? `；出错换 ${label(cfg, backup)}` : '；没有备用'}`;
+  return `现在：${label(cfg, main)}${backup ? `；${ability === 'image' ? '生成被明确拒绝才换' : '出错换'} ${label(cfg, backup)}` : '；没有备用'}`;
 }
 
 /**
@@ -145,7 +146,8 @@ export function abilityTable({ cfg, workspace, node, run }) {
       node('label', { className: 'ml-ability-slot' }, node('span', { textContent: '常用' }), main),
       node('label', { className: 'ml-ability-slot' }, node('span', { textContent: '备用' }), backup),
       manual,
-      now
+      now,
+      ...(ability === 'image' ? [imagePreferences({ cfg, workspace, node, run })] : [])
     );
   });
   return node(

@@ -209,3 +209,47 @@ describe('评测 cozDJE：核对之后答案写两遍、多冒一句“收到”
     expect(b.text).toMatch(/更正：核对后净盈利是 765 元/);
   });
 });
+
+it('短句实际开始制图或复核后解除普通查询时限，用户停止仍立即生效', async () => {
+  vi.useFakeTimers();
+  try {
+    for (const toolName of ['create_diagram', 'render_diagram', 'inspect_image', 'read_image_text']) {
+      const task = withLookupDeadline({ userText: '再查下这个skill', emit: () => {} }, async options => {
+        await delay(10_000);
+        options.emit({ type: 'tool_start', name: toolName });
+        expect(options.lookupControl.released()).toBe(true);
+        await delay(90_000);
+        return '复核完成';
+      });
+      await vi.advanceTimersByTimeAsync(100_000);
+      expect(await task).toBe('复核完成');
+    }
+    const controller = new AbortController();
+    let child;
+    const task = withLookupDeadline({ userText: '再查下这个skill', signal: controller.signal, emit: () => {} }, async options => {
+      child = options;
+      options.emit({ type: 'tool_start', name: 'render_diagram' });
+      await delay(90_000);
+      return '不应继续';
+    });
+    const assertion = expect(task).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.advanceTimersByTimeAsync(0);
+    controller.abort();
+    await assertion;
+    expect(child.signal.aborted).toBe(true);
+  } finally { vi.useRealTimers(); }
+});
+
+it('新架构底稿工具也属于制作过程，不被普通查询一分钟打断', async () => {
+  vi.useFakeTimers();
+  try {
+    const task = withLookupDeadline({ userText: '再查下这个结构', emit: () => {} }, async options => {
+      options.emit({ type: 'tool_start', name: 'plan_architecture' });
+      expect(options.lookupControl.released()).toBe(true);
+      await delay(90_000);
+      return '底稿完成';
+    });
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(await task).toBe('底稿完成');
+  } finally { vi.useRealTimers(); }
+});

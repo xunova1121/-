@@ -4,6 +4,7 @@ import {mkdtemp,mkdir,writeFile,readFile,rm,stat} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {validateSvg} from '../src/agent/svgPreview.js';
 let capability=null,tail=Promise.resolve(),pending=0;
 const binary=()=>process.env.JARVIS_SOFFICE||'soffice';
 function command(args,{cwd,timeout=45000,signal}={}){
@@ -25,7 +26,8 @@ export async function officeRenderAvailable(){
 }
 export async function renderOffice(blob,ext,{signal}={}){
  if(signal?.aborted)throw new DOMException('Aborted','AbortError');
- if(!['docx','pptx','xlsx'].includes(ext))throw new Error('不支持此格式的Office渲染');
+ if(!['docx','pptx','xlsx','svg'].includes(ext))throw new Error('不支持此格式的Office渲染');
+ if(ext==='svg')validateSvg(await blob.text());
  if(!await officeRenderAvailable())return {available:false,reason:'服务器未安装LibreOffice，尚未进行Office真实渲染'};
  if(blob.size>20e6)throw new Error('Office预览超过20MB限制');
  if(pending>=4)throw new Error('Office预览繁忙，请稍后重试');pending++;
@@ -36,11 +38,13 @@ export async function renderOffice(blob,ext,{signal}={}){
    const profile=path.join(dir,'profile');await mkdir(path.join(profile,'user'),{recursive:true});
    await writeFile(path.join(profile,'user','registrymodifications.xcu'),'<?xml version="1.0" encoding="UTF-8"?><oor:items xmlns:oor="http://openoffice.org/2001/registry"><item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="MacroSecurityLevel" oor:op="fuse"><value>3</value></prop></item></oor:items>');
    const input=path.join(dir,'document.'+ext);await writeFile(input,new Uint8Array(await blob.arrayBuffer()));
-   const result=await command(['-env:UserInstallation='+pathToFileURL(profile).href,'--headless','--nologo','--nodefault','--nolockcheck','--norestore','--convert-to','pdf','--outdir',dir,input],{cwd:dir,signal});
-   const output=path.join(dir,'document.pdf');if(result.code!==0)throw new Error('Office渲染进程失败');
+   const format=ext==='svg'?'png':'pdf';
+   const result=await command(['-env:UserInstallation='+pathToFileURL(profile).href,'--headless','--nologo','--nodefault','--nolockcheck','--norestore','--convert-to',ext==='svg'?'png:draw_png_Export':'pdf','--outdir',dir,input],{cwd:dir,signal});
+   const output=path.join(dir,'document.'+format);if(result.code!==0)throw new Error('Office渲染进程失败');
    if((await stat(output)).size>30e6)throw new Error('Office预览PDF过大');
-   const data=await readFile(output);if(data.subarray(0,5).toString()!=='%PDF-')throw new Error('Office未生成有效PDF');
-   return {available:true,engine:'LibreOffice',blob:new Blob([data],{type:'application/pdf'})};
+   const data=await readFile(output);if(format==='pdf'&&data.subarray(0,5).toString()!=='%PDF-')throw new Error('Office未生成有效PDF');
+   if(format==='png'&&data.subarray(0,8).toString('hex')!=='89504e470d0a1a0a')throw Object.assign(new Error('Office未生成有效PNG'),{code:'SVG_RENDER_INVALID',kind:'api'});
+   return {available:true,engine:'LibreOffice',blob:new Blob([data],{type:format==='png'?'image/png':'application/pdf'})};
   }finally{await rm(dir,{recursive:true,force:true});}
  });
  tail=work;try{return await work;}finally{pending--;}

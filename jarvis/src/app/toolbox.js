@@ -1,3 +1,4 @@
+import { editImage } from '../llm/imageEdit.js';
 import { qweatherConfig } from '../core/qweather.js';
 import { deepseekSearchOptions } from '../agent/deepseekSearch.js';
 /**
@@ -104,7 +105,8 @@ export function createToolbox(app) {
                 app.panels.openFile(path);
               },
         onFileChanged,
-        imageGen: (o) => generateImage(app.llmConfig, { ...o, gateway: app.gateway }),
+        imageGen: (o) => generateImage(app.llmConfig, { ...o, gateway: app.gateway, download: app.fetchViaGateway() }),
+        imageEdit: (o) => editImage(app.llmConfig, { ...o, gateway: app.gateway, download: app.fetchViaGateway() }),
         onImage: (src) => out()?.image?.(src),
         videoGen: (o) => generateVideo(app.llmConfig, { ...o, gateway: app.gateway }),
         onVideo: (src) => out()?.video?.(src),

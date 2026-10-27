@@ -114,6 +114,15 @@
     margin-bottom: 9px;
     overflow: hidden;
   }
+  .mc-image-options {
+    margin: 0 12px 12px;
+    color: var(--ml-muted);
+    font-size: 12px;
+  }
+  .mc-image-options summary {
+    cursor: pointer;
+    padding: 8px 0;
+  }
   .mc-ability-main {
     display: grid;
     grid-template-columns: 24px minmax(0, 0.9fr) minmax(0, 1.15fr) 8px;

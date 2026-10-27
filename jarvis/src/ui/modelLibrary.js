@@ -64,6 +64,7 @@ export function initModelLibrary({ root, workspace, toast }) {
   const compact = matchMedia('(max-width: 720px)');
   compact.addEventListener('change', () => render());
   let reviewOpen = false; // “文档审查与写作偏好”是否展开（重画时保持）
+  let imageOptionsOpen = false; // 手机改画图参数后保留展开状态，避免每选一项都收起。
   const patch = (update) => run(() => workspace.patch(update));
 
   function modelRow(cfg, provider, model, { catalog = false } = {}) {
@@ -372,6 +373,7 @@ export function initModelLibrary({ root, workspace, toast }) {
     // 改完配置会整块重画：重画前记下“文档审查与写作偏好”是否展开，免得刚选完就自己收起来
     // （不能靠 toggle 事件：它晚一拍才到，刚展开就选的话会漏记）
     reviewOpen = root.querySelector('.ml-review')?.open ?? reviewOpen;
+    imageOptionsOpen = root.querySelector('.mc-image-options')?.open ?? imageOptionsOpen;
     const caption =
       workspace.scope === 'server'
         ? runsOnServer
@@ -453,6 +455,8 @@ export function initModelLibrary({ root, workspace, toast }) {
     providersHost.append(serverKeysPanel({ cfg, workspace, node }));
     // 每项能力的常用、备用（取代以前的“设备用 / 关闭自动切换”）
     abilityHost.append(mobile ? mobileAbilityTable({ cfg, workspace, node, run }) : abilityTable({ cfg, workspace, node, run }));
+    const imageOptions = abilityHost.querySelector('.mc-image-options');
+    if (imageOptions) imageOptions.open = imageOptionsOpen;
     if (workspace.scope === 'server') {
       const preview = node(
         'details',

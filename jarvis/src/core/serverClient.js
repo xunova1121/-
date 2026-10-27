@@ -194,6 +194,9 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     appendSession: (id, messages) => req(`/api/sessions/${encodeURIComponent(id)}/append`, { method: 'POST', body: { messages } }),
     searchSessions: (q) => req(`/api/sessions/search?q=${encodeURIComponent(q)}`),
     listFiles: () => req('/api/files'),
+    listWorkRecords: ({ signal, ...options } = {}) => req('/api/work-records?' + new URLSearchParams(Object.entries(options).map(([key, value]) => [key, String(value)])), { signal, timeout: 5000 }),
+    renameWorkRecord: (id, title) => req('/api/work-records/' + encodeURIComponent(id), { method: 'PATCH', body: { title } }),
+    removeWorkRecord: (id) => req('/api/work-records/' + encodeURIComponent(id), { method: 'DELETE' }),
     async download(path) {
       const res = await req(`/api/files/raw?path=${encodeURIComponent(path)}`, { raw: true, binary: true, timeout: 120000 });
       if (!res.ok) throw new Error(`下载 ${path} 失败（${res.status}）`);

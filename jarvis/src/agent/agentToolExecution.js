@@ -1,3 +1,5 @@
+import { uid } from './store.js';
+import { recordWorkAttempt } from './workLedger.js';
 import { validateArgs } from './tools.js';
 import { withWebDeadline } from './retrievalBudget.js';
 import { throwControl } from '../core/networkRequest.js';
@@ -29,6 +31,8 @@ export async function executeToolCalls(
   let newScreenThisStep = false;
   const exec = async (c) => {
     const tool = loader.get(c.name);
+    // 执行器分配操作ID，不依赖中转站可能重复的工具ID；同一实际调用的回执可幂等保存。
+    const workCallId = uid('op') + ':' + c.id;
     const t0 = Date.now();
     emit({ type: 'state', value: 'processing' });
     emit({ type: 'tool_start', id: c.id, name: c.name, args: c.args });
@@ -103,6 +107,11 @@ export async function executeToolCalls(
       failure = e;
       if (e.code === 'RETRIEVAL_BUDGET') retrieval.close(e.message);
       output = `错误：${e.message || e}`;
+    }
+    try {
+      await recordWorkAttempt({ tool: c.name, args: c.args, output, ok, sessionId, scope: executionScope, callId: workCallId });
+    } catch {
+      output += '\n成果记录保存失败；已有文件不受影响，统计可能不完整，不要重新提交生成请求。';
     }
     await checkpoint?.({ type: 'tool_end', id: c.id, name: c.name, ok, output });
     emit({ type: 'tool_end', id: c.id, name: c.name, ok, output, ...(failure && { errorKind: errorKind(failure), code: failure.code }), ms: Date.now() - t0 });

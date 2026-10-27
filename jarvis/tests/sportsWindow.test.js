@@ -1,11 +1,17 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { sportsWindow, inSportsWindow, beijingTimestamp, inferSportsWindow } from '../src/agent/sportsWindow.js';
 import { getSportsScores, createSportsScoresTool, clearScoresCache, sportsPreCall } from '../src/agent/sportsScores.js';
 import { zhibo8Result, clearZhibo8Cache, ZHIBO8_URL } from '../src/agent/sportsZhibo8.js';
 
 const now = Date.parse('2026-10-25T06:04:00+08:00');
 const match = (id, time, state = '1') => ({ id, type: 'football', sdate: '2026-10-25', time, state, leagueid: '1', home_team: `主队${id}`, visit_team: `客队${id}`, home_score: '0', visit_score: '0' });
-beforeEach(() => { clearScoresCache(); clearZhibo8Cache(); });
+// 假赛程固定在2026-10-25，测试时钟也必须固定；不改变国内源优先的原断言。
+beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(now);
+  clearScoresCache();
+  clearZhibo8Cache();
+});
+afterEach(() => { vi.restoreAllMocks(); });
 describe('赛程时间由程序筛选', () => {
   it('FR-07：只返回未来60分钟，UTC先换算再比较', () => {
     const window = sportsWindow({ period: 'upcoming' }, now);

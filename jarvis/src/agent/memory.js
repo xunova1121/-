@@ -1,3 +1,4 @@
+import { communicationScope, recordScope, communicationRecords } from './communicationPreferences.js';
 /**
  * 记忆与进化（v2）。
  *
@@ -425,7 +426,7 @@ export function ruleFacts(text) {
 
 // ---------------------------------------------------------------- 其他学习
 export async function addLesson(content, context = '') {
-  const l = { id: uid('l'), content: String(content).trim(), context: String(context).slice(0, 200), ts: now() };
+  const l = { id: uid('l'), content: String(content).trim(), context: String(context).slice(0, 200), ...(communicationScope(context) && { communicationScope: communicationScope(context) }), ts: now() };
   await lessons.put(l);
   await log('lesson', `吸取教训：${l.content}`);
   return l;
@@ -554,7 +555,11 @@ export async function contextFor(query, { vector = true } = {}) {
   // 向量和读库同时进行；闲聊（你好、在吗）不按意思检索，只用关键词，不等向量服务
   const [ms, ls, ss, eps, core, vec] = await Promise.all([memories.all(), lessons.all(), skills.all(), episodes.all(), getCore(), vector ? embedOne(query) : null]);
   // 像注入指令的条目不交给模型（原文保留在库里，面板上标“可疑，未使用”）
-  const cur = ms.map(upgrade).filter(current).filter(m => m.category !== 'doc_style').filter(safe((m) => m.content));
+  const active = ms.map(upgrade).filter(current).filter(m => m.category !== 'doc_style').filter(safe((m) => m.content));
+  const usableLessons = ls.filter(safe(l => `${l.content}\n${l.context ?? ''}`));
+  const selectedCommunication = communicationRecords([...active, ...usableLessons], query);
+  const selectedStyles = selectedCommunication.filter(item => active.includes(item));
+  const cur = active.filter(m => !recordScope(m) || selectedStyles.includes(m));
   const relevant = score(cur, query, (m) => m.content, { k: 6, vec });
   // 基本情况（年龄、称呼、住址、家人、工作……）：每轮都带上，不和偏好抢名额，也不靠和问题像不像
   const basics = basicFacts(cur);
@@ -562,15 +567,28 @@ export async function contextFor(query, { vector = true } = {}) {
   const prefs = cur.filter((m) => !basics.includes(m) && (m.pinned || (m.category === 'preference' && m.importance >= 3)))
     .sort((a, b) => (b.pinned - a.pinned) || (b.importance - a.importance) || (b.updatedAt - a.updatedAt)).slice(0, 5);
   const mem = [...new Map([...prefs, ...relevant].filter((m) => !basics.includes(m)).map((m) => [m.id, m])).values()].slice(0, 9);
+  const scopedLessons = selectedCommunication.filter(item => usableLessons.includes(item));
+  const relatedLessons = score(usableLessons.filter(l => !recordScope(l)), query, l => `${l.content} ${l.context ?? ''}`, { k: 3, weights: false });
   reinforce(relevant).catch(() => {});
   return {
     core: cleanCore(core),
     basics,
     memories: [...basics, ...mem], // 含基本情况（旧调用方照旧拿得到）；拼提示时基本情况单独一节，这里的不重复列
     episodes: score(eps.filter(safe((e) => e.summary)), query, (e) => `${e.summary} ${(e.topics || []).join(' ')}`, { k: 2, vec, weights: false }).filter((e) => e.relevance >= 0.2),
-    lessons: score(ls.filter(safe((l) => `${l.content}\n${l.context ?? ''}`)), query, (l) => `${l.content} ${l.context}`, { k: 3, weights: false }),
+    lessons: [...new Map([...scopedLessons, ...relatedLessons].map(l => [l.id, l])).values()].slice(0,3),
     skills: score(ss.filter(safe(skillText)), query, (s) => `${s.name} ${s.description}`, { k: 3, weights: false })
   };
+}
+/** 图片尚未分类时给条件式表达偏好；最多3条/2000字，不把它们当图片事实。 */
+export async function communicationImageContext({ signal } = {}) {
+  signal?.throwIfAborted();
+  const [ms, ls] = await Promise.all([memories.all(), lessons.all()]);
+  signal?.throwIfAborted();
+  const valid = [...ms.map(upgrade).filter(current), ...ls].filter(safe(item => `${item.content}\n${item.context ?? ''}`));
+  const selected = communicationRecords(valid, '体检 文章');
+  if (!selected.length) return '';
+  const labels = {care:'仅家人/宠物检查报告',writing:'仅写作任务',general:'一般表达'};
+  return '图片场景的已记录表达偏好（只在对应场景适用；当前指令优先；不是图片或健康事实）：\n' + selected.map(item => `- [${labels[recordScope(item)]}] ${item.content}`).join('\n');
 }
 const skillText = (s) => `${s.name}\n${s.description ?? ''}\n${s.steps ?? ''}`;
 

@@ -1,5 +1,6 @@
 import { LIMITS, readJson, workflowError } from './workflowSchema.js';
 import { WRITING_RULES } from './workflowPolicy.js';
+import { hedgeIssue, roleReview } from './writingRoles.js';
 
 export function validateReview(value, plan, draft) {
   if (!value || (!Array.isArray(value.issues) && !Array.isArray(value.coverage))) throw workflowError('内容审查格式无效', 'DOCUMENT_RESPONSE');
@@ -40,8 +41,15 @@ export function validateReview(value, plan, draft) {
 
 export async function reviewDocument(input, plan, draft, ask, stage = 'reviewing') {
   const output = await ask(stage, {
-    system: `你是严格的文档内容审查员，不因文风正式而认可方案。${WRITING_RULES}只输出JSON。`,
+    system: `你是严格的文档内容审查员，不因文风正式而认可方案。${WRITING_RULES}${roleReview(input.role)}只输出JSON。`,
     prompt: `核对完整原始要求，不只核对底稿。检查需求遗漏或降级、业务断点、无依据的数字、事实与建议混淆、重复空话、验收场景。\n原始要求：${input.task}\n材料：${input.material}\n底稿与推演：${JSON.stringify(plan)}\n正文：\n${draft}\n输出{"coverage":[{"id":"REQ-1","result":"supported或partial或missing","quote":"正文中逐字存在的支撑片段；缺失留空"}],"issues":[{"severity":"must_fix或warning","location":"具体标题或段落","problem":"具体缺陷及理由","fix":"可执行修改要求"}]}。每条需求必须出现且只出现一次；严重问题最多30项。不要输出数字评分，不把需求词出现当作需求落实，不作未执行的事实核实或视觉检查声明。`
   });
-  return validateReview(readJson(output), plan, draft);
+  const review = validateReview(readJson(output), plan, draft);
+  // 对外文档推辞话术太多：程序数出来，不靠审查模型自觉（它自己也常是满篇“待确认”的来源）
+  const hedge = hedgeIssue(input.role, draft);
+  if (hedge) {
+    review.issues.push({ id: `ISSUE-${review.issues.length + 1}`, ...hedge });
+    review.outcome = 'needs_revision';
+  }
+  return review;
 }

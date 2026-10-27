@@ -1,14 +1,16 @@
+import { isResponseRevision } from '../core/responseRevision.js';
 import { createLookupWindow } from './lookupWindow.js';
 import { needsComputer } from '../llm/router.js';
+import { followsImage } from '../core/imageFollowup.js';
 import { creativeWithoutLookup } from '../core/imageFollowup.js';
 /** 普通信息查询的总时限：包含上下文、模型等待/重试、检索和收尾；不是只计网页耗时。 */
 export const LOOKUP_TOTAL_MS = 60_000;
 export const COMPLEX = /深度|深入|全面|详细|长篇|长文|\d+\s*[千万元]?\s*字|调研|研究报告|生成|制作|创作|画|设计|样式|效果图|界面|网页|网站|PPT|Word|Excel|文档|报告|方案|论文|查原文|核实原文|核对原文|逐条核[实验对]|逐项|逐一|交叉核[验对]|多来源核[验对]|(?:写|生成|制作|编制|导出|保存为|整理成).{0,16}(?:报告|文档|论文|PPT|Word|Excel|文件)|代码|编程|开发|安装|部署/i;
 /** 要她自己动脑的（描述、发散、想象、出主意、讲讲……）：不是查资料，不套普通查询的 60 秒时限 */
-const THINKING = /描述|描写|发散|想象|联想|脑暴|头脑风暴|构思|创意|灵感|点子|故事|编[个一段首]|作诗|写诗|诗歌|歌词|唱|讲讲|说说|聊聊|展开|思考|想法|出主意|主意|建议|怎么看|看法|观点|推理|推演|讨论|规划|计划|这[个张幅]图|图里|图中|照片里|画面/;
+const THINKING = /OCR|识图|读数|重新看|描述|描写|发散|想象|联想|脑暴|头脑风暴|构思|创意|灵感|点子|故事|编[个一段首]|作诗|写诗|诗歌|歌词|唱|讲讲|说说|聊聊|展开|思考|想法|出主意|主意|建议|怎么看|看法|观点|推理|推演|讨论|规划|计划|这[个张幅]图|图里|图中|照片里|画面/;
 export function isQuickLookup(text = '', images = []) {
   const value = String(text);
-  return !images.length && value.length <= 500 && !COMPLEX.test(value) && !THINKING.test(value) && !/(?:生成|制作|写|修改|重构|运行|执行|整理|翻译|总结|分析|评审|帮我做|接着做|继续|恢复|发送|删除|移动|重命名|创建|启动|打开|下载|上传|记住|记下|保存|安排|提醒|定时|设计|调整|新增|修复)/.test(value);
+  return !isResponseRevision(value) && !images.length && value.length <= 500 && !COMPLEX.test(value) && !THINKING.test(value) && !/(?:生成|制作|写|修改|重构|运行|执行|整理|翻译|总结|分析|评审|帮我做|接着做|继续|恢复|发送|删除|移动|重命名|创建|启动|打开|下载|上传|记住|记下|保存|安排|提醒|定时|设计|调整|新增|修复)/.test(value);
 }
 /** “继续”继承原问题的查询类别，不因按钮文案绕过普通查询期限。 */
 export function lookupRequirement(text, history = []) {
@@ -17,7 +19,7 @@ export function lookupRequirement(text, history = []) {
   return [...history].reverse().find(m => m.role === 'user' && !continuation(m.content))?.content || text;
 }
 /** 这些工具是在“做东西”（画图、唱歌、写文件）：一旦调用，说明不是普通查询，解除 60 秒时限 */
-const MAKING_TOOLS = new Set(['generate_image', 'sing_song', 'create_document', 'write_file']);
+const MAKING_TOOLS = new Set(['generate_image', 'sing_song', 'create_document', 'write_file', 'plan_architecture', 'create_diagram', 'export_diagram', 'render_diagram', 'inspect_image', 'read_image_text']);
 /** 普通问题一分钟没查完时，回答结尾的提示；用户回“再查”就放宽重查 */
 export const MORE_TIME_ASK = '要我再查一会儿，回“再查”就行';
 export const MORE_TIME_MS = 3 * 60_000;
@@ -48,6 +50,7 @@ export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_
   if(text !== (options.requirementText ?? options.userText)) options = { ...options, requirementText: text };
   const hasComputer=options.tools?.some(t=>t.name==='computer_look'||t.name==='computer_search');
   if(options.computerTask||hasComputer&&needsComputer(text,{history:options.history||[]}))return run(options.computerTask?options:{...options,computerTask:true});
+  if (followsImage(text, options.history || [], new Map((options.history || []).filter(message => message.images?.length || message.thumbs?.length).map(message => [message.ts, true])))) return run(options);
   if (!isQuickLookup(text, options.images)) return run(options);
   const ctrl = new AbortController();
   let timer, closed = false, partial = '', finishWait;

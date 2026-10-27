@@ -1,3 +1,4 @@
+import { IMAGE_RECHECK } from './imageReading.js';
 import { newsCandidates } from './newsDelivery.js';
 import { mediaReceipt, mediaDelivery, blockedAfterDenial } from './actionDelivery.js';
 import { createVisualEvidence, readVisualReceipt } from './visualEvidence.js';
@@ -9,12 +10,12 @@ import { answerConstraints, answerConstraintIssues, concreteSourceRequirement, s
 /** 核实文件内容的工具：同一文件验过可用后只再放行一次 */
 export const VERIFY_TOOLS = /^(?:read_file|computer_read_file|check_document)$/;
 /** 每轮仅存最多64条回执摘要，不保存正文、代码或网页。不同任务不共享。 */
-const DOC_TOOLS = /^(?:create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet)$/;
+const DOC_TOOLS = /^(?:create_diagram|export_diagram|create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet)$/;
 
 export function createExecutionReview(goal = '', { visual = false } = {}) {
   let request = String(goal).slice(0, 4000);
   const receipts = [];
-  const visualEvidence = createVisualEvidence(visual || /截图|识图|OCR|看图|图片识字/.test(goal));
+  const visualEvidence = createVisualEvidence(visual || /截图|识图|OCR|看图|图片识字/.test(goal), { requireRecheck: IMAGE_RECHECK.test(goal) });
   let visualIssue = '';
   let declinedTool = '';
   const toolBlock = (toolName) => blockedAfterDenial(request, declinedTool, toolName);
@@ -56,6 +57,10 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     }
     if (ok) for (const url of sourceCandidates(request, toolName, output, args)) {
       if (candidateSources.size < 8) candidateSources.add(url);
+    }
+    if (toolName === 'inspect_image') {
+      visualEvidence.note({ kind: 'ocr', ok: false });
+      visualEvidence.note(ok ? readVisualReceipt(output) || { kind: 'vision', ok: false } : { kind: 'vision', ok: false });
     }
     if (toolName === 'read_image_text') visualEvidence.note(ok ? readVisualReceipt(output) || { kind: 'ocr', ok: true } : { kind: 'ocr', ok: false });
     if (!ok && code === 'NOT_APPROVED') declinedTool = toolName;
@@ -105,6 +110,10 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
       readback: data.readback,
       structure: data.structure,
       render: data.render,
+      ...(data.designHash && { designHash: String(data.designHash).slice(0, 90) }),
+      ...(data.consistency && { consistency: String(data.consistency).slice(0, 40) }),
+      ...(data.visual && { visual: ['passed', 'failed'].includes(data.visual) ? data.visual : 'not_checked' }),
+      ...(data.business && { business: data.business === 'source_excerpts_matched' ? data.business : 'not_checked' }),
       errors: Math.max(0, Number(data.errors) || 0),
       slides: Number.isSafeInteger(data.slides) ? data.slides : null,
       expectedSlides: Number.isSafeInteger(data.expectedSlides) ? data.expectedSlides : null,
@@ -201,6 +210,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     if (!result.memoryChecked) issues.push('用户问有没有记住：先用 recall 查，查到了再回答，查不到就如实说没记，并问要不要现在记');
     if (result.pendingReadback.length) issues.push('这些修改尚未读回核对：' + result.pendingReadback.join('、'));
     if (result.codeExecution === 'not_run') issues.push('已修改代码但没有实际运行记录；先运行适用测试，无法执行就明确未验证');
+    if (result.artifacts.some(item => item.format === 'svg' && (item.visual !== 'passed' || item.business !== 'passed'))) issues.push('架构图按实际回执交付；摘录匹配不等于业务全面核实，未完成视觉检查要说明，不要为补状态重复生成');
     if (result.artifacts.some((item) => item.errors > 0)) issues.push('文档仍有生成器报告的问题，不能宣称排版或公式全部通过');
     if (result.failures.length)
       issues.push('本轮这些操作失败后没有成功补做：' + [...new Set(result.failures)].join('、') + '；补做只指重试失败的这一步（不能改做用户这次没要求的别的事），没补救的在回答里一句话说明，不要为此重新读取已交付的文件');
