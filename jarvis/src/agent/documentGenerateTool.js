@@ -2,7 +2,7 @@ import { requestedSlides } from './documentPageBudget.js';
 import * as ws from './workspace.js';
 import { generate } from './docs.js';
 import { THEME_IDS, themeList } from './themes.js';
-import { planDocument } from './documentPlan.js';
+import { planDocument, documentError } from './documentPlan.js';
 import { chooseDesign, DOC_KINDS, SHEET_KINDS } from './documentDesign.js';
 import { STYLE_IDS } from './pptStyles.js';
 import { deliverDocument } from './documentDelivery.js';
@@ -11,6 +11,7 @@ import { pickSheets, sheetSvg, rasterize } from './slidePreview.js';
 import { throwControl } from '../core/networkRequest.js';
 import { S, str, fmtSize, findTemplate } from './documentSchema.js';
 import { formattingSource, verifyFormattingContent } from './documentPreservation.js';
+import { formatDocumentFile } from './documentFileFormat.js';
 
 /** 保留原有一轮自修复与PPT看图检查，不额外叠加无界模型审稿。 */
 /** 同一轮里同一个文件：内容一样就直接用上次的结果；已经请模型自查过的文件，重新生成时不再自查（评测里一份 PPT 生成了四遍，每遍都等自查） */
@@ -39,7 +40,7 @@ export function createDocumentGenerateTool(ctx) {
   sameRun.set(memoOwner, memo);
   return {
     name: 'create_document',
-    description: `生成 Office / 文档文件并保存到工作区；需要模板时先get_document_template。生成后自动检查文件结构、读回内容，可用时由本机LibreOffice生成真实PDF预览。结构/估算检查不等于Office视觉验收。排版自动完成（A4、标题样式、编号列表、带表头底色的表格、页码；Word / PDF 的二级标题有 3 个以上时自动加目录）。
+    description: `生成 Office / 文档文件并保存到工作区；需要模板时先get_document_template。已有Word仅重排时用source_path保留原件结构，content可空；粘贴原文可用source_requirement_id绑定，不改写正文。生成后自动检查文件结构、读回内容，可用时由本机LibreOffice生成真实PDF预览。结构/估算检查不等于Office视觉验收。排版自动完成（A4、标题样式、编号列表、带表头底色的表格、页码；Word / PDF 的二级标题有 3 个以上时自动加目录）。
 content 用 Markdown：
 - docx / pdf / html：开头一个“# 文档标题”，正文用 ## 一级标题、### 二级标题、#### 三级标题；支持多级列表（缩进两个空格）、| 表格 |（:--: 居中、--: 右对齐）、**粗体**、*斜体*、~~删除线~~、[链接](https://…)、> 引用、代码块、--- 分隔线、单独一行 [分页]、![图注](工作区里的图片路径)
 - pptx：每页用“## 页标题”。汇报、方案类的页标题写成一句观点（如“建设必要性：补齐告警到处置的人工断点”）；剧情、介绍、攻略类用简洁准确的标题，不硬写观点句。用户自己给了分段的，一段一页、顺序不变。设计风格用 style（不填自动选）。版式按内容自动选：
@@ -66,6 +67,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         title: str('文档标题'),
         content: str('Markdown 内容'),
         source_requirement_id: str('只排版、内容不变时，绑定read_task_requirements中用户原文编号；不从助手旧稿重写正文'),
+        source_path: str('只排版已有Word时绑定工作区原DOCX路径；保留原文表格图片及关联，与source_requirement_id二选一'),
         theme: { type: 'string', enum: THEME_IDS, description: '配色主题，不填自动选' },
         style: { type: 'string', enum: STYLE_IDS, description: 'PPT 设计风格（构图不同，不只是颜色）：business 稳重商务（汇报、方案）/ minimal 简洁留白（产品、设计、品牌）/ story 叙事氛围（剧情、人物、历史、文化、旅行）/ data 数据报告（经营、财务、统计）。不填按用户要求和内容自动选' },
         kind: { type: 'string', enum: [...Object.keys(DOC_KINDS), ...Object.keys(SHEET_KINDS)], description: `文种 / 用途，决定结构和排法。Word：${Object.entries(DOC_KINDS).map(([k, v]) => `${k} ${v}`).join('、')}；Excel：${Object.entries(SHEET_KINDS).map(([k, v]) => `${k} ${v}`).join('、')}。不填按标题和要求自动判断` },
@@ -84,9 +86,11 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       ['format', 'path', 'content']
     ),
     run: async (
-      { format, path, title, content, theme, style, kind, cover, subtitle, author, issuer, docNo, toc, template, template_id: templateId, requirements, source_requirement_id: sourceId },
-      { progress, signal, checkpoint, rawRequestText, requestText, executionScope, sessionId } = {}
+      { format, path, title, content, theme, style, kind, cover, subtitle, author, issuer, docNo, toc, template, template_id: templateId, requirements, source_requirement_id: sourceId, source_path: sourcePath },
+      execution = {}
     ) => {
+      const { progress, signal, checkpoint, rawRequestText, requestText, executionScope, sessionId } = execution;
+      if (format !== 'docx' && (sourceId || sourcePath)) throw documentError('原Word/原文绑定请使用docx输出；PDF使用该Word的真实Office预览，不能另写一份替代原稿', 'DOCUMENT_SOURCE');
       // 每轮独立作用域，跨轮不能以旧回执跳过检查。
       let cache = memo;
       if (executionScope) {
@@ -94,7 +98,8 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         cache = memo.scopes.get(executionScope);
       }
       const goal = requestText || rawRequestText || requirements || '';
-      const source = format === 'docx' ? await formattingSource({ request: rawRequestText || goal, sessionId, sourceId, signal }) : null;
+      const source = format === 'docx' ? await formattingSource({ request: rawRequestText || goal, sessionId, sourceId, sourcePath, signal }) : null;
+      if (source?.kind === 'docx') return formatDocumentFile(ctx, source, { path, theme, kind, cover, toc, template, requirements }, execution);
       // 排版时绕过模型提供的正文和改写审稿，确定性沿用已绑定的用户原文。
       if (source) content = source.content;
       const forbidCover = /(?:不要|不用|无需|不加|不含|去掉|去除).{0,3}封面/.test(goal);

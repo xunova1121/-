@@ -3,11 +3,17 @@ import { documentError } from './documentPlan.js';
 import { openOfficePackage, xmlUnescape } from './officePackage.js';
 import { collectRequirements } from './taskRequirements.js';
 import * as sessions from './sessions.js';
+import { formattingFileSource, uploadedWordPaths } from './documentFileSource.js';
 
 // 只处理明确的排版任务；写作、精简、翻译仍走原工作流，不根据历史偏好猜授权。
 export function formattingOnly(request = '') {
   const instruction = String(request).split(/^#\s/m)[0];
   if (/(?:不要|不是|并非)只(?:做)?(?:排版|调整排版)|(?<!不)需要(?:改写|重写)|(?<!不)允许(?:改写|重写)/.test(instruction)) return false;
+  if (/(?:不要|不用|别)重新排版/.test(instruction)) return false;
+  for (const clause of instruction.split(/[，。；;\n]/)) {
+    if (/(?:改写|重写|重新写)/.test(clause) && !/(?:不|别|勿|无需|不必)[^，。；;]{0,8}(?:改写|重写|重新写)/.test(clause)) return false;
+  }
+  if (/重新排版|重排版|(?:按(?:照)?|根据).{0,12}(?:偏好|喜好).{0,8}(?:重新做|重做|重排|做成\s*Word)/i.test(instruction)) return true;
   return /只(?:让你)?(?:做|需|要)?(?:个)?(?:调整|修改|改)?(?:一下)?(?:排版|版式|格式)|(?:正文|内容|原文)(?:一字)?(?:都)?(?:不要改|不改|不变|保持不变)|仅(?:排版|调整版式)/.test(
     instruction
   );
@@ -17,8 +23,11 @@ const MAX_SOURCE = 120000;
 const fail = (message) => documentError(message, 'DOCUMENT_SOURCE');
 
 /** 原文来自本轮会话的用户记录，不接受模型自己填写的旧稿冒充原文。 */
-export async function formattingSource({ request, sessionId, sourceId, signal }) {
-  if (!formattingOnly(request)) return null;
+export async function formattingSource({ request, sessionId, sourceId, sourcePath, signal }) {
+  if (!formattingOnly(request)) {
+    if (sourceId || sourcePath) throw fail('来源绑定用于排版保留；正文修改用edit_office_document或改写入口，不要忽略已绑定原件再重写');
+    return null;
+  }
   signal?.throwIfAborted();
   const saved = sessionId ? await sessions.get(sessionId) : null;
   signal?.throwIfAborted();
@@ -27,7 +36,12 @@ export async function formattingSource({ request, sessionId, sourceId, signal })
   const recent = entries.slice(-400).filter((entry) => entry.text !== request);
   const latest = /^#\s+\S/m.test(request)
     ? { id: 'current', text: request }
-    : recent.reverse().find((entry) => entry.text.length > 100 || /^#\s+\S/m.test(entry.text));
+    : recent.reverse().find((entry) => entry.text.length > 100 || /^#\s+\S/m.test(entry.text) || uploadedWordPaths(entry.text).length);
+  if (sourceId && sourcePath) throw fail('原文编号与Word原文件只能绑定一种来源');
+  if (!sourceId) {
+    const file = await formattingFileSource({ request, sourcePath, latest, messages: saved?.messages, signal });
+    if (file) return file;
+  }
   let source;
   if (sourceId) {
     if (!/^r\d{1,12}$/.test(sourceId)) throw fail('原文编号格式无效');
@@ -39,9 +53,10 @@ export async function formattingSource({ request, sessionId, sourceId, signal })
     // 自动识别只接受完整Markdown正文边界；普通聊天不被当作原文，也不拿助手旧稿补位。
     source = latest && /^#\s+\S/m.test(latest.text) ? latest : null;
   }
-  if (!source) throw fail('只排版任务缺少已绑定的完整原文；先读取用户原文，用source_requirement_id指定记录，不要拿旧稿或摘要替代');
+  if (!source) throw fail('排版任务缺少已绑定的完整原文；用source_requirement_id指定用户原文，或source_path绑定原Word，不要拿旧稿或摘要替代');
   if (source.text.length > MAX_SOURCE) throw fail('排版原文超过12万字符处理上限，不能截断后冒充全文');
   const start = source.text.search(/^#\s+\S/m);
+  if (start < 0 && uploadedWordPaths(source.text).length) throw fail('该原话编号指向上传附件，请用source_path绑定Word原文件，不能把附件说明当成正文');
   if (start < 0 && formattingOnly(source.text)) throw fail('所选原话只有排版指令，没有可识别的正文；请读取并绑定正文编号');
   const prefix = start > 0 ? source.text.slice(0, start) : '';
   const content = (source.text === request && formattingOnly(prefix) ? source.text.slice(start) : source.text).trim();

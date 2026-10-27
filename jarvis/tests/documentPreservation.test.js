@@ -31,6 +31,12 @@ describe('只排版正文保真（虚构原文，不调用真实模型）', () =
     expect(formattingOnly('写一份方案，改进格式')).toBe(false);
     expect(formattingOnly('不要只排版，需要重写')).toBe(false);
     expect(formattingOnly('只让你做个版式调整，不需要改写')).toBe(true);
+    expect(formattingOnly('根据我的偏好重新做一版')).toBe(true);
+    expect(formattingOnly('按照我的写作偏好重新写一篇文章')).toBe(false);
+    expect(formattingOnly('根据偏好重新做一版，需要改写')).toBe(false);
+    expect(formattingOnly('根据我的偏好重新做一版，重写正文')).toBe(false);
+    expect(formattingOnly('根据我的偏好重新做一版，不要改写正文')).toBe(true);
+    expect(formattingOnly('不要重新排版，重写内容')).toBe(false);
   });
 
   it('本轮已落盘原话可用原编号；正文标题前的业务文字不得丢失', async () => {
