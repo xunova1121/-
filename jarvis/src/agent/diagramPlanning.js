@@ -20,15 +20,25 @@ export function planDiagramContent(input, materials = [], requestText = '') {
   if (!Array.isArray(facts) || facts.length > 80 || !Array.isArray(recommendations) || recommendations.length > 20)
     throw invalid('内容规划最多80条关键事实、20条建议');
   const drawn = compact([input.title, input.design?.message || '', ...input.layers.map(layer => [layer.title, layer.group || '', ...layer.nodes.map(node => `${node.title}\n${node.subtitle || ''}\n${node.detail || ''}\n${(node.bullets || []).map(item => item.text).join('\n')}\n${node.badge || ''}`)].join('\n'))].join('\n'));
-  const checked = facts.map(fact => {
+  const errors = [];
+  const checked = facts.map((fact, index) => {
+    try {
+    const reject = (stage, field, message, action) => { throw Object.assign(invalid(message + `（contentPlan.facts[${index}].${field}）`), { diagnostics: [{ stage, field: `contentPlan.facts[${index}].${field}`, action }] }); };
     if (typeof fact.text !== 'string' || !fact.text.trim() || fact.text.length > 160 || typeof fact.source !== 'string' || fact.source.length > 400 || typeof fact.excerpt !== 'string' || !fact.excerpt.trim() || fact.excerpt.length > 240)
-      throw invalid('每条关键事实需text、source和不超过240字的原文excerpt');
+      reject('arguments', 'text', '每条关键事实需text、source和不超过240字的原文excerpt', '按结构补全当前条目，不改其他事实');
     const original = fact.source === 'user' ? requestText : materials.find(item => item.path === fact.source)?.text;
-    if (!original || !compact(original).includes(compact(fact.excerpt)) || !compact(fact.excerpt).includes(compact(fact.text)))
-      throw invalid('关键事实无法匹配指定原文，请保留原文名称和数量，不以推测替代');
-    if (!drawn.includes(compact(fact.text))) throw invalid('关键事实未进入图形节点，请补齐后再绘制：' + fact.text);
+    if (!original) reject('source', 'source', '关键事实无法匹配指定原文：来源未读取或路径不一致', '读取sources中确切文件；不要借另一份同名材料的证据');
+    if (!compact(original).includes(compact(fact.excerpt))) reject('excerpt', 'excerpt', '关键事实无法匹配指定原文：摘录不存在', '从所选来源逐字摘取；检查正文范围与版本，不猜摘录');
+    if (!compact(fact.excerpt).includes(compact(fact.text))) reject('fact', 'text', '关键事实无法匹配指定原文：事实不在摘录中', '保留摘录中的实际名称和数量；建议移到recommendations');
+    if (!drawn.includes(compact(fact.text))) reject('inclusion', 'text', '关键事实未进入图形节点，请补齐后再绘制：' + fact.text, '把当前事实放入实际节点标题、说明或要点，不用元数据冒充入图');
     return { ...fact, evidence: 'source_excerpt_matched', included: true };
+    } catch (error) {
+      if (error.code !== 'DIAGRAM_CONTENT_PLAN') throw error;
+      errors.push(error);
+      return null;
+    }
   });
+  if (errors.length) throw Object.assign(errors[0], { diagnosticCount: errors.length, diagnostics: errors.flatMap(error => error.diagnostics || []).slice(0, 8) });
   if (recommendations.some(item => typeof item !== 'string' || !item.trim() || item.length > 160)) throw invalid('每条建议需为1至160字的文本');
   // 只给层级候选，不把缺失的层自动生成成项目事实。
   const levels = LEVELS.map(([label, pattern]) => ({ label, layers: input.layers.filter(layer => pattern.test(layer.title)).map(layer => layer.title) }));

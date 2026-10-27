@@ -1,3 +1,4 @@
+import { isDiagramTool, diagramFailureDetails } from './diagramRecovery.js';
 import { uid } from './store.js';
 import { recordWorkAttempt } from './workLedger.js';
 import { validateArgs } from './tools.js';
@@ -25,6 +26,7 @@ export async function executeToolCalls(
     lookupControl,
     webTools,
     parallelSafe,
+    diagramRecovery,
     allowWebSearch = true
   }
 ) {
@@ -51,11 +53,11 @@ export async function executeToolCalls(
         throw Object.assign(new Error('当前描述/创作无需检索，请直接依据图片和材料回答；用户明确要求外部核实后再联网'), { code: 'SEARCH_NOT_REQUESTED', kind: 'api' });
       // 一模一样的调用已经做过两次：结果不会变，不再执行，让模型换思路
       if (times >= 3 && !/^computer_(look|click|type|key|scroll|drag|screenshot)$/.test(c.name))
-        throw new Error(`这个操作（同样的参数）已经做过 ${times - 1} 次了，结果不会变。请换一种方法，或者直接根据已有结果继续。`);
+        throw Object.assign(new Error(`这个操作（同样的参数）已经做过 ${times - 1} 次了，结果不会变。请换一种方法，或者直接根据已有结果继续。`), isDiagramTool(c.name) ? { code: 'DIAGRAM_DUPLICATE_CALL', kind: 'input' } : {});
       const scopeIssue = review.toolBlock?.(c.name);
       if (scopeIssue) throw Object.assign(new Error(scopeIssue), { code: 'TASK_SCOPE_AFTER_DENIAL', kind: 'input' });
       const bad = c.parseError || validateArgs(tool, c.args);
-      if (bad) throw new Error(`${bad}。请检查参数后重新调用。`);
+      if (bad) throw Object.assign(new Error(`${bad}。请检查参数后重新调用。`), isDiagramTool(c.name) ? { code: 'DIAGRAM_INPUT', kind: 'input' } : {});
       // 文件已验过可用（能读回、没报错、之后没改过）且已经核实过一次：不再读，免得“读取 → 核实 → 再核实”绕圈
       if (review.rereadBlocked?.(c.name, c.args)) {
         output = `${c.args.path} 本轮已经核实过：能正常读回，没有报错，之后也没改过。不需要再读，直接把结果交给用户；没查到的内容（如“待查”）在回答里说明即可。`;
@@ -108,6 +110,11 @@ export async function executeToolCalls(
       if (e.code === 'RETRIEVAL_BUDGET') retrieval.close(e.message);
       output = `错误：${e.message || e}`;
     }
+    const recovery = diagramRecovery?.record(c.name, c.args, failure);
+    const diagnostics = diagramFailureDetails(failure);
+    if (diagnostics.length) output += '\n定点修复：' + JSON.stringify(diagnostics);
+    if (Number.isSafeInteger(failure?.diagnosticCount) && failure.diagnosticCount > 8) output += `\n共有${Math.min(80, failure.diagnosticCount)}条事实未通过，本次仅列前8条；按同一原文核对全部facts，不把未列出的条目当通过。`;
+    if (recovery) output += '\n' + recovery.message;
     try {
       await recordWorkAttempt({ tool: c.name, args: c.args, output, ok, sessionId, scope: executionScope, callId: workCallId });
     } catch {
@@ -117,7 +124,7 @@ export async function executeToolCalls(
     emit({ type: 'tool_end', id: c.id, name: c.name, ok, output, ...(failure && { errorKind: errorKind(failure), code: failure.code }), ms: Date.now() - t0 });
     if (failure?.code !== 'RETRIEVAL_BUDGET') throwControl(failure, signal);
     review.record({ name: c.name, args: c.args, ok, output, code: failure?.code });
-    return { c, ok, output, outImages };
+    return { c, ok, output, outImages, ...(recovery?.stopped && { recoveryStop: recovery.message }) };
   };
   // 互不影响的只读调用（搜索、读文件、读网页……）同时做；其余按顺序一个个做
   const results = [];
@@ -128,7 +135,13 @@ export async function executeToolCalls(
       results.push(...(await Promise.all(calls.slice(i, j).map(exec))));
       i = j;
     } else {
-      results.push(await exec(calls[i]));
+      const result = await exec(calls[i]);
+      results.push(result);
+      if (result.recoveryStop) {
+        // 已停止本批执行，仍补齐工具响应，避免用户同时插话后续请求缺tool_call_id。
+        for (const pending of calls.slice(i + 1)) results.push({ c: pending, ok: false, output: '本轮图形恢复上限已触发，此操作未执行；' + result.recoveryStop, outImages: [] });
+        break;
+      }
       i++;
     }
   }

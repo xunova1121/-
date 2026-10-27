@@ -1,3 +1,4 @@
+import { throwControl } from '../core/networkRequest.js';
 import * as workspace from './workspace.js';
 import { parseFile } from './docs.js';
 
@@ -7,7 +8,12 @@ export async function checkSources(sources, signal) {
   const materials = [];
   for (const source of sources) {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-    const blob = await workspace.readBlob(source.path);
+    let blob;
+    try { blob = await workspace.readBlob(source.path); } catch (error) {
+      throwControl(error, signal);
+      if (error.kind === 'network' || error.kind === 'timeout') throw error;
+      throw Object.assign(new Error('图形来源读取失败：' + String(source.path).slice(0,400)), {code:'DIAGRAM_SOURCE_READ',kind:'input',cause:error,diagnostics:[{stage:'material',field:'sources.path',action:'定位并读取明确来源文件；若为旧格式，使用用户指定的可读版本，不借旧稿代替'}]});
+    }
     if (blob.size > 10e6) throw Object.assign(new Error('来源文件超过10MB，请先分段提取相关材料'), { code: 'DIAGRAM_SOURCE_SIZE', kind: 'input' });
     if (source.sectionEnd !== undefined && source.sectionStart === undefined)
       throw Object.assign(new Error('章节终点必须同时给出唯一起点'), { code: 'ARCHITECTURE_SOURCE_SCOPE', kind: 'input' });

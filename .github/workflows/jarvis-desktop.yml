@@ -233,6 +233,7 @@ jobs:
           node e2e/image-inspection.mjs
           node e2e/diagram-layout.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/diagram-render.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/diagram-recovery.mjs "$RUNNER_TEMP/jarvis-e2e/recovery"
           node e2e/diagram-export.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/diagram-cards.mjs "$RUNNER_TEMP/jarvis-e2e/cards"
           node e2e/diagram-platform.mjs "$RUNNER_TEMP/jarvis-e2e/platform"

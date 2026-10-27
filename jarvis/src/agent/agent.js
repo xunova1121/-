@@ -1,3 +1,4 @@
+import { createDiagramRecovery } from './diagramRecovery.js';
 import { IMAGE_RECHECK, IMAGE_READING_RULES } from './imageReading.js';
 import { conversationFocus } from '../core/responseRevision.js';
 import { responseGuidance } from './responseGuidance.js';
@@ -280,6 +281,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   let limit = maxSteps;
   const hardCap = maxSteps * HARD_CAP;
   const recent = []; // 最近工具调用的成败
+  const diagramRecovery = createDiagramRecovery();
   const seen = new Map(); // 同样的调用（工具 + 参数）做过几次
   let stuck = false;
   // 当前用的模型；出错时换成备用模型（fallbacks，按顺序），这一轮剩下的步骤都用新模型
@@ -293,6 +295,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     const said = inbox?.splice(0) ?? [];
     if (said.length) currentRequest = said.join('\n');
     if (!said.length) return false;
+    diagramRecovery.reset();
     seen.clear(); // 用户追加了新指令，同样参数可能是新的明确要求
     if (availableTools.some(t => t.name === 'computer_search') && said.some(needsComputer)) computerNote = COMPUTER_NOTE;
     review.revise(said.join('\n'));
@@ -325,7 +328,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       signal,
       ...(sportsArgs ? { call: { name: 'get_sports_scores', args: sportsArgs }, timeoutMs: PRE_SPORTS_MS } : {}),
       run: async (calls, s) => {
-        const results = await executeToolCalls(calls, { loader, emit, seen, executionScope, closing: false, retrieval, approve, signal: s, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch: true });
+        const results = await executeToolCalls(calls, { loader, emit, seen, diagramRecovery, executionScope, closing: false, retrieval, approve, signal: s, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch: true });
         for (const r of results) retrieval.end(r.ok);
         return results;
       }
@@ -511,7 +514,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     // 执行一次工具调用：开始 / 结束事件照常发出，返回结果，按调用顺序写回对话
     // 模型又用先搜过的词搜一次：直接给上次的结果，不再白搜（也不会被“相同搜索词”拦下报错）
     const reused = new Map(r.toolCalls.filter((c) => reusesPreSearch(c, preFound)).map((c) => [c, { c, ok: true, output: preFound.output, outImages: [] }]));
-    const ran = await executeToolCalls(r.toolCalls.filter((c) => !reused.has(c)), { loader, emit, seen, executionScope, closing, retrieval, approve, signal, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch });
+    const ran = await executeToolCalls(r.toolCalls.filter((c) => !reused.has(c)), { loader, emit, seen, diagramRecovery, executionScope, closing, retrieval, approve, signal, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch });
     const results = r.toolCalls.map((c) => reused.get(c) ?? ran.find((x) => x.c === c)).filter(Boolean);
     for (const { c, ok, output, outImages } of results) {
       toolCount++;
@@ -524,6 +527,13 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       if (recent.length > 12) recent.shift();
       convo.push({ role: 'tool', toolCallId: c.id, name: c.name, content: output, isError: !ok, ...(outImages.length && { images: outImages }) });
       await see(convo.at(-1), { hint: requirementText, signal, ocr: c.name !== 'read_image_text' });
+    }
+    const recoveryStop = results.find(result => result.recoveryStop)?.recoveryStop;
+    if (recoveryStop && inbox?.length) { takeInbox(); continue; }
+    if (recoveryStop) {
+      emit({ type: 'text', delta: '\n' + recoveryStop });
+      finalText += '\n' + recoveryStop;
+      break;
     }
     // 长任务中途提醒：每调用 REMIND_EVERY 次工具，把用户这次的要求和计划进度附在最后一条工具结果后面，免得做着做着跑偏
     if (toolCount - reminded >= REMIND_EVERY) {
