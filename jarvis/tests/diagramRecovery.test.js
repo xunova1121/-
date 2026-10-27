@@ -77,3 +77,13 @@ it('同底稿的不同输出目标不会互相累计连续失败',()=>{
  expect(state.record('create_diagram',{path:'总体.svg',architecturePath:'同底稿.architecture.json'},error).failures).toBe(1);
  expect(state.record('create_diagram',{path:'业务.svg',architecturePath:'同底稿.architecture.json'},error).failures).toBe(1);
 });
+
+it('被用户否定的旧图不是允许目标，明确新图仍可读取',()=>{
+ expect(()=>assertDiagramTarget('图.svg','不要检查 `旧图.svg`，请检查图.svg')).not.toThrow();
+ expect(()=>assertDiagramTarget('旧图.svg','检查 `图.svg`，不是 `旧图.svg`')).toThrow();
+ expect(()=>assertDiagramTarget('图.svg','检查 `图.svg`，不是 `旧图.svg`')).not.toThrow();
+ expect(()=>assertDiagramTarget('旧图.svg','不要检查 `旧图.svg`')).toThrow();
+ expect(()=>assertDiagramTarget('图.svg','不要改动直接检查 `图.svg`')).not.toThrow();
+ expect(()=>assertDiagramTarget('图.svg','不要使用 `图.svg`，还是用 `图.svg`')).not.toThrow();
+ expect(()=>assertDiagramTarget('0.svg',Array.from({length:33},(_,i)=>'`'+i+'.svg`').join('，'))).toThrow(/32/);
+});
