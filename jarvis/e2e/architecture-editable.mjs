@@ -35,9 +35,25 @@ try {
   await fs.writeFile(changed, await zip.generateAsync({ type: 'nodebuffer' }));
   const saved = path.join(dir, 'saved');
   await fs.mkdir(saved);
-  await execFile(process.env.JARVIS_SOFFICE || 'soffice', ['-env:UserInstallation=' + pathToFileURL(path.join(dir, 'profile')).href, '--headless', '--convert-to', 'pptx:Impress MS PowerPoint 2007 XML', '--outdir', saved, changed], { timeout: 45000, maxBuffer: 64000 });
+  await execFile(
+    process.env.JARVIS_SOFFICE || 'soffice',
+    [
+      '-env:UserInstallation=' + pathToFileURL(path.join(dir, 'profile')).href,
+      '--headless',
+      '--convert-to',
+      'pptx:Impress MS PowerPoint 2007 XML',
+      '--outdir',
+      saved,
+      changed
+    ],
+    { timeout: 45000, maxBuffer: 64000 }
+  );
   const reopened = new Blob([await fs.readFile(path.join(saved, 'edited.pptx'))]);
   const info = await inspectNativeDiagram(reopened);
+  const reopenedZip = await JSZip.loadAsync(await reopened.arrayBuffer());
+  const reopenedXml = await reopenedZip.file(file).async('string');
+  const connectorX = (value) => Number(/<p:cxnSp>[\s\S]*?<a:xfrm[^>]*><a:off x="(\d+)"/.exec(value)?.[1]);
+  assert.ok(Math.abs(connectorX(reopenedXml) - connectorX(xml) - 203200) < 10000, '节点移动后真实Office必须同步连接线起点');
   assert.ok(info.nodeGroups >= 3 && info.anchoredEnds >= 4, '真实保存后不能扁平化或丢失连接锚点');
   const positions = [];
   for (const [index, blob] of [original, reopened].entries()) {
@@ -46,14 +62,28 @@ try {
     const pdf = path.join(dir, index + '.pdf');
     await fs.writeFile(pdf, new Uint8Array(await rendered.blob.arrayBuffer()));
     const { stdout } = await execFile('pdftotext', ['-bbox', pdf, '-'], { timeout: 20000, maxBuffer: 2e6 });
-    const word = [...stdout.matchAll(/<word xMin="([\d.]+)"[^>]*>([^<]*)<\/word>/g)].find(match => match[2].includes(index ? '预警复核' : '预警研判'));
+    const word = [...stdout.matchAll(/<word xMin="([\d.]+)"[^>]*>([^<]*)<\/word>/g)].find((match) => match[2].includes(index ? '预警复核' : '预警研判'));
     assert.ok(word, '实际PDF必须含可修改的正文文字');
     positions.push(Number(word[1]));
     if (index) await fs.copyFile(pdf, path.join(output, '编辑后重新打开.pdf'));
   }
   assert.ok(Math.abs(positions[1] - positions[0] - 16) < 1, '节点组移动应反映到真实渲染文字坐标');
   await fs.copyFile(path.join(saved, 'edited.pptx'), path.join(output, '编辑后重新打开.pptx'));
-  await fs.writeFile(path.join(output, 'edit-check.json'), JSON.stringify({ engine: 'LibreOffice', textChanged: true, movedPoints: positions[1] - positions[0], structure: info, nativeComparison: receipt.editable }, null, 2));
+  await fs.writeFile(
+    path.join(output, 'edit-check.json'),
+    JSON.stringify(
+      {
+        engine: 'LibreOffice',
+        textChanged: true,
+        connectorFollows: true,
+        movedPoints: positions[1] - positions[0],
+        structure: info,
+        nativeComparison: receipt.editable
+      },
+      null,
+      2
+    )
+  );
   console.log('真实Office保存重开：文字修改、节点移动、原生分组、连接锚点保留；非Windows/WPS真机验收');
 } finally {
   await fs.rm(dir, { recursive: true, force: true });

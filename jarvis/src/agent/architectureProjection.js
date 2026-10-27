@@ -139,6 +139,14 @@ export function projectArchitecture(bundle, input) {
       const entity = byId.get(node.id);
       if (!entity || drawn.has(node.id) || entity.kind !== role) throw invalid('对象重复、不在底稿中或层职责不匹配：' + node.id);
       if (!includes(node.title, entity.title)) throw invalid('图中对象名称必须保留底稿名称：' + entity.title);
+      // 网格只表达组成，职责留在底稿；有正文的卡片必须保留已审职责，不允许排版时另写一套业务。
+      if (layer.kind !== 'grid') {
+        const visible = [node.detail, node.subtitle, ...(node.bullets || []).map((item) => item.text)].filter(Boolean).join(' ');
+        if (!includes(visible, entity.responsibility)) {
+          if (!node.detail) node.detail = entity.responsibility;
+          else throw invalid('卡片说明必须保留已审职责，请先修底稿再审或沿用原职责：' + entity.title);
+        }
+      }
       if (group && !belongs(entity.id, group.id)) throw invalid('平台容器归属与底稿不一致：' + entity.title);
       drawn.add(node.id);
     }

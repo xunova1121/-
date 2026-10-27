@@ -85,3 +85,17 @@ it('正式工具入口不能跳底稿或伪称草图；旧低层调用仍兼容'
     tool.run({ path: '图.svg', architecturePath: 'test.architecture.json', draft: true }, { rawRequestText: '制作正式架构图' })
   ).rejects.toMatchObject({ code: 'ARCHITECTURE_DRAFT_ONLY' });
 });
+it('排版不能把已审职责改写成另一套业务；缺说明时程序补入原职责', () => {
+  const value = bundle();
+  const original = projectArchitecture(value, {});
+  const missing = structuredClone(original);
+  delete missing.layers[0].nodes[0].detail;
+  expect(projectArchitecture(value, missing).layers[0].nodes[0].detail).toBe('职责明确');
+  const changed = structuredClone(original);
+  changed.layers[0].nodes[0].detail = '改成与原底稿不同的职责';
+  expect(() => projectArchitecture(value, changed)).toThrow(/必须保留已审职责/);
+  const bullets = structuredClone(original);
+  delete bullets.layers[0].nodes[0].detail;
+  bullets.layers[0].nodes[0].bullets = [{ text: '职责明确' }, { text: '其他要点' }];
+  expect(projectArchitecture(value, bullets).layers[0].nodes[0].detail).toBeUndefined();
+});

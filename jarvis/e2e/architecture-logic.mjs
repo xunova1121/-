@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { chromium } from 'playwright';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { architectureSpec, architectureLayout } from './fixtures/architecture-plan.mjs';
@@ -30,10 +31,51 @@ const receipt = JSON.parse(response.split('\n')[1]);
 assert.equal(receipt.preview.render, 'passed');
 assert.equal(receipt.architecture.semantic, 'passed');
 const scene = JSON.parse(await workspace.readText(receipt.designPath));
-const drawn=sceneElements(scene).filter(item=>item.type==='text').flatMap(item=>item.lines.map(line=>line.text)).join('');
-if(view==='overview') for(const entity of architectureSpec.entities.filter(item=>item.kind!=='system')) {
- assert.ok(drawn.includes(entity.title), '不得漏画节点标题：'+entity.id);
- assert.ok(drawn.includes(entity.responsibility), '不得漏画节点职责：'+entity.id);
+const drawn = sceneElements(scene)
+  .filter((item) => item.type === 'text')
+  .flatMap((item) => item.lines.map((line) => line.text))
+  .join('');
+if (view === 'overview')
+  for (const entity of architectureSpec.entities.filter((item) => item.kind !== 'system')) {
+    assert.ok(drawn.includes(entity.title), '不得漏画节点标题：' + entity.id);
+    assert.ok(drawn.includes(entity.responsibility), '不得漏画节点职责：' + entity.id);
+  }
+const browser = await chromium.launch();
+try {
+  const page = await browser.newPage();
+  await page.setContent(await workspace.readText(receipt.sourcePath));
+  await page.evaluate(() => document.fonts.ready);
+  const invalid = await page.evaluate(() => {
+    const root = document.querySelector('svg'),
+      frame = root.viewBox.baseVal;
+    return [...root.querySelectorAll('text')]
+      .filter((item) => {
+        const b = item.getBBox();
+        return b.x < 0 || b.y < 0 || b.x + b.width > frame.width || b.y + b.height > frame.height;
+      })
+      .map((item) => item.textContent);
+  });
+  assert.deepEqual(invalid, [], '真实字体下不能有文字越出画布');
+  const empty = await page.evaluate(() => [...document.querySelectorAll('g[id^=node-]')].filter((item) => !item.querySelector('text')).map((item) => item.id));
+  assert.deepEqual(empty, [], '节点不能只剩空分组');
+  const boxes = sceneElements(scene)
+    .filter((item) => item.type === 'group' && item.nodeId && item.bounds)
+    .map((item) => ({ id: item.nodeId, ...item.bounds }));
+  const overflow = await page.evaluate(
+    (boxes) =>
+      boxes.flatMap((box) =>
+        [...document.getElementById('node-' + box.id).querySelectorAll('text')]
+          .filter((item) => {
+            const b = item.getBBox();
+            return b.x < box.x || b.y < box.y || b.x + b.width > box.x + box.width || b.y + b.height > box.y + box.height;
+          })
+          .map((item) => box.id + ':' + item.textContent)
+      ),
+    boxes
+  );
+  assert.deepEqual(overflow, [], '真实字形下节点正文不能溢出卡片');
+} finally {
+  await browser.close();
 }
 assert.equal(scene.architecture.planHash, JSON.parse(await workspace.readText(plan.reviewPath)).planHash);
 for (const item of receipt.artifacts)

@@ -239,3 +239,17 @@ it('短句实际开始制图或复核后解除普通查询时限，用户停止�
     expect(child.signal.aborted).toBe(true);
   } finally { vi.useRealTimers(); }
 });
+
+it('新架构底稿工具也属于制作过程，不被普通查询一分钟打断', async () => {
+  vi.useFakeTimers();
+  try {
+    const task = withLookupDeadline({ userText: '再查下这个结构', emit: () => {} }, async options => {
+      options.emit({ type: 'tool_start', name: 'plan_architecture' });
+      expect(options.lookupControl.released()).toBe(true);
+      await delay(90_000);
+      return '底稿完成';
+    });
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(await task).toBe('底稿完成');
+  } finally { vi.useRealTimers(); }
+});
