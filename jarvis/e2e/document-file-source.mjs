@@ -25,7 +25,7 @@ try {
     '# 合成Word原件\n\n## 业务范围\n\n全部内容均为合成测试资料。验收后付款1234.56元。\n\n| 项目 | 数量 |\n|---|---|\n| 传感器 | 17 |\n| 网关 | 3 |\n\n![合成示意图](test.png)';
   const original = await generate('docx', { content: material, theme: 'business', loadImage: async () => new Uint8Array(await image.arrayBuffer()) });
   await ws.write('上传/原件.docx', original.blob);
-  const request = '按照我的偏好重新做一版\n\n[已上传到工作区：上传/原件.docx]';
+  const request = '按照我的偏好重新做一版，Word总共1页\n\n[已上传到工作区：上传/原件.docx]';
   const session = sessions.create({ messages: [{ role: 'user', content: request }] });
   await sessions.save(session);
   const tool = createTools({
@@ -48,6 +48,7 @@ try {
   assert.equal(report.contentPreservation.state, 'passed');
   assert.equal(report.render, 'converted_not_visual_reviewed');
   assert.equal(report.errors, 0);
+  assert.deepEqual(report.wordPageBudget, { min: 1, max: 1, actual: 1, state: 'passed', scope: '整份Word真实转换PDF的总页数，含原有封面和目录' });
   const pdf = await ws.readBlob(report.previewPath);
   const parsed = await parseFile(pdf, 'preview.pdf');
   for (const text of ['合成Word原件', '1234.56', '传感器', '17', '网关']) assert.ok(parsed.text.replace(/\s/g, '').includes(text), text);

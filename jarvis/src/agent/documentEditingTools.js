@@ -52,7 +52,7 @@ export function createDocumentEditingTools(ctx) {
         if (!hit.length && !r.appended)
           throw new Error(`文件里没有找到要替换的文字：${miss.map((x) => `“${x.find}”`).join('、') || '（没有给出修改）'}。先用 read_file 看准原文`);
         const target = saveAs ? saveAs.replace(/\.[a-z0-9]+$/i, '') + `.${kind}` : path;
-        const w = await deliverDocument(ctx, { blob: r.blob, ext: kind }, target, options);
+        const w = await deliverDocument(ctx, { blob: r.blob, ext: kind }, target, { ...options, requirements: options.requestText || options.rawRequestText || options.requirements || '' });
         const parts = hit.map((x) => `“${x.find}”替换了 ${x.count} 处`);
         if (r.appended) parts.push(`追加了 ${r.appended} 段`);
         if (miss.length) parts.push(`没找到：${miss.map((x) => `“${x.find}”`).join('、')}`);

@@ -3,10 +3,13 @@ import { inspectDocument, qualitySummary } from './documentQuality.js';
 import { throwControl } from '../core/networkRequest.js';
 import { inspectRenderedPdf } from './pdfQuality.js';
 import { documentError } from './documentPlan.js';
+import { requestedWordPages, checkWordPages } from './wordPageBudget.js';
 
 /** 把短检查报告与真实产物放一起；正文只在工作区文件中，不进会话/检查点。 */
 export async function deliverDocument(ctx, out, target, { progress, signal, checkpoint, issues = [], plan, generatorReview, requiredText = [], requirements = '', preservation = null } = {}) {
   const validation = await inspectDocument(out.blob, target, { info: out.info, requiredText, signal, requirements });
+  const wordPages = validation.format === 'docx' ? requestedWordPages(requirements) : null;
+  if (wordPages) validation.wordPageBudget = checkWordPages(wordPages);
   if (validation.format === 'pptx' && out.info?.expectedSlides != null) {
     validation.expectedSlides = out.info.expectedSlides;
     if (validation.slides !== validation.expectedSlides) {
@@ -46,7 +49,8 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
         slides: validation.slides,
         expectedSlides: validation.expectedSlides,
         pages: validation.pages,
-        pdfPageMatch: validation.pdfPageMatch
+        pdfPageMatch: validation.pdfPageMatch,
+        wordPageBudget: validation.wordPageBudget
       }
     });
   const saveReport = async () => {
@@ -79,6 +83,20 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
           notes.push('PPT和PDF页数不一致，文件已保留，请修复后再交付');
         }
       }
+    }
+    if (wordPages) {
+      const checked = checkWordPages(wordPages, validation.pages);
+      validation.wordPageBudget = checked;
+      const goal = checked.max === null ? `至少${checked.min}页` : checked.min === checked.max ? `${checked.min}页` : `${checked.min}至${checked.max}页`;
+      if (checked.state !== 'passed') {
+        const text = checked.state === 'failed'
+          ? `Word实际${checked.actual}页，要求${goal}；页数验收未通过，保留正文，请调整版式后重新检查`
+          : `Word要求${goal}，尚无有效真实PDF页数，分页未校验`;
+        validation.issues.push({ level: checked.state === 'failed' ? 'error' : 'warn', text });
+        validation.issueCount += 1;
+        if (checked.state === 'failed') validation.errors += 1;
+        notes.push(text);
+      } else notes.push(`Word真实总页数${checked.actual}，满足${goal}要求`);
     }
     await receipt();
   }

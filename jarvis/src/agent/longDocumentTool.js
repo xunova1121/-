@@ -116,7 +116,7 @@ export function createLongDocumentTool(ctx) {
         template: tpl
       });
       const target = path.replace(/\.[a-z0-9]+$/i, '') + `.${out.ext}`;
-      const w = await deliverDocument(ctx, out, target, { progress, signal, checkpoint, issues: lint(format, r.markdown) });
+      const w = await deliverDocument(ctx, out, target, { progress, signal, checkpoint, issues: lint(format, r.markdown), requirements: execution.requestText || execution.rawRequestText || task });
       const previewNotes = w.notes;
       const chars = r.markdown.replace(/[\s#|*\-`>]/g, '').length;
       const lines = [`已生成 ${w.path}（${fmtSize(out.blob.size)}，${r.outline.length} 节，约 ${chars} 字，主题：${out.theme.name}）`];

@@ -263,11 +263,12 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       if (out.info?.missingImages?.length) notes.push(`这些图片没找到，用占位文字代替了：${out.info.missingImages.join('、')}`);
       if (tpl) notes.push(`${auto ? '自动' : ''}沿用了模板 ${tplPath} 的样式${auto ? '（不想用模板就传 template: "none"）' : ''}`);
       if (out.note) notes.push(out.note);
-      if (!r.validation.errors) keep(cache.reviewed, pathKey, { at: Date.now() });
+      const pageChecked = !r.validation.wordPageBudget || r.validation.wordPageBudget.state === 'passed';
+      if (!r.validation.errors && pageChecked) keep(cache.reviewed, pathKey, { at: Date.now() });
       // 没有硬伤：明说已经读回检查过——模型以前会再 read_file 好几遍、或者把同一份文件重新生成一遍
-      if (!r.validation.errors && !left.some((x) => x.level === 'error') && r.validation.readback === 'passed') notes.push('文件已经生成并读回检查过，不需要再 read_file 核对或重新生成；直接告诉用户文件在哪、做了什么');
+      if (!r.validation.errors && pageChecked && !left.some((x) => x.level === 'error') && r.validation.readback === 'passed') notes.push('文件已经生成并读回检查过，不需要再 read_file 核对或重新生成；直接告诉用户文件在哪、做了什么');
       const result = `${r.path}（${fmtSize(out.blob.size)}）。${notes.join('；')}`;
-      if (!r.validation.errors) keep(cache.results, callKey, { text: result, path: r.path, digest: await digestOf(new Uint8Array(await out.blob.arrayBuffer())), at: Date.now() });
+      if (!r.validation.errors && pageChecked) keep(cache.results, callKey, { text: result, path: r.path, digest: await digestOf(new Uint8Array(await out.blob.arrayBuffer())), at: Date.now() });
       return result;
     }
   };

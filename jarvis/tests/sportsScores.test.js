@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { getSportsScores, sportsPreCall, pickLeagues, LEAGUES, clearScoresCache, createSportsScoresTool } from '../src/agent/sportsScores.js';
 import { preSearch, preSearchNote, reusesPreSearch } from '../src/agent/preSearch.js';
 import { clearZhibo8Cache, ZHIBO8_URL } from '../src/agent/sportsZhibo8.js';
@@ -139,20 +139,27 @@ describe('问赛程比分时先查好', () => {
   });
 
   it('实际智能体：问“今天有什么比赛”时第一次请求模型前就查好了赛程', async () => {
-    clearScoresCache();
-    clearZhibo8Cache();
-    const espn = fakeEspn({ 'chn.1': [ev('1', new Date(Date.now() + 3600_000).toISOString(), 'Shanghai Port', 'Shandong Taishan', PRE)] });
-    const tool = createSportsScoresTool({ fetchImpl: espn.get });
-    const seenByModel = [];
-    const adapter = {
-      stream: async ({ messages }) => {
-        seenByModel.push(JSON.stringify(messages.at(-1)));
-        return { text: '今天中超：上海海港 vs 山东泰山', toolCalls: [], stop: 'end_turn' };
-      }
-    };
-    await runAgent({ adapter, model: 'fixture', history: [], userText: '今天有什么比赛？', tools: [tool], context: { dynamic: '' }, emit() {}, quiet: true });
-    expect(espn.urls.length).toBeGreaterThan(0);
-    expect(seenByModel[0]).toContain('Shanghai Port');
+    // 固定日期，不伪造定时器：真实时钟23点后“+1小时”会变成明天，被今天筛选正确排除。
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW);
+    try {
+      clearScoresCache();
+      clearZhibo8Cache();
+      const espn = fakeEspn({ 'chn.1': [ev('1', new Date(Date.now() + 3600_000).toISOString(), 'Shanghai Port', 'Shandong Taishan', PRE)] });
+      const tool = createSportsScoresTool({ fetchImpl: espn.get });
+      const seenByModel = [];
+      const adapter = {
+        stream: async ({ messages }) => {
+          seenByModel.push(JSON.stringify(messages.at(-1)));
+          return { text: '今天中超：上海海港 vs 山东泰山', toolCalls: [], stop: 'end_turn' };
+        }
+      };
+      await runAgent({ adapter, model: 'fixture', history: [], userText: '今天有什么比赛？', tools: [tool], context: { dynamic: '' }, emit() {}, quiet: true });
+      expect(espn.urls.length).toBeGreaterThan(0);
+      expect(seenByModel[0]).toContain('Shanghai Port');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
