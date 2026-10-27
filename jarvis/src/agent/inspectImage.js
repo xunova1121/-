@@ -85,7 +85,7 @@ export function createInspectImageTool(ctx) {
               system:
                 '读取本次提供的原始图片。只写可见事实；数字逐字段写“标签：原始数字 单位”。' + IMAGE_READING_RULES + ' 用户纠错后不得引用旧描述作识别依据。',
               prompt: independentImageQuestion(question) + (region && !cropped ? '\n仅关注归一化区域：' + JSON.stringify(region) : '') + (views.length ? '\n图1为整体定位；图2起依次为用户指定的局部区域，只抄局部各自可见字符。重叠区域注明对应，不当作新增内容。' : ''),
-              images: await Promise.all([image, ...views].map(imageData)),
+              images: await Promise.all([image, ...views].map(blob => imageData(blob, { detail: 'high' }))),
               signal
             })) || ''
           ).trim();

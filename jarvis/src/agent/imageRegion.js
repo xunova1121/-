@@ -35,9 +35,9 @@ export async function cropImageRegion(blob, value, { signal } = {}) {
   }
 }
 
-export async function imageData(blob) {
+export async function imageData(blob, { detail } = {}) {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   let text = '';
   for (let offset = 0; offset < bytes.length; offset += 0x8000) text += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-  return { mime: blob.type || 'image/png', data: btoa(text), detail: 'high' };
+  return { mime: blob.type || 'image/png', data: btoa(text), ...(detail === 'high' && { detail: 'high' }) };
 }
