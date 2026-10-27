@@ -57,6 +57,8 @@ export function createVisualEvidence(initiallyPresent = false, { requireRecheck 
     const claimsOcr = claims.some((line) => /OCR|read_image_text|识字工具|文字识别工具|图片识字/.test(line) && /(?:用|调用|识别|核对|确认|结果|写着|显示)/.test(line));
     const latest = receipts.at(-1);
     const fields = latest?.fields || [];
+    if (requireRecheck && present && !receipts.some(item => (item.kind === 'vision' || item.visionOk) && item.ok) && /\d/.test(text) && !/按你|你提供|你指出|你纠正|用户提供|未独立|尚未独立|无法确认|不能确认|候选|看不清/.test(text))
+      return '本轮未独立复核原图，读数只能明确归于用户纠正或标为未确认，不能直接把纠正值升级为识别结论';
     if (requireRecheck && !receipts.some(item => (item.kind === 'vision' || item.visionOk) && item.ok) && claims.some(line => !/不能|没能|并非|无法|未独立|用户|你提供|你纠正|按你/.test(line) && /能看清|看清了|已看清|重新看过|重新检查了原图|我.{0,8}(?:读到|看到了)/.test(line)))
       return '用户纠正不是独立识别依据；本轮无成功原图视觉复核，不能声称已经看清。可按用户提供值更正并标明来源，或先inspect_image核对原图';
     if (claims.some(line => /inspect_image|识图工具/.test(line) && /调用|结果|确认|核对|识别/.test(line)) && !latest?.ok) return '没有本轮成功识图回执，不能声称已经调用工具重新核对';
