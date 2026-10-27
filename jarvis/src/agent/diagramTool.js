@@ -24,7 +24,7 @@ export function createDiagramTool(ctx, { requireArchitecture = false } = {}) {
           enum: ['overview', 'workflow', 'dataflow', 'relations'],
           description: '底稿默认overview组成与闭环；workflow仅业务及反馈；dataflow仅数据传输；relations为全关系调试视图。各视图不混画，回执记录委派关系'
         },
-        architecturePath: { type: 'string', maxLength: 400, description: 'plan_architecture返回的业务底稿，正式架构必须先通过结构及语义审查' },
+        architecturePath: { type: 'string', maxLength: 400, description: '已有业务底稿路径优先复用；技术性not_checked可在此恢复一次，明确failed不能绕过，正式交付仍须结构和语义通过' },
         draft: { type: 'boolean', description: '仅生成黑白逻辑草图，不作为正式交付' },
         diagramType: {
           type: 'string',

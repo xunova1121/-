@@ -17,7 +17,7 @@ export function createArchitecturePlanTool(ctx) {
   return {
     name: 'plan_architecture',
     description:
-      '重要架构图先生成业务关系底稿：逐对象明确类型、职责、输入输出，区分包含/支撑/数据流/业务流/反馈。先完整读取相关采购章节，原始需求逐项映射，关系不确定须写假设；不会自动判定业务正确。回执只给文件路径，用read_file按需读，不把原文塞进对话。',
+      '重要架构图先生成业务关系底稿：逐对象明确类型、职责、输入输出，区分包含/支撑/数据流/业务流/反馈。先完整读取相关采购章节，原始需求逐项映射，关系不确定须写假设；不会自动判定业务正确。已有底稿的技术性审查未完成交create_diagram恢复一次，不要重建；业务failed才按具体意见修正。回执给路径及短审查状态，用read_file按需读，不把原文塞进对话。',
     input_schema: object(
       {
         title: text(80),
