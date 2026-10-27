@@ -71,3 +71,9 @@ it('一次列出多条事实的错误位置，避免逐条试错消耗恢复次�
   try { planDiagramContent({...input,contentPlan:{facts:[{...fact,source:'缺失.md'},{...fact,text:'雷达9套'}]}},materials);throw Error('未拦截'); }
   catch(error){expect(error.diagnosticCount).toBe(2);expect(error.diagnostics.map(item=>item.field)).toEqual(['contentPlan.facts[0].source','contentPlan.facts[1].text']);}
 });
+
+it('同底稿的不同输出目标不会互相累计连续失败',()=>{
+ const state=createDiagramRecovery();const error=Object.assign(new Error('invalid'),{code:'DIAGRAM_INPUT',kind:'input'});
+ expect(state.record('create_diagram',{path:'总体.svg',architecturePath:'同底稿.architecture.json'},error).failures).toBe(1);
+ expect(state.record('create_diagram',{path:'业务.svg',architecturePath:'同底稿.architecture.json'},error).failures).toBe(1);
+});

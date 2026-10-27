@@ -17,14 +17,14 @@ export function createDiagramRecovery() {
       if (!TOOLS.has(name) || stopped || error?.name === 'AbortError' || ['RETRIEVAL_BUDGET','NOT_APPROVED'].includes(error?.code)) return null;
       if (!error) {
         if (name === 'create_diagram' || name === 'plan_architecture') {
-          const target = String(args?.architecturePath || args?.path || '本轮底稿').replace(/\.(svg|png|pdf|pptx|diagram\.json)$/i, '').slice(0, 400);
+          const target = String(args?.path || args?.architecturePath || '本轮底稿').replace(/\.(svg|png|pdf|pptx|diagram\.json)$/i, '').slice(0, 400);
           for (const key of counts.keys()) if (key.startsWith(target + '\u0000')) counts.delete(key);
         }
         return null;
       }
       if (error.kind !== 'input' || !/^(?:DIAGRAM_|ARCHITECTURE_|SVG_)/.test(error.code || '')) return null;
       const stage = diagramFailureDetails(error)[0]?.stage || 'arguments';
-      const target = String(args?.architecturePath || args?.path || '本轮底稿').replace(/\.(svg|png|pdf|pptx|diagram\.json)$/i, '').slice(0, 400);
+      const target = String(args?.path || args?.architecturePath || '本轮底稿').replace(/\.(svg|png|pdf|pptx|diagram\.json)$/i, '').slice(0, 400);
       const key = target + '\u0000' + stage;
       const failures = (counts.get(key) || 0) + 1;
       counts.set(key, failures);
