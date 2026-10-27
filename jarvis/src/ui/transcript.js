@@ -139,7 +139,7 @@ export function toolLabel(name) {
 }
 
 const TOOL_LABEL = {
-  inspect_image: '复核原图', create_diagram: '制作可编辑图形', export_diagram: '从同稿导出图形', render_diagram: '渲染并检查图形', list_work_records: '核对成果记录',
+  inspect_image: '复核原图', plan_architecture: '梳理架构关系', create_diagram: '制作可编辑图形', export_diagram: '从同稿导出图形', render_diagram: '渲染并检查图形', list_work_records: '核对成果记录',
   remember: '记住', recall: '回忆', forget: '遗忘', save_skill: '习得技能', kb_search: '检索知识库',
   list_files: '列出文件', read_file: '读取文件', write_file: '写入文件', create_document: '生成文档',
   run_javascript: '运行 JS', run_python: '运行 Python', preview: '打开预览', fetch_url: '读取网页',
@@ -453,6 +453,7 @@ export class Transcript {
         },
         done(ok, output, ms) {
           li.dataset.st = ok ? 'ok' : 'fail';
+          if (!ok) tx.querySelector('small').textContent = String(output || '执行失败，点开查看详情').split('\n')[0].slice(0, 100);
           tm.textContent = fmt(ms ?? Date.now() - t1);
           pre.textContent = log ? `${log}\n\n${output}` : output;
           p.done++;
@@ -554,6 +555,7 @@ export class Transcript {
           done(ok, output, ms) {
             card.classList.remove('live');
             card.classList.add(ok ? 'ok' : 'fail');
+            if (!ok) ta.textContent = String(output || '执行失败，点开查看详情').split('\n')[0].slice(0, 100);
             tm.textContent = ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
             pre.textContent = log ? `${log}\n\n${output}` : output;
             self.#scroll();

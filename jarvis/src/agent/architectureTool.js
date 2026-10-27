@@ -4,8 +4,13 @@ import * as workspace from './workspace.js';
 import { ARCHITECTURE_KINDS, ARCHITECTURE_RELATIONS, makeArchitecturePlan, architectureMarkdown } from './architecturePlan.js';
 import { checkSources } from './diagramSources.js';
 import { throwControl } from '../core/networkRequest.js';
+import { architectureSources } from './architectureSources.js';
 const text = (maxLength) => ({ type: 'string', maxLength });
-const proof = { source: text(400), excerpt: text(400), assumption: text(240) };
+const proof = {
+  source: { ...text(400), description: '工作区原文件完整路径或user，不能填章节标题、result_id或来源概括；程序会读取声明的文件' },
+  excerpt: { ...text(400), description: '该原文件内连续的逐字摘录，不能改写；超过读取范围时在sources声明唯一章节边界' },
+  assumption: text(240)
+};
 const object = (properties, required) => ({ type: 'object', properties, required, additionalProperties: false });
 const list = (items, maxItems) => ({ type: 'array', items, maxItems });
 export function createArchitecturePlanTool(ctx) {
@@ -42,7 +47,7 @@ export function createArchitecturePlanTool(ctx) {
           100
         ),
         requirements: list(
-          object({ text: text(240), entities: list(text(64), 12), source: text(400), excerpt: text(400) }, ['text', 'entities', 'source', 'excerpt']),
+          object({ text: text(240), entities: list(text(64), 12), source: proof.source, excerpt: proof.excerpt }, ['text', 'entities', 'source', 'excerpt']),
           80
         )
       },
@@ -51,9 +56,10 @@ export function createArchitecturePlanTool(ctx) {
     run: async (input, { signal, checkpoint, rawRequestText, progress, retrieval } = {}) => {
       throwControl(null, signal);
       progress?.('正在整理业务职责、关系及原文映射…');
-      const { materials, checks } = await checkSources(input.sources || [], signal);
+      const sources = architectureSources(input);
+      const { materials, checks } = await checkSources(sources, signal);
       const plan = makeArchitecturePlan(input, materials, rawRequestText);
-      plan.sources = checks.map((item, index) => ({ ...item, excerpt: input.sources[index].excerpt }));
+      plan.sources = checks.map((item, index) => ({ ...item, excerpt: sources[index].excerpt }));
       plan.materialHashes = await Promise.all(materials.map(async (item) => ({ path: item.path, hash: await diagramDigest(item.text) })));
       const base = '文档检查/架构底稿/' + crypto.randomUUID();
       throwControl(null, signal);
