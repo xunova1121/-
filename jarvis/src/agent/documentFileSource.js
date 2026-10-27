@@ -38,7 +38,7 @@ function pathBinding(request, path) {
 }
 
 /** 只绑定本轮明确路径、最新上传或最近文件回执；助手正文中的任意文件名不算来源。 */
-export async function formattingFileSource({ request, sourcePath, latest, messages = [], signal }) {
+export async function formattingFileSource({ request, sourcePath, latest, messages = [], signal, preferText = false }) {
   const currentFiles = uploadedWordPaths(request);
   const latestFiles = uploadedWordPaths(latest?.text);
   const uploads = currentFiles.length ? currentFiles : latestFiles;
@@ -55,10 +55,16 @@ export async function formattingFileSource({ request, sourcePath, latest, messag
   // 新粘贴正文优先于旧文件；刚生成的Word仍可据真实文件回执重排，不能据助手口头声称选择。
   const hasBody = /^#\s+\S/m.test(latest?.text || '') || (String(latest?.text || '').length > 100 && !latestFiles.length);
   const newBody = hasBody && (latest.text === request || bodyIndex > fileIndex);
-  if (newBody && !explicit) return null;
+  if ((newBody || (preferText && hasBody)) && !explicit) return null;
   const recentOutput = !currentFiles.length && latestWork === sourcePath && fileIndex >= 0 && fileIndex > bodyIndex;
-  if (!explicit && !recentOutput && (uploads.length ? !uploads.includes(sourcePath) : latestWork !== sourcePath))
-    throw fail('所选Word不是本轮指定/最新上传/最近回执文件，请核对来源，不要回用旧稿');
+  if (!explicit && !recentOutput && (uploads.length ? !uploads.includes(sourcePath) : latestWork !== sourcePath)) {
+    const candidates = (uploads.length ? uploads : latestWork ? [latestWork] : []).slice(-6).map((path) => path.slice(0, 240));
+    throw fail(
+      'source_path不属于本轮指定/最新上传/最近回执文件；可绑定原件：' +
+        (candidates.length ? candidates.join('、') : '未找到，请回读本段文件回执') +
+        '；不要回用旧稿'
+    );
+  }
   signal?.throwIfAborted();
   const blob = await ws.readBlob(sourcePath);
   if (blob.size > 20_000_000) throw fail('Word原文件超过20MB处理上限，不能截断重做');

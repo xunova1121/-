@@ -13,10 +13,14 @@ export function formattingOnly(request = '') {
   for (const clause of instruction.split(/[，。；;\n]/)) {
     if (/(?:改写|重写|重新写)/.test(clause) && !/(?:不|别|勿|无需|不必)[^，。；;]{0,8}(?:改写|重写|重新写)/.test(clause)) return false;
   }
-  if (/重新排版|重排版|(?:按(?:照)?|根据).{0,12}(?:偏好|喜好).{0,8}(?:重新做|重做|重排|做成\s*Word)/i.test(instruction)) return true;
-  return /只(?:让你)?(?:做|需|要)?(?:个)?(?:调整|修改|改)?(?:一下)?(?:排版|版式|格式)|(?:正文|内容|原文)(?:一字)?(?:都)?(?:不要改|不改|不变|保持不变)|仅(?:排版|调整版式)/.test(
-    instruction
-  );
+  const explicit =
+    /只(?:让你)?(?:做|需|要)?(?:个)?(?:调整|修改|改)?(?:一下)?(?:排版|版式|格式)|(?:正文|内容|原文)(?:一字)?(?:都)?(?:不要改|不改|不变|保持不变)|仅(?:排版|调整版式)/.test(
+      instruction
+    );
+  if (explicit) return true;
+  // 写作风格/语气重做仍允许改文字，不能因为“偏好”二字就降级为只换格式。
+  if (/写作(?:偏好|喜好)|文风|语气|润色|翻译|精简|扩写/.test(instruction)) return false;
+  return /重新排版|重排版|(?:按(?:照)?|根据).{0,12}(?:偏好|喜好).{0,8}(?:重新做|重做|重排|做成\s*Word)/i.test(instruction);
 }
 
 const MAX_SOURCE = 120000;
@@ -24,10 +28,8 @@ const fail = (message) => documentError(message, 'DOCUMENT_SOURCE');
 
 /** 原文来自本轮会话的用户记录，不接受模型自己填写的旧稿冒充原文。 */
 export async function formattingSource({ request, sessionId, sourceId, sourcePath, signal }) {
-  if (!formattingOnly(request)) {
-    if (sourceId || sourcePath) throw fail('来源绑定用于排版保留；正文修改用edit_office_document或改写入口，不要忽略已绑定原件再重写');
-    return null;
-  }
+  // 自动锁稿只用于纯排版；显式绑定是本步保文契约，复杂任务可先套版、再用编辑工具改文字。
+  if (!formattingOnly(request) && !sourceId && !sourcePath) return null;
   signal?.throwIfAborted();
   const saved = sessionId ? await sessions.get(sessionId) : null;
   signal?.throwIfAborted();
@@ -39,7 +41,9 @@ export async function formattingSource({ request, sessionId, sourceId, sourcePat
     : recent.reverse().find((entry) => entry.text.length > 100 || /^#\s+\S/m.test(entry.text) || uploadedWordPaths(entry.text).length);
   if (sourceId && sourcePath) throw fail('原文编号与Word原文件只能绑定一种来源');
   if (!sourceId) {
-    const file = await formattingFileSource({ request, sourcePath, latest, messages: saved?.messages, signal });
+    const instruction = request.split(/^#\s/m)[0];
+    const preferText = formattingOnly(request) && /内容我发你了|我发给你的(?:完整)?(?:正文|原文)/.test(instruction);
+    const file = await formattingFileSource({ request, sourcePath, latest, messages: saved?.messages, signal, preferText });
     if (file) return file;
   }
   let source;
@@ -59,7 +63,8 @@ export async function formattingSource({ request, sessionId, sourceId, sourcePat
   if (start < 0 && uploadedWordPaths(source.text).length) throw fail('该原话编号指向上传附件，请用source_path绑定Word原文件，不能把附件说明当成正文');
   if (start < 0 && formattingOnly(source.text)) throw fail('所选原话只有排版指令，没有可识别的正文；请读取并绑定正文编号');
   const prefix = start > 0 ? source.text.slice(0, start) : '';
-  const content = (source.text === request && formattingOnly(prefix) ? source.text.slice(start) : source.text).trim();
+  const layoutCommand = /^\s*(?:只(?:调整|做)?排版|只调整版式)(?:[，,]\s*(?:正文|内容)(?:不改|不变))?[。！!\s]*$/.test(prefix);
+  const content = (source.text === request && layoutCommand ? source.text.slice(start) : source.text).trim();
   if (!content) throw fail('排版原文为空');
   return { content, id: source.id };
 }

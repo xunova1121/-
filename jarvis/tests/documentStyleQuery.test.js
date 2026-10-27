@@ -25,6 +25,15 @@ describe('文档偏好问答按需读取', () => {
     expect(asksDocumentStyles('我的制作爱好是什么', [{ content: '字'.repeat(800) + 'Word' }])).toBe(false);
   });
 
+  it('文档后追问按偏好重做也读取偏好，不把普通推荐问题变成文档偏好', async () => {
+    await memory.reflect([{ role: 'user', content: '以后Word用宋体' }], { episode: false, session: { id: 'style-test' } });
+    const history = [{ role: 'assistant', content: '上一份Word已完成' }];
+    expect(asksDocumentStyles('根据我的偏好重新做一版')).toBe(false);
+    expect(asksDocumentStyles('根据我的偏好重新做一版', history)).toBe(true);
+    expect(asksDocumentStyles('根据我的偏好推荐电影', history)).toBe(false);
+    expect((await buildContext('根据我的偏好重新做一版', { light: true, history })).dynamic).toContain('docx · 用宋体');
+  });
+
   it('真实上下文能读到doc_style，普通闲聊不带；当前明确要求优先', async () => {
     await memory.reflect([{ role: 'user', content: '以后Word用宋体，不要封面' }], { episode: false, session: { id: 'style-test' } });
     const result = await buildContext('我的制作爱好是什么', { light: true, history: [{ role: 'user', content: '帮我把方案做成Word' }] });

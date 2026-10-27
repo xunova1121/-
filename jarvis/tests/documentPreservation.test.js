@@ -37,6 +37,9 @@ describe('只排版正文保真（虚构原文，不调用真实模型）', () =
     expect(formattingOnly('根据我的偏好重新做一版，重写正文')).toBe(false);
     expect(formattingOnly('根据我的偏好重新做一版，不要改写正文')).toBe(true);
     expect(formattingOnly('不要重新排版，重写内容')).toBe(false);
+    expect(formattingOnly('按我的写作偏好重新做一版')).toBe(false);
+    expect(formattingOnly('根据我的偏好重新做一版，语气更温暖')).toBe(false);
+    expect(formattingOnly('按我的写作偏好重新做一版，只排版，内容不变')).toBe(true);
   });
 
   it('本轮已落盘原话可用原编号；正文标题前的业务文字不得丢失', async () => {
@@ -47,6 +50,8 @@ describe('只排版正文保真（虚构原文，不调用真实模型）', () =
     session.messages.push({ role: 'user', content: '业务前言必须保留。\n' + ORIGINAL, requirementId: 'r2' });
     await sessions.save(session);
     expect((await formattingSource({ request: '只排版', sessionId: session.id, sourceId: 'r2' })).content).toContain('业务前言必须保留。');
+    const business = '合同内容不变。\n' + ORIGINAL;
+    expect((await formattingSource({ request: business })).content).toBe(business);
   });
 
   it('模型误传旧稿时，实际Word沿用最新用户正文，且不调用改写审稿', async () => {

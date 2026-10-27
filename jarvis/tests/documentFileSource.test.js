@@ -122,6 +122,22 @@ describe('上传Word只换样式，原文件结构保持', () => {
     await expect(restyleDocx(new Blob(), new Blob(), { signal: ctrl.signal })).rejects.toHaveProperty('name', 'AbortError');
   });
 
+  it('用户明确回指已发正文时，不把较新的错误Word回执当原稿', async () => {
+    await ws.write('生成.docx', (await sourceDoc()).blob);
+    const session = sessions.create({
+      messages: [
+        { role: 'user', content: BODY },
+        { role: 'assistant', content: '已生成', files: ['生成.docx'] }
+      ]
+    });
+    await sessions.save(session);
+    const selected = await formattingSource({ request: '内容我发你了，只排版', sessionId: session.id, sourcePath: '生成.docx' });
+    expect(selected.content).toBe(BODY);
+    expect(selected.kind).not.toBe('docx');
+    const explicit = await formattingSource({ request: '内容我发你了，只排版 "生成.docx"', sessionId: session.id, sourcePath: '生成.docx' });
+    expect(explicit.kind).toBe('docx');
+  });
+
   it('同名输出另存排版副本；原件更新后再次读取，不复用旧内容或摘要', async () => {
     const original = (await sourceDoc()).blob;
     await ws.write('原稿.docx', original);
@@ -164,6 +180,31 @@ describe('上传Word只换样式，原文件结构保持', () => {
       'DOCUMENT_SOURCE'
     );
     expect(await ws.exists('不应生成.pdf')).toBe(false);
+  });
+
+  it('显式保文步骤可用于美化或先套版再改字，编辑后重新验收而不沿用保文结论', async () => {
+    const original = (await sourceDoc()).blob;
+    await ws.write('原稿.docx', original);
+    const session = sessions.create({ messages: [{ role: 'user', content: '[已上传到工作区：原稿.docx]' }] });
+    await sessions.save(session);
+    expect((await formattingSource({ request: '请美化这份Word', sessionId: session.id, sourcePath: '原稿.docx' })).kind).toBe('docx');
+    const tools = createTools({});
+    const execution = { rawRequestText: '给 "原稿.docx" 先套版，再将不得漏项改成逐项留痕', sessionId: session.id };
+    await tools
+      .find((tool) => tool.name === 'create_document')
+      .run({ format: 'docx', path: '改版.docx', content: '', source_path: '原稿.docx', theme: 'gongwen' }, execution);
+    // 文件存储返回的Blob可能关联磁盘文件；覆盖前读取快照，不能覆盖后再读失效的旧文件句柄。
+    const before = await openOfficePackage(await ws.readBlob('改版.docx'));
+    await tools
+      .find((tool) => tool.name === 'edit_office_document')
+      .run({ path: '改版.docx', replacements: [{ find: '不得漏项', replace: '逐项留痕' }], expected_count: 1 }, execution);
+    const after = await openOfficePackage(await ws.readBlob('改版.docx'));
+    expect(await after.file('word/document.xml').async('string')).toContain('逐项留痕');
+    expect(await after.file('word/document.xml').async('string')).toContain('1234.56');
+    for (const key of Object.keys(before.files).filter((key) => !before.files[key].dir && key !== 'word/document.xml'))
+      expect(await after.file(key).async('uint8array')).toEqual(await before.file(key).async('uint8array'));
+    expect(JSON.parse(await ws.readText('文档检查/改版-docx.json')).contentPreservation).toBeUndefined();
+    expect(new Uint8Array(await (await ws.readBlob('原稿.docx')).arrayBuffer())).toEqual(new Uint8Array(await original.arrayBuffer()));
   });
 
   it('排除的旧原件不会被附件索引重新放行，最后一次明确更正优先', async () => {
