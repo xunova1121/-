@@ -1,8 +1,11 @@
 /** 用户明确给了图片路径时，不能擅自换成“新版”；无明确路径不假装程序已消歧。 */
 export function assertDiagramTarget(path, request = '') {
   // 明确标记的文件名必须完整相等，不能以“图.svg”是“旧图.svg”的子串冒充同一版本。
+  // 仅对简明的文件指令启用此规则；复杂修饰/指代保留旧路径检查，不能猜成禁止目标。
+  const structured = /^(?:(?:请)?(?:检查|查看|读取|打开|使用|用|看)|(?:不要|不用|别|不是|排除)(?:再)?(?:检查|查看|读取|打开|使用|用|看|选用|选)?)?\s*(?:`|\[)/.test(String(request).trim());
   const references = new Map();
   for (const match of String(request).matchAll(/`([^`]+\.(?:svg|png|jpe?g|webp))`|\]\(([^)]+\.(?:svg|png|jpe?g|webp))\)/gi)) {
+    if (!structured) break;
     const before = String(request).slice(0, match.index).split(/[，,。；;\n]/).at(-1);
     const excluded = /(?:不要|不用|别|不是|排除)(?:再)?(?:检查|查看|读取|打开|使用|用|看|选用|选)?\s*(?:\[[^\]]*)?$/.test(before);
     const value = (match[1] || match[2]).replace(/^\.\//, '');
