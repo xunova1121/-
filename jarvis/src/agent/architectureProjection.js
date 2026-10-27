@@ -3,6 +3,7 @@ import * as workspace from './workspace.js';
 import { diagramDigest } from './diagramExport.js';
 import { checkSources } from './diagramSources.js';
 import { ARCHITECTURE_KINDS } from './architecturePlan.js';
+import { architectureReviewStatus } from './architectureReview.js';
 const invalid = (message) => Object.assign(new Error(message), { code: 'ARCHITECTURE_PROJECTION', kind: 'input' });
 const includes = (text, value) => String(text).replace(/\s+/g, '').includes(String(value).replace(/\s+/g, ''));
 const labels = {
@@ -58,7 +59,7 @@ export async function loadArchitecture(path, signal) {
     const actual = materials.find((item) => item.path === saved.path);
     if (!actual || (await diagramDigest(actual.text)) !== saved.hash) throw invalid('原始材料已变化，请重新生成和审查底稿');
   }
-  return { plan, report, planHash, reviewPath, path };
+  return { plan, report, planHash, reviewPath, path, materials };
 }
 
 /** 不提供版式时给出保守的职责分层；可提供丰富零件版式，但必须逐项通过同一关系校验。 */
@@ -86,8 +87,18 @@ export function architectureInput(plan, input) {
 /** 所有对象可追溯；所属用容器表达，其余关系由底稿生成，调用者不能删箭头以绕过验收。 */
 export function projectArchitecture(bundle, input) {
   const { plan, report } = bundle;
-  if (report.structure !== 'passed' || report.semantic === 'failed') throw invalid('业务关系审查未通过，请读取' + bundle.reviewPath + '修正底稿');
-  if (report.semantic !== 'passed' && !input.draft) throw invalid('语义审查未完成，只能生成draft逻辑草图，不能交付正式架构图');
+  if (report.structure !== 'passed' || report.semantic === 'failed') throw Object.assign(invalid('业务关系审查未通过，请读取' + bundle.reviewPath + '修正底稿'), {
+    diagnostics: [{ stage: 'review', field: 'architecturePath', action: '读取' + bundle.reviewPath + '，按审查意见修正底稿，不能绕过或反复审到通过' }],
+    reviewPath: bundle.reviewPath
+  });
+  if (report.semantic !== 'passed' && !input.draft) {
+    const state = architectureReviewStatus(report, bundle.reviewPath);
+    throw Object.assign(invalid('语义审查未完成，不能交付正式架构图；' + state.reviewNote + '；' + state.nextAction), {
+      diagnostics: [{ stage: 'review', field: 'architecturePath', action: state.nextAction }],
+      reviewPath: bundle.reviewPath,
+      reviewErrorCode: state.reviewErrorCode
+    });
+  }
   const result = architectureInput(plan, input);
   const byId = new Map(plan.entities.map((item) => [item.id, item]));
   const containers = plan.entities.filter((item) => plan.relations.some((link) => link.type === 'contains' && link.from === item.id));

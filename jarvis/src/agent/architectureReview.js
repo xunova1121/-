@@ -46,14 +46,20 @@ export function inspectArchitecture(plan) {
   return { structure: issues.length ? 'failed' : 'passed', semantic: 'not_checked', issues: issues.slice(0, 32), issueCount: issues.length };
 }
 
-/** 每份底稿最多一次语义审查；不把同模型审查宣称为独立领域专家核实。 */
+/** 单次最多一个模型请求；出图恢复最多额外一次，不宣称独立领域专家核实。 */
 export async function reviewArchitecture(ctx, plan, options = {}) {
   const report = inspectArchitecture(plan);
   if (report.structure === 'failed') return report;
   const llm = ctx.reasonLlm || ctx.llm;
-  if (!llm) return { ...report, note: '缺少审查模型，仅完成确定性关系检查。' };
-  const content = JSON.stringify({ plan, sourceMaterials: options.materials || [], userRequest: options.rawRequestText || '' });
-  if (content.length > 200000) return { ...report, note: '底稿超过单次语义审查容量，请拆为总体与专题底稿；未裁掉正文冒充审查。' };
+  if (!llm) return { ...report, errorCode: 'ARCHITECTURE_REVIEW_UNAVAILABLE', note: '缺少审查模型，仅完成确定性关系检查。' };
+  const content = JSON.stringify({
+    plan,
+    sourceMaterials: options.materials || [],
+    userRequest: options.rawRequestText || '',
+    ...(options.recoveryReason && { recoveryReason: options.recoveryReason })
+  });
+  if (content.length > 200000)
+    return { ...report, errorCode: 'ARCHITECTURE_REVIEW_SIZE', note: '底稿超过单次语义审查容量，请拆为总体与专题底稿；未裁掉正文冒充审查。' };
   options.retrieval?.consume('model');
   try {
     const response = await withWebDeadline(
@@ -65,12 +71,15 @@ export async function reviewArchitecture(ctx, plan, options = {}) {
           signal,
           nativeSearch: false,
           maxWebSearches: 0,
-          maxRetries: 0
+          maxRetries: 0,
+          allowWebSearch: false,
+          maxTransientRetries: 0,
+          maxPartialRetries: 0
         }),
       { signal: options.signal, timeoutMs: 45000 }
     );
     if (typeof response !== 'string' || response.length > 12000) throw Object.assign(new Error('审查格式无效'), { code: 'ARCHITECTURE_REVIEW_FORMAT' });
-    const value = JSON.parse(response.replace(/^```(?:json)?\s*|\s*```$/g, ''));
+    const value = JSON.parse(response.trim().replace(/^```(?:json)?\s*|\s*```$/gi, ''));
     const targets = new Set([
       'plan',
       ...plan.entities.map((item) => 'entity:' + item.id),
@@ -97,10 +106,44 @@ export async function reviewArchitecture(ctx, plan, options = {}) {
       issues: value.issues,
       issueCount: value.issues.length,
       reviewer: 'configured_reason_or_primary_model',
+      reviewerRole: ctx.reasonLlm ? 'reason' : 'write',
       note: '审查基于本次实际读取材料、登记依据与假设，不代表材料范围外全文覆盖、外部事实或独立模型核实。'
     };
   } catch (error) {
     throwControl(error, options.signal);
-    return { ...report, errorCode: String(error.code || error.name).slice(0, 80), note: '语义审查未完成；不能宣称业务已验收。' };
+    const errorCode = error instanceof SyntaxError ? 'ARCHITECTURE_REVIEW_FORMAT' : String(error.code || error.name).slice(0, 80);
+    return {
+      ...report,
+      errorCode,
+      reviewerRole: ctx.reasonLlm ? 'reason' : 'write',
+      note:
+        errorCode === 'ARCHITECTURE_REVIEW_FORMAT'
+          ? '审查模型返回格式不符合约定，底稿已保留，尚未完成业务审查。'
+          : '业务审查请求未完成（' + errorCode + '），底稿已保留。'
+    };
   }
+}
+
+/** 保存底稿与允许正式绘图是两种结果；不能用工具调用成功冒充审查通过。 */
+export function architectureReviewStatus(report, reviewPath) {
+  const readyForRender = report.structure === 'passed' && report.semantic === 'passed';
+  return {
+    readyForRender,
+    reviewNote:
+      report.note || (report.structure !== 'passed' ? '确定性关系检查未通过' : report.semantic === 'failed' ? '业务语义审查未通过' : '业务语义审查尚未完成'),
+    reviewErrorCode: report.errorCode || null,
+    reviewResumeAttempts: report.resumeAttempts || 0,
+    reviewIssues: (report.issues || []).slice(0, 8),
+    nextAction: readyForRender
+      ? '使用本architecturePath调用create_diagram，不重新生成底稿'
+      : report.structure !== 'passed' || report.semantic === 'failed'
+        ? '读取' + reviewPath + '，按具体问题修改底稿，不绕过审查'
+        : report.errorCode === 'ARCHITECTURE_REVIEW_UNAVAILABLE'
+          ? '检查写作/推理模型连接配置；保留已有底稿'
+          : report.errorCode === 'ARCHITECTURE_REVIEW_SIZE'
+            ? '明确相关章节范围或拆分总体与专题，不裁掉原文冒充完整审查'
+            : report.resumeAttempts >= 1
+              ? '已恢复审查一次，读取' + reviewPath + '核对原因；不要反复重建相同底稿或降低门槛'
+              : '保留本architecturePath；create_diagram可恢复审查一次，不必重抄原文或重建底稿'
+  };
 }

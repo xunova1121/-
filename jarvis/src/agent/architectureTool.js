@@ -1,4 +1,4 @@
-import { reviewArchitecture } from './architectureReview.js';
+import { reviewArchitecture, architectureReviewStatus } from './architectureReview.js';
 import { diagramDigest } from './diagramExport.js';
 import * as workspace from './workspace.js';
 import { ARCHITECTURE_KINDS, ARCHITECTURE_RELATIONS, makeArchitecturePlan, architectureMarkdown } from './architecturePlan.js';
@@ -78,6 +78,8 @@ export function createArchitecturePlanTool(ctx) {
         ctx.onFileChanged?.(path);
         await checkpoint?.({ type: 'file', path });
       }
+      const reviewStatus = architectureReviewStatus(review, reviewFile.path);
+      progress?.(reviewStatus.readyForRender ? '底稿与业务审查通过，可以生成架构图' : '底稿已保存，业务审查尚未通过：' + reviewStatus.reviewNote);
       return JSON.stringify({
         architecturePath: saved.path,
         relationTablePath: markdown.path,
@@ -89,7 +91,8 @@ export function createArchitecturePlanTool(ctx) {
         structure: review.structure,
         reviewPath: reviewFile.path,
         issueCount: review.issueCount,
-        note: plan.note
+        note: plan.note,
+        ...reviewStatus
       });
     }
   };

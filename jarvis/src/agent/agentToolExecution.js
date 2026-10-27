@@ -116,7 +116,7 @@ export async function executeToolCalls(
     if (Number.isSafeInteger(failure?.diagnosticCount) && failure.diagnosticCount > 8) output += `\n共有${Math.min(80, failure.diagnosticCount)}条事实未通过，本次仅列前8条；按同一原文核对全部facts，不把未列出的条目当通过。`;
     if (recovery) output += '\n' + recovery.message;
     try {
-      await recordWorkAttempt({ tool: c.name, args: c.args, output, ok, sessionId, scope: executionScope, callId: workCallId });
+      await recordWorkAttempt({ tool: c.name, args: c.args, output, ok, sessionId, scope: executionScope, callId: workCallId, failure });
     } catch {
       output += '\n成果记录保存失败；已有文件不受影响，统计可能不完整，不要重新提交生成请求。';
     }

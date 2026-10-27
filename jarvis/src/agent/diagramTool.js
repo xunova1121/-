@@ -1,4 +1,5 @@
 import { loadArchitecture, projectArchitecture } from './architectureProjection.js';
+import { resumeArchitectureReview } from './architectureResume.js';
 import { chooseDiagram } from './diagramCandidates.js';
 import { SECTION_KINDS } from './diagramSections.js';
 import { DIAGRAM_ICONS } from './diagramCards.js';
@@ -160,7 +161,8 @@ export function createDiagramTool(ctx, { requireArchitecture = false } = {}) {
         });
       if (requireArchitecture && input.draft && !/草图|示意|关系稿|先.{0,8}(?:理顺|关系|逻辑)/.test(rawRequestText || ''))
         throw Object.assign(new Error('用户未要求逻辑草图，不能用draft绕过正式架构的业务审查'), { code: 'ARCHITECTURE_DRAFT_ONLY', kind: 'input' });
-      const architecture = input.architecturePath ? await loadArchitecture(input.architecturePath, signal) : null;
+      let architecture = input.architecturePath ? await loadArchitecture(input.architecturePath, signal) : null;
+      if (architecture && !input.draft) architecture = await resumeArchitectureReview(ctx, architecture, { signal, retrieval, progress, rawRequestText });
       if (architecture) input = projectArchitecture(architecture, { ...input, view: input.view || 'overview' });
       if (input.draft && !/草图|示意/.test(input.path)) input.path = input.path.replace(/(\.[^/.]+)$/, '-逻辑草图$1');
       if (architecture && !input.draft) input = { ...input, formats: input.formats || ['svg', 'png', 'pdf', 'pptx'], pptxMode: input.pptxMode || 'editable' };

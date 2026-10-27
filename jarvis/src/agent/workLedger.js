@@ -8,7 +8,7 @@ const sessions = collection('sessions');
 const INDEX = 'work-ledger-v1';
 export const WORK_RECORD_LIMIT = 4096;
 const TOOLS =
-  /^(sing_song|generate_image|generate_video|create_diagram|export_diagram|create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet)$/;
+  /^(sing_song|generate_image|generate_video|plan_architecture|create_diagram|export_diagram|create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet)$/;
 const scopes = new WeakMap();
 let tail = Promise.resolve();
 let pending = 0;
@@ -40,7 +40,7 @@ async function recordId(scope, callId, files) {
 const keyOf = (id) => 'work-record:' + id;
 
 /** 仅存精简生成回执，不存歌词、提示、工具原文或密钥；保留4096条并明确覆盖缺口。 */
-export async function recordWorkAttempt({ tool, args = {}, output = '', ok, sessionId, scope, callId }) {
+export async function recordWorkAttempt({ tool, args = {}, output = '', ok, sessionId, scope, callId, failure }) {
   if (!sessionId || !TOOLS.test(tool)) return null;
   const session = await sessions.get(sessionId);
   if (!session || session.evaluationId) return null;
@@ -57,7 +57,7 @@ export async function recordWorkAttempt({ tool, args = {}, output = '', ok, sess
   for (const path of paths.slice(0, 12)) {
     if (path.length <= 400 && (await workspace.exists(path))) files.push(path);
   }
-  const generationStatus = !ok ? 'failed' : files.length && (!media || media.state === 'completed') ? 'success' : 'unverified';
+  const generationStatus = !ok ? 'failed' : tool !== 'plan_architecture' && files.length && (!media || media.state === 'completed') ? 'success' : 'unverified';
   const record = {
     id: await recordId(scope, callId, files),
     sessionId: String(sessionId).slice(0, 200),
@@ -69,12 +69,18 @@ export async function recordWorkAttempt({ tool, args = {}, output = '', ok, sess
           ? 'image'
           : tool === 'generate_video'
             ? 'video'
-            : /^(create_diagram|export_diagram)$/.test(tool)
+            : /^(plan_architecture|create_diagram|export_diagram)$/.test(tool)
               ? 'diagram'
               : 'document',
     title: String(args.title || files[0]?.split('/').pop() || tool).slice(0, 160),
     files,
     status: generationStatus,
+    ...(!ok && /^(?:ARCHITECTURE_|DIAGRAM_|SVG_)/.test(failure?.code || '') && {
+      failure: {
+        code: String(failure.code).slice(0, 80),
+        fields: (Array.isArray(failure.diagnostics) ? failure.diagnostics : []).slice(0, 8).map(item => ({ field: String(item.field || '').slice(0, 120), stage: String(item.stage || '').slice(0, 30) }))
+      }
+    }),
     createdAt: Date.now()
   };
   return serial(async () => {
@@ -100,6 +106,7 @@ export async function listWorkRecords({
   status: recordStatus = 'success',
   format = '',
   path = '',
+  sessionId = '',
   signal
 } = {}) {
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
@@ -120,6 +127,7 @@ export async function listWorkRecords({
         !record ||
         (path && !record.files.includes(path)) ||
         (kind && record.kind !== kind) ||
+        (sessionId && record.sessionId !== sessionId) ||
         (recordStatus && record.status !== recordStatus) ||
         record.createdAt < from ||
         record.createdAt >= to ||
@@ -131,6 +139,9 @@ export async function listWorkRecords({
     }
   }
   return {
+    statusFilter: recordStatus || 'all',
+    sessionIdFilter: sessionId || null,
+    queryScope: recordStatus === 'success' ? '本次只查成功成果，不代表没有失败调用；排查失败用status:all' : '本次按指定状态查询；旧记录可能不完整，不能据无记录断言未调用',
     total,
     items: selected,
     offset: start,
@@ -190,6 +201,13 @@ export function workQuestion(text = '') {
               : '';
 }
 export async function workHistoryBlock(text, sessionId, { signal } = {}) {
+  // 排查图形失败时给本段实际调用，不拿“成功成果为空”代替调用历史。
+  if (sessionId && /架构图|流程图|出图|制图/.test(text) && /失败|报错|卡在|卡哪|没成功/.test(text) && !(await sessions.get(sessionId))?.evaluationId) {
+    const attempts = await listWorkRecords({ kind: 'diagram', sessionId, status: '', signal, limit: 8 });
+    const brief = attempts.items.map(item => ({ id: item.id, tool: item.tool, status: item.status, sessionId: item.sessionId, files: item.files, failure: item.failure }));
+    while (JSON.stringify(brief).length > 8000 && brief.length) brief.pop();
+    return '【本段图形实际调用记录，最多最近8条】\n' + JSON.stringify(brief) + '\n仅描述记录中的阶段和结果；未成功不等于未调用，未记录不等于未发生。失败原因只能按failure字段或原回执，不凭摘要猜；完整记录用list_work_records的status:all及本sessionId翻页。';
+  }
   const kind = workQuestion(text);
   if (!kind || (sessionId && (await sessions.get(sessionId))?.evaluationId)) return '';
   const period = reviewPeriod('做过' + text);
@@ -208,12 +226,14 @@ export async function workHistoryBlock(text, sessionId, { signal } = {}) {
 export function createWorkRecordsTool() {
   return {
     name: 'list_work_records',
-    description: '查成功生成的歌曲/图片/架构图/文档操作记录，按生成ID去重，用于总共多少、列全做过哪些；分页含来源对话ID。历史缺口只能回答至少，不从摘要补猜。',
+    description: '查生成记录，默认仅成功；排查架构图失败必须用status:all并可指定sessionId，未成功不等于未调用。分页含来源对话ID，历史缺口只能回答至少，不从摘要补猜。',
     input_schema: {
       type: 'object',
       properties: {
         kind: { type: 'string', enum: ['song', 'image', 'video', 'diagram', 'document'] },
         format: { type: 'string', enum: ['docx', 'pptx', 'xlsx'] },
+        status: { type: 'string', enum: ['success', 'failed', 'unverified', 'all'] },
+        sessionId: { type: 'string', maxLength: 200 },
         from: { type: 'number', minimum: 0 },
         to: { type: 'number', minimum: 0 },
         offset: { type: 'integer', minimum: 0 },
@@ -221,6 +241,6 @@ export function createWorkRecordsTool() {
       },
       additionalProperties: false
     },
-    run: async (args, { signal } = {}) => JSON.stringify(await listWorkRecords({ ...args, signal }))
+    run: async (args, { signal } = {}) => JSON.stringify(await listWorkRecords({ ...args, status: args.status === 'all' ? '' : args.status, signal }))
   };
 }

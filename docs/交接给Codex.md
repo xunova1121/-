@@ -1,3 +1,7 @@
+## 新用户反馈：架构审查恢复与失败追踪（待完整CI）
+
+用户截图底稿已生成，但create_diagram被语义not_checked拦住；模型误称没有调用记录。补上具体审查状态、沿用底稿最多恢复一次（提前记数、来源再核）、失败记录按本段查询；不得绕过明确failed或调松原生PPT门槛。详见`docs/架构审查恢复与失败追踪-20261028.md`及第7节自查。定向9文件55项、lint、真实四格式/原生PPT恢复E2E通过，尚未正式发布本次修复。
+
 ## 已发布1.0.313：架构来源绑定、Word原件保留与分页核对
 
 - 正式发布：https://github.com/xunova1121/-/releases/tag/desktop-v1.0.313 。安卓：https://github.com/xunova1121/-/releases/download/desktop-v1.0.313/Jarvis-1.0.313-android.apk 。先“立即更新服务器”，再安装APK；未直接登录/更新用户生产服务器。

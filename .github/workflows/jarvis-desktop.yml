@@ -246,6 +246,7 @@ jobs:
           node e2e/diagram-platform.mjs "$RUNNER_TEMP/jarvis-e2e/platform"
           node e2e/diagram-candidates.mjs "$RUNNER_TEMP/jarvis-e2e/candidates"
           node e2e/architecture-editable.mjs "$RUNNER_TEMP/jarvis-e2e/architecture"
+          node e2e/architecture-resume.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-resume"
           ARCHITECTURE_VIEW=workflow node e2e/architecture-logic.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-workflow"
           ARCHITECTURE_VIEW=dataflow node e2e/architecture-logic.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-dataflow"
           node e2e/workspace-management.mjs "$RUNNER_TEMP/jarvis-e2e"
@@ -312,16 +313,13 @@ jobs:
           make_latest: true
           files: dist/*
           body: |
-            ## 本版更新 · 架构来源绑定与Word原件保留
-            - 明确只排版、正文不变时，绑定本轮会话中的用户原文；不使用助手旧稿或压缩摘要替代正文。
-            - 原文直接进入Word生成器，不经模型改写审稿；写入目标前从真实DOCX逐段逐格核对正文、表格和金额，缺失或缺图时保留已有目标文件。
-            - 长文/专业起草入口不能绕过只排版保护。检查报告保留来源编号及摘要，便于追溯。
-            - 对话里明确问文档偏好或在近期文档话题里问“制作爱好”时，读取有效写作偏好；更正/删除即时生效，普通兴趣和闲聊不带入排版要求。
-            - 上传或最近生成的Word可绑定原件重排：只换样式，正文、表格、图片及关联等非样式部件逐字节保持；同名输出自动另存排版副本。
-            - 新增正文、偏好和原件回归与实际Word、LibreOffice PDF文字和图像验收，原测试和图形同稿/PPT门槛不放松。
-            - Word明确总页数或范围以实际PDF核对；页数不符或无法渲染不缓存成功，不删正文凑页数。
-            - 架构底稿在漏填材料清单时实际补读已声明的文件路径；来源、摘录和需求错误定位到具体字段，手机失败步骤显示错误摘要。原文、业务审查和同稿导出门槛保持。
-            - 保留原件直接格式与原有封面目录；详细字体角色及Word自动分页协调继续分项处理。未用真实付费模型、客户原文件或安卓/Windows真机验收。
+            ## 本版更新 · 架构图审查恢复与失败追踪
+            - 保存底稿与允许正式出图分开记录；审查未完成时返回具体状态、错误代码、意见和下一步，不把工具调用成功说成业务通过。
+            - 出图时沿用原底稿，审查请求/格式失败最多恢复一次；可使用已配置写作分工恢复失败的推理分工。提前持久化次数，换输出文件名或重启不绕过上限。
+            - 审查明确失败、来源变更、用户停止继续拦截；实际读取与同稿导出、原生PPT对照门槛保持。
+            - 审查错误定位到业务审查阶段，不再误报为参数结构。补齐当前辅助调用真实支持的禁止联网和零自动重试参数。
+            - 可按本段对话查询失败和规划记录；默认成功成果查询明确范围，不把“没有成功”说成“没有调用”。失败索引只存短错误代码和字段，不存提示词或全文。
+            - 新增同底稿失败恢复后实际导出SVG、PNG、PDF和原生PPT验收。尚未用用户原招标文件、真实模型或安卓/Windows真机验证。
 
             ## 更新与使用
             先在设置里“立即更新服务器”，再更新电脑和手机。仅安装APK不会替换远端服务器代码。
