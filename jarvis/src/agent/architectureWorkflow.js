@@ -1,6 +1,6 @@
 import * as ws from './workspace.js';
 import { createDocumentNavigation } from './documentNavigation.js';
-import { workflowMaterials, compileArchitectureContent, WORKFLOW_CONTENT_PROMPT } from './architectureWorkflowInput.js';
+import { workflowMaterials, compileArchitectureContent, WORKFLOW_CONTENT_PROMPT, requestedArchitectureViews } from './architectureWorkflowInput.js';
 import { createArchitecturePlanTool } from './architectureTool.js';
 import { createArchitecturePackageTool } from './architecturePackage.js';
 import { diagramDigest } from './diagramExport.js';
@@ -56,7 +56,7 @@ export function createArchitectureWorkflowTool(ctx) {
           files: args.files,
           request: args.request,
           directory: args.directory,
-          views: args.views || ['overview'],
+          views: requestedArchitectureViews(args.request, args.views),
           lastError: null
         };
         jobPath = '文档检查/架构任务/' + crypto.randomUUID() + '.json';

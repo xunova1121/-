@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createFileStore } from '../server/fileStore.mjs';
 import { useBackend } from '../src/agent/store.js';
 import * as ws from '../src/agent/workspace.js';
-import { workflowMaterials, compileArchitectureContent } from '../src/agent/architectureWorkflowInput.js';
+import { workflowMaterials, compileArchitectureContent, requestedArchitectureViews } from '../src/agent/architectureWorkflowInput.js';
 import { createArchitectureWorkflowTool } from '../src/agent/architectureWorkflow.js';
 import { mediaReceipt } from '../src/agent/actionDelivery.js';
 let root;
@@ -76,4 +76,11 @@ it('不接受草稿路径当任务，也不把缺四格式/partial回执当完�
       JSON.stringify({ status: 'complete', completedViews: [{ editable: true, files: [{ format: 'svg', path: 'a.svg' }] }] })
     ).state
   ).toBe('pending');
+});
+
+it('明确请求的三视图不会因模型少填而漏交，排除专题不能强行生成', () => {
+  expect(requestedArchitectureViews('总体架构，并给出业务闭环和数据流专题', ['overview'])).toEqual(['overview', 'workflow', 'dataflow']);
+  expect(requestedArchitectureViews('只做业务闭环，不要数据流')).toEqual(['workflow']);
+  expect(() => requestedArchitectureViews('不要数据流', ['dataflow'])).toThrow();
+  expect(() => requestedArchitectureViews('不要总体架构')).toThrow();
 });
