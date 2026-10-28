@@ -77,3 +77,46 @@ describe('普通画图：版式参数不合规则时程序调整，不让模型�
     await expect(tool.run(input, { rawRequestText: '做一下这个项目的架构图，逐条核对需求原文' })).rejects.toMatchObject({ code: 'ARCHITECTURE_PLAN_REQUIRED' });
   });
 });
+
+// 用户 2026-10-29 07:06 实测：图出来了但“好多线，乱七八糟”，视觉检查因连线过密不通过，PNG/PPT 没导出；候选图混在成果里分不清
+describe('普通架构图：去掉跨层连线、过程文件不当成果、.doc 新版 Word 能搜', () => {
+  it('分层架构图只留同层连线并记下省略条数；流程图不动', () => {
+    const input = {
+      title: '总体架构',
+      layers: [
+        { title: '展示', nodes: [{ id: 'a', title: 'PC端' }, { id: 'b', title: '大屏' }] },
+        { title: '平台', nodes: [{ id: 'c', title: '数据' }, { id: 'd', title: 'AI' }] }
+      ],
+      edges: [{ from: 'a', to: 'b', label: '联动' }, { from: 'a', to: 'c' }, { from: 'b', to: 'd' }, { from: 'c', to: 'd' }]
+    };
+    const arch = layoutWithRepair(input, { architecture: true });
+    expect(arch.model.edges.map((e) => e.from + e.to)).toEqual(['ab', 'cd']);
+    expect(arch.notes.join()).toContain('跨层连线 2 条已省略');
+    expect(layoutWithRepair(input).model.edges).toHaveLength(4);
+  });
+
+  it('dropCrossLayer 单独用：两层之间的连线去掉', async () => {
+    const { dropCrossLayer } = await import('../src/agent/diagramRepair.js');
+    expect(dropCrossLayer({ layers: [{ nodes: [{ id: 'a' }] }, { nodes: [{ id: 'b' }] }], edges: [{ from: 'a', to: 'b' }] }).input.edges).toEqual([]);
+  });
+
+  it('回答下面的文件卡片不列“文档检查/”里的候选图和审查记录', async () => {
+    const { PROCESS_FILE } = await import('../src/ui/workspaceCatalog.js');
+    expect(PROCESS_FILE.test('文档检查/架构候选/1f2e/candidate-0.png')).toBe(true);
+    expect(PROCESS_FILE.test('长江禁捕项目总体架构.svg')).toBe(false);
+  });
+
+  it('search_in_files：后缀 .doc 内容是新版 Word 的照常搜；真老 .doc 照旧报清楚', async () => {
+    const ws = await import('../src/agent/workspace.js');
+    const { createTools } = await import('../src/agent/tools.js');
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
+    zip.file('_rels/.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="r1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+    zip.file('word/document.xml', '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>建设湖泊电子围栏系统5套</w:t></w:r></w:p></w:body></w:document>');
+    await ws.write('上传/虚构招标.doc', new Blob([await zip.generateAsync({ type: 'uint8array' })]));
+    await ws.write('上传/真老文件.doc', new Blob([new Uint8Array([0xd0, 0xcf, 0x11, 0xe0])]));
+    const search = createTools({}).find((t) => t.name === 'search_in_files');
+    expect(await search.run({ path: '上传/虚构招标.doc', query: '电子围栏' })).toContain('电子围栏');
+    await expect(search.run({ path: '上传/真老文件.doc', query: '任意' })).rejects.toHaveProperty('code', 'DOCUMENT_NAVIGATION');
+  });
+});

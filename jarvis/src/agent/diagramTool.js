@@ -178,7 +178,7 @@ export function createDiagramTool(ctx, { requireArchitecture = false } = {}) {
       let repairNotes = [];
       let model;
       if (strict || architecture || projected) model = layoutDiagram(input);
-      else ({ model, input, notes: repairNotes } = layoutWithRepair(input));
+      else ({ model, input, notes: repairNotes } = layoutWithRepair(input, { architecture: !['workflow', 'dataflow', 'general'].includes(input.diagramType) }));
       if (input.draft) model.monochrome = true;
       progress?.('正在核对材料和图形结构…');
       const direct = await checkSources(input.sources || [], signal);

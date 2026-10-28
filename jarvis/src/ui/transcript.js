@@ -3,6 +3,7 @@
  * 全程只用 createElement + textContent，从不把模型输出当 HTML 插入。
  */
 import { imageButton, previewWorkspaceImage, showImagePreview } from './imagePreview.js';
+import { PROCESS_FILE } from './workspaceCatalog.js';
 import './mobileImprovements.css';
 import { parseMarkdown, inline, toPlainText } from '../core/markdown.js';
 import { stripEmotionTags } from '../../shared/emotionTag.js';
@@ -654,6 +655,8 @@ export class Transcript {
       },
       /** 这一轮生成 / 修改的文件：回答末尾一排按钮，点一下在工作区里打开 */
       fileLink(path, onOpen) {
+        // 检查过程文件（架构候选图、审查记录等，放在“文档检查/”下）不当成果列出来，免得分不清哪个是最终图；工作区里照样能找到
+        if (PROCESS_FILE.test(path)) return;
         if (!files) { files = document.createElement('div'); files.className = 'file-links'; el.append(files); }
         if ([...files.children].some((b) => b.dataset.path === path)) return;
         const name = path.split('/').pop();

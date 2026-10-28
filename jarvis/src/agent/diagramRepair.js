@@ -146,8 +146,28 @@ const stripLabels = (input) => ({ ...input, edges: (input.edges || []).map(({ la
  * 普通画图：先调整版式再排版；仍因箭头文字位置报错时去掉箭头文字再排一次
  * @returns {{ model: object, input: object, notes: string[] }}
  */
-export function layoutWithRepair(raw) {
-  const { input, notes } = repairDiagramInput(raw);
+/**
+ * 分层架构图：层与层的上下排列已经表达支撑关系，跨层连线走右侧通道会层层交叉（用户 2026-10-29 07:06 实测“好多线，乱七八糟”，
+ * 视觉检查也因“连线过密”不通过，PNG/PDF/PPT 都没导出）。只保留同一层里的连线，跨层的去掉并记下条数
+ */
+export function dropCrossLayer(input) {
+  const layerOf = new Map(input.layers.flatMap((layer, i) => layer.nodes.map((node) => [node.id, i])));
+  const kept = (input.edges || []).filter((edge) => layerOf.get(edge.from) === layerOf.get(edge.to));
+  const dropped = (input.edges || []).length - kept.length;
+  return { input: { ...input, edges: kept }, note: dropped ? `跨层连线 ${dropped} 条已省略：层与层的支撑关系由上下排列表示，避免连线交叉` : '' };
+}
+
+/**
+ * @param {object} raw
+ * @param {{ architecture?: boolean }} [o]  分层架构图：去掉跨层连线
+ */
+export function layoutWithRepair(raw, { architecture = false } = {}) {
+  let { input, notes } = repairDiagramInput(raw);
+  if (architecture) {
+    const cut = dropCrossLayer(input);
+    input = cut.input;
+    if (cut.note) notes = [...notes, cut.note];
+  }
   try {
     return { model: layoutDiagram(input), input, notes };
   } catch (error) {

@@ -15,7 +15,9 @@ export function createDocumentFileAccess(navigation,segment){
   },
   async search({query,path='',regex=false},{signal}={}){
    throwControl(null,signal);
-   if(path&&navigableOffice(path)){
+   // 后缀是 .doc、内容其实是新版 Word（PK 开头）的照 docx 搜；真老 .doc 或不存在的照旧报错，不当零命中
+   const zippedDoc=path&&/\.doc$/i.test(path)&&await ws.readBlob(ws.normalize(path)).then(async b=>{const h=new Uint8Array(await b.slice(0,2).arrayBuffer());return h[0]===0x50&&h[1]===0x4b;}).catch(()=>false);
+   if(path&&(navigableOffice(path)||zippedDoc)){
     if(regex)throw invalid('Office/PDF定位暂只支持普通关键词，请关闭regex后检索确切原文');
     const doc=await navigation.read(path,{signal});
     return JSON.stringify({...(await navigation.search(doc,query,{signal})),scannedDocuments:1});
