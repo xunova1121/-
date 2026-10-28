@@ -51,8 +51,8 @@ export async function executeToolCalls(
       if (!tool) throw new Error(`没有名为 ${c.name} 的工具`);
       if (!allowWebSearch && (webTools.has(c.name) || c.name === 'delegate_task'))
         throw Object.assign(new Error('当前描述/创作无需检索，请直接依据图片和材料回答；用户明确要求外部核实后再联网'), { code: 'SEARCH_NOT_REQUESTED', kind: 'api' });
-      // 一模一样的调用已经做过两次：结果不会变，不再执行，让模型换思路
-      if (times >= 3 && !/^computer_(look|click|type|key|scroll|drag|screenshot)$/.test(c.name))
+      // 无状态相同参数最多2次；已声明的状态续接最多4次同参，仍执行自身额度/材料/阶段检查，不把新状态误作旧结果。
+      if (times >= 3 && !(times <= 4 && tool.isStatefulResume?.(c.args)) && !/^computer_(look|click|type|key|scroll|drag|screenshot)$/.test(c.name))
         throw Object.assign(new Error(`这个操作（同样的参数）已经做过 ${times - 1} 次了，结果不会变。请换一种方法，或者直接根据已有结果继续。`), isDiagramTool(c.name) ? { code: 'DIAGRAM_DUPLICATE_CALL', kind: 'input' } : {});
       const scopeIssue = review.toolBlock?.(c.name);
       if (scopeIssue) throw Object.assign(new Error(scopeIssue), { code: 'TASK_SCOPE_AFTER_DENIAL', kind: 'input' });

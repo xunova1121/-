@@ -1,6 +1,6 @@
 /** 单轮图形恢复：同目标同阶段最多3次确定性失败，总计最多6次；不保存正文/参数。 */
 const TOOLS = new Set(['build_architecture', 'create_architecture_package', 'revise_architecture_plan', 'prepare_architecture_evidence', 'plan_architecture', 'create_diagram', 'export_diagram', 'render_diagram']);
-const stages = { material: '材料读取', source: '来源定位', excerpt: '原文摘录', fact: '事实依据', inclusion: '事实入图', arguments: '参数结构', review: '业务审查', layout: '版面容量', render: '渲染与导出', duplicate: '重复调用' };
+const stages = { content:'内容整理', format:'回复格式', material: '材料读取', source: '来源定位', excerpt: '原文摘录', fact: '事实依据', inclusion: '事实入图', arguments: '参数结构', review: '业务审查', layout: '版面容量', render: '渲染与导出', duplicate: '重复调用' };
 export const isDiagramTool = (name) => TOOLS.has(name);
 export function diagramFailureDetails(error) {
   const details = error?.diagnostics;
