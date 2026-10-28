@@ -19,8 +19,8 @@ const field = (value, max, label) => {
   if (typeof value !== 'string' || !value.trim() || [...value].length > max) throw invalid(label + '为空或过长');
   return value.trim();
 };
-function evidence(item, materials, requestText, previousUserEvidence) {
-  if (item.assumption) return { assumption: field(item.assumption, 240, '假设前提'), evidence: 'assumption' };
+export function evidence(item, materials, requestText, previousUserEvidence) {
+  if (item.assumption) return { assumption: field(item.assumption, 240, '假设前提'), evidence: 'assumption', ...(item.basis && { basis: item.basis }) };
   const source = field(item.source, 400, '原文路径');
   const excerpt = field(item.excerpt, 400, '原文摘录');
   const candidates = materials.filter(material => material.path === source).map(material => material.text);

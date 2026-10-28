@@ -68,7 +68,7 @@ export async function resolveArchitectureEvidence(input, materials, checks, sign
   const groups = ['entities', 'relations', 'requirements'];
   for (const [key, max] of [['entities', 60], ['relations', 100], ['requirements', 80]])
     if (Array.isArray(input[key]) && input[key].length > max) throw invalid(key + '超过底稿条数上限');
-  if (!groups.some(key => Array.isArray(input[key]) && input[key].some(item => item?.evidenceId !== undefined))) return input;
+  if (!groups.some(key => Array.isArray(input[key]) && input[key].some(item => (item?.evidenceId !== undefined || item?.basisEvidenceId !== undefined)))) return input;
   const prepared = await evidenceMaterials(materials, checks, signal);
   // 编号不依赖分页方式或全局注册表，但必须绑定本次重读全文摘要和有效连续范围。
   const proofFor = id => {
@@ -86,13 +86,19 @@ export async function resolveArchitectureEvidence(input, materials, checks, sign
   for (const key of groups) {
     if (!Array.isArray(input[key])) continue;
     result[key] = input[key].map((item, index) => {
-      if (item?.evidenceId === undefined) return item;
-      const proof = proofFor(item.evidenceId);
+      if (item?.evidenceId === undefined && item?.basisEvidenceId === undefined) return item;
+      const isBasis = item.basisEvidenceId !== undefined;
+      const proof = proofFor(isBasis ? item.basisEvidenceId : item.evidenceId);
       const fail = message => {
         const error = invalid(message);
         error.diagnostics[0].field = `${key}[${index}].evidenceId`;
         throw error;
       };
+      if (isBasis) {
+        if (key === 'requirements' || !item.assumption || item.evidenceId !== undefined || item.source !== undefined || item.excerpt !== undefined) fail('设计推导需assumption和basisEvidenceId，不得同时声明事实编号或手填原文；采购需求不能是推导');
+        if (!proof) fail('设计依据编号不存在或原文已变化，请重新取号');
+        return { ...item, basis: { source: proof.source, excerpt: proof.text, evidenceId: item.basisEvidenceId } };
+      }
       if (!proof) fail('证据编号不存在或材料/读取范围已变化，请重新取当前编号');
       if (item.assumption || item.source !== undefined && item.source !== proof.source || item.excerpt !== undefined && item.excerpt !== proof.text)
         fail('编号与手填来源/摘录冲突，或同时声明假设；请只引用编号，不混用其他证据');

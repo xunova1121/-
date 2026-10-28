@@ -44,7 +44,18 @@ spec.requirements = [{ text: requirement, entities: spec.requirements[0].entitie
 spec.sources = sources;
 let calls = 0;
 const ctx = { renderSvg, compareDiagramPpt, llm: async () => { calls++; return '{"passed":true,"issues":[]}'; } };
-const plan = JSON.parse(await createArchitecturePlanTool(ctx).run(spec, { rawRequestText: requirement }));
+let submission = spec;
+if (process.argv[3] === 'resume') {
+  submission = structuredClone(spec);
+  for (const relation of submission.relations) delete relation.evidenceId;
+  submission.requirements[0].text = '虚构改写，不是原文';
+  await assert.rejects(createArchitecturePlanTool(ctx).run(submission), error => error.diagnostics.length === spec.relations.length + 1);
+  assert.equal(calls, 0);
+  const files = await workspace.list('文档检查/架构输入');
+  const draftPath = files.find(item => item.path.endsWith('.submission.json')).path;
+  submission = {draftPath, corrections:[...spec.relations.map((item,index)=>({group:'relations',index,evidenceId:item.evidenceId})),{group:'requirements',index:0,evidenceId:spec.requirements[0].evidenceId,useEvidenceText:true}]};
+}
+const plan = JSON.parse(await createArchitecturePlanTool(ctx).run(submission, { rawRequestText: requirement }));
 assert.equal(calls, 1);
 assert.equal(plan.readyForRender, true);
 const saved = JSON.parse(await workspace.readText(plan.architecturePath));
