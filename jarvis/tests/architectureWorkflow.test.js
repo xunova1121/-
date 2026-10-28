@@ -84,3 +84,16 @@ it('明确请求的三视图不会因模型少填而漏交，排除专题不能�
   expect(() => requestedArchitectureViews('不要数据流', ['dataflow'])).toThrow();
   expect(() => requestedArchitectureViews('不要总体架构')).toThrow();
 });
+
+it('缺专题关系停在内容阶段，不能进入导出后不断重试同一份缺项稿', async () => {
+  await ws.write('原文.md', '平台承载业务。');
+  const llm = vi.fn(async () => JSON.stringify(content));
+  await expect(createArchitectureWorkflowTool({ llm }).run({ files: ['原文.md'], request: '总体架构业务闭环数据流', directory: '交付' })).rejects.toThrow(
+    '未登记业务流'
+  );
+  const job = (await ws.list('文档检查/架构任务')).find((f) => !f.path.includes('.content.'));
+  const state = JSON.parse(await ws.readText(job.path));
+  expect(state.stage).toBe('content');
+  expect(state.architecturePath).toBeUndefined();
+  expect(llm).toHaveBeenCalledTimes(1);
+});

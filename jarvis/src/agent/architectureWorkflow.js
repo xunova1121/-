@@ -120,6 +120,10 @@ export function createArchitectureWorkflowTool(ctx) {
           state.contentPath = contentPath;
           await save();
           const input = compileArchitectureContent(content, sources, materials);
+          if (state.views.includes('workflow') && !input.relations.some((row) => ['workflow', 'feedback'].includes(row.type)))
+            throw invalid('已要求业务闭环，但内容未登记业务流/反馈关系；应核原文补齐内容，不进入导出阶段');
+          if (state.views.includes('dataflow') && !input.relations.some((row) => row.type === 'dataflow'))
+            throw invalid('已要求数据流，但内容未登记数据流关系；应核原文补齐内容，不进入导出阶段');
           const receipt = JSON.parse(
             await createArchitecturePlanTool({ ...ctx, readDocument: read }).run(input, { ...execution, rawRequestText: state.request })
           );
