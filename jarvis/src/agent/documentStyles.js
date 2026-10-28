@@ -24,9 +24,12 @@ export function extractDocumentStyles(lines) {
       const match = matches.at(-1);
       if (!match) continue;
       const negative = line.slice(0, match.index).match(/(?:不要|不需要|不用|别用|不喜欢|不想要|别|不)$/)?.[0] || '';
-      const content = (/^(?:不|别)/.test(match[0]) ? '' : negative) + match[0];
+      const content = aspect === 'font' && /正文|标题|字号|行距|段前|段后/.test(line)
+        ? line.slice(0, 150) : (/^(?:不|别)/.test(match[0]) ? '' : negative) + match[0];
       results.push({ aspect, scope: scopeOf(line), content, evidence: line.slice(0, 240) });
     }
+    if (/小[一二三四五六](?:号)?|[一二三四五六]号|\d+(?:\.\d+)?\s*(?:磅|pt|倍行距)|段前|段后|固定行距/i.test(line))
+      results.push({ aspect: 'typography', scope: scopeOf(line), content: line.slice(0, 150), evidence: line.slice(0, 240) });
   }
   return results.slice(-MAX_STYLES);
 }
@@ -81,5 +84,5 @@ export function withDocumentStyles(ctx, getContext) {
     request.signal?.throwIfAborted();
     return helper({ ...request, prompt: String(request.prompt || '') + (preferences ? '\n' + preferences : '') });
   });
-  return { ...ctx, llm: wrap(ctx.llm), reasonLlm: wrap(ctx.reasonLlm), documentReviewer: wrap(ctx.documentReviewer) };
+  return { ...ctx, documentStylePreferences: ctx.documentStylePreferences || getContext, llm: wrap(ctx.llm), reasonLlm: wrap(ctx.reasonLlm), documentReviewer: wrap(ctx.documentReviewer) };
 }

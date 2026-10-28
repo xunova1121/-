@@ -14,6 +14,8 @@ import { parseDoc, plain, headings, markSalutationAndSignature } from './docMode
 import { FONTS } from './themes.js';
 import { openOfficePackage } from './officePackage.js';
 import { imageInfo } from './imageInfo.js';
+import { normalizeTypography, typographyFont } from './documentTypography.js';
+import { applyDocxTypography } from './docxTypography.js';
 
 const PT = (n) => Math.round(n * 2); // 字号：磅 → 半磅
 const MM = (n) => Math.round((n * 1440) / 25.4); // 毫米 → twip
@@ -42,7 +44,8 @@ const font = (key) => {
  * @param {Uint8Array|ArrayBuffer} [o.template]  用户的 .docx 模板：沿用其样式
  * @returns {Promise<{ blob: Blob, info: { toc: boolean, images: number, missingImages: string[], headings: number } }>}
  */
-export async function makeDocx({ title, content, theme, cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, template = null, layout = 'report', issuer = '', docNo = '', kind = '' }) {
+export async function makeDocx({ title, content, theme, cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, template = null, layout = 'report', issuer = '', docNo = '', kind = '', typography = {} }) {
+  typography = normalizeTypography(typography);
   const d = await import('docx');
   const {
     Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle,
@@ -59,9 +62,10 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
   const noCover = K === 'minutes' || K === 'notice' || (short && K !== 'proposal');
   cover = (Boolean(cover) && !noCover) || (K === 'proposal' && chars >= 3000 && !official);
   const C = theme.colors;
-  const bodyFont = font(theme.fonts.body);
+  const bodyFont = typographyFont(typography.body, font(theme.fonts.body));
   const headFont = font(theme.fonts.heading);
-  const bodySize = official ? 16 : brief ? 11 : 12;
+  const titleFont = typographyFont(typography.title, font(theme.fonts.title ?? theme.fonts.heading));
+  const bodySize = typography.body?.size ?? (official ? 16 : brief ? 11 : 12);
   const lineSpacing = official ? { line: 579, lineRule: LineRuleType.EXACT } : { line: brief ? 300 : 360, lineRule: LineRuleType.AUTO };
   const page = official
     ? { top: MM(37), bottom: MM(35), left: MM(28), right: MM(26) }
@@ -282,7 +286,7 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
         verticalAlign: VerticalAlign.BOTTOM,
         margins: { top: 400, bottom: 500, left: 500, right: 500 },
         children: [
-          new Paragraph({ spacing: { after: 240 }, children: [new TextRun({ text: docTitle, bold: true, size: PT(28), color: 'FFFFFF', font: font(theme.fonts.title ?? theme.fonts.heading) })] }),
+          new Paragraph({ heading: HeadingLevel.TITLE, spacing: { after: 240 }, children: [new TextRun({ text: docTitle, bold: true, size: PT(typography.title?.size ?? 28), color: 'FFFFFF', font: titleFont })] }),
           new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 18, color: C.extra, space: 1 } }, indent: { right: 11906 - page.left - page.right - 1000 - 1400 }, spacing: { after: 240, line: 80, lineRule: LineRuleType.EXACT }, children: [] }),
           ...(subtitle ? [new Paragraph({ children: [new TextRun({ text: subtitle, size: PT(14), color: C.soft, font: headFont })] })] : [])
         ]
@@ -292,17 +296,17 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
       new Paragraph({ spacing: { before: 0, after: 0 }, children: [] }),
       banner,
       ...(author ? [new Paragraph({ spacing: { before: 3600, after: 120 }, children: [new TextRun({ text: author, size: PT(14), color: C.primary, bold: true, font: headFont })] })] : []),
-      new Paragraph({ spacing: { before: author ? 0 : 3600, after: 0 }, children: [new TextRun({ text: date || today(), size: PT(12), color: '7F7F7F', font: bodyFont })] }),
+      new Paragraph({ style: 'Caption', spacing: { before: author ? 0 : 3600, after: 0 }, children: [new TextRun({ text: date || today(), size: PT(12), color: '7F7F7F', font: bodyFont })] }),
       new Paragraph({ children: [new PageBreak()] })
     );
   } else if (cover) {
     front.push(
       // 用段前距留白，不用空段落：空段落会继承正文的 1.5 倍行距和段后距，封面会被挤到第二页
-      new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 3400, after: 360 }, children: [new TextRun({ text: docTitle, bold: true, size: PT(official ? 22 : 28), font: font(theme.fonts.title ?? theme.fonts.heading), color: official ? '000000' : C.primary })] }),
+      new Paragraph({ heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER, spacing: { before: 3400, after: 360 }, children: [new TextRun({ text: docTitle, bold: true, size: PT(typography.title?.size ?? (official ? 22 : 28)), font: titleFont, color: official ? '000000' : C.primary })] }),
       ...(subtitle ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 240 }, children: [new TextRun({ text: subtitle, size: PT(16), color: official ? '000000' : C.accent, font: headFont })] })] : []),
       ...(official ? [] : [new Paragraph({ alignment: AlignmentType.CENTER, border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: C.accent, space: 1 } }, indent: { left: 3000, right: 3000 }, children: [] })]),
       ...(author ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 4200, after: 120 }, indent: { firstLine: 0 }, children: [new TextRun({ text: author, size: PT(14), font: bodyFont })] })] : []),
-      new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: author ? 0 : 4200, after: 0 }, indent: { firstLine: 0 }, children: [new TextRun({ text: date || today(), size: PT(14), font: bodyFont })] }),
+      new Paragraph({ style: 'Caption', alignment: AlignmentType.CENTER, spacing: { before: author ? 0 : 4200, after: 0 }, indent: { firstLine: 0 }, children: [new TextRun({ text: date || today(), size: PT(14), font: bodyFont })] }),
       new Paragraph({ children: [new PageBreak()] })
     );
   } else {
@@ -416,7 +420,8 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
   let blob = await Packer.toBlob(doc);
   let templateInfo = null;
   if (template) ({ blob, info: templateInfo } = await applyTemplate(blob, template));
-  return { blob, info: { toc: wantToc, images: imageCount, missingImages, headings: hs.length, template: templateInfo } };
+  if (Object.keys(typography).length) ({ blob } = await applyDocxTypography(blob, typography));
+  return { blob, info: { toc: wantToc, images: imageCount, missingImages, headings: hs.length, template: templateInfo, typographyProfile: typography } };
 }
 
 /**

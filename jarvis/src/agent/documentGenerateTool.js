@@ -12,6 +12,7 @@ import { throwControl } from '../core/networkRequest.js';
 import { S, str, fmtSize, findTemplate } from './documentSchema.js';
 import { formattingSource, verifyFormattingContent } from './documentPreservation.js';
 import { formatDocumentFile } from './documentFileFormat.js';
+import { documentTypography } from './documentTypography.js';
 
 /** 保留原有一轮自修复与PPT看图检查，不额外叠加无界模型审稿。 */
 /** 同一轮里同一个文件：内容一样就直接用上次的结果；已经请模型自查过的文件，重新生成时不再自查（评测里一份 PPT 生成了四遍，每遍都等自查） */
@@ -98,13 +99,14 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         cache = memo.scopes.get(executionScope);
       }
       const goal = requestText || rawRequestText || requirements || '';
+      const typography = format === 'docx' ? await documentTypography(ctx, goal, signal) : {};
       const source = format === 'docx' ? await formattingSource({ request: rawRequestText || goal, sessionId, sourceId, sourcePath, signal }) : null;
       if (source?.kind === 'docx') return formatDocumentFile(ctx, source, { path, theme, kind, cover, toc, template, requirements }, execution);
       // 排版时绕过模型提供的正文和改写审稿，确定性沿用已绑定的用户原文。
       if (source) content = source.content;
       const forbidCover = /(?:不要|不用|无需|不加|不含|去掉|去除).{0,3}封面/.test(goal);
       const expectedSlides = format === 'pptx' ? requestedSlides('PPT ' + goal) : null;
-      const callKey = await keyOf({ format, path, title, content, theme, style, kind, cover, subtitle, author, issuer, docNo, toc, template, templateId, requirements, goal, sessionId, sourceId: source?.id, workflow: ctx.documentContentReview?.workflowFile || null });
+      const callKey = await keyOf({ format, path, title, content, theme, style, kind, cover, subtitle, author, issuer, docNo, toc, template, templateId, requirements, goal, typography, sessionId, sourceId: source?.id, workflow: ctx.documentContentReview?.workflowFile || null });
       // 记住的结果只管 10 分钟（同一个任务里重复调用）；隔得久了照常重新生成
       const fresh = (m, key, ms) => m.has(key) && Date.now() - m.get(key).at < ms;
       const cached = cache.results.get(callKey);
@@ -146,6 +148,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
           // 文件名常带“_5页”：封面标题不要这个尾巴
           title: (title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, '')).replace(/[_\s-]*\d+\s*页$/, ''),
           content: text,
+          typography,
           expectedSlides,
           requireCover: !forbidCover && /含封面|包含封面|加(?:一页)?封面|带封面/.test(goal),
           forbidCover,
@@ -267,8 +270,8 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       if (!r.validation.errors && pageChecked) keep(cache.reviewed, pathKey, { at: Date.now() });
       // 没有硬伤：明说已经读回检查过——模型以前会再 read_file 好几遍、或者把同一份文件重新生成一遍
       if (!r.validation.errors && pageChecked && !left.some((x) => x.level === 'error') && r.validation.readback === 'passed') notes.push('文件已经生成并读回检查过，不需要再 read_file 核对或重新生成；直接告诉用户文件在哪、做了什么');
-      const result = `${r.path}（${fmtSize(out.blob.size)}）。${notes.join('；')}`;
-      if (!r.validation.errors && pageChecked) keep(cache.results, callKey, { text: result, path: r.path, digest: await digestOf(new Uint8Array(await out.blob.arrayBuffer())), at: Date.now() });
+      const result = `${r.path}（${fmtSize(r.blob.size)}）。${notes.join('；')}`;
+      if (!r.validation.errors && pageChecked) keep(cache.results, callKey, { text: result, path: r.path, digest: await digestOf(new Uint8Array(await r.blob.arrayBuffer())), at: Date.now() });
       return result;
     }
   };

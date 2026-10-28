@@ -4,6 +4,7 @@ import { THEME_IDS } from './themes.js';
 import { writeLongDocument, outlineMarkdown } from './longDoc.js';
 import { lint } from './selfCheck.js';
 import { deliverDocument } from './documentDelivery.js';
+import { documentTypography } from './documentTypography.js';
 import { S, str, fmtSize, findTemplate } from './documentSchema.js';
 import { createProfessionalDocumentTools } from './professionalDocumentTools.js';
 import { documentDepth } from '../app/doc/workflowPolicy.js';
@@ -99,6 +100,7 @@ export function createLongDocumentTool(ctx) {
       }
       const { tpl, tplPath } = await findTemplate(format);
       const out = await generate(format, {
+        typography: format === 'docx' ? await documentTypography(ctx, execution.requestText || execution.rawRequestText || task, signal) : {},
         title: r.title,
         content: r.markdown,
         theme,

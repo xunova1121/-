@@ -5,7 +5,7 @@
 #   1. 解压到 /opt/jarvis/app-<版本>，用国内镜像安装依赖（不运行任何安装脚本）
 #   2. 第一次安装时：建一个专门运行未央的系统账号 jarvis，问你设访问密码，写进 /opt/jarvis/jarvis.env（只有 root 能读）
 #   3. 注册成系统服务 jarvis（开机自启、崩了自动重启、最多用 1.2GB 内存），只在本机 127.0.0.1:8787 上监听
-#   另外：没装 LibreOffice 的话装上（生成的文档转 PDF 逐页检查用；装不上不影响使用）
+#   另外：补装 LibreOffice 和 ffmpeg（文档检查与SVG备用渲染；失败明确提示，不伪装验收成功）
 #   4. 切换到新版本并重启；旧版本保留最近 2 个，出问题可以切回去
 #   5. 装上自动更新：每天凌晨 4 点左右（北京时间）检查新版本；手机 / 电脑上点“立即更新服务器”也会马上更新（见 update.sh）
 # 你的对话、记忆、文件在 /opt/jarvis/data，更新不会动它。
@@ -31,6 +31,21 @@ tar -xzf "$PKG" -C "$APP.tmp" --strip-components=1
 echo "== 安装依赖（国内镜像，几分钟）"
 (cd "$APP.tmp" && "$NPM" install --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund --registry=https://registry.npmmirror.com)
 rm -rf "$APP" && mv "$APP.tmp" "$APP"
+
+# SVG备用解码：不能假定服务器/CI镜像自带ffmpeg；不自动开启第三方RPM软件源。
+if [[ "${JARVIS_NO_FFMPEG:-}" != 1 ]] && ! command -v ffmpeg >/dev/null 2>&1; then
+  echo "== 安装 ffmpeg（SVG备用渲染）"
+  if command -v apt-get >/dev/null 2>&1; then
+    (export DEBIAN_FRONTEND=noninteractive; timeout 360 apt-get update -qq && timeout 360 apt-get install -y -qq --no-install-recommends ffmpeg) \
+      || echo "== 缺 ffmpeg：安装失败，SVG备用渲染不可用；请按部署说明补装"
+  elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
+    FFMPEG_PM="$(command -v dnf || command -v yum)"
+    timeout 360 "$FFMPEG_PM" install -y -q ffmpeg \
+      || echo "== 缺 ffmpeg：当前软件源安装失败；请从系统支持的软件源补装，不自动启用第三方源"
+  else
+    echo "== 缺 ffmpeg：未找到包管理器，请按部署说明手动安装"
+  fi
+fi
 
 # Office 真实渲染（生成的 Word / PPT / Excel 转成 PDF 逐页检查）：没装 LibreOffice 就装上，带中文字体。
 # 只装一次（几百 MB，几分钟）；装不上不影响使用，只是文档少一步检查。不想装：JARVIS_NO_OFFICE=1 bash install.sh …

@@ -1,9 +1,9 @@
 // Word分页只从真实PDF读取；不以字数、标题数或DOCX缓存页数代替。
-export function requestedWordPages(requirements = '') {
+export function requestedWordPages(requirements = '', { wordContext = false } = {}) {
   const instruction = String(requirements).slice(0, 120000).split(/^#\s/m)[0];
   let latest = null;
   for (const clause of instruction.split(/[。；;\n]/)) {
-    if (!/Word|docx/i.test(clause) || /PPT|幻灯片|Excel/i.test(clause)) continue;
+    if ((!wordContext && !/Word|docx/i.test(clause)) || /PPT|幻灯片|Excel/i.test(clause)) continue;
     if (/正文[^。；;]*页|另加[^。；;]*封面|不含[^。；;]*封面/.test(clause)) continue;
     const matches = clause.matchAll(
       /(?<![\d第前后至到~～—-])([1-9]\d{0,2}|[一二两三四五六七八九十]{1,3})\s*(?:[-—~～至到]\s*([1-9]\d{0,2}|[一二两三四五六七八九十]{1,3})\s*)?页/g

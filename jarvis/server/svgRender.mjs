@@ -26,7 +26,7 @@ export async function renderSvg(svg, { signal } = {}) {
         // 复用原部署脚本已有的LibreOffice，不新增npm依赖或另装浏览器。
         const office = await renderOffice(new Blob([checked.svg], { type: 'image/svg+xml' }), 'svg', { signal });
         if (!office.available)
-          throw Object.assign(new Error('服务器缺少可用SVG渲染器，原部署中的LibreOffice也不可用；源文件已保留'), {
+          throw Object.assign(new Error('服务器缺少rsvg-convert' + (fallbackError.code === 'SVG_RENDER_FFMPEG_MISSING' ? '、缺 ffmpeg' : '，ffmpeg备用栅格化失败') + '，LibreOffice也不可用；源文件已保留'), {
             code: 'SVG_RENDER_UNAVAILABLE',
             kind: 'capability',
             cause: fallbackError

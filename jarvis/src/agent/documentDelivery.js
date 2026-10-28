@@ -4,11 +4,20 @@ import { throwControl } from '../core/networkRequest.js';
 import { inspectRenderedPdf } from './pdfQuality.js';
 import { documentError } from './documentPlan.js';
 import { requestedWordPages, checkWordPages } from './wordPageBudget.js';
+import { coordinateWordLayout } from './wordLayout.js';
+import { directTypographyConflicts } from './docxTypography.js';
 
 /** 把短检查报告与真实产物放一起；正文只在工作区文件中，不进会话/检查点。 */
 export async function deliverDocument(ctx, out, target, { progress, signal, checkpoint, issues = [], plan, generatorReview, requiredText = [], requirements = '', preservation = null } = {}) {
+  if (out.ext === 'docx') {
+    out = await coordinateWordLayout(ctx, out, requirements, { signal, progress });
+    const typographyIssues = await directTypographyConflicts(out.blob, out.info?.typographyProfile || {}, { signal });
+    issues = [...issues, ...typographyIssues];
+  }
   const validation = await inspectDocument(out.blob, target, { info: out.info, requiredText, signal, requirements });
-  const wordPages = validation.format === 'docx' ? requestedWordPages(requirements) : null;
+  if (out.wordLayout) validation.wordLayout = out.wordLayout;
+  if (out.info?.typographyProfile && Object.keys(out.info.typographyProfile).length) validation.typography = { profile: out.info.typographyProfile, scope: '正文和标题样式；原件直接格式、代码、页眉页脚独立格式保留' };
+  const wordPages = validation.format === 'docx' ? requestedWordPages(requirements, { wordContext: true }) : null;
   if (wordPages) validation.wordPageBudget = checkWordPages(wordPages);
   if (validation.format === 'pptx' && out.info?.expectedSlides != null) {
     validation.expectedSlides = out.info.expectedSlides;
@@ -63,6 +72,7 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
   await receipt();
   let checkedPath;
   const notes = [];
+  if (out.wordLayout) notes.push(out.wordLayout.note);
   if (['docx', 'pptx', 'xlsx'].includes(out.ext)) {
     const preview = await renderDocument(ctx, out, saved.path, { progress, signal });
     notes.push(...preview.notes);
@@ -103,7 +113,7 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
   checkedPath = await saveReport();
   if (validation.wordCount) notes.push(`实际文件字数${validation.wordCount.count}，要求${validation.wordCount.min}至${validation.wordCount.max}；${validation.wordCount.scope}；${validation.wordCount.passed ? '在范围内' : '不在范围内，须修改'}`);
   notes.push(qualitySummary(validation), `检查报告：${checkedPath}`);
-  return { ...saved, validation, notes };
+  return { ...saved, validation, notes, blob: out.blob };
 }
 
 async function renderDocument(ctx, out, filePath, { progress, signal }) {
@@ -111,7 +121,7 @@ async function renderDocument(ctx, out, filePath, { progress, signal }) {
   try {
     progress?.('生成Office真实预览…');
     signal?.throwIfAborted();
-    const rendered = await ctx.officeRender(out.blob, out.ext, { signal });
+    const rendered = out.wordPreview || await ctx.officeRender(out.blob, out.ext, { signal });
     signal?.throwIfAborted();
     if (!rendered.available) return { state: 'not_available', notes: [rendered.reason || '本端不支持Office真实渲染'] };
     if (!rendered.blob?.size || (await rendered.blob.slice(0, 5).text()) !== '%PDF-') throw documentError('Office未生成有效PDF', 'DOCUMENT_RENDER');
