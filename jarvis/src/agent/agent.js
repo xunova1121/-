@@ -59,6 +59,7 @@ import { loadRules, rulesBlock } from './projectRules.js';
 import { canFallback, needsComputer, computerTaskKind } from '../llm/router.js';
 import { compactToolResults } from './turnContext.js';
 import { requirementsTool } from './taskRequirements.js';
+import * as holdings from './holdings.js';
 import { createImageSight } from './imageSight.js';
 
 export const STABLE_PROMPT = `你是“未央”，用户的个人智能体。实际运行位置与能力以下方环境和本轮工具为准。
@@ -129,6 +130,8 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
     conversationEvidence(sessionId, { text: userText, light })
   ]);
   // 问“今天 / 昨天 / 这周干了什么”：把那段时间所有对话都列上（关键词搜不出来，以前要追问好几次）
+  // 问到股票 / 盈亏：带上持仓记录（不靠对话原文，压缩、换对话后成本和股数也对得上）
+  const held = !light && holdings.STOCK_TOPIC.test(String(userText)) ? await holdings.list().catch(() => []) : [];
   const period = reviewPeriod(userText);
   const periodText = period ? periodBlock(await sessions.listLocal().catch(() => []), period, { currentId: sessionId }) : '';
   const parts = [`当前时间：${new Date().toLocaleString('zh-CN', { hour12: false, timeZone:'Asia/Shanghai' })}（${'Asia/Shanghai'}）`];
@@ -164,6 +167,7 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
   const day = (ts) => new Date(ts).toLocaleDateString('zh-CN');
   if (ctx.episodes?.length) parts.push(`## 相关的过往对话\n${ctx.episodes.map((e) => `- ${day(e.ts)}${e.sessionTitle ? `「${e.sessionTitle}」` : ''}：${e.summary}`).join('\n')}`);
   if (past.length && !light) parts.push(`## 过往对话里的相关原话（需要更多细节时用 read_conversation 读全文）\n${past.map((p) => `- ${day(p.ts)}「${p.title}」（id: ${p.sessionId}）\n  用户：${p.user.slice(0, 160)}${p.reply ? `\n  未央：${p.reply.replace(/\s+/g, ' ').slice(0, 240)}` : ''}`).join('\n')}`);
+  if (held.length) parts.push(holdings.holdingsBlock(held));
   if (periodText) parts.push(periodText);
   if (recentS.length) parts.push(`## 最近的其他对话（用户说“接着上次 / 刚才那个”时参考）\n${recentS.map((s) => `- ${day(s.updatedAt)}「${s.title}」（id: ${s.id}，${s.messages.length} 条）最后：${String([...s.messages].reverse().find((m) => m.role === 'user')?.content ?? '').slice(0, 60)}`).join('\n')}`);
   if (open.length) parts.push(`## 之前对话里说好以后再做的事（只在当前请求相关时参考；用户没要求就不要转回旧任务；用户说不用了就不再提）\n${open.map((o) => `- ${o.text}${o.sessionTitle ? `（来自「${o.sessionTitle}」，${day(o.ts)}）` : ''}`).join('\n')}`);

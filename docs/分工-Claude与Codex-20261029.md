@@ -40,3 +40,10 @@
 ## 协调记录
 （要动对方名下文件时在这里写：日期、谁、改哪个文件、为什么）
 - 2026-10-29 Claude：云端提醒改了 `src/agent/tools.js`（只动定时任务那几个工具，加 update_schedule）、`src/agent/skillCatalog.js`（定时任务技能说明）、`src/ui/transcript.js` / `src/core/formDirector.js`（各加一个工具名）、`server/taskRunner.mjs`（SERVER_BLOCKED 去掉定时工具、ctx 加 scheduleHost）、`server/serverMode.mjs`（定时任务接口）、`src/core/serverClient.js`（定时任务方法）。
+- 2026-10-29 Claude：持仓链路新增 `src/agent/holdings.js`，在 `src/agent/tools.js` 加三个持仓工具、`toolLoader.js` CORE 加工具名、`agent.js` buildContext 加持仓段。只调用 Codex 的 get_stock_kline，没改行情代码。CI 工作流在单元测试前加装 ffmpeg（Codex 的 svgRaster 测试需要）。
+
+## Claude 名下进度（2026-10-29 晚）
+- 表达与情感：已做（提示与收尾话术，有测试）；真实模型多轮效果未验收。
+- 云端提醒：已做（服务器按时执行、重启恢复、防重复、修改 / 暂停、北京时间、手机取通知）；App 被彻底关掉时没有即时推送；华为真机未验。
+- 历史记忆与统计：持仓链路已做；歌曲等成果统计沿用 Codex 的成果索引（workLedger），旧记录只能说“至少”。
+- 架构图收尾：需要用户服务器上的真实模型实测，等用户更新后反馈。
