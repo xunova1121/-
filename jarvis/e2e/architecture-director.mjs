@@ -57,7 +57,7 @@ const runner = createTaskRunner({
 });
 let started;
 try {
-  started = await runner.start({ text: `根据工作区原始文件${source}制作总体架构图，同时给出业务闭环和数据流专题，产物存到${directory}/。各视图SVG、PNG、PDF和原生可编辑PPT同稿导出。`, evaluationId: 'architecture_director_e2e' });
+  started = await runner.start({ text: `根据工作区原始文件${source}制作总体架构图，逐条核对需求原文，同时给出业务闭环和数据流专题，产物存到${directory}/。各视图SVG、PNG、PDF和原生可编辑PPT同稿导出。`, evaluationId: 'architecture_director_e2e' });
   const deadline = Date.now() + 180000;
   while (!['done', 'error', 'stopped'].includes(runner.get(started.id)?.status)) {
     assert.ok(Date.now() < deadline, '架构专用流程超过3分钟');
