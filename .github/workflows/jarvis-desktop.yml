@@ -112,6 +112,15 @@ jobs:
           cache-dependency-path: jarvis/android/**/*.gradle*
       - name: 安装依赖
         run: npm ci --no-audit --no-fund
+      - name: 安装 ffmpeg（SVG 直接栅格化的单元测试要用；GitHub 的 Ubuntu 镜像不再自带）
+        timeout-minutes: 20
+        run: |
+          command -v ffmpeg && exit 0
+          for i in 1 2 3; do
+            if timeout 360 sh -c 'sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg'; then exit 0; fi
+            echo "第 $i 次安装没完成，重试"
+          done
+          exit 1
       - name: 单元测试
         run: npm test
       - name: 构建手机版网页并同步到安卓工程
@@ -181,6 +190,15 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
+      - name: 安装 ffmpeg（SVG 直接栅格化的单元测试要用；GitHub 的 Ubuntu 镜像不再自带）
+        timeout-minutes: 20
+        run: |
+          command -v ffmpeg && exit 0
+          for i in 1 2 3; do
+            if timeout 360 sh -c 'sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg'; then exit 0; fi
+            echo "第 $i 次安装没完成，重试"
+          done
+          exit 1
       - name: 完整单元测试
         run: npm test
       - name: 代码检查（没定义的变量、浏览器同名全局、格式）
