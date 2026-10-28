@@ -1,3 +1,5 @@
+import {createDocumentNavigation} from './documentNavigation.js';
+import {createDocumentFileAccess} from './documentFileAccess.js';
 import { createArchitecturePackageTool } from './architecturePackage.js';
 import { createArchitectureRevisionTool } from './architectureRevision.js';
 import { communicationPreferenceSupported } from './communicationPreferences.js';
@@ -22,7 +24,6 @@ import { MOBILE } from '../config.js';
 import * as ws from './workspace.js';
 import * as memory from './memory.js';
 import * as kb from './knowledge.js';
-import { parseFile } from './docs.js';
 import { withBom } from './xlsxWriter.js';
 import { applyEdits } from './textEdit.js';
 import { runJavaScript, runPython } from './sandbox.js';
@@ -34,7 +35,7 @@ import { createSearch } from './webSearch.js';
 import { getWeather } from './weather.js';
 import { createPageReader } from './pageReader.js';
 import { withWebDeadline } from './retrievalBudget.js';
-import { matchFiles, searchLines } from './fileSearch.js';
+import { matchFiles } from './fileSearch.js';
 import { deepResearch, DEPTHS } from './research.js';
 import { factCheck, formatReport } from './factCheck.js';
 import { preferenceClaim, preferenceSupported } from './memoryPreference.js';
@@ -96,6 +97,9 @@ export function fileSegment(text, offset = 0, n = READ_PAGE_CHARS) {
  * @param {(html: string) => Promise<Uint8Array>} [ctx.toPdf]  桌面版：排好版的 HTML 直接转 PDF
  */
 export function createTools(ctx) {
+  const navigation=createDocumentNavigation();
+  const fileAccess=createDocumentFileAccess(navigation,fileSegment);
+  ctx={...ctx,readDocument:navigation.read};
   const readPage = createPageReader(ctx); // 直接打不开或没读到正文时，有 Tavily Key 就让 Tavily 代读
   const seenFiles = new Set(); // 这次读过或写过的工作区文件（覆盖没读过的文件前先拦一下）
   const overwriteWarned = new Set();
@@ -105,7 +109,7 @@ export function createTools(ctx) {
     createSongTool(ctx),
     createOcrTool(ctx),
     createInspectImageTool(ctx),
-    createArchitectureEvidenceTool(),
+    createArchitectureEvidenceTool(ctx),
     createArchitecturePlanTool(ctx),
     createArchitectureRevisionTool(ctx),
     createArchitecturePackageTool(ctx),
@@ -411,25 +415,15 @@ export function createTools(ctx) {
     },
     {
       name: 'search_in_files',
-      description: '在工作区的文本文件（代码、网页、Markdown、CSV、TXT 等）里搜内容，返回文件名、行号和那一行。改代码、找某段话在哪个文件时先用它定位，再 read_file 读。',
+      description: '搜工作区原文。path明确指定DOCX/PDF/PPT/Excel时解析该原件，返回真实命中位置及sectionId；不把未检索说成未找到。目录扫描仅搜代码/文本，每次最多100文件。先定位再按章节读，不顺序反复翻整份招标书。',
       input_schema: S({ query: str('要找的文字（不区分大小写）'), path: str('可选：只在这个目录或文件里找'), regex: { type: 'boolean', description: 'query 当正则表达式用' } }, ['query']),
-      run: async ({ query, path = '', regex = false }) => {
-        const out = [];
-        let scanned = 0;
-        for (const f of (await ws.list('')).filter((f) => ws.isText(f.path) && (!path || f.path.startsWith(ws.normalize(path))) && (f.size ?? 0) <= 2e6)) {
-          if (out.length >= 60) break;
-          scanned++;
-          const text = await ws.readText(f.path).catch(() => '');
-          out.push(...searchLines(text, query, { regex }).slice(0, 8).map((h) => `${f.path}:${h.line}: ${h.text}`));
-        }
-        return out.length ? `${out.slice(0, 60).join('\n')}${out.length >= 60 ? '\n（结果太多，只列前 60 条：缩小目录或换更具体的词）' : ''}` : `在 ${scanned} 个文本文件里没有找到“${query}”`;
-      }
+      run: (args,execution) => fileAccess.search(args,execution)
     },
     {
       name: 'read_file',
-      description: '读取工作区里的文件。Word、PDF、PPT、Excel 会自动转换成文字；代码和文本原样返回；图片（png / jpg / webp）会直接给你看。长文件一次给 2 万字，结尾会写 offset，按它接着读，直到读完再下结论。',
-      input_schema: S({ path: str('文件路径'), offset: { type: 'integer', minimum: 0, description: '从第几个字开始读（长文件接着读时填上次结尾给的数，第一次不填）' } }, ['path']),
-      run: async ({ path, offset = 0 }, { signal } = {}) => {
+      description: '读取原文件。长Word/PDF先用view=sections取得程序生成的目录与sectionId，或用query定位，再以sectionId读相关原文；不要猜章节名或反复顺序翻整份文件。正文分页2万字，95%以上重叠范围不重复发送；目录和片段不代表全文已读。代码文本原样返回，图片直接查看。',
+      input_schema: S({ path: str('文件路径'), offset: { type: 'integer', minimum: 0, description: '正文/关键词的字符起点；sectionId存在时为该范围内偏移' }, view:{type:'string',enum:['text','sections']},query:{type:'string',maxLength:120},sectionId:{type:'string',maxLength:120},recover:{type:'boolean',description:'仅在旧工具结果已过期且确需原文时恢复该页；每个重叠范围最多恢复一次，不能用offset加1绕过'},catalogOffset:{type:'integer',minimum:0,maximum:1000},limit:{type:'integer',minimum:1,maximum:20} }, ['path']),
+      run: async ({ path, offset = 0,...options }, { signal } = {}) => {
         let blob = await ws.readBlob(path);
         seenFiles.add(ws.normalize(path));
         if(isImageName(path)&&typeof document==='undefined'){
@@ -445,8 +439,8 @@ export function createTools(ctx) {
           const img = await prepareImage(blob);
           return { text: `图片 ${path}（${img.width}×${img.height}）`, images: [{ mime: img.mime, data: img.data }] };
         }
-        if (ws.isText(path)) return fileSegment(await blob.text(), offset);
-        return fileSegment((await parseFile(blob, path, { limit: Infinity })).text, offset);
+        if (ws.isText(path)&&!options.query&&!options.sectionId&&options.view!=='sections') return fileSegment(await blob.text(), offset);
+        return fileAccess.read({path,offset,...options},{signal});
       }
     },
     {

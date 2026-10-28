@@ -17,8 +17,15 @@ const entityText = item => `${item.title}：${item.responsibility}。`;
 const relationText = item => `${byId.get(item.from)}→${byId.get(item.to)}：${item.meaning}。`;
 const requirement = spec.requirements[0].text;
 const lines = [...spec.entities.map(entityText), ...spec.relations.map(relationText), requirement];
-await workspace.write('合成采购.md', lines.map(line => line + ' '.repeat(130)).join('\n'));
+const indexed = process.argv[3] === 'indexed';
+await workspace.write('合成采购.md', (indexed ? '第一章 虚构采购\n\n' : '') + lines.map(line => line + ' '.repeat(130)).join('\n'));
+
 const sources = [{ path: '合成采购.md' }];
+if (indexed) {
+  const catalog = JSON.parse(await createArchitectureEvidenceTool().run({ sources, catalog: true, query: '虚构采购' }));
+  assert.equal(catalog.documents[0].sections.length, 1);
+  sources[0].sectionId = catalog.documents[0].sections[0].sectionId;
+}
 const evidence = [];
 let offset = 0;
 do {
@@ -43,6 +50,7 @@ assert.equal(plan.readyForRender, true);
 const saved = JSON.parse(await workspace.readText(plan.architecturePath));
 assert.ok(saved.entities.every(item => item.evidenceId && item.source === '合成采购.md' && item.evidence === 'excerpt_matched'));
 assert.ok(saved.relations.every(item => item.evidenceId && item.evidence === 'excerpt_matched'));
+if (indexed) assert.equal(saved.sources[0].sectionId, sources[0].sectionId);
 const result = await createDiagramTool(ctx, { requireArchitecture: true }).run({
   ...structuredClone(architectureLayout), architecturePath: plan.architecturePath,
   path: '编号引用架构.svg', formats: ['svg', 'png', 'pdf', 'pptx'], pptxMode: 'editable'

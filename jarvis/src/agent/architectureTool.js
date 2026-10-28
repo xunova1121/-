@@ -60,7 +60,7 @@ export function createArchitecturePlanTool(ctx) {
       throwControl(null, signal);
       progress?.('正在整理业务职责、关系及原文映射…');
       const sources = architectureSources(input);
-      const { materials, checks } = await checkSources(sources, signal);
+      const { materials, checks } = await checkSources(sources, signal,ctx.readDocument);
       const resolved = await resolveArchitectureEvidence(input, materials, checks, signal);
       const plan = makeArchitecturePlan(resolved, materials.map((item, index) => ({ ...item, truncated: checks[index].truncated, scope: checks[index].scope })), rawRequestText, previousUserEvidence);
       plan.sources = bindEvidenceSources(sources, checks, materials, resolved);

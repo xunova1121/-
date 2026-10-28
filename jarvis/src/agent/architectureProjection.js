@@ -1,3 +1,4 @@
+import {architectureScope} from './documentSections.js';
 import { businessArchitectureLayout } from './architectureLayout.js';
 import { architectureView } from './architectureViews.js';
 import * as workspace from './workspace.js';
@@ -52,7 +53,7 @@ export async function loadArchitecture(path, signal) {
     (plan.sources || []).map((item) => ({
       path: item.path,
       excerpt: item.excerpt || '',
-      ...(item.scope === 'section' && { sectionStart: item.sectionStart, sectionEnd: item.sectionEnd })
+      ...architectureScope(item)
     })),
     signal
   );

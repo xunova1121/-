@@ -1,3 +1,4 @@
+import {architectureScope} from './documentSections.js';
 import { createArchitecturePlanTool } from './architectureTool.js';
 import { loadArchitecture } from './architectureProjection.js';
 import { diagramDigest } from './diagramExport.js';
@@ -19,7 +20,7 @@ export function reviseArchitectureInput(plan, changes) {
     count += values.length;
   }
   if (!count || count > 60) throw invalid('修订需1～60处显式修改');
-  const input = { title: plan.title, sources: (plan.sources || []).map(item => ({ path: item.path, excerpt: item.excerpt || '', ...(item.scope === 'section' && { sectionStart: item.sectionStart, sectionEnd: item.sectionEnd }) })) };
+  const input = { title: plan.title, sources: (plan.sources || []).map(item => ({ path: item.path, excerpt: item.excerpt || '', ...architectureScope(item) })) };
   for (const key of ['entities', 'relations', 'requirements']) {
     input[key] = plan[key].map(item => clean(item, key));
     const touched = new Set();

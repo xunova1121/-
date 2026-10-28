@@ -11,6 +11,7 @@ export function diagramFailureDetails(error) {
       field: String(item.field || '').slice(0, 120),
       stage: String(item.stage || '').slice(0, 30),
       action: String(item.action || '').slice(0, 180),
+      ...(Array.isArray(item.scopeOptions)&&{scopeOptions:item.scopeOptions.slice(0,4).filter(option=>typeof option?.source?.path==='string'&&typeof option?.source?.sectionId==='string'&&option.source.sectionId.startsWith('sec:')).map(option=>({title:String(option.title||'').slice(0,100),chars:Math.max(0,Math.min(120000,Number(option.chars)||0)),part:Number(option.part)||1,parts:Number(option.parts)||1,source:{path:option.source.path.slice(0,400),sectionId:option.source.sectionId.slice(0,120)}}))}),
       ...(item.diffKind && {
         diffKind: String(item.diffKind).slice(0, 30),
         actual: String(item.actual || '').slice(0, 120),

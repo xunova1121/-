@@ -248,6 +248,7 @@ jobs:
           node e2e/architecture-editable.mjs "$RUNNER_TEMP/jarvis-e2e/architecture"
           node e2e/architecture-resume.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-resume"
           node e2e/architecture-evidence.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-evidence"
+          node e2e/architecture-evidence.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-indexed" indexed
           node e2e/architecture-revision.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-revision"
           node e2e/architecture-auto-layout.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-auto-layout"
           node e2e/architecture-dense-layout.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-dense-layout"
