@@ -150,3 +150,24 @@ describe('参考风格：按 DIAGRAM_PLANNING 的版式填，能直接出图', (
     expect(model.layers.find((l) => l.title === '业务应用层').nodes.every((n) => n.icon && n.badge && n.bullets.every((b) => typeof b.text === 'string'))).toBe(true);
   });
 });
+
+// 用户 2026-10-29 服务器耗时日志：一张普通架构图 22 轮模型、151 秒，其中 update_plan 5 次、prepare_architecture_evidence 5 次
+describe('普通画图不给严格流水线工具和任务清单', () => {
+  const names = async (userText, history = []) => {
+    const { runAgent } = await import('../src/agent/agent.js');
+    let got = [];
+    const adapter = { async stream({ tools }) { got = tools.map((t) => t.name); return { text: '好的', toolCalls: [], stop: 'end_turn' }; } };
+    const tool = (name) => ({ name, description: name, input_schema: { type: 'object', properties: {} }, run: async () => 'ok' });
+    await runAgent({ adapter, model: 'x', history, userText, context: { dynamic: '' }, tools: ['create_diagram', 'read_file', 'build_architecture', 'prepare_architecture_evidence', 'plan_architecture'].map(tool), emit: () => {} });
+    return got;
+  };
+  it('普通请求：没有 build_architecture / prepare_architecture_evidence / update_plan', async () => {
+    const got = await names('根据文档做一个架构图');
+    expect(got).toContain('create_diagram');
+    for (const n of ['build_architecture', 'prepare_architecture_evidence', 'plan_architecture', 'update_plan']) expect(got).not.toContain(n);
+  });
+  // 明说逐条核对的请求由 agent.js 交给严格流程入口（architectureDirector），不走这里
+  it('之前已有架构底稿：照常提供', async () => {
+    expect(await names('接着改', [{ role: 'assistant', content: '底稿 architecturePath: 文档检查/架构底稿/x.json' }])).toContain('plan_architecture');
+  });
+});

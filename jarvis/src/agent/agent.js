@@ -4,7 +4,7 @@ import { asksDocumentStyles } from './documentStyleQuery.js';
 import { IMAGE_RECHECK, IMAGE_READING_RULES } from './imageReading.js';
 import { conversationFocus } from '../core/responseRevision.js';
 import { responseGuidance } from './responseGuidance.js';
-import { DIAGRAM_PLANNING, strictArchitecture } from './diagramPlanning.js';
+import { DIAGRAM_PLANNING, strictArchitecture, STRICT_PIPELINE } from './diagramPlanning.js';
 import { answerWorkHistory } from './workHistoryAnswer.js';
 import { workHistoryBlock } from './workLedger.js';
 import { safeNewsPartial, newsCandidateLinks } from './newsDelivery.js';
@@ -223,6 +223,10 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     return { text: workAnswer.text, toolCalls: 1 };
   }
   if (light && needsActionTools(userText, history)) light = false;
+  // 普通请求不给严格架构流水线的工具：用户 2026-10-29 实测画普通架构图时模型调了 5 次 prepare_architecture_evidence，
+  // 每轮还要多带这几个工具的长说明。明说逐条核对、或之前已有架构底稿 / 任务路径时照常提供
+  const pipelineContext = strictArchitecture(requirementText) || history.slice(-8).some((m) => /architecturePath|jobPath|文档检查\/架构(?:底稿|任务)/.test(String(m.content || '')));
+  if (!pipelineContext) tools = tools.filter((tool) => !STRICT_PIPELINE.has(tool.name));
   const availableTools = tools;
   let questionProfile = light ? null : questionToolProfile(requirementText, { images, history });
   tools = toolsForQuestion(tools, questionProfile);
@@ -270,7 +274,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   // 短单文件不提供外层清单；长方案保留入口，但用任务说明避免重复规划。
   // 要做文件（Word、PPT、表格……）：模型要先在后台写很长的内容，前面很久没动静是正常的
   const makingFile = taskContract(requirementText).formats.length > 0;
-  const oneFile = singleDocumentTask(requirementText) && String(requirementText).length <= 150 && !/方案|调研|研究|论文/.test(requirementText);
+  // 画一张图也算单件交付：不给外层任务清单（实测一张架构图列清单、改清单用了 5 轮模型）
+  const oneFile = (singleDocumentTask(requirementText) && String(requirementText).length <= 150 && !/方案|调研|研究|论文/.test(requirementText)) || (!pipelineContext && /架构图|流程图|示意图|拓扑图|关系图/.test(requirementText) && String(requirementText).length <= 300);
   const executionScope = {};
   const own = [...(oneFile ? [] : [plan.tool]), review.tool, executionTool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: availableTools })] : []), ...(lookupDeadline && lookupControl?.release ? [moreTimeTool] : [])].filter((t) => !tools.some((x) => x.name === t.name));
   // 工具按需加载：工具多时只带常用的完整说明，其余列名字、用 tool_search 加载（见 toolLoader.js）

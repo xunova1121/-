@@ -5,6 +5,8 @@
  * 2026-10-26～29 真实测试连续五六次一张图都没出（见 docs/交接给Claude-架构实测失败与未发布改动-20261029.md）。
  */
 export const STRICT_ARCHITECTURE = /逐[条项一](?:核对|对应|核实|审查)|对应(?:到)?(?:每条|逐条)?需求原文|需求原文.{0,6}(?:核对|对应)|严格(?:核对|审查|模式)|业务审查/;
+/** 严格架构流水线的工具：只在明说逐条核对需求原文（或已有底稿 / 任务路径）时提供 */
+export const STRICT_PIPELINE = new Set(['build_architecture', 'prepare_architecture_evidence', 'plan_architecture', 'revise_architecture_plan', 'create_architecture_package']);
 export const strictArchitecture = (text) => STRICT_ARCHITECTURE.test(String(text || ''));
 
 export const DIAGRAM_PLANNING =
