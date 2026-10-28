@@ -1,5 +1,16 @@
 /** 画前规划只整理来源与覆盖，不把模型建议提升为事实，也不调用额外模型。 */
-export const DIAGRAM_PLANNING = '从原始材料新建总体架构图优先build_architecture(files,request,directory,views)，程序管理材料、业务内容、审查和同稿交付；失败只用jobPath继续，不手工编造编号或混用输入草稿/正式底稿，不把用户交付要求当采购原文。已有原始文件路径时直接调用统一入口，它负责完整相关章节的读取和取证，不要先手工翻目录、抄摘录或取一批编号；路径不清楚才先find_files。以下仅为旧稿/明确采用旧版工具的兼容规则，不用于新建build_architecture任务。已有architecturePath优先交create_diagram复用，不为技术性审查未完成而重读整份材料或重建底稿；create_diagram可在同底稿上恢复审查一次，明确业务failed须读reviewPath，用revise_architecture_plan按具体意见定点修订，保留未改对象和原文；不得无修改反复审到通过。仅在旧版plan_architecture兼容路线中，首次任务先用read_file(view=sections)或prepare_architecture_evidence(catalog=true,sources=[{path}])取得真实目录，必要时query筛标题；直接沿用返回的sectionId选择相关连续原文，再取evidenceId，不猜章节边界或重复翻整份招标。读完相关范围后再规划，目录本身不代表已读正文；plan_architecture沿用回执sources，逐项引用evidenceId，由程序回填原文而不是手抄路径/摘录；再调用plan_architecture，登记对象职责、输入输出、依据和需求映射，区分包含/支撑/数据流/业务流/反馈，再按关系决定分层；业务是做什么、能力是共用服务、数据是信息对象、基础设施是运行资源，不能凭名称硬塞层或把所有关系画成箭头。需要完整多视图交付时用create_architecture_package从同一底稿生成总体、业务闭环、数据流及四格式清单；availableViews不是已经交付的文件。旧版create_diagram路线的总体架构图先读原始材料，按展示/用户、业务应用与闭环、平台模块和能力中心、感知/数据、终端/网络/算力云、安全保障、标准规范列内容提纲，再交create_diagram。材料中的数量、系统名、设备型号及主业务关系逐项保留，不压成一句概括；缺失层不硬凑，新增通用能力标为建议。用contentPlan.facts逐条登记关键事实及来源原文，用recommendations登记建议；事实text必须实际出现在图中标题、副标题、说明、要点或标签中，用户原话来源用user，文件来源用确切路径。先保证内容完整，再排版；不要为塞进一张图偷偷删数量或系统名称，超限明确拆图。';
+/**
+ * 用户明确要“逐条核对需求原文 / 严格审查”时才走 build_architecture 严格流水线。
+ * 平时的总体架构图直接 create_diagram：严格流水线要模型一次写对几十条带类型的关系，
+ * 2026-10-26～29 真实测试连续五六次一张图都没出（见 docs/交接给Claude-架构实测失败与未发布改动-20261029.md）。
+ */
+export const STRICT_ARCHITECTURE = /逐[条项一](?:核对|对应|核实|审查)|对应(?:到)?(?:每条|逐条)?需求原文|需求原文.{0,6}(?:核对|对应)|严格(?:核对|审查|模式)|业务审查/;
+export const strictArchitecture = (text) => STRICT_ARCHITECTURE.test(String(text || ''));
+
+export const DIAGRAM_PLANNING =
+  '画总体架构图 / 项目架构图：直接用 create_diagram 出图。先用 read_file 读原始材料（长文件先 view=sections 看目录，再读建设内容、技术要求等相关章节），按 展示与用户 → 业务应用（各业务端用卡片，端与端之间用带字箭头）→ 平台（业务模块用 grid，能力中心用卡片或 columns，同一平台的层用同一 group）→ 感知与数据 → 终端 / 网络 / 云（columns）→ 安全保障（band）排层；材料里的数量、系统名、设备型号逐项写进标题、说明或要点，不压成一句概括；材料没有的层不硬凑。政企项目用 gov-blue 主题，direction 用 top-down。只画主要关系，不必把所有关系都连线。create_diagram 报错时按报错删减或拆分后再画一次，一定要交出图。contentPlan 可不填。' +
+  '只有用户明确要求“逐条核对需求原文 / 严格审查”时才用 build_architecture(files,request,directory,views) 严格流水线，失败只用 jobPath 继续。' +
+  '已有 architecturePath 时交 create_diagram 复用；明确业务 failed 须读 reviewPath，用 revise_architecture_plan 按意见定点修订。';
 
 const invalid = (message) => Object.assign(new Error(message), { code: 'DIAGRAM_CONTENT_PLAN', kind: 'input' });
 const compact = (value) => String(value || '').replace(/\s+/g, '');

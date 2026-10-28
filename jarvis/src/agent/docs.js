@@ -20,7 +20,13 @@ const MAX_CHARS = 60000;
 
 // ---------------------------------------------------------------- 读取
 export async function parseFile(blob, name, options = {}) {
-  const e = ext(name);
+  let e = ext(name);
+  // 后缀写 .doc 的文件很多其实是新版 Word（zip 包，PK 开头）：按内容认，不按后缀拒（用户的招标文件就是这样）
+  if (e === 'doc' || e === 'wps') {
+    const head = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
+    if (head[0] === 0x50 && head[1] === 0x4b) e = 'docx';
+    else throw new Error('这是老版 Word 文件（Word 97-2003 的 .doc），暂时读不了：请在 Word 或 WPS 里“另存为” .docx 后再上传');
+  }
   const buf = () => blob.arrayBuffer();
   let text;
   if (e === 'docx') {

@@ -4,7 +4,7 @@ import { asksDocumentStyles } from './documentStyleQuery.js';
 import { IMAGE_RECHECK, IMAGE_READING_RULES } from './imageReading.js';
 import { conversationFocus } from '../core/responseRevision.js';
 import { responseGuidance } from './responseGuidance.js';
-import { DIAGRAM_PLANNING } from './diagramPlanning.js';
+import { DIAGRAM_PLANNING, strictArchitecture } from './diagramPlanning.js';
 import { answerWorkHistory } from './workHistoryAnswer.js';
 import { workHistoryBlock } from './workLedger.js';
 import { safeNewsPartial, newsCandidateLinks } from './newsDelivery.js';
@@ -328,7 +328,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   };
 
   let preFound = null;
-  if (depth === 0 && !images.length) {
+  // 严格架构流水线只在用户明确要逐条核对需求原文时接管；平时架构图由主模型直接 create_diagram 出图（见 diagramPlanning.js）
+  if (depth === 0 && !images.length && strictArchitecture(userText)) {
     const directed = await runArchitectureDirector({
       text: userText, tools: availableTools, emit, signal, shouldYield: () => Boolean(inbox?.length),
       onStart: () => { lookupControl?.release?.(); retrieval.upgrade('制作架构图'); light = false; if (!loader.get('build_architecture')) loader = createToolLoader([...availableTools, ...own]); },

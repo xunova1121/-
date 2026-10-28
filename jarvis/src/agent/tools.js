@@ -117,7 +117,7 @@ export function createTools(ctx) {
     createArchitectureRevisionTool(ctx),
     createArchitecturePackageTool(ctx),
     createArchitectureWorkflowTool(ctx),
-    createDiagramTool(ctx, {requireArchitecture:true}),
+    createDiagramTool(ctx, { requireArchitecture: 'strict' }),
     createExportDiagramTool(ctx),
     createRenderDiagramTool(ctx),
     createStockKlineTool(ctx),

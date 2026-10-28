@@ -9,7 +9,8 @@ import { runAgent } from '../src/agent/agent.js';
 
 const source = '上传/虚构采购.md';
 const jobPath = '文档检查/架构任务/agent-director.json';
-const request = `根据${source}制作总体架构图，产物存到交付/虚构`;
+// 2026-10-29 起严格流水线只在用户明确要“逐条核对需求原文”时接管（平时直接 create_diagram 出图），这里的请求带上这句
+const request = `根据${source}制作总体架构图，逐条核对需求原文，产物存到交付/虚构`;
 let directory;
 beforeEach(async () => {
   directory = fs.mkdtempSync(path.join(os.tmpdir(), 'architecture-director-agent-'));
@@ -75,7 +76,9 @@ it.each([
   `根据${source}制作5页PPT并生成架构图`,
   `根据${source}制作PPT，并生成架构图`,
   `材料${source}里面的“制作架构图”要求是什么意思？`,
-  `根据${source}修改这张原图的架构图并输出`
+  `根据${source}修改这张原图的架构图并输出`,
+  // 普通的“制作总体架构图”（没说逐条核对）：交主模型直接 create_diagram 出图，不进严格流水线
+  `根据${source}制作总体架构图，产物存到交付/虚构`
 ])('分析/混合PPT/原图修改保留原主模型入口：%s', async userText => {
   const run = vi.fn(); const fixture = options(run, { userText });
   await runAgent(fixture.args);

@@ -5,7 +5,7 @@ import { SECTION_KINDS } from './diagramSections.js';
 import { DIAGRAM_ICONS } from './diagramCards.js';
 import * as workspace from './workspace.js';
 import { checkSources } from './diagramSources.js';
-import { DIAGRAM_PLANNING, planDiagramContent } from './diagramPlanning.js';
+import { DIAGRAM_PLANNING, planDiagramContent, strictArchitecture } from './diagramPlanning.js';
 import { layoutDiagram } from './diagramModel.js';
 import { diagramScene } from './diagramScene.js';
 import { deliverDiagram, diagramFormats, diagramDigest } from './diagramExport.js';
@@ -156,12 +156,14 @@ export function createDiagramTool(ctx, { requireArchitecture = false } = {}) {
         throw Object.assign(new Error('图形输出需使用SVG/PNG/PDF/PPTX后缀'), { code: 'DIAGRAM_FORMAT', kind: 'input' });
       if (!input.architecturePath && input.edges?.some(edge => edge.type === 'integration'))
         throw Object.assign(new Error('应用集成须通过已审架构底稿投影，不能以普通有向连线替代'), { code: 'ARCHITECTURE_PLAN_REQUIRED', kind: 'input' });
-      if (requireArchitecture && !input.architecturePath && (!input.diagramType || input.diagramType === 'architecture' || /架构/.test(rawRequestText || '')))
+      // 'strict'：用户明确要逐条核对需求原文时才强制先走架构底稿；平时直接画（见 diagramPlanning.js）
+      const strict = requireArchitecture === true || (requireArchitecture === 'strict' && strictArchitecture(rawRequestText));
+      if (strict && !input.architecturePath && (!input.diagramType || input.diagramType === 'architecture' || /架构/.test(rawRequestText || '')))
         throw Object.assign(new Error('先调用plan_architecture理顺业务关系并取得architecturePath，再生成架构图；不能跳过底稿改用自由图片'), {
           code: 'ARCHITECTURE_PLAN_REQUIRED',
           kind: 'input'
         });
-      if (requireArchitecture && input.draft && !/草图|示意|关系稿|先.{0,8}(?:理顺|关系|逻辑)/.test(rawRequestText || ''))
+      if (strict && input.draft && !/草图|示意|关系稿|先.{0,8}(?:理顺|关系|逻辑)/.test(rawRequestText || ''))
         throw Object.assign(new Error('用户未要求逻辑草图，不能用draft绕过正式架构的业务审查'), { code: 'ARCHITECTURE_DRAFT_ONLY', kind: 'input' });
       let architecture = input.architecturePath ? await loadArchitecture(input.architecturePath, signal) : null;
       if (architecture && !input.draft) architecture = await resumeArchitectureReview(ctx, architecture, { signal, retrieval, progress, rawRequestText });
