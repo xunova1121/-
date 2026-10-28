@@ -8,13 +8,18 @@ import { coordinateWordLayout } from './wordLayout.js';
 import { directTypographyConflicts } from './docxTypography.js';
 
 /** 把短检查报告与真实产物放一起；正文只在工作区文件中，不进会话/检查点。 */
-export async function deliverDocument(ctx, out, target, { progress, signal, checkpoint, issues = [], plan, generatorReview, requiredText = [], requirements = '', preservation = null } = {}) {
+export async function deliverDocument(ctx, out, target, { progress, signal, checkpoint, issues = [], plan, generatorReview, requiredText = [], requirements = '', preservation = null, design = null } = {}) {
   if (out.ext === 'docx') {
     out = await coordinateWordLayout(ctx, out, requirements, { signal, progress });
     const typographyIssues = await directTypographyConflicts(out.blob, out.info?.typographyProfile || {}, { signal });
     issues = [...issues, ...typographyIssues];
   }
   const validation = await inspectDocument(out.blob, target, { info: out.info, requiredText, signal, requirements });
+  if (validation.format === 'pptx' && design && out.info?.style) {
+    const conflict = design.style !== out.info.style;
+    validation.design = { requested: design.style, effective: out.info.style, state: conflict ? 'conflict' : 'applied' };
+    if (conflict) issues = [...issues, { level: design.required || design.excluded?.includes(out.info.style) ? 'error' : 'warn', text: '公文主题固定稳重商务，与选择的PPT风格冲突；请调整主题后再交付' }];
+  }
   if (out.wordLayout) validation.wordLayout = out.wordLayout;
   if (out.info?.typographyProfile && Object.keys(out.info.typographyProfile).length) validation.typography = { profile: out.info.typographyProfile, scope: '正文和标题样式；原件直接格式、代码、页眉页脚独立格式保留' };
   const wordPages = validation.format === 'docx' ? requestedWordPages(requirements, { wordContext: true }) : null;

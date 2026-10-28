@@ -7,6 +7,7 @@ import { createDocumentWorkflow } from '../app/doc/documentWorkflow.js';
 import { boundedText, LIMITS, workflowError } from '../app/doc/workflowSchema.js';
 import { createDocumentResearch } from './documentResearch.js';
 import { preserveUserRequest } from '../app/doc/workflowPolicy.js';
+import { STYLE_IDS } from './pptStyles.js';
 
 async function readMaterials(args, execution) {
   const parts = [args.material || ''];
@@ -33,6 +34,7 @@ const properties = {
   template: str('已明确选择的Word模板路径；none为不套用'),
   template_id: str('已有场景配方编号，不代替业务推演'),
   theme: str('已有配色主题编号'),
+  style: { type: 'string', enum: STYLE_IDS, description: 'PPT构图风格：business商务/minimal留白/story叙事/data数据；保存到流程，恢复不必重复填写' },
   cover: { type: 'boolean' },
   toc: { type: 'string', enum: ['auto', 'yes', 'no'] },
   material: str('用户原始材料，不把模型建议冒充用户事实'),
@@ -113,6 +115,7 @@ export function createProfessionalDocumentTools(ctx) {
           template: args.template,
           template_id: args.template_id,
           theme: args.theme,
+          style: args.style || savedState.input.style,
           cover: args.cover,
           toc: args.toc || 'no'
         },

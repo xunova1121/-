@@ -1,4 +1,5 @@
 /** 只记用户明确说的长期写作偏好；每条180字，最多30条，同范围同维度覆盖，不积累历史正文。 */
+import { presentationRequest } from './presentationDesign.js';
 const MAX_STYLES = 30;
 const RULES = [
   ['length', /(?:不要|别)(?:太)?(?:啰嗦|冗长|废话)|(?:简短|简洁|精简|详细|详尽|深入)(?:一些|一点|些)?/],
@@ -30,6 +31,10 @@ export function extractDocumentStyles(lines) {
     }
     if (/小[一二三四五六](?:号)?|[一二三四五六]号|\d+(?:\.\d+)?\s*(?:磅|pt|倍行距)|段前|段后|固定行距/i.test(line))
       results.push({ aspect: 'typography', scope: scopeOf(line), content: line.slice(0, 150), evidence: line.slice(0, 240) });
+    if (scopeOf(line) === 'pptx') {
+      const choice = presentationRequest(line);
+      if (choice.style || choice.excluded.length) results.push({ aspect: 'presentation', scope: 'pptx', content: line.slice(0, 150), evidence: line.slice(0, 240) });
+    }
   }
   return results.slice(-MAX_STYLES);
 }

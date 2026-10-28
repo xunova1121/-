@@ -4,7 +4,7 @@ import { generate } from './docs.js';
 import { THEME_IDS, themeList } from './themes.js';
 import { planDocument, documentError } from './documentPlan.js';
 import { chooseDesign, DOC_KINDS, SHEET_KINDS } from './documentDesign.js';
-import { STYLE_IDS } from './pptStyles.js';
+import { STYLE_IDS, STYLE_NAMES } from './pptStyles.js';
 import { deliverDocument } from './documentDelivery.js';
 import { selfCheck, lint, fixAfterBuild, reviewSlidesByImage } from './selfCheck.js';
 import { pickSheets, sheetSvg, rasterize } from './slidePreview.js';
@@ -13,6 +13,7 @@ import { S, str, fmtSize, findTemplate } from './documentSchema.js';
 import { formattingSource, verifyFormattingContent } from './documentPreservation.js';
 import { formatDocumentFile } from './documentFileFormat.js';
 import { documentTypography } from './documentTypography.js';
+import { presentationDesign } from './presentationDesign.js';
 
 /** 保留原有一轮自修复与PPT看图检查，不额外叠加无界模型审稿。 */
 /** 同一轮里同一个文件：内容一样就直接用上次的结果；已经请模型自查过的文件，重新生成时不再自查（评测里一份 PPT 生成了四遍，每遍都等自查） */
@@ -104,9 +105,13 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       if (source?.kind === 'docx') return formatDocumentFile(ctx, source, { path, theme, kind, cover, toc, template, requirements }, execution);
       // 排版时绕过模型提供的正文和改写审稿，确定性沿用已绑定的用户原文。
       if (source) content = source.content;
+      const designOptions = { format, title, content, requirements, style, kind };
+      const design = format === 'pptx'
+        ? await presentationDesign(ctx, goal, designOptions, signal)
+        : chooseDesign(designOptions);
       const forbidCover = /(?:不要|不用|无需|不加|不含|去掉|去除).{0,3}封面/.test(goal);
       const expectedSlides = format === 'pptx' ? requestedSlides('PPT ' + goal) : null;
-      const callKey = await keyOf({ format, path, title, content, theme, style, kind, cover, subtitle, author, issuer, docNo, toc, template, templateId, requirements, goal, typography, sessionId, sourceId: source?.id, workflow: ctx.documentContentReview?.workflowFile || null });
+      const callKey = await keyOf({ format, path, title, content, theme, design, kind, cover, subtitle, author, issuer, docNo, toc, template, templateId, requirements, goal, typography, sessionId, sourceId: source?.id, workflow: ctx.documentContentReview?.workflowFile || null });
       // 记住的结果只管 10 分钟（同一个任务里重复调用）；隔得久了照常重新生成
       const fresh = (m, key, ms) => m.has(key) && Date.now() - m.get(key).at < ms;
       const cached = cache.results.get(callKey);
@@ -127,8 +132,6 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         : null;
       const taskRules = requirements && plan ? requirements + '\n制作约束：' + plan.rules.join('；') : requirements;
       const chosenTheme = theme || (templateId && templateId !== 'auto' ? plan?.theme : undefined);
-      // 任务决定设计：用户原话 > 内容；画法交给各个生成器
-      const design = chooseDesign({ format, title, content, requirements, style, kind });
       const chosenToc = toc || (templateId && content.length < 1500 ? 'no' : plan?.options.toc);
       // 生成前自查：规则检查；有原始要求或硬伤时请模型对照检查并改一轮
       // 请模型对照要求自查（十几秒）：同一个文件第一次生成、内容不算短，或规则检查查出了硬伤时才做；
@@ -235,10 +238,10 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       if (ctx.documentContentReview && finalContent !== content) {
         ctx.documentContentReview.business = 'needs_recheck';
       }
-      const r = await deliverDocument(ctx, out, target, { progress, signal, checkpoint, plan, issues: lint(format, finalContent), generatorReview: looked, requirements: goal || requirements, preservation });
+      const r = await deliverDocument(ctx, out, target, { progress, signal, checkpoint, plan, issues: lint(format, finalContent), generatorReview: looked, requirements: goal || requirements, preservation, design });
       const notes = [
         `主题：${out.theme.name}`,
-        ...(design.label ? [`设计：${design.label}（${design.reason}）`] : []),
+        ...(design.label ? [`设计：${STYLE_NAMES[out.info?.style] || design.label}（${out.info?.style && out.info.style !== design.style ? '公文主题固定稳重商务，与请求风格冲突；未按请求风格生成' : design.reason}）`] : []),
         r.validation.readback === 'passed' ? '已检查真实文件并读回有效内容' : '已检查文件头或结构',
         ...(plan ? ['制作方案：' + plan.templateName] : []),
         ...r.notes

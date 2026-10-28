@@ -15,7 +15,7 @@ export function requestedSlides(text = '') {
 }
 
 export function slideBudget(bodyCount, expectedSlides, requireCover = false, forbidCover = false) {
-  if (expectedSlides == null) return { cover: true, strict: false };
+  if (expectedSlides == null) return { cover: !forbidCover, strict: false };
   if (!Number.isSafeInteger(expectedSlides) || expectedSlides < 1 || expectedSlides > 120) throw documentError('PPT总页数必须是1至120的整数', 'DOCUMENT_SLIDE_COUNT');
   if (bodyCount === expectedSlides && !requireCover) return { cover: false, strict: true };
   if (bodyCount + 1 === expectedSlides && !forbidCover) return { cover: true, strict: true };
