@@ -12,6 +12,8 @@ import * as workspace from '../src/agent/workspace.js';
 const output = path.resolve(process.argv[2] || '/tmp/weiyang-architecture-package');
 await fs.mkdir(output, { recursive: true });
 const spec = structuredClone(architectureSpec);
+// 额外虚构变体：现场处置反馈到调度，专测相邻节点正反双向路线。
+if (process.argv[3] === 'parallel') for (const relation of spec.relations) if (relation.type === 'feedback') relation.to = 'dispatch';
 const byId = new Map(spec.entities.map(item => [item.id, item.title]));
 const entityText = item => `${item.title}：${item.responsibility}。`;
 const relationText = item => `${byId.get(item.from)}→${byId.get(item.to)}：${item.meaning}。`;

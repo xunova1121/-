@@ -140,7 +140,7 @@ export function diagramScene(model, design = {}) {
   }
   if (model.semanticRouting) {
     const notes = {
-      overview: '总览：容器或编号表示归属；文字说明支撑；箭头表示业务主链；数据传输见数据流视图',
+      overview: '总览：容器或编号表示归属；文字说明支撑；箭头表示业务主链；数据传输见数据流视图' + (model.layers.some(layer => layer.kind === 'grid') ? '；网格列名称，职责见底稿' : ''),
       workflow: '业务闭环视图：实线为业务推进，点线为已登记反馈；不表示数据传输或支撑依赖',
       dataflow: '数据流视图：箭头只表示已登记的数据传输；业务过程与支撑依赖见其他视图'
     };

@@ -1,3 +1,4 @@
+import { routeLabelPosition, labelBox, routeHitsBox } from './architectureRouteLabels.js';
 import { diagramLines } from './diagramText.js';
 const measure = (text, size) => [...text].reduce((sum, c) => sum + (/[\u0000-\u007f]/.test(c) ? 0.58 : 1), 0) * size;
 const invalid = (message) => Object.assign(new Error(message), { code: 'ARCHITECTURE_ROUTE', kind: 'input' });
@@ -52,6 +53,7 @@ export function architectureRoutes(model) {
   const boxes = obstacles(model);
   const nodes = new Map(model.nodes.map((node) => [node.id, node]));
   const used = [];
+  const labels = [];
   const result = new Map();
   const ordered = model.edges
     .map((edge, index) => ({ ...edge, index }))
@@ -88,7 +90,8 @@ export function architectureRoutes(model) {
         candidates.push([a, { x: a.x, y: first }, { x, y: first }, { x, y: last }, { x: b.x, y: last }, b]);
       }
     }
-    let best,
+    const label = edge.label || (edge.type === 'workflow' && edge.meaning?.length <= 12 ? edge.meaning : null);
+    let best, bestLabel,
       score = Infinity;
     for (const raw of candidates.slice(0, 300)) {
       const points = simplify(raw);
@@ -101,61 +104,35 @@ export function architectureRoutes(model) {
         )
       )
         continue;
+      if (points.some((point,index)=>index && labels.some(box=>routeHitsBox(points[index-1],point,box)))) continue;
+      const candidateLabel = label ? routeLabelPosition(points,label,{boxes,labels,routes:used,width:model.width}) : null;
+      if (label && !candidateLabel) continue;
       let cost = (points.length - 2) * 32;
       for (let index = 1; index < points.length; index++) {
         const first = points[index - 1],
           last = points[index];
         cost += Math.abs(last.x - first.x) + Math.abs(last.y - first.y);
-        for (const previous of used) for (let j = 1; j < previous.length; j++) if (crossing(first, last, previous[j - 1], previous[j])) cost += 180;
+        for (const previous of used) for (let j = 1; j < previous.length; j++) {
+          const a=previous[j-1],b=previous[j];
+          if (crossing(first,last,a,b)) cost += 180;
+          // 共线重叠比相交更难辨别，尤其正向工单与反向反馈；不让反向箭头叠在同一段。
+          const overlap = first.y===last.y && a.y===b.y && first.y===a.y
+            ? Math.min(Math.max(first.x,last.x),Math.max(a.x,b.x))-Math.max(Math.min(first.x,last.x),Math.min(a.x,b.x))
+            : first.x===last.x && a.x===b.x && first.x===a.x
+              ? Math.min(Math.max(first.y,last.y),Math.max(a.y,b.y))-Math.max(Math.min(first.y,last.y),Math.min(a.y,b.y)) : 0;
+          if (overlap>2) cost += 10000+overlap*20;
+        }
       }
       if (cost < score) {
         best = points;
+        bestLabel = candidateLabel;
         score = cost;
       }
     }
     if (!best) throw invalid('关系无法避开对象和标题：' + from.title + ' → ' + to.title + '；请重排模块或拆为总体/流程/数据流视图，未删除关系');
     used.push(best);
-    const label = edge.label || (edge.type === 'workflow' && edge.meaning?.length <= 12 ? edge.meaning : null);
-    let labelPosition;
-    if (label) {
-      const segments = best
-        .slice(1)
-        .map((end, index) => ({ start: best[index], end }))
-        .filter((segment) => segment.start.y === segment.end.y && Math.abs(segment.start.x - segment.end.x) > Math.min(measure(label, 12), 84) + 16);
-      const segment = segments.sort((u, v) => Math.abs(v.start.x - v.end.x) - Math.abs(u.start.x - u.end.x))[0];
-      if (segment)
-        labelPosition = {
-          x: (segment.start.x + segment.end.x) / 2 - Math.min(measure(label, 12), 84) / 2,
-          y: segment.start.y - (measure(label, 12) > 84 ? 30 : 14),
-          width: Math.min(measure(label, 12), 84) + 4,
-          maxLines: 2
-        };
-    }
-    if (label && !labelPosition) {
-      const width = Math.min(measure(label, 12), 84) + 4;
-      const height = measure(label, 12) > 84 ? 34 : 18;
-      for (let index = 1; index < best.length && !labelPosition; index++) {
-        const first = best[index - 1],
-          last = best[index];
-        if (first.x !== last.x || Math.abs(first.y - last.y) < height + 4) continue;
-        const min = Math.min(first.y, last.y),
-          max = Math.max(first.y, last.y);
-        for (const y of [min + height - 3, (min + max) / 2, max - 5])
-          for (const x of [first.x + 8, first.x - width - 8]) {
-            const rect = { x, y: y - 12, width, height };
-            if (x < 8 || x + width > model.width - 8 || rect.y < min || rect.y + height > max) continue;
-            if (
-              !boxes.some(
-                (box) => rect.x < box.x + box.width + 2 && rect.x + width > box.x - 2 && rect.y < box.y + box.height + 2 && rect.y + height > box.y - 2
-              )
-            ) {
-              labelPosition = { x, y, width, maxLines: 2 };
-              break;
-            }
-          }
-      }
-    }
-    if (label && !labelPosition) throw invalid('流程箭头标签没有安全空间，请增加卡片间距或拆分流程视图，未丢弃标签');
+    const labelPosition = bestLabel;
+    if (labelPosition) labels.push(labelBox(labelPosition));
     result.set(edge.index, {
       ...edge,
       points: best,

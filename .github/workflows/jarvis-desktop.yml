@@ -250,8 +250,11 @@ jobs:
           node e2e/architecture-evidence.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-evidence"
           node e2e/architecture-revision.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-revision"
           node e2e/architecture-auto-layout.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-auto-layout"
+          node e2e/architecture-dense-layout.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-dense-layout"
           node e2e/architecture-package.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-package"
           node e2e/architecture-bends.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-package"
+          node e2e/architecture-package.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-parallel" parallel
+          node e2e/architecture-bends.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-parallel"
           ARCHITECTURE_VIEW=workflow node e2e/architecture-logic.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-workflow"
           ARCHITECTURE_VIEW=dataflow node e2e/architecture-logic.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-dataflow"
           node e2e/workspace-management.mjs "$RUNNER_TEMP/jarvis-e2e"

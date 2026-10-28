@@ -1,3 +1,4 @@
+import { overviewApplicationSections } from './architectureOverviewLayout.js';
 /** 新底稿的业务版式。只组合已经审查的对象/关系，不添加业务、删证据或压小字号。 */
 const roles = ['interface', 'system', 'application', 'capability', 'data', 'acquisition', 'infrastructure', 'security'];
 const labels = { interface: '用户与展示', system: '系统与边界', application: '业务应用', capability: '共用能力', data: '数据资源', acquisition: '感知与接入', infrastructure: '基础设施', security: '贯穿保障' };
@@ -24,6 +25,8 @@ export function businessArchitectureLayout(plan, input = {}) {
   const append = (entities, group) => {
     for (const role of roles) {
       const values = entities.filter(item => item.kind === role);
+      const overview = role === 'application' && overviewApplicationSections(values, plan, group, input.view || 'overview', node);
+      if (overview) { layers.push(...overview); continue; }
       for (let offset = 0; offset < values.length; offset += 12) {
         const part = values.slice(offset, offset + 12);
         const kind = role === 'security' && part.length === 1 ? 'band' : ['interface', 'infrastructure'].includes(role) && part.length >= 2 && part.length <= 4 ? 'columns' : 'cards';
@@ -39,6 +42,8 @@ export function businessArchitectureLayout(plan, input = {}) {
   // 没有可视子项的分组仍以独立系统节点呈现，避免隐藏空容器。
   for (const group of groups) if (!layers.some(layer => layer.group === group.title)) append([group]);
   const reserveFeedback = (input.view || 'overview') === 'overview' && plan.relations.some(item => item.type === 'feedback') ? 1 : 0;
-  if (!layers.length || layers.length + reserveFeedback > 8) throw invalid('当前内容与系统边界超过单图8层容量，请拆分总体和专题，不省略对象');
+  const topic = ['workflow', 'dataflow'].includes(input.view);
+  // 专题先按原投影核对完整对象，再筛对应关系端点；最终布局仍执行原8层限制。
+  if (!layers.length || !topic && layers.length + reserveFeedback > 8) throw invalid('当前内容与系统边界超过单图8层容量，请拆分总体和专题，不省略对象');
   return { ...input, title: input.title || plan.title, layers, view: input.view || 'overview', direction: 'top-down', design: { theme: 'gov-blue', message: '业务职责 · 系统边界 · 支撑与闭环', ...(input.design || {}) } };
 }

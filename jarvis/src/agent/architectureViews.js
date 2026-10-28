@@ -1,3 +1,4 @@
+import { workflowOrder } from './architectureOverviewLayout.js';
 /** 同一底稿的不同视图必须显式声明范围；不把某视图省略的关系当作删除或验收通过。 */
 const invalid = (message) => Object.assign(new Error(message), { code: 'ARCHITECTURE_VIEW', kind: 'input' });
 export function architectureView(plan, input) {
@@ -37,14 +38,16 @@ export function architectureView(plan, input) {
       if (item.type === 'supports') item.display = 'support_text';
       else if (item.type === 'feedback') item.display = 'feedback_band';
       else if (item.type === 'dataflow') item.display = 'dataflow_view';
-    result.design = { ...result.design, audience: '总体架构：组成、归属、支撑与业务闭环；数据传输见数据流视图' };
+    result.design = { ...result.design, audience: '总体架构：组成、归属、支撑与业务闭环；数据传输见数据流视图' + (result.layers.some(layer => layer.kind === 'grid') ? '；网格列名称，职责见业务底稿' : '') };
   } else if (view === 'workflow' || view === 'dataflow') {
     const selected = all.filter((link) => (view === 'workflow' ? ['workflow', 'feedback'].includes(link.type) : link.type === 'dataflow'));
     if (!selected.length) throw invalid('底稿没有登记此视图的关系，请先补关系，不能编造连接');
     const ids = new Set(selected.flatMap((link) => [link.from, link.to]));
     result.layers = result.layers.map((layer) => ({ ...layer, nodes: layer.nodes.filter((node) => ids.has(node.id)) })).filter((layer) => layer.nodes.length);
     for (const layer of result.layers) {
+      if (view === 'workflow') layer.nodes = workflowOrder(layer.nodes, selected) || layer.nodes;
       if ((layer.kind === 'columns' && layer.nodes.length === 1) || (layer.kind === 'grid' && layer.nodes.length < 8)) {
+        if (layer.kind === 'grid') for (const node of layer.nodes) node.detail = byId.get(node.id).responsibility;
         layer.kind = 'cards';
         for (const node of layer.nodes)
           if (node.subtitle) {
