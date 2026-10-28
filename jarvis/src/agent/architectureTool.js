@@ -56,15 +56,21 @@ export function createArchitecturePlanTool(ctx) {
       },
       ['title', 'entities', 'relations', 'requirements']
     ),
-    run: async (input, { signal, checkpoint, rawRequestText, progress, retrieval } = {}) => {
+    run: async (input, { signal, checkpoint, rawRequestText, progress, retrieval, architectureRevision, previousUserEvidence } = {}) => {
       throwControl(null, signal);
       progress?.('正在整理业务职责、关系及原文映射…');
       const sources = architectureSources(input);
       const { materials, checks } = await checkSources(sources, signal);
       const resolved = await resolveArchitectureEvidence(input, materials, checks, signal);
-      const plan = makeArchitecturePlan(resolved, materials.map((item, index) => ({ ...item, truncated: checks[index].truncated, scope: checks[index].scope })), rawRequestText);
+      const plan = makeArchitecturePlan(resolved, materials.map((item, index) => ({ ...item, truncated: checks[index].truncated, scope: checks[index].scope })), rawRequestText, previousUserEvidence);
       plan.sources = bindEvidenceSources(sources, checks, materials, resolved);
       plan.materialHashes = await Promise.all(materials.map(async (item) => ({ path: item.path, hash: await diagramDigest(item.text) })));
+      plan.layoutProfile = 'business-v2';
+      if (architectureRevision) {
+        const contentHash = await diagramDigest(JSON.stringify({ entities: plan.entities, relations: plan.relations, requirements: plan.requirements }));
+        if (contentHash === architectureRevision.contentHash) throw Object.assign(new Error('规范化后没有实质变更，不能重复审查'), { code: 'ARCHITECTURE_REVISION', kind: 'input', diagnostics: [{ stage: 'review', field: 'changes', action: '按具体审查意见修改底稿，不反复请求通过' }] });
+        plan.revision = architectureRevision;
+      }
       const base = '文档检查/架构底稿/' + crypto.randomUUID();
       throwControl(null, signal);
       const saved = await workspace.write(base + '.architecture.json', JSON.stringify(plan));
@@ -72,7 +78,7 @@ export function createArchitecturePlanTool(ctx) {
       let review;
       try {
         progress?.('正在审查业务归属、支撑方向与数据流…');
-        review = await reviewArchitecture(ctx, plan, { signal, retrieval, materials, rawRequestText });
+        review = await reviewArchitecture(ctx, plan, { signal, retrieval, materials, rawRequestText, previousUserEvidence });
       } catch (error) {
         throw Object.assign(error, { statePath: saved.path });
       }

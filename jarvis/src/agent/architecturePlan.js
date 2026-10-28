@@ -1,3 +1,4 @@
+import { architectureBusinessMarkdown } from './architectureBusiness.js';
 import { excerptDiagnostics } from './architectureDiagnostics.js';
 /** 业务关系先于坐标；最多60对象、100关系、80需求，事实须绑定实际材料，不能据名称猜归属。 */
 export const ARCHITECTURE_KINDS = ['interface', 'application', 'capability', 'data', 'acquisition', 'infrastructure', 'system', 'security'];
@@ -18,11 +19,11 @@ const field = (value, max, label) => {
   if (typeof value !== 'string' || !value.trim() || [...value].length > max) throw invalid(label + '为空或过长');
   return value.trim();
 };
-function evidence(item, materials, requestText) {
+function evidence(item, materials, requestText, previousUserEvidence) {
   if (item.assumption) return { assumption: field(item.assumption, 240, '假设前提'), evidence: 'assumption' };
   const source = field(item.source, 400, '原文路径');
   const excerpt = field(item.excerpt, 400, '原文摘录');
-  const original = source === 'user' ? requestText : materials.find((material) => material.path === source)?.text;
+  const original = source === 'user' ? [requestText || '', ...(previousUserEvidence || [])].find(text => compact(text).includes(compact(excerpt))) || requestText || previousUserEvidence?.[0] || '' : materials.find((material) => material.path === source)?.text;
   if (!original) {
     const error = invalid(
       '依据未出现在实际读取材料中：' + source,
@@ -49,7 +50,7 @@ function strings(values, label) {
   if (!Array.isArray(values) || values.length > 8) throw invalid(label + '最多8条');
   return values.map((value) => field(value, 100, label));
 }
-export function makeArchitecturePlan(input, materials = [], requestText = '') {
+export function makeArchitecturePlan(input, materials = [], requestText = '', previousUserEvidence = []) {
   const title = field(input.title, 80, '标题');
   if (!Array.isArray(input.entities) || !input.entities.length || input.entities.length > 60) throw invalid('业务对象需1～60个');
   if (!Array.isArray(input.relations) || input.relations.length > 100) throw invalid('关系最多100条');
@@ -67,7 +68,7 @@ export function makeArchitecturePlan(input, materials = [], requestText = '') {
         responsibility: field(item.responsibility, 160, '职责'),
         inputs: strings(item.inputs, '输入'),
         outputs: strings(item.outputs, '输出'),
-        ...evidence(item, materials, requestText)
+        ...evidence(item, materials, requestText, previousUserEvidence)
       };
     })
   );
@@ -78,7 +79,7 @@ export function makeArchitecturePlan(input, materials = [], requestText = '') {
       const key = [item.from, item.to, item.type].join('\u0000');
       if (links.has(key)) throw invalid('同类型关系重复');
       links.add(key);
-      return { from: item.from, to: item.to, type: item.type, meaning: field(item.meaning, 120, '关系含义'), ...evidence(item, materials, requestText) };
+      return { from: item.from, to: item.to, type: item.type, meaning: field(item.meaning, 120, '关系含义'), ...evidence(item, materials, requestText, previousUserEvidence) };
     })
   );
   const requirements = input.requirements.map((item, index) =>
@@ -86,7 +87,7 @@ export function makeArchitecturePlan(input, materials = [], requestText = '') {
       const text = field(item.text, 240, '需求');
       if (!Array.isArray(item.entities) || !item.entities.length || item.entities.length > 12 || item.entities.some((id) => !ids.has(id)))
         throw invalid('每条需求必须映射1～12个存在的对象');
-      const proof = evidence(item, materials, requestText);
+      const proof = evidence(item, materials, requestText, previousUserEvidence);
       if (proof.evidence !== 'excerpt_matched' || !compact(proof.excerpt).includes(compact(text))) {
         const error = invalid('原始需求必须保留原文，不能用建议替代', 'text', 'fact', 'text使用excerpt内连续的原始需求；概括写入对象职责，不把假设当采购事实');
         Object.assign(error.diagnostics[0], excerptDiagnostics(text, proof.excerpt, materials));
@@ -141,5 +142,6 @@ export function architectureMarkdown(plan) {
     );
   lines.push('', '## 需求映射');
   for (const item of plan.requirements) lines.push('- ' + item.text + ' → ' + item.entities.map((id) => byId.get(id)).join('、'));
+  lines.push('', architectureBusinessMarkdown(plan));
   return lines.join('\n');
 }

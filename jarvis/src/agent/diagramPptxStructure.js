@@ -1,3 +1,4 @@
+import { nativeOrthogonalRoute } from './diagramPptxRoutes.js';
 import { escapeSvg } from './diagramText.js';
 const fail = (message) => Object.assign(new Error(message), { code: 'DIAGRAM_PPTX_STRUCTURE', kind: 'input' });
 /** 保留scene分组树；输出对象最多8000个，不能把整图贴成一张图片冒充可编辑。 */
@@ -55,10 +56,12 @@ export async function groupNativeDiagram(bytes, scene, tree) {
   }
   let serial = Math.max(1, ...[...xml.matchAll(/<p:cNvPr id="(\d+)"/g)].map((match) => Number(match[1])));
   const references = new Map();
+  let nativeCount = (xml.match(/<p:cNvPr /g) || []).length;
   const assign = (nodes) => {
     for (const node of nodes)
       if (node.children) {
         node.nativeId = ++serial;
+        nativeCount++;
         const background = nativeLeaves(node.children)
           .filter((child) => child.item.type === 'rect')
           .sort((a, b) => b.item.width * b.item.height - a.item.width * a.item.height)[0];
@@ -71,6 +74,10 @@ export async function groupNativeDiagram(bytes, scene, tree) {
   };
   assign(tree);
   const emu = (value) => Math.round(((value * 13.333333) / scene.width) * 914400);
+  const nextId = () => {
+    if (++nativeCount > 8000) throw fail('原生对象超过8000，请拆图');
+    return ++serial;
+  };
   const draw = (node) => {
     if (node.children) {
       const box = bounds(node);
@@ -90,6 +97,7 @@ export async function groupNativeDiagram(bytes, scene, tree) {
           const source = references.get(item.from),
             target = references.get(item.to);
           if (!source || !target || !Number.isFinite(source.id) || !Number.isFinite(target.id)) throw fail('连接线缺少真实节点锚点');
+          if (item.points.length > 2) return nativeOrthogonalRoute(item, source, target, shape, { nextId, emu, sourcePort: port(item.points[0], source.bounds), targetPort: port(item.points.at(-1), target.bounds) });
           const nv = /<p:cNvPr\b[\s\S]*?<\/p:cNvPr>|<p:cNvPr\b[^>]*\/>/.exec(shape)?.[0];
           if (!nv) throw fail('原生连接线缺少标识');
           shape = shape.replace(/^<p:sp>/, '<p:cxnSp>').replace(/<\/p:sp>$/, '</p:cxnSp>');

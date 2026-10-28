@@ -169,7 +169,9 @@ export function createDiagramTool(ctx, { requireArchitecture = false } = {}) {
       const model = layoutDiagram(input);
       if (input.draft) model.monochrome = true;
       progress?.('正在核对材料和图形结构…');
-      const { checks: sources, materials } = await checkSources(input.sources || [], signal);
+      const direct = await checkSources(input.sources || [], signal);
+      const sources = input.sources?.length ? direct.checks : architecture?.sourceChecks || [];
+      const materials = input.sources?.length ? direct.materials : architecture?.materials || [];
       const contentPlan = planDiagramContent(input, materials, rawRequestText);
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       let contentPlanPath;

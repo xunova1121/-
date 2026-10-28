@@ -1,3 +1,5 @@
+import { createArchitecturePackageTool } from './architecturePackage.js';
+import { createArchitectureRevisionTool } from './architectureRevision.js';
 import { communicationPreferenceSupported } from './communicationPreferences.js';
 import { createWorkRecordsTool } from './workLedger.js';
 import { readGovernmentGuide } from './governmentGuide.js';
@@ -105,6 +107,8 @@ export function createTools(ctx) {
     createInspectImageTool(ctx),
     createArchitectureEvidenceTool(),
     createArchitecturePlanTool(ctx),
+    createArchitectureRevisionTool(ctx),
+    createArchitecturePackageTool(ctx),
     createDiagramTool(ctx, {requireArchitecture:true}),
     createExportDiagramTool(ctx),
     createRenderDiagramTool(ctx),

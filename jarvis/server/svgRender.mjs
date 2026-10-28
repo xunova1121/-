@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { validateSvg } from '../src/agent/svgPreview.js';
 import { imageFormat } from '../src/agent/imageFormat.js';
-import { cropImageRegion } from './imageRegion.mjs';
+import { rasterizeSvg } from './svgRaster.mjs';
 import { throwControl } from '../src/core/networkRequest.js';
 import { renderOffice } from './officeRender.mjs';
 
@@ -20,7 +20,7 @@ export async function renderSvg(svg, { signal } = {}) {
       throwControl(error, signal);
       if (error.code !== 'ENOENT') throw error;
       try {
-        blob = await cropImageRegion(new Blob([checked.svg], { type: 'image/svg+xml' }), { x: 0, y: 0, width: 1, height: 1 }, { signal });
+        blob = await rasterizeSvg(checked.svg, { signal });
       } catch (fallbackError) {
         throwControl(fallbackError, signal);
         // 复用原部署脚本已有的LibreOffice，不新增npm依赖或另装浏览器。

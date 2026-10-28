@@ -56,6 +56,7 @@ export async function reviewArchitecture(ctx, plan, options = {}) {
     plan,
     sourceMaterials: options.materials || [],
     userRequest: options.rawRequestText || '',
+    ...(options.previousUserEvidence?.length && { previousUserEvidence: options.previousUserEvidence }),
     ...(options.recoveryReason && { recoveryReason: options.recoveryReason })
   });
   if (content.length > 200000)

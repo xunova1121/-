@@ -59,7 +59,8 @@ export async function makeDiagramPptx(scene, { png, editable = false } = {}) {
         for (const line of item.lines)
           slide.addText(line.text, {
             objectName: objectName(),
-            x: line.x * scale,
+            // Noto在Office文本框的左字面与SVG相差半个设计像素；保持字号/画布，校正字面定位。
+            x: (line.x + (scene.fontFace === 'Noto Sans CJK SC' ? 0.5 : 0)) * scale,
             y: (line.y - item.fontSize * (scene.fontFace === 'Noto Sans CJK SC' ? 0.98 : 1)) * scale,
             w: item.width * scale,
             h: item.fontSize * 1.5 * scale,

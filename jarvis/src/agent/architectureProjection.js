@@ -1,3 +1,4 @@
+import { businessArchitectureLayout } from './architectureLayout.js';
 import { architectureView } from './architectureViews.js';
 import * as workspace from './workspace.js';
 import { diagramDigest } from './diagramExport.js';
@@ -47,7 +48,7 @@ export async function loadArchitecture(path, signal) {
   const report = JSON.parse(await reportBlob.text());
   const planHash = await diagramDigest(JSON.stringify(plan));
   if (report.planHash !== planHash) throw invalid('底稿已变化，旧审查不能复用；请重新plan_architecture');
-  const { materials } = await checkSources(
+  const { materials, checks } = await checkSources(
     (plan.sources || []).map((item) => ({
       path: item.path,
       excerpt: item.excerpt || '',
@@ -59,12 +60,13 @@ export async function loadArchitecture(path, signal) {
     const actual = materials.find((item) => item.path === saved.path);
     if (!actual || (await diagramDigest(actual.text)) !== saved.hash) throw invalid('原始材料已变化，请重新生成和审查底稿');
   }
-  return { plan, report, planHash, reviewPath, path, materials };
+  return { plan, report, planHash, reviewPath, path, materials, sourceChecks: checks };
 }
 
 /** 不提供版式时给出保守的职责分层；可提供丰富零件版式，但必须逐项通过同一关系校验。 */
 export function architectureInput(plan, input) {
   if (input.layers) return { ...structuredClone(input), title: input.title || plan.title };
+  if (plan.layoutProfile === 'business-v2') return businessArchitectureLayout(plan, input);
   const layers = ['interface', 'system', 'application', 'capability', 'data', 'acquisition', 'infrastructure', 'security']
     .map((role) => ({
       title: labels[role],

@@ -8,7 +8,7 @@ const sessions = collection('sessions');
 const INDEX = 'work-ledger-v1';
 export const WORK_RECORD_LIMIT = 4096;
 const TOOLS =
-  /^(sing_song|generate_image|generate_video|plan_architecture|create_diagram|export_diagram|create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet)$/;
+  /^(sing_song|generate_image|generate_video|prepare_architecture_evidence|revise_architecture_plan|create_architecture_package|plan_architecture|create_diagram|export_diagram|create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet)$/;
 const scopes = new WeakMap();
 let tail = Promise.resolve();
 let pending = 0;
@@ -57,7 +57,7 @@ export async function recordWorkAttempt({ tool, args = {}, output = '', ok, sess
   for (const path of paths.slice(0, 12)) {
     if (path.length <= 400 && (await workspace.exists(path))) files.push(path);
   }
-  const generationStatus = !ok ? 'failed' : tool !== 'plan_architecture' && files.length && (!media || media.state === 'completed') ? 'success' : 'unverified';
+  const generationStatus = !ok ? 'failed' : !['plan_architecture', 'revise_architecture_plan', 'prepare_architecture_evidence'].includes(tool) && files.length && (!media || media.state === 'completed') ? 'success' : 'unverified';
   const record = {
     id: await recordId(scope, callId, files),
     sessionId: String(sessionId).slice(0, 200),
@@ -69,7 +69,7 @@ export async function recordWorkAttempt({ tool, args = {}, output = '', ok, sess
           ? 'image'
           : tool === 'generate_video'
             ? 'video'
-            : /^(plan_architecture|create_diagram|export_diagram)$/.test(tool)
+            : /^(prepare_architecture_evidence|revise_architecture_plan|create_architecture_package|plan_architecture|create_diagram|export_diagram)$/.test(tool)
               ? 'diagram'
               : 'document',
     title: String(args.title || files[0]?.split('/').pop() || tool).slice(0, 160),
