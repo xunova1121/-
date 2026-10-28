@@ -2,8 +2,10 @@
 export function sportsWindow(args = {}, now = Date.now()) {
   const period = args.period || 'all';
   const minutes = args.window_minutes ?? 60;
-  if (!['all', 'upcoming', 'afternoon'].includes(period) || !Number.isSafeInteger(minutes) || minutes < 1 || minutes > 360) throw Object.assign(new Error('时间筛选需all/upcoming/afternoon，未来窗口为1至360分钟'), { code: 'INVALID_SPORTS_INPUT', kind: 'input' });
-  return { period, now, minutes, label: period === 'upcoming' ? `接下来${minutes}分钟，仅未开赛` : period === 'afternoon' ? '北京时间下午12:00（含）至18:00（不含）' : '' };
+  if (!['all', 'upcoming', 'remaining', 'afternoon'].includes(period) || !Number.isSafeInteger(minutes) || minutes < 1 || minutes > 360) throw Object.assign(new Error('时间筛选需all/upcoming/remaining/afternoon，未来窗口为1至360分钟'), { code: 'INVALID_SPORTS_INPUT', kind: 'input' });
+  const lastDate = args.end_date || args.date || new Date(now + 8 * 3600_000).toISOString().slice(0, 10);
+  const until = beijingTimestamp(lastDate, '00:00') + 24 * 3600_000;
+  return { period, now, minutes, until, label: period === 'upcoming' ? `接下来${minutes}分钟，仅未开赛` : period === 'remaining' ? '指定北京日期内当前时刻之后的未开赛，直到当日24:00；不限定60分钟' : period === 'afternoon' ? '北京时间下午12:00（含）至18:00（不含）' : '' };
 }
 
 export function beijingTimestamp(date, clock) {
@@ -15,6 +17,7 @@ export function inSportsWindow(timestamp, state, window) {
   if (!window || window.period === 'all') return true;
   if (!Number.isFinite(timestamp)) return false;
   if (window.period === 'upcoming') return ['pre', '1'].includes(String(state)) && timestamp >= window.now && timestamp < window.now + window.minutes * 60_000;
+  if (window.period === 'remaining') return ['pre', '1'].includes(String(state)) && timestamp >= window.now && timestamp < window.until;
   const hour = new Date(timestamp + 8 * 3600_000).getUTCHours();
   return hour >= 12 && hour < 18;
 }
@@ -29,5 +32,6 @@ export function inferSportsWindow(text) {
     const hourCount = hours ? ({ 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6 }[hours[1]] ?? Number(hours[1])) : null;
     return { period: 'upcoming', window_minutes: match ? Number(match[1]) : hours ? hourCount * 60 : 60 };
   }
+  if (/(?:今天|今日).{0,12}(?:剩余|剩下|还有|未开赛|没开赛)|(?:剩余|剩下|还没开赛|尚未开赛).{0,8}(?:比赛|球赛|赛程)/.test(text)) return { period: 'remaining' };
   return {};
 }

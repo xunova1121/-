@@ -282,7 +282,9 @@ export function createTools(ctx) {
           pack = await packs.installFromFiles(files, { source: '工作区' });
         }
         const n = Object.keys(pack.files || {}).length;
-        return `已安装技能「${pack.name}」${n ? `（带 ${n} 个附件）` : ''}${pack.also?.length ? `，另外还装了：${pack.also.map((p) => p.name).join('、')}` : ''}。用户以后输入“/${pack.name} 具体要求”就能点名使用；现在可以用 use_skill 读取它试一次。`;
+        const installed = await packs.get(pack.name);
+        if (!installed || installed.installationId !== pack.installationId) throw Object.assign(new Error('技能安装后读回不一致，尚不能确认生效版本'), { code: 'SKILL_INSTALL_READBACK', kind: 'validation' });
+        return `已安装技能「${pack.name}」${n ? `（带 ${n} 个附件）` : ''}${pack.also?.length ? `，另外还装了：${pack.also.map((p) => p.name).join('、')}` : ''}。声明版本：${String(installed.meta?.version || '未声明').slice(0, 80)}；安装批次：${installed.installationId || '未登记'}；${installed.enabled ? '已启用' : '仍被用户停用，不会自动启用'}；已从安装库读回，本回执不代表执行样例成功。用户以后输入“/${pack.name} 具体要求”就能点名使用；现在可以用 use_skill 读取它试一次。`;
       }
     },
     {

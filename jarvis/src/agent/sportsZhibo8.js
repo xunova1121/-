@@ -12,8 +12,8 @@ import { withWebDeadline } from './retrievalBudget.js';
 export const ZHIBO8_URL = 'https://bifen4pc.qiumibao.com/json/list.htm';
 const STATE = { 1: '未开赛', 2: '进行中', 3: '完场', 4: '延期', 6: '取消', 7: '待定' };
 const SPORT = { football: '足球', basketball: '篮球', tennis: '网球', snooker: '斯诺克', game: '电竞', other: '其他' };
-/** 只计数、不逐场列的状态（多是低级别联赛，几十场一列反而淹没要看的） */
-const QUIET = new Set(['4', '6', '7']);
+/** 特殊状态只用于分类统计，不能再拿它隐藏比赛或猜联赛级别。 */
+const SPECIAL = new Set(['4', '6', '7']);
 const TIMEOUT_MS = 6000;
 /** 列表随比赛进行变化：缓存 30 秒（只一条） */
 const CACHE_MS = 30_000;
@@ -60,8 +60,9 @@ export function normalizeZhibo8(m) {
 
 function lineOf(e) {
   const started = e.state === '2' || e.state === '3';
-  const score = started && e.home.score !== '' ? `${e.home.score}-${e.away.score}` : 'vs';
-  const status = e.state === '2' ? `进行中 ${e.period}`.trim() : STATE[e.state] || e.period || '状态未知';
+  const scoreKnown = [e.home.score, e.away.score].every(value => value !== null && value !== undefined && /^\d+$/.test(String(value)));
+  const score = started && scoreKnown ? `${e.home.score}-${e.away.score}` : 'vs';
+  const status = e.state === '2' ? `进行中 ${e.period}`.trim() : STATE[e.state] || `状态未知（原状态${e.state || '空'}${e.period ? '，来源文字' + e.period : ''}）`;
   const half = e.half && e.state === '3' ? `（半场 ${e.half}）` : '';
   return `- ${e.time} ${status}：${e.home.name} ${score} ${e.away.name}${half}`;
 }
@@ -85,12 +86,13 @@ export function zhibo8Result(list, { from, to, today, sports = null, team = '', 
   const covered = days.every((d) => have.has(d));
   const q = String(team || '').trim().toLowerCase();
   const picked = all.filter((e) => days.includes(e.date) && (!sports || sports.includes(e.sport)) && (!q || `${e.home.name} ${e.away.name}`.toLowerCase().includes(q)));
-  const available = picked.filter((e) => q || !QUIET.has(e.state));
-  const shown = available.filter((e) => inSportsWindow(beijingTimestamp(e.date, e.time), e.state, window));
-  const quiet = picked.length - available.length;
+  const shown = picked.filter((e) => inSportsWindow(beijingTimestamp(e.date, e.time), e.state, window));
+  const quiet = shown.filter(e => SPECIAL.has(e.state)).length;
+  const unknown = shown.filter(e => !STATE[e.state]).length;
   const order = Object.keys(SPORT);
   shown.sort((a, b) => window && window.period !== 'all' ? beijingTimestamp(a.date, a.time) - beijingTimestamp(b.date, b.time) : a.date.localeCompare(b.date) || order.indexOf(a.sport) - order.indexOf(b.sport) || a.leagueId.localeCompare(b.leagueId) || a.time.localeCompare(b.time));
   const lines = [`北京时间 ${from}（${weekday(from)}）${to !== from ? ` 至 ${to}（${weekday(to)}）` : ''}的赛程和比分，来源直播吧（zhibo8.com），查询于北京时间 ${clock}。时间都是北京时间，前面是主队。`];
+  lines.push(`本来源本次筛选共${shown.length}场，延期/取消/待定和未知状态也保留明细；不代表所有联赛完整覆盖。`);
   if (window?.label) lines.push('时间筛选：' + window.label + '；不代表全天完整赛程。');
   if (!shown.length) lines.push('\n这段时间列表里没有符合条件的比赛。');
   let day = '';
@@ -113,7 +115,8 @@ export function zhibo8Result(list, { from, to, today, sports = null, team = '', 
     }
     lines.push(lineOf(e));
   }
-  if (quiet) lines.push(`\n另有 ${quiet} 场延期、取消或待定，没逐场列出（多是低级别联赛）。`);
+  if (quiet) lines.push(`\n分类统计：另有 ${quiet} 场延期、取消或待定，已包含在上方逐场明细和总场数内，不推断联赛级别。`);
+  if (unknown) lines.push(`\n另有${unknown}场来源状态未知，已保留原状态码和文字，不按开球时间猜成未开赛、延期或完场。`);
   lines.push('\n说明：这个列表不带联赛名，同一“赛事编号”是同一个联赛——不能从队名推断联赛或级别；未返回的联赛名明确说未提供，用户确需时再核对官方赛程。不要把赛事编号当已核实的联赛名。');
   if (focus.length) lines.push(`用户问的是：${focus.join('、')}。只挑这些联赛的比赛回答；列表里没有就说直播吧当前列表里没有，需要时用 web_search 再查。`);
   if (days.some((d) => d > today)) lines.push('明天及以后的比赛这里只排进了少数几场，不全；用户要完整赛程时用 web_search 补。');

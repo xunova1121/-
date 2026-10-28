@@ -124,14 +124,14 @@ function statusOf(event) {
   if (/POSTPONED/.test(name)) return { state: 'post', text: '延期' };
   if (/CANCEL/.test(name)) return { state: 'post', text: '取消' };
   if (/ABANDON|SUSPENDED/.test(name)) return { state: 'post', text: '中断' };
-  const state = type.state || 'pre';
+  const state = type.state || (/SCHEDULED/.test(name) ? 'pre' : 'unknown');
   if (state === 'in') return { state, text: `进行中 ${type.shortDetail || ''}`.trim() };
   if (state === 'post') {
     // 加时、点球决胜写清楚（只写“完场”会让人以为是常规时间的比分）
     const extra = /Pens|PK|penalt/i.test(type.detail || type.shortDetail || '') ? '（含点球）' : /AET|ET|OT/i.test(type.shortDetail || '') ? '（含加时）' : '';
     return { state, text: `完场${extra}` };
   }
-  return { state: 'pre', text: STATUS.pre };
+  return state === 'pre' ? { state: 'pre', text: STATUS.pre } : { state: 'unknown', text: `状态未知（来源${name || type.state || '未提供'}）` };
 }
 
 /** ESPN 的一场比赛 → 我们要的几项 */
@@ -163,7 +163,8 @@ export function normalizeEvent(event, league) {
 /** 一行文字：足球主队在前；篮球按国内习惯也写“主队 vs 客队”，并标出主客 */
 function lineOf(e) {
   const clock = beijingClock(e.time);
-  const score = e.state === 'pre' || e.home.score === '' ? 'vs' : `${e.home.score}-${e.away.score}`;
+  const scoreKnown = [e.home.score, e.away.score].every(value => value !== null && value !== undefined && /^\d+$/.test(String(value)));
+  const score = ['in', 'post'].includes(e.state) && scoreKnown && !/延期|取消/.test(e.status) ? `${e.home.score}-${e.away.score}` : 'vs';
   const pens = e.home.shootout != null && e.away.shootout != null ? `，点球 ${e.home.shootout}-${e.away.shootout}` : '';
   return `- ${clock} ${e.status}：${e.home.name}（主）${score} ${e.away.name}（客）${pens}`;
 }
@@ -172,6 +173,7 @@ function lineOf(e) {
 export function formatScores({ events, from, to, asked, failed, now = Date.now(), window = null }) {
   const lines = [`北京时间 ${from}（${weekday(from)}）${to !== from ? ` 至 ${to}（${weekday(to)}）` : ''}的赛程和赛果，来源 ESPN（espn.com），查询于北京时间 ${beijingDate(now)} ${beijingClock(now)}。时间均已换算成北京时间。`];
   const shown = events.slice(0, MAX_EVENTS);
+  lines.push(`本来源本次筛选返回${events.length}场，本回执列出${shown.length}场；覆盖范围与失败赛事见后文。`);
   if (window?.label) lines.push('时间筛选：' + window.label + '；不代表全天完整赛程。');
   if (!shown.length) lines.push(window?.label ? '\n这个时间窗口未返回符合条件的比赛，不代表其他时段或联赛没有比赛。' : '\n查到的赛事在这段时间都没有比赛。');
   let day = '';
@@ -314,7 +316,8 @@ export async function getSportsScores(args = {}, { get, signal, retrieval, now =
   const order = new Map(LEAGUES.map((l, i) => [l.name, i]));
   events.sort((a, b) => window.period !== 'all' ? a.time - b.time : beijingDate(a.time).localeCompare(beijingDate(b.time)) || order.get(a.league) - order.get(b.league) || a.time - b.time);
   progress?.(`查到 ${events.length} 场（${done - failed.length}/${asked.length} 个赛事有数据）`);
-  return formatScores({ events, from, to, asked, failed, now, window });
+  const secondary = formatScores({ events, from, to, asked, failed, now, window });
+  return partial ? partial.text + '\n\n## ESPN补充（与上方为独立来源，可能重复，不能把两份场数直接相加）\n' + secondary : secondary;
 }
 
 /** 直播吧按项目筛：用户点名的联赛决定项目（CBA、中甲这类 ESPN 没有的也认得） */
@@ -340,7 +343,7 @@ export function createSportsScoresTool(ctx = {}) {
     input_schema: {
       type: 'object',
       properties: {
-        period: { type: 'string', enum: ['all', 'upcoming', 'afternoon'], description: 'all全天；upcoming只看未来未开赛；afternoon北京时间12:00含至18:00不含' },
+        period: { type: 'string', enum: ['all', 'upcoming', 'remaining', 'afternoon'], description: 'all全天；remaining指定日期范围内从现在至当日24点未开赛（今天剩余，不限60分钟）；upcoming未来分钟窗口；afternoon北京时间12:00含至18:00不含' },
         window_minutes: { type: 'integer', minimum: 1, maximum: 360, description: 'upcoming未来分钟数，默认60' },
         date: { type: 'string', description: '北京时间日期 YYYY-MM-DD，默认今天' },
         end_date: { type: 'string', description: '可选：查到哪天（含），最多跨 3 天' },

@@ -169,6 +169,8 @@ export async function installFromFiles(files, { source = '本地', skipped = [] 
     skipped,
     source,
     enabled: old ? old.enabled : true,
+    installationId: globalThis.crypto?.randomUUID?.() || null,
+    previousInstallationId: old?.installationId || null,
     installedAt: Date.now(),
     updatedFrom: old ? old.installedAt : null
   };
@@ -382,6 +384,7 @@ export function render(pack) {
   };
   return [
     `# 技能：${pack.name}`,
+    `已安装声明版本：${String(pack.meta?.version || '未声明').slice(0, 80)}；安装批次：${pack.installationId || '旧记录未登记'}；${pack.enabled ? '已启用' : '已停用'}。本次仅读取已安装说明，不等于已执行或样例验收成功。`,
     pack.body,
     pack.skipped?.length ? `\n（注意：安装时有 ${pack.skipped.length} 个文件没装上：${pack.skipped.slice(0, 10).join('、')}。如果做法依赖它们，告诉用户需要用 zip 上传完整技能）` : '',
     files.length ? `\n---\n附带文件（文本用 read_skill_file 读取；模板等二进制文件用 copy_skill_file 复制到工作区，再用 run_python 处理）：\n${files.map((f) => `- ${f}${tag(f)}`).join('\n')}` : '',
