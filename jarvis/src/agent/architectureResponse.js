@@ -32,9 +32,17 @@ export async function architectureContentResponse(ctx, state, jobPath, materials
     if (blob.size > 320000) throw invalid('历史业务内容超限');
     previousContent = JSON.parse(await blob.text());
   }
+  let completeDiagnostics = null;
+  if (pendingText === null && state.lastError?.issuesPath) {
+    if (!/^文档检查\/架构(?:诊断\/[\w-]+\.issues-\d+|底稿\/[\w-]+\.review)\.json$/.test(state.lastError.issuesPath))
+      throw invalid('架构诊断路径无效，不能读取其他文件作纠错指令');
+    const blob = await ws.readBlob(state.lastError.issuesPath);
+    if (blob.size > 1000000) throw invalid('架构诊断超过1MB');
+    completeDiagnostics = JSON.parse(await blob.text());
+  }
   const prompt = JSON.stringify(
     pendingText === null
-      ? { request: state.request, materials: architectureReferences(materials), correction: state.lastError, previousContent }
+      ? { request: state.request, materials: architectureReferences(materials), correction: state.lastError, completeDiagnostics, previousContent }
       : { invalidJson: pendingText, error: state.lastError }
   );
   throwControl(null, execution.signal);

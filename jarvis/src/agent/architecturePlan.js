@@ -5,12 +5,16 @@ export const ARCHITECTURE_KINDS = ['interface', 'application', 'capability', 'da
 export const ARCHITECTURE_RELATIONS = ['contains', 'supports', 'dataflow', 'workflow', 'feedback'];
 const invalid = (message, field = '', stage = 'arguments', action = '按该字段修正本次底稿参数，不重新读取无关材料') =>
   Object.assign(new Error(message), { code: 'ARCHITECTURE_PLAN', kind: 'input', diagnostics: [{ field, stage, action }] });
-function atField(path, build) {
+function atField(path, build, diagnostics) {
   try {
     return build();
   } catch (error) {
     if (error.code !== 'ARCHITECTURE_PLAN') throw error;
     error.diagnostics = error.diagnostics.map((item) => ({ ...item, field: path + (item.field ? '.' + item.field : '') }));
+    if (diagnostics) {
+      diagnostics.push(...error.diagnostics.map(item => ({ ...item, message: error.message })));
+      return null;
+    }
     throw error;
   }
 }
@@ -51,12 +55,13 @@ function strings(values, label) {
   if (!Array.isArray(values) || values.length > 8) throw invalid(label + '最多8条');
   return values.map((value) => field(value, 100, label));
 }
-export function makeArchitecturePlan(input, materials = [], requestText = '', previousUserEvidence = []) {
+export function makeArchitecturePlan(input, materials = [], requestText = '', previousUserEvidence = [], options = {}) {
   const title = field(input.title, 80, '标题');
   if (!Array.isArray(input.entities) || !input.entities.length || input.entities.length > 60) throw invalid('业务对象需1～60个');
   if (!Array.isArray(input.relations) || input.relations.length > 100) throw invalid('关系最多100条');
   if (!Array.isArray(input.requirements) || input.requirements.length > 80) throw invalid('需求最多80条');
   const ids = new Set();
+  const diagnostics = options.collectErrors ? [] : null;
   const entities = input.entities.map((item, index) =>
     atField(`entities[${index}]`, () => {
       const id = field(item.id, 64, '对象ID');
@@ -71,17 +76,19 @@ export function makeArchitecturePlan(input, materials = [], requestText = '', pr
         outputs: strings(item.outputs, '输出'),
         ...evidence(item, materials, requestText, previousUserEvidence)
       };
-    })
+    }, diagnostics)
   );
   const links = new Set();
   const relations = input.relations.map((item, index) =>
     atField(`relations[${index}]`, () => {
-      if (!ids.has(item.from) || !ids.has(item.to) || item.from === item.to || !ARCHITECTURE_RELATIONS.includes(item.type)) throw invalid('关系类型或端点无效');
+      if (!ids.has(item.from) || !ids.has(item.to)) throw invalid('关系端点必须是已登记对象ID', 'from/to');
+      if (item.from === item.to) throw invalid('关系不能把对象连接到自身', 'to');
+      if (!ARCHITECTURE_RELATIONS.includes(item.type)) throw invalid('关系类型无效', 'type');
       const key = [item.from, item.to, item.type].join('\u0000');
       if (links.has(key)) throw invalid('同类型关系重复');
       links.add(key);
       return { from: item.from, to: item.to, type: item.type, meaning: field(item.meaning, 120, '关系含义'), ...evidence(item, materials, requestText, previousUserEvidence) };
-    })
+    }, diagnostics)
   );
   const requirements = input.requirements.map((item, index) =>
     atField(`requirements[${index}]`, () => {
@@ -95,8 +102,9 @@ export function makeArchitecturePlan(input, materials = [], requestText = '', pr
         throw error;
       }
       return { id: 'requirement-' + index, text, entities: [...new Set(item.entities)], ...proof };
-    })
+    }, diagnostics)
   );
+  if (diagnostics?.length) throw Object.assign(invalid('架构字段共' + diagnostics.length + '项未通过，请逐项修正完整清单'), { diagnostics });
   return {
     version: 1,
     title,

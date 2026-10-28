@@ -1,4 +1,6 @@
 import { architectureContentResponse } from './architectureResponse.js';
+import { applyArchitectureCorrections } from './architectureContentContract.js';
+import { validateArchitectureContent } from './architectureContentValidation.js';
 import * as ws from './workspace.js';
 import { createDocumentNavigation } from './documentNavigation.js';
 import { workflowMaterials, compileArchitectureContent, requestedArchitectureViews } from './architectureWorkflowInput.js';
@@ -89,22 +91,32 @@ export function createArchitectureWorkflowTool(ctx) {
       await save();
       try {
         if (state.stage === 'content') {
-          const content = await architectureContentResponse(ctx, state, jobPath, materials, save, execution);
+          const response = await architectureContentResponse(ctx, state, jobPath, materials, save, execution);
+          let previousContent = null;
+          if (state.contentPath) {
+            const blob = await ws.readBlob(state.contentPath);
+            if (blob.size > 320000) throw invalid('历史业务内容超限');
+            previousContent = JSON.parse(await blob.text());
+          }
+          const { content, adapters } = applyArchitectureCorrections(response, previousContent);
           const contentPath = jobPath.replace(/\.json$/, '.content.json');
           await ws.write(contentPath, JSON.stringify(content));
           state.contentPath = contentPath;
+          state.contentAdapters = adapters;
           await save();
           const input = compileArchitectureContent(content, sources, materials);
           if (state.views.includes('workflow') && !input.relations.some((row) => ['workflow', 'feedback'].includes(row.type)))
             throw invalid('已要求业务闭环，但内容未登记业务流/反馈关系；应核原文补齐内容，不进入导出阶段');
           if (state.views.includes('dataflow') && !input.relations.some((row) => row.type === 'dataflow'))
             throw invalid('已要求数据流，但内容未登记数据流关系；应核原文补齐内容，不进入导出阶段');
+          // 用原校验器一次收齐字段问题，不能为只修一个错反复消耗整份理解请求。
+          validateArchitectureContent(input, materials, state.request);
           const receipt = JSON.parse(
             await createArchitecturePlanTool({ ...ctx, readDocument: read }).run(input, { ...execution, rawRequestText: state.request })
           );
           state.architecturePath = receipt.architecturePath;
           if (!receipt.readyForRender) {
-            state.lastError = { code: 'ARCHITECTURE_REVIEW', issues: receipt.reviewIssues, note: receipt.reviewNote };
+            state.lastError = { code: 'ARCHITECTURE_REVIEW', issuesPath: receipt.reviewPath, issues: receipt.reviewIssues, note: receipt.reviewNote };
             await save();
             return JSON.stringify({
               jobPath,

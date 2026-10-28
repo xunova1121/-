@@ -12,17 +12,24 @@ import {mediaReceipt} from '../src/agent/actionDelivery.js';
 const spec=structuredClone(architectureSpec),names=new Map(spec.entities.map(e=>[e.id,e.title]));
 const lines=[];const cite=text=>{lines.push(text);return {material:0,quote:text};};
 const content={title:spec.title,entities:spec.entities.map(({assumption,source,excerpt,evidenceId,...e})=>({...e,citation:cite(e.title+'：'+e.responsibility+'。')})),relations:spec.relations.map(({assumption,source,excerpt,evidenceId,...r})=>({...r,citation:cite(names.get(r.from)+'→'+names.get(r.to)+'：'+r.meaning+'。')})),requirements:spec.requirements.map(r=>({entities:r.entities,citation:cite(r.text)}))};
-const repair=process.argv[3]==='json-repair', indexed=repair||process.argv[3]==='references';
+const repair=process.argv[3]==='json-repair', correction=process.argv[3]==='content-repair', alias=correction||process.argv[3]==='objects', indexed=repair||alias||process.argv[3]==='references';
 const sourceText=(indexed?lines.map(line=>line.padEnd(480,' ')):lines).join('\n');
 await ws.write('虚构原文.md',sourceText);
 if(indexed){const refs=architectureReferences([{path:'虚构原文.md',text:sourceText}])[0];for(const group of ['entities','relations','requirements'])for(const item of content[group]){const block=refs.blocks.find(block=>block.text.includes(item.citation.quote));assert.ok(block,'真实引用块须完整包含对应原文');item.citation={material:0,block:block.block};}}
-let calls=0;const llm=async args=>{calls++;if(repair&&calls===1)return {text:JSON.stringify(content).replace(',"entities"',' "entities"'),stop:'end_turn'};return args.system.includes('你负责业务理解')||args.system.includes('只修复给定JSON')?JSON.stringify(content):'{"passed":true,"issues":[]}';};
+let calls=0;const llm=async args=>{calls++;if(repair&&calls===1)return {text:JSON.stringify(content).replace(',"entities"',' "entities"'),stop:'end_turn'};
+if(args.system.includes('你负责业务理解')){
+ assert.ok(args.system.includes('根键固定为title/entities/relations/requirements'));
+ if(correction&&calls===2){const context=JSON.parse(args.prompt);assert.ok(context.completeDiagnostics.diagnostics.some(d=>d.field==='relations[0].to'));return JSON.stringify({corrections:[{group:'relations',index:0,value:content.relations[0]}]});}
+ if(alias){const {entities,...rest}=structuredClone(content);if(correction)rest.relations[0].to=rest.relations[0].from;return JSON.stringify({...rest,objects:entities});}
+ return JSON.stringify(content);
+}
+return args.system.includes('只修复给定JSON')?JSON.stringify(content):'{"passed":true,"issues":[]}';};
 const tool=createArchitectureWorkflowTool({llm,renderSvg,compareDiagramPpt});
 const startArgs={files:['虚构原文.md'],request:'制作总体架构及业务闭环和数据流，三视图四格式',directory:'交付/虚构统一流程',views:['overview','workflow','dataflow']};
 let runArgs=startArgs;
-if(repair){await assert.rejects(tool.run(startArgs),{code:'ARCHITECTURE_CONTENT_FORMAT'});const state=(await ws.list('文档检查/架构任务')).find(f=>!f.path.includes('.content.'));runArgs={jobPath:state.path};}
+if(repair||correction){await assert.rejects(tool.run(startArgs),{code:repair?'ARCHITECTURE_CONTENT_FORMAT':'ARCHITECTURE_PLAN'});const state=(await ws.list('文档检查/架构任务')).find(f=>!f.path.includes('.content.'));runArgs={jobPath:state.path};}
 const result=JSON.parse(await tool.run(runArgs));
-const expectedCalls=repair?3:2;
+const expectedCalls=repair||correction?3:2;
 assert.equal(result.status,'complete');assert.equal(result.completedViews.length,3);assert.equal(calls,expectedCalls);
 assert.equal(mediaReceipt('build_architecture',true,JSON.stringify(result)).state,'completed');
 const output=path.resolve(process.argv[2]||'/tmp/weiyang-architecture-workflow');await fs.mkdir(output,{recursive:true});
