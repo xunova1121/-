@@ -58,7 +58,7 @@ export function createArchitecturePlanTool(ctx) {
       progress?.('正在整理业务职责、关系及原文映射…');
       const sources = architectureSources(input);
       const { materials, checks } = await checkSources(sources, signal);
-      const plan = makeArchitecturePlan(input, materials, rawRequestText);
+      const plan = makeArchitecturePlan(input, materials.map((item, index) => ({ ...item, truncated: checks[index].truncated, scope: checks[index].scope })), rawRequestText);
       plan.sources = checks.map((item, index) => ({ ...item, excerpt: sources[index].excerpt }));
       plan.materialHashes = await Promise.all(materials.map(async (item) => ({ path: item.path, hash: await diagramDigest(item.text) })));
       const base = '文档检查/架构底稿/' + crypto.randomUUID();

@@ -48,7 +48,7 @@ import * as memory from './memory.js';
 import * as kb from './knowledge.js';
 import * as ws from './workspace.js';
 import * as packs from './skillPacks.js';
-import { summaryBlock } from './compress.js';
+import { summaryBlock, HISTORY_SOURCE_RULE } from './compress.js';
 import { DOCUMENT_TOOLS, createToolLoader } from './toolLoader.js';
 import { taskContract } from './taskContract.js';
 import { questionToolProfile, toolsForQuestion, BASIC_ANSWER_PROMPT } from './questionTools.js';
@@ -137,6 +137,8 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
   if (typeof document !== 'undefined' && document.body?.classList.contains('compact')) {
     parts.push('运行环境：未央手机 App（安卓）。屏幕上只有对话，没有“右侧预览区”：生成的文件、网页、PPT 在左上角菜单 →“工作区”里查看，回答时这样告诉用户（不要说“看右侧”）。不能操作电脑。');
   }
+  // 各模式共用来源边界，旧答复不能在换模型后变成新规则。
+  if (history.length || summary?.text) parts.push(HISTORY_SOURCE_RULE);
   // 长对话：较早的消息已压缩成摘要（见 compress.js）
   const earlier = summaryBlock(summary, sessionId);
   if (earlier) parts.push(earlier);

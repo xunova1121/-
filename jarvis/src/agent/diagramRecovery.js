@@ -10,7 +10,16 @@ export function diagramFailureDetails(error) {
     .map((item) => ({
       field: String(item.field || '').slice(0, 120),
       stage: String(item.stage || '').slice(0, 30),
-      action: String(item.action || '').slice(0, 180)
+      action: String(item.action || '').slice(0, 180),
+      ...(item.diffKind && {
+        diffKind: String(item.diffKind).slice(0, 30),
+        actual: String(item.actual || '').slice(0, 120),
+        expected: String(item.expected || '').slice(0, 120),
+        offset: Number.isInteger(item.offset) ? item.offset : null,
+        firstDiffAt: Number.isInteger(item.firstDiffAt) ? item.firstDiffAt : null,
+        candidateOnly: true,
+        readMaterials: Array.isArray(item.readMaterials) ? item.readMaterials.slice(0, 4).map(material => ({ path: String(material.path || '').slice(0, 400), chars: Math.max(0, Number(material.chars) || 0), ...(typeof material.truncated === 'boolean' && { truncated: material.truncated }), ...(material.scope === 'section' && { scope: 'section' }) })) : []
+      })
     }));
 }
 export function createDiagramRecovery() {
