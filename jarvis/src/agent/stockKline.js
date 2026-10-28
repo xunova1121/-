@@ -62,11 +62,32 @@ export function summarizeKline(rows, { start, end } = {}) {
   };
 }
 
+/** 持仓用同来源、同复权的已结束日K；盘中最新价不冒充收盘，上一条缺失时不补0或猜日期。 */
+export function completedStockCloses(rows, { start, end, adjustment = 'none', now = Date.now() } = {}) {
+  const all = normalizeBars(rows);
+  const today = new Date(now + 8 * 3600_000).toISOString().slice(0, 10);
+  const completed = all.filter(bar => bar.close > 0 && bar.date <= today && (bar.date < today || now >= Date.parse(bar.date + 'T15:05:00+08:00')));
+  const latest = completed.filter(bar => (!start || bar.date >= start) && (!end || bar.date <= end)).at(-1);
+  const previous = latest && completed.filter(bar => bar.date < latest.date).at(-1);
+  return {
+    latestClose: latest?.close ?? null,
+    previousClose: previous?.close ?? null,
+    priceDate: latest?.date ?? null,
+    previousPriceDate: previous?.date ?? null,
+    priceState: latest ? 'completed_daily_bar' : 'missing_completed_bar',
+    holdingCompatible: Boolean(latest && adjustment === 'none'),
+    marketTimeZone: 'Asia/Shanghai',
+    closeCutoff: '15:05 Asia/Shanghai',
+    priceScope: 'latest_completed_bar_in_requested_range',
+    previousCloseBasis: 'previous_available_daily_bar_same_source_and_adjustment'
+  };
+}
+
 export function createStockKlineTool(ctx = {}) {
   const get = ctx.fetchViaGateway ?? ctx.fetchImpl ?? ((...args) => fetch(...args));
   return {
     name: 'get_stock_kline',
-    description: '读取A股历史日K，JS计算返回记录内最高/最低及日期。需六位证券代码；明确复权方式和实际覆盖范围，不等于实时成交价或完整上市历史。',
+    description: '读取A股历史日K和程序计算的极值。回执latestClose/previousClose/priceDate分别为最新已结束日K收盘、上一条日K收盘及日期，缺项为null；给holding_profit映射price/prevClose/priceDate，按现金成本算盈亏须adjustment=none。今日盘中日K不冒充收盘；不等于实时成交价或完整历史。',
     input_schema: {
       type: 'object',
       properties: {
@@ -86,10 +107,11 @@ export function createStockKlineTool(ctx = {}) {
       if (start && end && start > end) throw invalid('开始日期不能晚于结束日期');
       if (!['none', 'qfq', 'hfq'].includes(adjustment) || !Number.isInteger(limit) || limit < 1 || limit > 120) throw invalid('复权方式或条数不合法');
       const mode = adjustment === 'none' ? '' : adjustment;
+      const requestTime = typeof ctx.now === 'function' ? ctx.now() : Date.now();
       const providers = [
         {
           source: '腾讯行情',
-          url: 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=' + encodeURIComponent([symbol, 'day', start ?? '', end ?? '', limit, mode].join(',')),
+          url: 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=' + encodeURIComponent([symbol, 'day', start ?? '', end ?? '', Math.max(3, limit), mode].join(',')),
           parse: (text) => {
             const response = JSON.parse(text);
             const data = response.data?.[symbol];
@@ -108,6 +130,7 @@ export function createStockKlineTool(ctx = {}) {
           }
         });
       let lastError;
+      const failedSources = [];
       for (const provider of providers) {
         try {
           const rows = await retryRead(
@@ -126,15 +149,18 @@ export function createStockKlineTool(ctx = {}) {
             source: provider.source,
             sourceUrl: provider.url,
             adjustment,
+            ...completedStockCloses(rows, { start, end, adjustment, now: requestTime }),
+            failedSources,
             fetchedAt: new Date().toISOString(),
             ...trimmed,
             providerRows: result.count,
             truncated: result.count > limit,
-            note: '极值仅针对返回bars；停牌、上市日期、接口历史上限均可能影响覆盖。成交量沿用来源单位，未跨源混合；今日数据可能仍在变化。'
+            note: '极值仅针对返回bars；停牌、上市日期、来源历史上限均可能影响覆盖。latestClose等字段只用同来源同复权的已结束日K（北京时间当日15:05前不采用当日条目），不等于实时成交价；previousClose是上一条可取得日K，缺失为null。复权价格不能直接和未复权现金成本混算。成交量沿用来源单位，未跨源混合；bars可能含今日盘中条目。'
           });
         } catch (error) {
           throwControl(error, signal);
           lastError = error;
+          failedSources.push({ source: provider.source, code: String(error.code || error.name || 'MARKET_SOURCE_ERROR').slice(0, 80) });
         }
       }
       throw lastError ?? Object.assign(new Error('行情暂时不可用'), { code: 'NO_MARKET_DATA', kind: 'network' });
