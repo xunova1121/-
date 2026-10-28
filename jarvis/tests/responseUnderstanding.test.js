@@ -158,3 +158,13 @@ it('跨偏好和教训只使用最新表达要求，身份名字不能被当表�
   await memory.deleteItem('lessons', recent.id);
   expect((await memory.listAll()).lessons.some((l) => l.id === recent.id)).toBe(false);
 });
+it('表达：说中文白话、限制只说一次；宠物化验单也按陪诊结构解读', async () => {
+  const { STABLE_PROMPT } = await import('../src/agent/agent.js');
+  const { dialoguePolicy } = await import('../src/agent/dialoguePolicy.js');
+  expect(STABLE_PROMPT).toContain('像靠谱的熟人说话');
+  expect(STABLE_PROMPT).toContain('不写成公文腔');
+  expect(responseGuidance('你好', [], { light: true })).toContain('不夹英文单词');
+  for (const text of ['帮我看下这份产检报告', '我家猫的血常规报告怎么看', '狗狗化验单']) expect(responseGuidance(text, [])).toContain('开头一两句说整体情况');
+  expect(responseGuidance('今天天气怎么样', [])).not.toContain('开头一两句说整体情况');
+  expect(dialoguePolicy('产检报告怎么看')).toContain('集中说一次');
+});

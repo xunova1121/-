@@ -1,11 +1,11 @@
 import { conversationFocus } from '../core/responseRevision.js';
-const CARE = /产检|孕检|体检|化验|检查报告|糖耐|胎儿|孕周|陪诊|胸痛|呼吸困难|急救/;
+const CARE = /产检|孕检|体检|化验|检查报告|糖耐|胎儿|孕周|陪诊|胸痛|呼吸困难|急救|(?:宠物|猫|狗).{0,8}(?:检查|血常规|报告|化验)/;
 const FEELING = /担心|害怕|难受|失落|委屈|孤独|心累|有点累|伤心|焦虑/;
 /** 选择回答目标，不增加模型调用，也不把情绪推断写进用户记忆。 */
 export function responseGuidance(text, history = [], { light = false, hasImages = false, visibleText = '' } = {}) {
   const focus = conversationFocus(text, history);
   const parts = [
-    '先理解用户真正关心什么，直接回应并解释依据；不要只复述材料或用免责声明代替能做的解释。感受有上下文依据才回应，不擅自断言用户焦虑，不机械说“别担心”；用户只要结果时尊重要求。'
+    '先理解用户真正关心什么，直接回应并解释依据；不要只复述材料或用免责声明代替能做的解释。感受有上下文依据才回应，不擅自断言用户焦虑，不机械说“别担心”；用户只要结果时尊重要求。用中文说，不夹英文单词（专有名词、单位、代码除外），说得像人在聊天，不像在念报告。'
   ];
   if (focus.revision)
     parts.push(
@@ -15,7 +15,7 @@ export function responseGuidance(text, history = [], { light = false, hasImages 
     );
   if (CARE.test(focus.memoryQuery + (hasImages ? String(visibleText).slice(0, 1800) : '')))
     parts.push(
-      '报告解读先抓家属关心的重点，用有依据的正常描述和异常发现解释整体情况，再通俗解释术语及下一步。安慰不能等于保证没事，急症风险优先处理；不能仅因指标有记录就判正常，必要的专业判断集中说明，不反复推给医生。'
+      '报告解读先抓家属关心的重点：开头一两句说整体情况（哪些让人安心、哪一项要留意），再逐项用白话解释异常项（报告写了什么、大概意味着什么，可打个比方），最后说下一步和出现什么情况要尽快就医。安慰不能等于保证没事，急症风险优先处理；不能仅因指标有记录就判正常，必要的专业判断集中说明，不反复推给医生。'
     );
   else if (hasImages)
     parts.push(

@@ -33,6 +33,8 @@ export async function finishAgentRun({
     // 一个字都没写出来（比如资料都没核实到）：别只剩一句“回答到这里”
     const note = quickStop && !finalText.trim()
       ? `这次一分钟内还没有确切结果（查到的资料都没能核实），先不乱说。${MORE_TIME_ASK}。`
+      : quickStop && finalText.trim().length >= 300
+      ? `\n\n（以上是一分钟内查到的。${MORE_TIME_ASK}。）`
       : quickStop
       ? `\n\n（普通问题我先回答到这里，上面是已经查到的；还没有确切结果、没核实的部分别当结论。${MORE_TIME_ASK}。）`
       : retrieval.reason

@@ -127,6 +127,14 @@ describe('先给已有的，再问要不要再查',()=>{
     const r=await runAgent({adapter,model:'x',history:[],userText:'今天娱乐新闻',context:{dynamic:''},tools:[WEB],emit:()=>{},maxSteps:40});
     expect(r.text).toContain(MORE_TIME_ASK);expect(r.text).not.toMatch(/本轮检索已停止|本轮已停止继续检索/);
   });
+  it('已经答得很完整时：结尾只留一句短提示，不再重复“没核实别当结论”',async()=>{
+    const WEB={name:'web_search',description:'测试用',input_schema:{type:'object',properties:{q:{type:'string'}}},run:async({q})=>`结果 ${q}`};
+    const full='今天的娱乐新闻主要有这几条，'.repeat(30);let n=0;
+    const adapter={async stream({tools}){n++;if(!tools.some(t=>t.name==='web_search'))return {text:full,toolCalls:[],stop:'end_turn'};return {text:'',toolCalls:[{id:String(n),name:'web_search',args:{q:`第${n}次`}}],stop:'tool_use'};}};
+    const r=await runAgent({adapter,model:'x',history:[],userText:'今天娱乐新闻',context:{dynamic:''},tools:[WEB],emit:()=>{},maxSteps:40});
+    expect(r.text).toContain(MORE_TIME_ASK);expect(r.text).not.toContain('别当结论');
+    expect(moreTimeRequest('好的',[{role:'user',content:'今天娱乐新闻'},{role:'assistant',content:r.text}])).toBe('今天娱乐新闻');
+  });
 });
 
 describe('模型自己判断要不要更多时间',()=>{
