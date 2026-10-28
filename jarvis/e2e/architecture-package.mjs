@@ -60,5 +60,13 @@ for (const view of receipt.completedViews) {
     await fs.writeFile(path.join(folder, path.basename(artifact.path)), new Uint8Array(await blob.arrayBuffer()));
   }
 }
+// 再次调用必须核对实际文件后复用；若触发任一渲染/对照则测试失败。
+const unexpected = () => { throw new Error('已完成且未变更的视图不应重新渲染'); };
+const resumed = JSON.parse(await createArchitecturePackageTool({ ...ctx, renderSvg: unexpected, compareDiagramPpt: unexpected }).run({ architecturePath: plan.architecturePath, directory: '合成交付' }));
+assert.equal(resumed.status, 'complete');
+assert.deepEqual(resumed.reusedViews, ['overview', 'workflow', 'dataflow']);
+assert.deepEqual(resumed.completedViews, receipt.completedViews);
+assert.equal(calls, 1, '复用实际交付不能重做业务审查');
+await fs.writeFile(path.join(output, 'resume-receipt.json'), JSON.stringify(resumed, null, 2));
 await fs.writeFile(path.join(output, 'receipt.json'), JSON.stringify(receipt, null, 2));
 console.log('通过：同一证据编号底稿的总体/闭环/数据流三个视图均实际交付四格式和原生PPT，清单核对通过；未替代客户验收。');

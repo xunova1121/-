@@ -4,9 +4,9 @@ const invalid = message => Object.assign(new Error(message), { code: 'ARCHITECTU
 export const EVIDENCE_LIMITS = Object.freeze({ sources: 4, chars: 120000, span: 240, entries: 4096, page: 20 });
 
 /** 无正文快照/全局注册表：编号绑定路径、当前读取范围全文和连续位置，重新读材料即可核验。 */
-export async function architectureEvidence(materials, checks = [], signal) {
+async function evidenceMaterials(materials, checks = [], signal) {
   if (!Array.isArray(materials) || !materials.length || materials.length > EVIDENCE_LIMITS.sources) throw invalid('证据编号需要1～4份实际材料');
-  const items = [];
+  const prepared = [];
   const hashes = new Set();
   for (let index = 0; index < materials.length; index++) {
     throwControl(null, signal);
@@ -17,6 +17,33 @@ export async function architectureEvidence(materials, checks = [], signal) {
     const hash = await diagramDigest(JSON.stringify([material.path, material.text]));
     if (hashes.has(hash)) throw invalid('来源范围重复，请去掉重复材料');
     hashes.add(hash);
+    prepared.push({ ...material, hash });
+  }
+  return prepared;
+}
+
+/** 查询连续全文，避免关键词恰好跨分页边界时漏查；旧的无查询编号保持不变。 */
+export async function architectureEvidence(materials, checks = [], signal, query = '') {
+  if (typeof query !== 'string' || query.length > 120) throw invalid('证据关键词最多120字符');
+  const prepared = await evidenceMaterials(materials, checks, signal);
+  const items = [];
+  for (const material of prepared) {
+    const { hash } = material;
+    if (query) {
+      let position = material.text.indexOf(query);
+      while (position >= 0) {
+        throwControl(null, signal);
+        let start = Math.max(0, position - Math.floor((EVIDENCE_LIMITS.span - query.length) / 2));
+        if (start && /[\uDC00-\uDFFF]/.test(material.text[start])) start--;
+        let end = Math.min(material.text.length, start + EVIDENCE_LIMITS.span);
+        if (end < material.text.length && /[\uD800-\uDBFF]/.test(material.text[end - 1])) end--;
+        if (items.length >= EVIDENCE_LIMITS.entries) throw invalid('关键词命中超过4096处，请缩小章节或使用更具体的关键词');
+        const evidenceId = `ev:${hash}:${start}:${end - start}`;
+        if (items.at(-1)?.evidenceId !== evidenceId) items.push({ evidenceId, source: material.path, start, end, text: material.text.slice(start, end).trim() });
+        position = material.text.indexOf(query, position + query.length);
+      }
+      continue;
+    }
     for (let start = 0; start < material.text.length;) {
       let end = Math.min(start + EVIDENCE_LIMITS.span, material.text.length);
       // 优先落在后半段的句子/段落边界；固定上限，不因全文无标点而无界增长。
@@ -42,14 +69,25 @@ export async function resolveArchitectureEvidence(input, materials, checks, sign
   for (const [key, max] of [['entities', 60], ['relations', 100], ['requirements', 80]])
     if (Array.isArray(input[key]) && input[key].length > max) throw invalid(key + '超过底稿条数上限');
   if (!groups.some(key => Array.isArray(input[key]) && input[key].some(item => item?.evidenceId !== undefined))) return input;
-  const items = await architectureEvidence(materials, checks, signal);
-  const byId = new Map(items.map(item => [item.evidenceId, item]));
+  const prepared = await evidenceMaterials(materials, checks, signal);
+  // 编号不依赖分页方式或全局注册表，但必须绑定本次重读全文摘要和有效连续范围。
+  const proofFor = id => {
+    if (typeof id !== 'string' || id.length > 120) return null;
+    const match = /^ev:((?:sha256:[a-f0-9]{64}|checksum:[a-f0-9]{2,16})):(0|[1-9]\d*):([1-9]\d*)$/.exec(id);
+    if (!match) return null;
+    const material = prepared.find(item => item.hash === match[1]);
+    const start = Number(match[2]), end = start + Number(match[3]);
+    if (!material || end > material.text.length || end - start > EVIDENCE_LIMITS.span || !Number.isSafeInteger(end)) return null;
+    if (start && /[\uDC00-\uDFFF]/.test(material.text[start]) || end < material.text.length && /[\uD800-\uDBFF]/.test(material.text[end - 1])) return null;
+    const text = material.text.slice(start, end).trim();
+    return text ? { source: material.path, text } : null;
+  };
   const result = { ...input };
   for (const key of groups) {
     if (!Array.isArray(input[key])) continue;
     result[key] = input[key].map((item, index) => {
       if (item?.evidenceId === undefined) return item;
-      const proof = byId.get(item.evidenceId);
+      const proof = proofFor(item.evidenceId);
       const fail = message => {
         const error = invalid(message);
         error.diagnostics[0].field = `${key}[${index}].evidenceId`;

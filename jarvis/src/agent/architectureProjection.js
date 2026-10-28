@@ -56,9 +56,11 @@ export async function loadArchitecture(path, signal) {
     })),
     signal
   );
+  const actualHashes = await Promise.all(materials.map(async item => ({ path: item.path, hash: await diagramDigest(item.text) })));
   for (const saved of plan.materialHashes || []) {
-    const actual = materials.find((item) => item.path === saved.path);
-    if (!actual || (await diagramDigest(actual.text)) !== saved.hash) throw invalid('原始材料已变化，请重新生成和审查底稿');
+    const index = actualHashes.findIndex(item => item.path === saved.path && item.hash === saved.hash);
+    if (index < 0) throw invalid('原始材料已变化，请重新生成和审查底稿');
+    actualHashes.splice(index, 1);
   }
   return { plan, report, planHash, reviewPath, path, materials, sourceChecks: checks };
 }

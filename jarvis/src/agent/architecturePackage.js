@@ -1,3 +1,4 @@
+import { reusableArchitectureViews } from './architecturePackageState.js';
 import * as workspace from './workspace.js';
 import { loadArchitecture } from './architectureProjection.js';
 import { createDiagramTool } from './diagramTool.js';
@@ -8,7 +9,7 @@ export function createArchitecturePackageTool(ctx) {
   const diagram = createDiagramTool(ctx, { requireArchitecture: true });
   return {
     name: 'create_architecture_package',
-    description: '从同一已审架构底稿交付总体、业务闭环、数据流多视图，每视图实际生成SVG/PNG/PDF/原生可编辑PPT及清单；没有登记相应关系不编造专题。不重建底稿；任一视图失败保留已生成文件与partial清单，不声称整包完成。',
+    description: '从同一已审架构底稿交付总体、业务闭环、数据流多视图，每视图实际生成SVG/PNG/PDF/原生可编辑PPT及清单；没有登记相应关系不编造专题。同版文件摘要一致时复用已完成视图，不重建底稿；任一视图失败保留已生成文件与partial清单，不声称整包完成。',
     input_schema: { type: 'object', properties: {
       architecturePath: { type: 'string', maxLength: 400 }, directory: { type: 'string', maxLength: 200 },
       views: { type: 'array', maxItems: 3, minItems: 1, uniqueItems: true, items: { type: 'string', enum: ['overview', 'workflow', 'dataflow'] } }
@@ -20,15 +21,19 @@ export function createArchitecturePackageTool(ctx) {
       const available = ['overview', ...(bundle.plan.relations.some(item => ['workflow', 'feedback'].includes(item.type)) ? ['workflow'] : []), ...(bundle.plan.relations.some(item => item.type === 'dataflow') ? ['dataflow'] : [])];
       const selected = views || available;
       if (!Array.isArray(selected) || !selected.length || selected.length > 3 || new Set(selected).size !== selected.length || selected.some(view => !available.includes(view))) throw invalid('选择的视图未登记对应关系或重复，不编造专题');
-      const manifest = { version: 1, architecturePath, planHash: bundle.planHash, status: 'running', selectedViews: selected, completedViews: [], failedView: null, files: [] };
       const manifestPath = directory + '/交付清单.json';
+      const reused = await reusableArchitectureViews(manifestPath, bundle, selected, directory, execution.signal);
+      const manifest = { version: 1, architecturePath, planHash: bundle.planHash, status: 'running', selectedViews: selected, reusedViews: reused.map(item => item.view), completedViews: reused, failedView: null, files: reused.flatMap(item => item.files.map(file => file.path)) };
       const save = async () => {
+        manifest.completedViews.sort((a, b) => selected.indexOf(a.view) - selected.indexOf(b.view));
+        manifest.files = manifest.completedViews.flatMap(item => item.files.map(file => file.path));
         await workspace.write(manifestPath, JSON.stringify(manifest));
         await execution.checkpoint?.({ type: 'file', path: manifestPath });
         ctx.onFileChanged?.(manifestPath);
       };
       await save();
       for (const view of selected) {
+        if (manifest.reusedViews.includes(view)) { execution.progress?.('已核对并复用' + labels[view] + '实际文件，不重复生成'); continue; }
         try {
           throwControl(null, execution.signal);
           execution.progress?.('正在交付' + labels[view] + '，保留同一底稿与来源版本…');

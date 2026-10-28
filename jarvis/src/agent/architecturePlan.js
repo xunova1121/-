@@ -23,7 +23,8 @@ function evidence(item, materials, requestText, previousUserEvidence) {
   if (item.assumption) return { assumption: field(item.assumption, 240, '假设前提'), evidence: 'assumption' };
   const source = field(item.source, 400, '原文路径');
   const excerpt = field(item.excerpt, 400, '原文摘录');
-  const original = source === 'user' ? [requestText || '', ...(previousUserEvidence || [])].find(text => compact(text).includes(compact(excerpt))) || requestText || previousUserEvidence?.[0] || '' : materials.find((material) => material.path === source)?.text;
+  const candidates = materials.filter(material => material.path === source).map(material => material.text);
+  const original = source === 'user' ? [requestText || '', ...(previousUserEvidence || [])].find(text => compact(text).includes(compact(excerpt))) || requestText || previousUserEvidence?.[0] || '' : candidates.find(text => compact(text).includes(compact(excerpt))) || candidates[0];
   if (!original) {
     const error = invalid(
       '依据未出现在实际读取材料中：' + source,

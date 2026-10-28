@@ -49,3 +49,20 @@ it('底稿中途变更拒绝合并，停止信号原样抛出', async () => {
   const ctrl = new AbortController(); ctrl.abort();
   await expect(createArchitecturePackageTool({}).run({}, { signal: ctrl.signal })).rejects.toHaveProperty('name', 'AbortError');
 });
+it('再次调用只复用实际摘要一致的完成视图，不再运行生成器', async () => {
+  const { diagramDigest } = await import('../src/agent/diagramExport.js');
+  state.load.mockResolvedValue({ path: '稿.architecture.json', planHash: 'same', report: { structure: 'passed', semantic: 'passed' }, plan: { relations: [] } });
+  state.run.mockImplementation(async input => {
+    const artifacts = [];
+    for (const format of ['svg','png','pdf','pptx']) {
+      const target = input.path.replace('.svg','') + (format === 'pptx' ? '-可编辑' : '') + '.' + format;
+      const blob = new Blob(['合成文件:' + format]); await ws.write(target, blob);
+      artifacts.push({path:target,format,hash:await diagramDigest(blob),designHash:'same-design'});
+    }
+    return '已生成\n' + JSON.stringify({architecture:{semantic:'passed'},editable:{passed:true},designHash:'same-design',artifacts});
+  });
+  const tool = createArchitecturePackageTool({});
+  await tool.run({architecturePath:'稿.architecture.json',directory:'复用'});
+  const next = JSON.parse(await tool.run({architecturePath:'稿.architecture.json',directory:'复用'}));
+  expect(next.reusedViews).toEqual(['overview']);expect(state.run).toHaveBeenCalledTimes(1);expect(next.status).toBe('complete');
+});

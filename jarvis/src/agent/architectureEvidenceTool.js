@@ -24,7 +24,7 @@ export function createArchitectureEvidenceTool() {
       progress?.('正在从选定原文提取可核对的证据编号…');
       const { materials, checks } = await checkSources(sources, signal);
       const all = await architectureEvidence(materials, checks, signal);
-      const filtered = query ? all.filter(item => item.text.includes(query)) : all;
+      const filtered = query ? await architectureEvidence(materials, checks, signal, query) : all;
       const items = filtered.slice(offset, offset + limit);
       return JSON.stringify({ sources, readMaterials: checks.map((item, index) => ({ path: item.path, chars: materials[index].text.length, truncated: item.truncated, ...(item.scope && { scope: item.scope, sectionStart: item.sectionStart, sectionEnd: item.sectionEnd }) })), total: all.length, matched: filtered.length, offset, nextOffset: offset + items.length < filtered.length ? offset + items.length : null, items, note: '编号只证明选定文件范围内存在连续原文；分页或过滤不是全文业务覆盖。引用编号仍须原需求核对、业务审查及真实导出。' });
     }

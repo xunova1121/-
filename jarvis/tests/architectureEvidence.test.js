@@ -90,3 +90,47 @@ it('工具真实注册且可按名称加载', async () => {
   await search.run({ names: ['prepare_architecture_evidence', 'plan_architecture'] });
   expect(loader.list().some(tool => tool.name === 'prepare_architecture_evidence')).toBe(true);
 });
+it('关键词跨240字分页边界仍返回连续原文编号，重读可解析且不放宽原文校验', async () => {
+  const keyword = '跨页边界采购需求';
+  const text = '甲'.repeat(237) + keyword + '乙'.repeat(260);
+  await ws.write('跨页.md', text);
+  const sources = [{ path: '跨页.md' }];
+  const old = await architectureEvidence([{ path: '跨页.md', text }]);
+  expect(old.some(item => item.text.includes(keyword))).toBe(false);
+  const receipt = await prepare({ sources, query: keyword });
+  expect(receipt.matched).toBe(1);
+  const proof = receipt.items[0];
+  expect(proof.text).toContain(keyword);
+  expect(proof.end - proof.start).toBeLessThanOrEqual(240);
+  const resolved = await resolveArchitectureEvidence({ entities: [{ evidenceId: proof.evidenceId }] }, [{ path: '跨页.md', text }]);
+  expect(resolved.entities[0]).toMatchObject({ source: '跨页.md', excerpt: proof.text });
+  for (const suffix of [':999999:1', ':0:241', ':0:0', ':01:1']) {
+    const evidenceId = proof.evidenceId.replace(/:\d+:\d+$/, suffix);
+    await expect(resolveArchitectureEvidence({ entities: [{ evidenceId }] }, [{ path: '跨页.md', text }])).rejects.toHaveProperty('code', 'ARCHITECTURE_EVIDENCE');
+  }
+});
+it('查询的连续窗口不切断表情代理对，材料更新后仍拒绝旧编号', async () => {
+  const text = '甲'.repeat(118) + '😀' + '乙'.repeat(116) + '业务能力中心' + '丙'.repeat(250);
+  const items = await architectureEvidence([{ path: '原文.md', text }], [], undefined, '业务能力中心');
+  expect(items).toHaveLength(1);
+  expect(items[0].text).toContain('业务能力中心');
+  expect(/[\uDC00-\uDFFF]/.test(text[items[0].start])).toBe(false);
+  await expect(resolveArchitectureEvidence({ entities: [{ evidenceId: items[0].evidenceId }] }, [{ path: '原文.md', text: text + '更新' }])).rejects.toHaveProperty('code', 'ARCHITECTURE_EVIDENCE');
+});
+it('同一长文件分两章取证，第二章引用和底稿重开不误报原文变化，任一章改动仍拒绝', async () => {
+  const { loadArchitecture } = await import('../src/agent/architectureProjection.js');
+  await ws.write('分章.md', '第一章唯一\n配置门户。\n第二章唯一\n配置数据服务。\n第三章唯一');
+  const sources = [
+    { path: '分章.md', sectionStart: '第一章唯一', sectionEnd: '第二章唯一' },
+    { path: '分章.md', sectionStart: '第二章唯一', sectionEnd: '第三章唯一' }
+  ];
+  const receipt = await prepare({ sources });
+  const entity = { id: 'data', title: '数据服务', kind: 'capability', responsibility: '提供数据', inputs: [], outputs: [], evidenceId: receipt.items[1].evidenceId };
+  const plan = JSON.parse(await createArchitecturePlanTool({}).run({ title: '分章测试', sources, entities: [entity, { ...entity, id: 'portal', title: '门户', kind: 'application', evidenceId: receipt.items[0].evidenceId }], relations: [], requirements: [{ entities: ['data'], evidenceId: receipt.items[1].evidenceId }, { entities: ['portal'], evidenceId: receipt.items[0].evidenceId }] }));
+  expect(plan.structure).toBe('passed');
+  const reopened = await loadArchitecture(plan.architecturePath);
+  expect(reopened.materials).toHaveLength(2);
+  expect(reopened.plan.entities[0].excerpt).toContain('配置数据服务');
+  await ws.write('分章.md', '第一章唯一\n门户已变。\n第二章唯一\n配置数据服务。\n第三章唯一');
+  await expect(loadArchitecture(plan.architecturePath)).rejects.toHaveProperty('code', 'ARCHITECTURE_PROJECTION');
+});
