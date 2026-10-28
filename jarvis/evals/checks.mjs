@@ -1,3 +1,4 @@
+import './architecture-server-checks.mjs';
 import './reliability-checks.mjs';
 import './baseline-checks.mjs';
 import test from 'node:test';
