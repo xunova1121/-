@@ -49,8 +49,8 @@ import * as ws from '../src/agent/workspace.js';
 import { needsRunner } from '../src/agent/skillDeps.js';
 import { skillRunnerTool } from './skillRunner.mjs';
 
-/** 服务器上不提供的工具：浏览器里的代码沙箱、预览窗口、本机指标、定时任务（定时任务还在手机 / 电脑上跑） */
-export const SERVER_BLOCKED = new Set(['run_javascript', 'run_python', 'preview', 'get_local_metrics', 'schedule_task', 'list_schedules', 'cancel_schedule']);
+/** 服务器上不提供的工具：浏览器里的代码沙箱、预览窗口、本机指标（定时任务由服务器自己按时执行，见 serverSchedules.mjs） */
+export const SERVER_BLOCKED = new Set(['run_javascript', 'run_python', 'preview', 'get_local_metrics']);
 /** 连续这么久没有任何进展（模型输出、工具事件）就中断，记为失败 */
 export const IDLE_MS = 10 * 60_000;
 /** 回答完以后，等服务器安静这么久再整理记忆、压缩对话（不和下一句抢模型）；一直忙也最多等这么久 */
@@ -258,7 +258,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       // 显示工作区里已有的图片：让手机按文件取回来显示
       onImage: (src, path) => { if (path) record(task, { type: 'file', path }); },
       officeRender:renderOffice,
-      currentSessionId: () => session.id
+      currentSessionId: () => session.id,
+      scheduleHost: 'server'
     }).filter((t) => !SERVER_BLOCKED.has(t.name)), task.evaluationId);
     const projectTool = projectExecutionTool({ image: process.env.JARVIS_CODE_SANDBOX_IMAGE });
     if (projectTool) tools.push(projectTool);

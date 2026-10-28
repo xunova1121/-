@@ -34,6 +34,8 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createFileStore } from './fileStore.mjs';
 import { createTaskRunner } from './taskRunner.mjs';
+import { createServerSchedules, notices as scheduleNotices } from './serverSchedules.mjs';
+import * as scheduler from '../src/agent/scheduler.js';
 import { useBackend } from '../src/agent/store.js';
 import { seedBuiltins } from '../src/agent/skillPacks.js';
 import * as skillPacks from '../src/agent/skillPacks.js';
@@ -80,7 +82,7 @@ export function mergeConfig(old, next) {
 /**
  * @param {{ dataDir: string, password: string, maxRunning?: number, runner?: object }} o
  */
-export function createServerMode({ dataDir, password, maxRunning = 1, runner: injected = null, appDir = APP_DIR, updateUnit = UPDATE_UNIT, makeModelAdapter } = {}) {
+export function createServerMode({ dataDir, password, maxRunning = 1, runner: injected = null, appDir = APP_DIR, updateUnit = UPDATE_UNIT, makeModelAdapter, autoSchedules = false } = {}) {
   if (!password || String(password).length < 8) throw new Error('服务器模式需要设置 JARVIS_PASSWORD（至少 8 位）');
   const store = createFileStore(path.join(dataDir, 'store'));
   useBackend(store);
@@ -94,6 +96,9 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
   // 技能脚本运行器：技能里的 Python / Node 命令在隔离的 Docker 里跑（没装 Docker 或镜像时照实告诉模型怎么装）
   const skillRunner = createSkillRunner({ image: process.env.JARVIS_SKILL_RUNNER_IMAGE || SKILL_RUNNER_IMAGE, baseDir: path.join(dataDir, 'skill-runner') });
   const runner = injected ?? createTaskRunner({ getConfig: async () => loadConfig(), maxRunning, skillRunner });
+  // 定时任务 / 提醒：服务器自己按时执行（手机关着也做），见 serverSchedules.mjs；测试里不自动开始计时
+  const schedules = createServerSchedules({ runner });
+  if (autoSchedules) schedules.start();
   const want = Buffer.from(tokenFor(password));
   const failures = new Map(); // IP → 最近登录失败的时间（防止暴力猜密码）
   let activePCModels=0;
@@ -260,6 +265,29 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
         return true;
       }
     }
+    if (pathname === '/api/server/schedules' && req.method === 'GET') { json(res, 200, await scheduler.list()); return true; }
+    if (pathname === '/api/server/notices' && req.method === 'GET') { json(res, 200, await scheduleNotices(Number(url.searchParams.get('after')) || 0)); return true; }
+    const sch = pathname.match(/^\/api\/server\/schedules\/([\w-]{1,60})(\/run)?$/);
+    if (sch) {
+      if (sch[2] && req.method === 'POST') {
+        const s = (await scheduler.list()).find((x) => x.id === sch[1]);
+        if (!s) { json(res, 404, { error: '找不到这个定时任务' }); return true; }
+        if (!schedules.runNow(s)) { json(res, 409, { error: '有定时任务正在运行，稍后再试' }); return true; }
+        json(res, 200, { started: true }); return true;
+      }
+      if (!sch[2] && req.method === 'PATCH') {
+        const body = await readJson(req);
+        const s = await scheduler.update(sch[1], { enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined, when: typeof body.when === 'string' ? body.when : undefined, prompt: typeof body.prompt === 'string' ? body.prompt : undefined, title: typeof body.title === 'string' ? body.title : undefined });
+        s ? json(res, 200, s) : json(res, 404, { error: '找不到这个定时任务' }); return true;
+      }
+      if (!sch[2] && req.method === 'DELETE') { await scheduler.remove(sch[1]); json(res, 200, { ok: true }); return true; }
+    }
+    if (pathname === '/api/server/schedules' && req.method === 'POST') {
+      const body = await readJson(req);
+      // 口语时间（“每天 9 点”）或面板表单的分项（kind / time / weekday / at / everyMinutes）都收；服务器上没人确认，不开无人值守操作
+      const timing = typeof body.when === 'string' ? scheduler.parseWhen(body.when) : { kind: body.kind, time: body.time, weekday: body.weekday, at: body.at, everyMinutes: body.everyMinutes };
+      json(res, 200, await scheduler.upsert({ title: body.title, prompt: body.prompt, unattended: false, ...timing })); return true;
+    }
     if (pathname === '/api/tasks' && req.method === 'POST') {
       const { sessionId = null, text, images, voice, requestId, evaluationId } = await readJson(req, IMPORT_LIMIT); // 可能带图片，放宽大小
       json(res, 200, await runner.start({ sessionId, text, images, voice: voice === true, requestId:requestId??null, evaluationId:evaluationId??null })); return true;
@@ -365,5 +393,5 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     return false;
   }
 
-  return { authorized, handle, runner, store, ready, realtimeKey: () => loadConfig().keys?.qwen || '', qweather: () => qweatherConfig(loadConfig()) };
+  return { authorized, handle, runner, schedules, store, ready, realtimeKey: () => loadConfig().keys?.qwen || '', qweather: () => qweatherConfig(loadConfig()) };
 }

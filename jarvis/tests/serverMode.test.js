@@ -220,3 +220,20 @@ describe('服务器模式：编辑重发、本机那一轮记回来、按内容�
   });
 });
 
+
+describe('服务器上的定时任务接口', () => {
+  it('新建（口语时间）→ 列出 → 暂停 → 删除；重复的不建第二个；通知接口要登录', async () => {
+    const body = JSON.stringify({ title: '吃药', prompt: '提醒用户：吃药', when: '每天 8:00' });
+    const a = await (await api('/api/server/schedules', { method: 'POST', body })).json();
+    expect(a).toMatchObject({ title: '吃药', kind: 'daily', time: '08:00', enabled: true });
+    expect((await (await api('/api/server/schedules', { method: 'POST', body })).json()).duplicate).toBe(true);
+    expect((await (await api('/api/server/schedules')).json()).filter((s) => s.title === '吃药')).toHaveLength(1);
+    const paused = await (await api(`/api/server/schedules/${a.id}`, { method: 'PATCH', body: JSON.stringify({ enabled: false }) })).json();
+    expect(paused).toMatchObject({ id: a.id, enabled: false });
+    expect(Array.isArray(await (await api('/api/server/notices?after=0')).json())).toBe(true);
+    expect((await fetch(base + '/api/server/notices')).status).toBe(401);
+    expect((await api(`/api/server/schedules/${a.id}`, { method: 'DELETE' })).status).toBe(200);
+    expect((await (await api('/api/server/schedules')).json()).some((s) => s.id === a.id)).toBe(false);
+    expect((await api('/api/server/schedules/nope', { method: 'PATCH', body: JSON.stringify({ enabled: true }) })).status).toBe(404);
+  });
+});

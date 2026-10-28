@@ -16,7 +16,7 @@ const TOOL_FORMS = [
   [/^(write_file|run_javascript|run_python|preview|read_skill_file)$/, ['lattice']],
   [/^(create_document)$/, ['pages']],
   [/^(remember|recall|forget|core_memory_update|kb_search|search_conversations|read_conversation|save_skill|use_skill)$/, ['constellation']],
-  [/^(schedule_task|list_schedules|cancel_schedule|get_current_time)$/, ['clock']],
+  [/^(schedule_task|list_schedules|update_schedule|cancel_schedule|get_current_time)$/, ['clock']],
   [/^computer_(look|click|type|key|scroll|drag|screenshot)$/, ['eye']],
   [/^(computer_|clipboard_)/, ['lattice', 'eye']],
   [/^(read_file|list_files)$/, ['pages', 'lattice']],

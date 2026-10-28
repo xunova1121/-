@@ -12,7 +12,7 @@ import * as sessionsApi from '../agent/sessions.js';
 import { executeScheduled, scheduledPrompt, notificationFor } from '../agent/scheduledRun.js';
 import { preApproved } from '../agent/commandSafety.js';
 import { composeGreeting, GREET_GAP_MS } from '../core/greeting.js';
-import { initSchedulesPanel } from '../ui/schedulesPanel.js';
+import { initSchedulesPanel, serverScheduleStore } from '../ui/schedulesPanel.js';
 import { $, DESKTOP, toast, wp } from './env.js';
 
 export function createBackground(app) {
@@ -270,12 +270,50 @@ export function createBackground(app) {
     }
   }
 
+  /** 服务器模式：取服务器上定时任务做完的通知，弹系统通知（手机关着时服务器照样执行，下次打开补弹最近的） */
+  const NOTICE_KEY = 'jarvis.serverNoticeSeen';
+  let noticeBusy = false;
+  async function serverNoticeTick() {
+    if (!app.server?.notices || noticeBusy) return;
+    noticeBusy = true;
+    try {
+      let seen = 0;
+      try {
+        seen = Number(localStorage.getItem(NOTICE_KEY)) || 0;
+      } catch {
+        /* 隐私模式 */
+      }
+      // 第一次用：只补最近 12 小时的，不把很久以前的一下子全弹出来
+      if (!seen) seen = Date.now() - 12 * 3600_000;
+      const list = await app.server.notices(seen);
+      if (!Array.isArray(list) || !list.length) return;
+      for (const n of list.slice(-5)) notify(n.title, n.body);
+      try {
+        localStorage.setItem(NOTICE_KEY, String(Math.max(...list.map((n) => n.at))));
+      } catch {
+        /* 隐私模式 */
+      }
+      app.sessionsPanel?.refresh();
+      schedulesPanel?.refresh();
+    } catch {
+      /* 服务器暂时连不上：下次再取 */
+    } finally {
+      noticeBusy = false;
+    }
+  }
+
   let schedulesPanel = null;
   /** 定时任务面板，并开始按时检查（启动末尾调用） */
   function initSchedules() {
     schedulesPanel = initSchedulesPanel({
       toast: (t) => toast(t),
+      store: () => (app.server?.listSchedules ? serverScheduleStore(app.server) : null),
       runNow: async (s) => {
+        if (app.server?.runSchedule) {
+          await app.server.runSchedule(s.id);
+          toast('已交给服务器运行，做完会出现在“⏰”对话里并通知');
+          return;
+        }
         if (schedulerBusy) {
           toast('有任务正在运行，稍后再试');
           return;
@@ -292,6 +330,11 @@ export function createBackground(app) {
     });
     setInterval(schedulerTick, 30_000);
     setTimeout(schedulerTick, 4000);
+    setInterval(serverNoticeTick, 30_000);
+    setTimeout(serverNoticeTick, 6000);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) serverNoticeTick();
+    });
   }
 
   return {
@@ -304,6 +347,7 @@ export function createBackground(app) {
     notify,
     runScheduled,
     schedulerTick,
+    serverNoticeTick,
     initSchedules,
     get reflectTimer() {
       return reflectTimer;

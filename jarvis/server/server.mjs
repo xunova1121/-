@@ -385,7 +385,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   const host = process.env.HOST || '127.0.0.1';
   // 服务器模式：设置了数据目录就开启（必须同时设置访问密码）；云服务器上不启动 MCP（会运行本机程序）
   // 按需加载：桌面版、本机网关用不到服务器模式，不加载智能体那一大套代码
-  const serverMode = process.env.JARVIS_DATA ? (await import('./serverMode.mjs')).createServerMode({ dataDir: path.resolve(process.env.JARVIS_DATA), password: process.env.JARVIS_PASSWORD, maxRunning: Number(process.env.JARVIS_MAX_TASKS || 1) }) : null;
+  // 服务器模式：定时任务、提醒、“今天 / 明天几点”都按北京时间算（云服务器常默认 UTC）；部署时自己设了 TZ 就照用
+  if (process.env.JARVIS_DATA && !process.env.TZ) process.env.TZ = 'Asia/Shanghai';
+  const serverMode = process.env.JARVIS_DATA ? (await import('./serverMode.mjs')).createServerMode({ dataDir: path.resolve(process.env.JARVIS_DATA), password: process.env.JARVIS_PASSWORD, maxRunning: Number(process.env.JARVIS_MAX_TASKS || 1), autoSchedules: true }) : null;
   const mcp = process.env.JARVIS_NO_MCP || serverMode ? null : createMcpManager({ log: (m) => console.log(m) });
   const server = createServer({ mcp, serverMode });
   mcp?.startAll();

@@ -78,6 +78,13 @@ export function pickPythonFiles(list, code, { maxFiles = 300, maxBytes = 150e6 }
   }
   return out;
 }
+/** 定时任务的时间一律按北京时间显示 */
+const whenText = (t) => new Date(t).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' });
+/** 定时任务在哪里执行：服务器上手机关着也照样到点做；本机则要应用开着 */
+const scheduleHostNote = (ctx) =>
+  ctx.scheduleHost === 'server'
+    ? '到点由服务器自动执行（手机、电脑关着也会做），结果存成一段“⏰”对话；手机或电脑开着（含后台待机）时会弹通知，App 被彻底关掉时下次打开再提示。'
+    : '到时会自动执行并通知（应用需要在运行中：桌面版在托盘里也可以）。';
 const clip = (s, n = 20000) => (s.length > n ? `${s.slice(0, n)}\n…（已截断，共 ${s.length} 字）` : s);
 /** read_file 一次给多少字；长文件（如十几页的 PDF）分段读，结尾告诉模型从哪接着读 */
 export const READ_PAGE_CHARS = 20000;
@@ -339,7 +346,8 @@ export function createTools(ctx) {
       run: async ({ title, prompt, when, unattended }) => {
         const s = await scheduler.upsert({ title, prompt, unattended, ...scheduler.parseWhen(when) });
         ctx.onSchedulesChanged?.();
-        return `已创建定时任务「${s.title}」：${scheduler.describe(s)}，下一次在 ${new Date(s.nextRun).toLocaleString('zh-CN', { hour12: false })}。到时会自动执行并通知（应用需要在运行中：桌面版在托盘里也可以）。`;
+        if (s.duplicate) return `已经有一模一样的定时任务「${s.title}」（${scheduler.describe(s)}，id ${s.id}），没有重复创建。`;
+        return `已创建定时任务「${s.title}」（id ${s.id}）：${scheduler.describe(s)}，下一次在 ${whenText(s.nextRun)}（北京时间）。${scheduleHostNote(ctx)}`;
       }
     },
     {
@@ -348,14 +356,37 @@ export function createTools(ctx) {
       input_schema: S({}),
       run: async () => {
         const list = await scheduler.list();
-        return list.length ? list.map((s) => `- [${s.id}] ${s.title}：${scheduler.describe(s)}${s.enabled ? '' : '（已停用）'}，下一次 ${s.nextRun ? new Date(s.nextRun).toLocaleString('zh-CN', { hour12: false }) : '—'}；指令：${s.prompt.slice(0, 60)}`).join('\n') : '还没有定时任务。';
+        return list.length ? list.map((s) => `- [${s.id}] ${s.title}：${scheduler.describe(s)}${s.enabled ? '' : '（已停用）'}，下一次 ${s.nextRun ? whenText(s.nextRun) : '—'}；指令：${s.prompt.slice(0, 60)}`).join('\n') : '还没有定时任务。';
+      }
+    },
+    {
+      name: 'update_schedule',
+      description: '修改已有的定时任务（先用 list_schedules 找到 id）：改时间、改要做的事、改名称、暂停或恢复。用户说“提醒改到 8 点 / 先别提醒了 / 恢复提醒”时用，不要删了重建。',
+      input_schema: S({
+        id: str('任务 id'),
+        when: str('新的时间（不改就不填），写法同 schedule_task'),
+        prompt: str('新的指令（不改就不填）'),
+        title: str('新的名称（不改就不填）'),
+        enabled: { type: 'boolean', description: 'false 暂停，true 恢复；不改就不填' }
+      }, ['id']),
+      run: async ({ id, when, prompt, title, enabled }) => {
+        const s = await scheduler.update(id, { when, prompt, title, enabled });
+        if (!s) return `没有找到 id 为 ${id} 的定时任务，先用 list_schedules 查看。`;
+        ctx.onSchedulesChanged?.();
+        return `已修改「${s.title}」：${scheduler.describe(s)}${s.enabled ? `，下一次在 ${whenText(s.nextRun)}（北京时间）` : '（已暂停）'}。`;
       }
     },
     {
       name: 'cancel_schedule',
       description: '删除一个定时任务（先用 list_schedules 找到 id）。',
       input_schema: S({ id: str('任务 id') }, ['id']),
-      run: async ({ id }) => { await scheduler.remove(id); ctx.onSchedulesChanged?.(); return '已删除。'; }
+      run: async ({ id }) => {
+        const had = (await scheduler.list()).find((x) => x.id === id);
+        if (!had) return `没有找到 id 为 ${id} 的定时任务，先用 list_schedules 查看。`;
+        await scheduler.remove(id);
+        ctx.onSchedulesChanged?.();
+        return `已删除「${had.title}」。`;
+      }
     },
     {
       name: 'kb_search',

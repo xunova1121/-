@@ -181,6 +181,12 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     events: (id, after, signal) => req(`/api/tasks/${id}/events?after=${after}`, { raw: true, stream: streaming, signal, timeout: streaming ? STREAM_FIRST_MS : timeoutMs, headers: { Accept: 'text/event-stream' } }),
     listSessions: () => req('/api/sessions'),
     /** 服务器上的技能和技能运行器状态 */
+    listSchedules: () => req('/api/server/schedules'),
+    addSchedule: (o) => req('/api/server/schedules', { method: 'POST', body: o }),
+    patchSchedule: (id, patch) => req(`/api/server/schedules/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }),
+    removeSchedule: (id) => req(`/api/server/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    runSchedule: (id) => req(`/api/server/schedules/${encodeURIComponent(id)}/run`, { method: 'POST', timeout: 3600_000 }),
+    notices: (after = 0) => req(`/api/server/notices?after=${Number(after) || 0}`),
     listSkills: () => req('/api/server/skills'),
     /** 把手机 / 电脑上装好的技能传到服务器（files：packToFiles 的结果；大技能多等一会儿） */
     installSkill: (files, source) => req('/api/server/skills', { method: 'POST', body: { files, source }, timeout: 120000 }),

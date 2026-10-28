@@ -39,3 +39,4 @@
 
 ## 协调记录
 （要动对方名下文件时在这里写：日期、谁、改哪个文件、为什么）
+- 2026-10-29 Claude：云端提醒改了 `src/agent/tools.js`（只动定时任务那几个工具，加 update_schedule）、`src/agent/skillCatalog.js`（定时任务技能说明）、`src/ui/transcript.js` / `src/core/formDirector.js`（各加一个工具名）、`server/taskRunner.mjs`（SERVER_BLOCKED 去掉定时工具、ctx 加 scheduleHost）、`server/serverMode.mjs`（定时任务接口）、`src/core/serverClient.js`（定时任务方法）。

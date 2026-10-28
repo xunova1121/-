@@ -146,7 +146,7 @@ const TOOL_LABEL = {
   update_plan: '更新清单', delegate_task: '交给分身', find_files: '找文件', search_in_files: '搜内容',
   web_search: '联网搜索', deep_research: '深度调研', get_current_time: '读取时间', get_weather: '查天气', get_sports_scores: '查赛程比分', get_local_metrics: '读取系统状态',
   generate_image: '画图', generate_video: '生成视频', copy_skill_file: '复制技能文件', show_image: '显示图片',
-  use_skill: '使用技能', read_skill_file: '读取技能文件', schedule_task: '创建定时任务', list_schedules: '查看定时任务', cancel_schedule: '删除定时任务', core_memory_update: '更新核心记忆',
+  use_skill: '使用技能', read_skill_file: '读取技能文件', schedule_task: '创建定时任务', list_schedules: '查看定时任务', cancel_schedule: '删除定时任务', update_schedule: '修改定时任务', core_memory_update: '更新核心记忆',
   computer_list_dir: '查看文件夹', computer_read_file: '读取电脑文件', computer_write_file: '写入电脑文件', computer_save_from_workspace: '保存到电脑',
   computer_move: '移动 / 重命名', computer_copy: '复制文件', computer_trash: '移到回收站', computer_search: '搜索文件', computer_open: '打开',
   computer_run: '运行命令', computer_screenshot: '截屏', computer_look: '看屏幕', computer_click: '点击', computer_type: '键盘输入', computer_key: '按键', computer_scroll: '滚动', computer_drag: '拖动', clipboard_read: '读剪贴板', clipboard_write: '写剪贴板', computer_notify: '系统通知'

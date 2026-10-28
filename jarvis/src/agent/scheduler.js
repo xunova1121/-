@@ -105,9 +105,16 @@ async function saveAll(items) {
   await kv.put({ id: KEY, items });
 }
 
+/** 同一件事、同一个时间：算重复（用户说两遍、模型调两次都不该建出两个提醒） */
+const sameWhen = (a, b) => a.kind === b.kind && ['time', 'weekday', 'at', 'everyMinutes'].every((k) => (a[k] ?? null) === (b[k] ?? null));
+export const isDuplicate = (a, b) => a.enabled !== false && String(a.prompt || '').trim() === String(b.prompt || '').trim() && sameWhen(a, b);
+
 export async function upsert(input) {
   const items = await list();
   const old = items.find((x) => x.id === input.id);
+  // 新建时已有一模一样的（同指令、同时间、启用中）：不再建，返回原来那个
+  const twin = !old && items.find((x) => isDuplicate(x, input));
+  if (twin) return { ...twin, duplicate: true };
   const s = {
     id: input.id || uid('sch'),
     title: String(input.title || '').trim().slice(0, 40) || '定时任务',
@@ -134,6 +141,19 @@ export async function upsert(input) {
   if (s.kind === 'once' && !s.nextRun && !old) throw new Error('这个时间已经过去了');
   await saveAll(old ? items.map((x) => (x.id === s.id ? s : x)) : [...items, s]);
   return s;
+}
+
+/**
+ * 修改已有任务：只改给出的字段（时间、指令、名称、启停），其余照旧；时间改了重新排下一次
+ * @returns {Promise<object|null>} 找不到返回 null
+ */
+export async function update(id, patch = {}) {
+  const old = (await list()).find((x) => x.id === id);
+  if (!old) return null;
+  const when = patch.when ? parseWhen(patch.when) : null;
+  const timing = when ? { kind: when.kind, time: when.time, weekday: when.weekday, at: when.at, everyMinutes: when.everyMinutes } : {};
+  const fields = Object.fromEntries(['title', 'prompt', 'enabled', 'unattended'].filter((k) => patch[k] !== undefined && patch[k] !== null && patch[k] !== '').map((k) => [k, patch[k]]));
+  return upsert({ ...old, ...timing, ...fields, id });
 }
 
 export async function remove(id) {
