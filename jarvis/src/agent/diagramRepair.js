@@ -49,6 +49,8 @@ function cleanNode(node, notes) {
   if (next.icon !== undefined && !DIAGRAM_ICONS.includes(next.icon)) delete next.icon;
   if (next.accent !== undefined && !['orange', 'blue', 'green'].includes(next.accent)) delete next.accent;
   if (next.badge && chars(next.badge).length > 28) next.badge = cut(next.badge, 28);
+  // 要点写成纯文字（模型常这样写）：转成 { text }，不当错误
+  if (Array.isArray(next.bullets)) next.bullets = next.bullets.map((b) => (typeof b === 'string' ? { text: cut(b, 40) } : b && typeof b === 'object' && b.text ? { ...b, ...(b.icon && !DIAGRAM_ICONS.includes(b.icon) && { icon: undefined }) } : b)).map((b) => (b && b.icon === undefined ? { text: b.text } : b));
   if (next.bullets !== undefined && (!Array.isArray(next.bullets) || next.bullets.length < 2 || next.bullets.length > 5)) {
     const list = Array.isArray(next.bullets) ? next.bullets : [next.bullets];
     if (list.length > 5) {
@@ -82,6 +84,15 @@ function repairLayer(layer, notes) {
   if (kind === 'cards' && nodes.length > 12 && nodes.length <= 18 && !nodes.some((n) => n.detail || isCard(n))) {
     notes.push(`「${layer.title}」${nodes.length}个模块，改为网格`);
     kind = 'grid';
+  }
+  // 通栏左侧标题位只有一行约9个字：括号里的说明挪进正文，标题仍放不下就整句挪进正文、标题留空位前半句
+  if (kind === 'band' && nodes.length === 1 && chars(layer.title).length > 9) {
+    const [, head, note] = String(layer.title).match(/^(.*?)\s*[（(](.*)[)）]\s*$/) || [null, layer.title, ''];
+    const fits = chars(head).length <= 9;
+    base.title = fits ? head : chars(head).slice(0, 8).join('');
+    const moved = [fits ? '' : layer.title, note].filter(Boolean).join('，');
+    if (moved) nodes[0] = { ...nodes[0], detail: cut([moved, nodes[0].detail].filter(Boolean).join('：'), 160) };
+    notes.push(`通栏标题“${layer.title}”放不下一行，${note ? '括号说明' : '完整标题'}已挪进正文`);
   }
   const fixed = nodes.map((n) => (kind === 'band' || kind === 'cards' ? flatten(n, notes, kind === 'cards') : kind === 'columns' ? n : flatten(n, notes)));
   const max = kind === 'grid' || kind === 'catalog' ? 18 : 12;

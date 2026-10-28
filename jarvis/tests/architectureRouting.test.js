@@ -120,3 +120,33 @@ describe('普通架构图：去掉跨层连线、过程文件不当成果、.doc
     await expect(search.run({ path: '上传/真老文件.doc', query: '任意' })).rejects.toHaveProperty('code', 'DOCUMENT_NAVIGATION');
   });
 });
+
+// 用户 2026-10-29 给的参考图（三端主卡 + 带字箭头 + 反馈条 + 平台分组 + 底座 + 安全通栏）：现有零件照“好看的版式”填就能出图
+describe('参考风格：按 DIAGRAM_PLANNING 的版式填，能直接出图', () => {
+  const c = (id, title, o = {}) => ({ id, title, ...o });
+  const input = {
+    path: '图/参考风格.svg', title: '项目总体架构图', direction: 'top-down', design: { theme: 'gov-blue', message: '平台统筹 · 三端协同 · 感知联动' },
+    layers: [
+      { title: '界面展示层', kind: 'columns', nodes: [c('d1', '大屏', { detail: '全域态势与指挥' }), c('d2', 'PC', { detail: '研判与办案' }), c('d3', '手机', { detail: '接单与回传' })] },
+      { title: '业务应用层', kind: 'cards', nodes: [
+        c('w', '预警端', { icon: 'triangle-alert', accent: 'orange', bullets: ['多源感知与目标识别', '轨迹还原与信息比对', '人工复核后分级推送'], badge: '智能识别研判' }),
+        c('z', '指挥端', { icon: 'map-pin', accent: 'blue', bullets: ['一张图汇聚事件和力量', '匹配附近可用人员船艇', '签收处置全程跟踪'], badge: '就近调度派单' }),
+        c('e', '执法端', { icon: 'scale', accent: 'green', bullets: ['移动核查与现场取证', '法规检索与案例辅助', '人工审核与办案监督'], badge: '智能辅助办案' })] },
+      { title: '处置反馈', kind: 'band', nodes: [c('fb', '闭环', { detail: '事件回溯 · 结果归档 · 数据回流 → 支撑下次研判' })] },
+      { title: '平台业务模块', kind: 'grid', group: '综合管理平台', nodes: ['门户', '指挥驾驶舱', '智能预警', '重点人员', '巡查执勤', '指挥调度', '队伍管理', '资源采集'].map((t, i) => c('m' + i, t)) },
+      { title: '平台能力层', kind: 'columns', group: '综合管理平台', nodes: [c('p1', '业务能力中心', { icon: 'network', subtitle: 'GIS / 事件 / 流程' }), c('p2', '数据能力', { icon: 'database', subtitle: '接入 / 治理 / 共享' }), c('p3', 'AI中台', { icon: 'cpu', subtitle: '算法 / 场景识别' })] },
+      { title: '基础支撑', kind: 'columns', nodes: [c('b1', '终端感知层', { subtitle: '采集现场数据', detail: '云台32套 · 雷达12套' }), c('b2', '网络传输层', { subtitle: '连接现场与平台', detail: '融合通信6套' }), c('b3', '云基础设施层', { subtitle: '承载应用与数据', detail: '计算存储 · 数据库' })] },
+      { title: '安全保障（贯穿各层）', kind: 'band', nodes: [c('sec', '安全保障', { detail: '边界与网络安全 · 国密与密评 · 等保三级' })] }
+    ],
+    edges: [{ from: 'w', to: 'z', label: '结构化线索' }, { from: 'z', to: 'e', label: '任务工单' }, { from: 'p2', to: 'w' }]
+  };
+
+  it('三端主卡带图标 / 要点 / 底部色条 / 带字箭头，长通栏标题挪进正文，跨层线省略', async () => {
+    const out = await createDiagramTool({}, { requireArchitecture: 'strict' }).run(input, { rawRequestText: '根据文档做一个架构图' });
+    const receipt = JSON.parse(out.slice(out.indexOf('\n') + 1, out.lastIndexOf('}') + 1));
+    expect(receipt.layoutAdjusted.join()).toMatch(/括号说明已挪进正文[\s\S]*跨层连线 1 条已省略/);
+    const { model } = layoutWithRepair(input, { architecture: true });
+    expect(model.edges.map((e) => e.label)).toEqual(['结构化线索', '任务工单']);
+    expect(model.layers.find((l) => l.title === '业务应用层').nodes.every((n) => n.icon && n.badge && n.bullets.every((b) => typeof b.text === 'string'))).toBe(true);
+  });
+});

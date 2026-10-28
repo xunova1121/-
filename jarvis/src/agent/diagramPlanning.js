@@ -8,7 +8,9 @@ export const STRICT_ARCHITECTURE = /逐[条项一](?:核对|对应|核实|审查
 export const strictArchitecture = (text) => STRICT_ARCHITECTURE.test(String(text || ''));
 
 export const DIAGRAM_PLANNING =
-  '画总体架构图 / 项目架构图：直接用 create_diagram 出图。先用 read_file 读原始材料（长文件先 view=sections 看目录，再读建设内容、技术要求等相关章节），按 展示与用户 → 业务应用（各业务端用卡片，端与端之间用带字箭头）→ 平台（业务模块用 grid，能力中心用卡片或 columns，同一平台的层用同一 group）→ 感知与数据 → 终端 / 网络 / 云（columns）→ 安全保障（band）排层；材料里的数量、系统名、设备型号逐项写进标题、说明或要点，不压成一句概括；材料没有的层不硬凑。政企项目用 gov-blue 主题，direction 用 top-down。只画主要关系，不必把所有关系都连线。create_diagram 报错时按报错删减或拆分后再画一次，一定要交出图。contentPlan 可不填。' +
+  '画总体架构图 / 项目架构图：直接用 create_diagram 出图。先用 read_file 读原始材料（长文件先 view=sections 看目录，再读建设内容、技术要求等相关章节）。材料里的数量、系统名、设备型号逐项写进标题、说明或要点，不压成一句概括；材料没有的层不硬凑。design.theme=gov-blue，direction=top-down，design.message 写一句主线（如“平台统筹 · 三端协同 · 感知联动”）。' +
+  '好看的版式照这个填（自上而下）：①展示层 columns 3～4个（title=大屏/PC/手机，detail=用途）；②业务应用层 cards 2～4张主卡，每张都给 icon、accent（orange/blue/green 轮换）、bullets 3～4条 {text}（每条≤14字）、badge=这一端的核心能力（≤8字），相邻主卡之间连 edges 并写 label（≤6字，如“结构化线索”“任务工单”）；③闭环反馈用 band（层标题≤6字如“处置反馈”，节点 detail 写“事件回溯 · 结果归档 · 数据回流 → 支撑下次研判”）；④平台的几层用同一 group（写平台名）：业务模块 grid（8～18个只写标题），能力中心 columns（2～4个，icon + subtitle 用“/”分隔要点），感知与协同 columns；⑤基础层 columns 3个（终端感知 / 网络传输 / 云基础设施：subtitle=作用，detail=设备和数量）；⑥安全保障 band 放最后（层标题≤6字）。' +
+  '节点标题≤10字、说明≤40字。跨层不连线（上下排列就是支撑关系，连了会交叉），只有同层相邻主卡用带字箭头。版式参数不合规则时程序会自动调整并在 layoutAdjusted 里说明，交付时告诉用户；仍报错就按报错删减或拆分后再画一次，一定要交出图。contentPlan 可不填。' +
   '只有用户明确要求“逐条核对需求原文 / 严格审查”时才用 build_architecture(files,request,directory,views) 严格流水线，失败只用 jobPath 继续。' +
   '已有 architecturePath 时交 create_diagram 复用；明确业务 failed 须读 reviewPath，用 revise_architecture_plan 按意见定点修订。';
 
