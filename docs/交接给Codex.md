@@ -1,3 +1,13 @@
+## 已发布1.0.319：A1原文证据编号；下一步A2业务底稿
+
+- 发布：https://github.com/xunova1121/-/releases/tag/desktop-v1.0.319 。APK：https://github.com/xunova1121/-/releases/download/desktop-v1.0.319/Jarvis-1.0.319-android.apk 。先“立即更新服务器”再装APK；未直接登录或更新用户生产服务器。
+- 发布源码c656c3b58da4e6c04730f44484ebc01f86a943f1，CI40626543190四任务success。201文件1744项单测、lint及全部原门禁通过，新增原文取号→编号底稿→四格式/原生PPT真实产物通过，网页174/174；WebGL原300ms门槛保持，实测app57ms/总282ms。
+- 实际下载APK/服务器包大小、SHA256匹配GitHub；APK版本、新工具/编号/冲突校验代码标记确认；v2证书指纹延续旧版（未另用apksigner独立验签）。服务器VERSION/最新JSON一致，src/server/shared共412文件逐字节匹配发布提交。
+- APK SHA256：7ec22c61d6bad155227e405f501b1a87292aa6c72d02adadd34edae017ef24f7；服务器SHA256：94ab08c264e429959bcd3eedd82b76fa6cb8fce2b74df2ae143b5f0bd2fac19d。
+- A1工程实现和合成验收完成，支持分页/过滤、当前来源重读核号、原文回填与旧手填兼容；严格业务/需求/导出门槛保留。详见`docs/架构证据编号第1步-20261028.md`及§7自查。
+- 真实客户原件、服务商模型与安卓/Windows真机未验收。架构总体目标仍未完成；下一步A2业务分层/系统归属/关系与闭环，随后A3版式/A4稳定交付/A5真实材料验收。其他领域待办保持，不因发版写成全部完成。
+- 本条和剩余计划更新仅文档[skip ci]，不再触发发布。
+
 ## A1架构证据编号已完成本地检查，待正式发布CI（2026-10-28）
 
 按用户要求顺序推进。新增prepare_architecture_evidence，程序从当前来源取连续原文编号，plan_architecture逐项引用并重读核验回填；旧手填、原审查/恢复/原生PPT门槛保持。201文件1744项、lint、build及真实原文取号到四格式/原生PPT通过；测试/自查见`docs/架构证据编号第1步-20261028.md`。A2业务分层/A3版式/A5客户验收仍未完成，未声称真实客户图成功。原件/真实模型/安卓Windows真机未测。正式发布和下载包校验随后记录。
