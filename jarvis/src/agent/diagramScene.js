@@ -111,7 +111,7 @@ export function diagramScene(model, design = {}) {
     const stroke = edge.type
       ? model.monochrome
         ? colors.accent
-        : { supports: '#6683a4', dataflow: '#00856b', workflow: '#087fca', feedback: '#bd6200' }[edge.type]
+        : { supports: '#6683a4', dataflow: '#00856b', workflow: '#087fca', feedback: '#bd6200', integration: '#64748b' }[edge.type]
       : edge.label
         ? DIAGRAM_ACCENTS[from.accent] || colors.accent
         : '#8291ad';
@@ -122,12 +122,12 @@ export function diagramScene(model, design = {}) {
       to: edge.to,
       stroke,
       strokeWidth: edge.label ? 3 : 1.6,
-      arrow: true,
+      arrow: edge.type !== 'integration',
       ...(edge.type && {
         relationType: edge.type,
         meaning: edge.meaning,
         relationId: edge.relationId,
-        ...(edge.type === 'supports' ? { dash: 'dash' } : edge.type === 'feedback' ? { dash: 'dot' } : {})
+        ...(['supports', 'integration'].includes(edge.type) ? { dash: 'dash' } : edge.type === 'feedback' ? { dash: 'dot' } : {})
       })
     });
     if (edge.labelPosition)
@@ -139,17 +139,18 @@ export function diagramScene(model, design = {}) {
     }
   }
   if (model.semanticRouting) {
+    const integrationNote = model.edges.some(edge => edge.type === 'integration') ? '；无箭头虚线仅表示应用集成，不表示数据流或依赖方向' : '';
     const notes = {
-      overview: '总览：容器或编号表示归属；文字说明支撑；箭头表示业务主链；数据传输见数据流视图' + (model.layers.some(layer => layer.kind === 'grid') ? '；网格列名称，职责见底稿' : ''),
+      overview: '总览：容器或编号表示归属；文字说明支撑；箭头表示业务主链；数据传输见数据流视图' + (model.layers.some(layer => ['grid', 'catalog'].includes(layer.kind)) ? '；网格列名称，职责见底稿' : ''),
       workflow: '业务闭环视图：实线为业务推进，点线为已登记反馈；不表示数据传输或支撑依赖',
       dataflow: '数据流视图：箭头只表示已登记的数据传输；业务过程与支撑依赖见其他视图'
     };
     elements.push(
       text(
-        notes[model.architectureView] ||
+        (notes[model.architectureView] ||
           (model.monochrome
             ? '业务/数据流为实线，支撑为虚线，反馈为点线；具体关系见底稿表；所属用容器或系统编号表达'
-            : '关系类型：蓝色业务流 · 绿色数据流 · 灰蓝虚线支撑 · 橙色点线反馈；所属用容器或系统编号表达'),
+            : '关系类型：蓝色业务流 · 绿色数据流 · 灰蓝虚线支撑 · 橙色点线反馈；所属用容器或系统编号表达')) + integrationNote,
         48,
         model.height - 18,
         1344,
@@ -270,6 +271,8 @@ export function validateScene(scene) {
       throw invalid('设计稿矩形尺寸无效');
     if (item.type === 'path' && (!color(item.stroke) || !Number.isFinite(item.strokeWidth) || item.strokeWidth <= 0 || item.strokeWidth > 10))
       throw invalid('设计稿连线无效');
+    if (item.type === 'path' && item.relationType === 'integration' && (item.arrow !== false || item.dash !== 'dash'))
+      throw invalid('应用集成必须保持无箭头虚线，不得改画成有方向的传输或支撑');
     const points =
       item.type === 'path'
         ? item.points

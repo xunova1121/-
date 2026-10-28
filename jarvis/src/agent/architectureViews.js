@@ -6,7 +6,7 @@ export function architectureView(plan, input) {
   if (!['overview', 'workflow', 'dataflow', 'relations'].includes(view)) throw invalid('视图类型无效');
   const byId = new Map(plan.entities.map((item) => [item.id, item]));
   const all = plan.relations.map((link, index) => ({ ...link, id: 'relation-' + index }));
-  const coverage = all.map((link) => ({ id: link.id, type: link.type, display: link.type === 'contains' ? 'ownership' : 'arrow' }));
+  const coverage = all.map((link) => ({ id: link.id, type: link.type, display: link.type === 'contains' ? 'ownership' : link.type === 'integration' ? 'undirected_link' : 'arrow' }));
   const result = { ...input, view, relationCoverage: coverage };
   const findNode = (id) => result.layers.flatMap((layer) => layer.nodes).find((node) => node.id === id);
   if (view === 'overview') {
@@ -22,10 +22,11 @@ export function architectureView(plan, input) {
     const feedback = all.filter((link) => link.type === 'feedback');
     if (feedback.length) {
       const detail = feedback.map((link) => byId.get(link.from).title + ' → ' + byId.get(link.to).title + '：' + link.meaning).join('；');
-      if (detail.length > 160 || result.layers.length >= 8) throw invalid('反馈闭环条超出版面，请用系统容器归拢层级或拆业务流程图，未丢弃反馈关系');
+      if (detail.length > 160) throw invalid('反馈闭环条超出版面，请用系统容器归拢层级或拆业务流程图，未丢弃反馈关系');
       const index = result.layers.findLastIndex((layer) => layer.role === 'application');
       const parent = result.layers[index];
-      result.layers.splice(index + 1, 0, {
+      if (result.layers.length >= 8 && parent) parent.footer = { title: '反馈闭环', detail, relationIds: feedback.map(link => link.id) };
+      else result.layers.splice(index + 1, 0, {
         title: '反馈闭环',
         role: 'application',
         kind: 'band',
@@ -33,12 +34,12 @@ export function architectureView(plan, input) {
         nodes: [{ id: '__architecture_feedback__', title: '反馈关系', detail }]
       });
     }
-    result.edges = result.edges.filter((edge) => edge.type === 'workflow');
+    result.edges = result.edges.filter((edge) => ['workflow', 'integration'].includes(edge.type));
     for (const item of coverage)
       if (item.type === 'supports') item.display = 'support_text';
       else if (item.type === 'feedback') item.display = 'feedback_band';
       else if (item.type === 'dataflow') item.display = 'dataflow_view';
-    result.design = { ...result.design, audience: '总体架构：组成、归属、支撑与业务闭环；数据传输见数据流视图' + (result.layers.some(layer => layer.kind === 'grid') ? '；网格列名称，职责见业务底稿' : '') };
+    result.design = { ...result.design, audience: '总体架构：组成、归属、支撑与业务闭环；数据传输见数据流视图' + (result.layers.some(layer => ['grid', 'catalog'].includes(layer.kind)) ? '；网格列名称，职责见业务底稿' : '') };
   } else if (view === 'workflow' || view === 'dataflow') {
     const selected = all.filter((link) => (view === 'workflow' ? ['workflow', 'feedback'].includes(link.type) : link.type === 'dataflow'));
     if (!selected.length) throw invalid('底稿没有登记此视图的关系，请先补关系，不能编造连接');
@@ -60,7 +61,7 @@ export function architectureView(plan, input) {
     }
     result.edges = result.edges
       .filter((edge) => selected.some((link) => link.id === edge.relationId))
-      .map((edge) => ({ ...edge, label: edge.meaning.length <= 12 ? edge.meaning : view === 'workflow' ? '业务流' : '数据流' }));
+      .map((edge) => ({ ...edge, label: view === 'dataflow' ? edge.label || '数据流' : edge.meaning.length <= 12 ? edge.meaning : '业务流' }));
     const selectedIds = new Set(selected.map((link) => link.id));
     for (const item of coverage)
       if (!selectedIds.has(item.id) && item.type !== 'contains') item.display = item.type === 'dataflow' ? 'dataflow_view' : 'overview_view';

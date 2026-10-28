@@ -6,6 +6,8 @@ import { diagramDigest } from './diagramExport.js';
 import { checkSources } from './diagramSources.js';
 import { ARCHITECTURE_KINDS } from './architecturePlan.js';
 import { architectureReviewStatus } from './architectureReview.js';
+import { architectureFlowLabel } from './architectureFlowLabel.js';
+import { isCatalogModule } from './diagramCatalog.js';
 const invalid = (message) => Object.assign(new Error(message), { code: 'ARCHITECTURE_PROJECTION', kind: 'input' });
 const includes = (text, value) => String(text).replace(/\s+/g, '').includes(String(value).replace(/\s+/g, ''));
 const labels = {
@@ -126,6 +128,7 @@ export function projectArchitecture(bundle, input) {
     return plan.relations.some((link) => link.type === 'contains' && link.to === child && (link.from === parent || belongs(link.from, parent, visited)));
   };
   for (const layer of result.layers) {
+    if (layer.footer !== undefined) throw invalid('架构反馈条由已审关系生成，不能由版式自行填写');
     const matches = layer.group ? containers.filter((item) => item.title === layer.group) : [];
     if (matches.length > 1) throw invalid('同名容器无法确定所属，请在底稿使用有业务限定的名称');
     const group = matches[0];
@@ -156,7 +159,7 @@ export function projectArchitecture(bundle, input) {
       if (!entity || drawn.has(node.id) || entity.kind !== role) throw invalid('对象重复、不在底稿中或层职责不匹配：' + node.id);
       if (!includes(node.title, entity.title)) throw invalid('图中对象名称必须保留底稿名称：' + entity.title);
       // 网格只表达组成，职责留在底稿；有正文的卡片必须保留已审职责，不允许排版时另写一套业务。
-      if (layer.kind !== 'grid') {
+      if (layer.kind !== 'grid' && !isCatalogModule(layer, node)) {
         const visible = [node.detail, node.subtitle, ...(node.bullets || []).map((item) => item.text)].filter(Boolean).join(' ');
         if (!includes(visible, entity.responsibility)) {
           if (!node.detail) node.detail = entity.responsibility;
@@ -179,7 +182,8 @@ export function projectArchitecture(bundle, input) {
         type: link.type,
         meaning: link.meaning,
         relationId: 'relation-' + link.relationIndex,
-        ...(link.type === 'workflow' && { label: link.meaning.length <= 12 ? link.meaning : '业务流' })
+        ...(link.type === 'dataflow' && { label: architectureFlowLabel(plan, link.relationIndex) }),
+        ...(['workflow', 'integration'].includes(link.type) && { label: link.meaning.length <= 12 ? link.meaning : link.type === 'integration' ? '应用集成' : '业务流' })
       };
     });
   for (const container of containers) {

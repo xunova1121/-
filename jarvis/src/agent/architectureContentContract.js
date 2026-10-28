@@ -1,3 +1,4 @@
+import { checkArchitectureCorrectionFidelity, checkArchitectureReplacementFidelity } from './architectureCorrectionFidelity.js';
 const groups = { entities: 60, relations: 100, requirements: 80 };
 const failure = (message, field, action) => Object.assign(new Error(message), {
   code: 'ARCHITECTURE_CONTENT_SCHEMA', kind: 'input', diagnostics: [{ field, stage: 'format', action }]
@@ -34,19 +35,25 @@ export function normalizeArchitectureContent(value) {
   return { content, adapters: adapted ? ['objects->entities'] : [] };
 }
 /** 续改只替换明确的现有行，不删项/添项；完成后仍过原文、结构、业务和导出全部门槛。 */
-export function applyArchitectureCorrections(response, previousContent) {
-  if (!object(response) || !Object.hasOwn(response, 'corrections')) return normalizeArchitectureContent(response);
+export function applyArchitectureCorrections(response, previousContent, options = {}) {
+  if (!object(response) || !Object.hasOwn(response, 'corrections')) {
+    const result = normalizeArchitectureContent(response);
+    const correctionAudit = options.strictTopology && previousContent ? checkArchitectureReplacementFidelity(normalizeArchitectureContent(previousContent).content, result.content) : [];
+    return { ...result, correctionAudit };
+  }
   if (!previousContent || Object.keys(response).length !== 1 || !Array.isArray(response.corrections) || !response.corrections.length || response.corrections.length > 240)
     throw failure('局部修复需要已有完整内容及1～240项corrections，不混入完整稿', 'corrections', '首次返回完整内容；续改仅返回corrections数组');
   const { content, adapters } = normalizeArchitectureContent(previousContent);
   const next = structuredClone(content), touched = new Set();
   for (const patch of response.corrections) {
     const key = patch?.group + ':' + patch?.index;
-    if (!object(patch) || Object.keys(patch).some(key => !['group', 'index', 'value'].includes(key)) || !Object.hasOwn(groups, patch.group) || !Number.isInteger(patch.index) || patch.index < 0 || !next[patch.group][patch.index] || !object(patch.value) || touched.has(key))
+    const allowed = options.strictTopology ? ['group', 'index', 'value', 'expected', 'reason'] : ['group', 'index', 'value'];
+    if (!object(patch) || Object.keys(patch).some(key => !allowed.includes(key)) || !Object.hasOwn(groups, patch.group) || !Number.isInteger(patch.index) || patch.index < 0 || !Object.hasOwn(next[patch.group], patch.index) || !object(patch.value) || touched.has(key))
       throw failure('局部修复位置无效、重复或包含删除/新增操作', 'corrections', '按现有group/index替换完整value；不能删行、增加行或重复修同一位置');
     touched.add(key);
     next[patch.group][patch.index] = structuredClone(patch.value);
   }
   const checked = normalizeArchitectureContent(next);
-  return { content: checked.content, adapters };
+  const correctionAudit = options.strictTopology ? checkArchitectureCorrectionFidelity(content, checked.content, response.corrections) : [];
+  return { content: checked.content, adapters, correctionAudit };
 }

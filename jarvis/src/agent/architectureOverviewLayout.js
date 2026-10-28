@@ -25,6 +25,22 @@ export function overviewApplicationSections(values, plan, group, view, node) {
   ];
 }
 
+/** 层数紧张时在同一个业务职责层归拢主线、关联卡片和组成，不删除对象或它们的关系。 */
+export function overviewApplicationCatalog(values, plan, group, view, node) {
+  if (view !== 'overview' || values.length < 8 || values.length > 18) return null;
+  const protectedIds = new Set(plan.relations.filter(item => ['workflow', 'feedback', 'integration'].includes(item.type)).flatMap(item => [item.from, item.to]));
+  for (const relation of plan.relations) if (relation.type === 'supports') protectedIds.add(relation.from);
+  const detailed = workflowOrder(values.filter(item => protectedIds.has(item.id)), plan.relations);
+  if (!detailed || detailed.length > 15) return null;
+  const primary = detailed.slice(0, 3), related = detailed.slice(3);
+  const modules = values.filter(item => !protectedIds.has(item.id));
+  return [{
+    title: '业务应用', role: 'application', kind: 'catalog', ...(group && { group: group.title }),
+    catalog: { primary: primary.map(item => item.id), detailed: related.map(item => item.id) },
+    nodes: [...primary.map((item, index) => primaryCard(item, index, node)), ...related.map(node), ...modules.map(item => ({ id: item.id, title: item.title }))]
+  }];
+}
+
 /** 仅用已登记的业务推进排序，反馈不参与；循环交原审查处理，不猜顺序。 */
 export function workflowOrder(values, relations) {
   const ids = new Set(values.map(item => item.id));

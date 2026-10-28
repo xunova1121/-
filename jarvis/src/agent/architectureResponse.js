@@ -3,6 +3,7 @@ import { architectureReferences } from './architectureReferences.js';
 import { WORKFLOW_CONTENT_PROMPT } from './architectureWorkflowInput.js';
 import { withWebDeadline } from './retrievalBudget.js';
 import { throwControl } from '../core/networkRequest.js';
+import { loadWorkflowContent, mapWorkflowDiagnostics } from './architectureWorkflowIntegrity.js';
 const invalid = (message, code = 'ARCHITECTURE_CONTENT_FORMAT') =>
   Object.assign(new Error(message), {
     code,
@@ -28,9 +29,7 @@ export async function architectureContentResponse(ctx, state, jobPath, materials
     if (blob.size > 320000) throw invalid('待修格式回复超限');
     pendingText = await blob.text();
   } else if (state.contentPath) {
-    const blob = await ws.readBlob(state.contentPath);
-    if (blob.size > 320000) throw invalid('历史业务内容超限');
-    previousContent = JSON.parse(await blob.text());
+    previousContent = await loadWorkflowContent(state, jobPath);
   }
   let completeDiagnostics = null;
   if (pendingText === null && state.lastError?.issuesPath) {
@@ -39,6 +38,8 @@ export async function architectureContentResponse(ctx, state, jobPath, materials
     const blob = await ws.readBlob(state.lastError.issuesPath);
     if (blob.size > 1000000) throw invalid('架构诊断超过1MB');
     completeDiagnostics = JSON.parse(await blob.text());
+    // 私有正式报告保留原始索引；仅模型纠错副本回到原始内容索引，避免拆行后修错条款。
+    if (/\.review\.json$/.test(state.lastError.issuesPath)) completeDiagnostics = mapWorkflowDiagnostics(completeDiagnostics, state.requirementSourceIndices);
   }
   const prompt = JSON.stringify(
     pendingText === null
@@ -77,8 +78,8 @@ export async function architectureContentResponse(ctx, state, jobPath, materials
   const base = jobPath.replace('架构任务/', '架构回复/').replace(/\.json$/, '') + '.response-' + state.attempts;
   const responsePath = base + '.txt',
     metaPath = base + '.meta.json';
-  await ws.write(responsePath, captured);
-  await ws.write(
+  await ws.writeArchitectureState(responsePath, captured);
+  await ws.writeArchitectureState(
     metaPath,
     JSON.stringify({
       attempt: state.attempts,

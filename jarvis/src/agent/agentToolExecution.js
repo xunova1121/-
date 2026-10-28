@@ -5,6 +5,7 @@ import { validateArgs } from './tools.js';
 import { withWebDeadline } from './retrievalBudget.js';
 import { throwControl } from '../core/networkRequest.js';
 import { errorKind } from '../core/suggest.js';
+import { assertArchitectureToolCall } from './architectureStateProtection.js';
 
 /** 原顺序执行副作用，仅将连续的只读调用并行；检查点先于操作落盘。 */
 export async function executeToolCalls(
@@ -58,6 +59,7 @@ export async function executeToolCalls(
       if (scopeIssue) throw Object.assign(new Error(scopeIssue), { code: 'TASK_SCOPE_AFTER_DENIAL', kind: 'input' });
       const bad = c.parseError || validateArgs(tool, c.args);
       if (bad) throw Object.assign(new Error(`${bad}。请检查参数后重新调用。`), isDiagramTool(c.name) ? { code: 'DIAGRAM_INPUT', kind: 'input' } : {});
+      await assertArchitectureToolCall(c.name, c.args, { signal });
       // 文件已验过可用（能读回、没报错、之后没改过）且已经核实过一次：不再读，免得“读取 → 核实 → 再核实”绕圈
       if (review.rereadBlocked?.(c.name, c.args)) {
         output = `${c.args.path} 本轮已经核实过：能正常读回，没有报错，之后也没改过。不需要再读，直接把结果交给用户；没查到的内容（如“待查”）在回答里说明即可。`;

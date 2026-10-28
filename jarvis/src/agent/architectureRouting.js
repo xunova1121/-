@@ -9,14 +9,20 @@ const segmentHits = (a, b, box) =>
 function obstacles(model) {
   const result = [];
   for (const layer of model.layers) {
+    // 组合层仍是一个职责层；内部标题和反馈条也必须参与同一避障，不能靠未登记的空隙穿过去。
+    if (layer.kind === 'catalog') for (const part of layer.parts || []) {
+      if (part.sideHeading) result.push({ x: 68, y: part.y + 10, width: 154, height: Math.min(part.height, 90) });
+      else { const width = Math.min(1344, measure(part.title, 17)); result.push({ x: (1440 - width) / 2, y: part.y + 5, width, height: 24 }); }
+    }
+    if (layer.footerBox) result.push({ ...layer.footerBox });
     if (layer.kind === 'band') {
       for (const node of layer.nodes) {
         const lines = diagramLines([node.title, node.detail].filter(Boolean).join(' · '), (node.width - 32) / 15, 2);
         result.push({ x: node.x + 16, y: node.y + 12, width: Math.max(...lines.map((line) => measure(line, 15))), height: lines.length * 21 });
       }
     } else result.push(...layer.nodes.map((node) => ({ ...node, obstacleId: node.id })));
-    if (layer.sideHeading) result.push({ x: 68, y: layer.y + 10, width: 154, height: Math.min(layer.height, 90) });
-    else {
+    if (layer.kind !== 'catalog' && layer.sideHeading) result.push({ x: 68, y: layer.y + 10, width: 154, height: Math.min(layer.height, 90) });
+    else if (layer.kind !== 'catalog') {
       const width = Math.min(1344, measure(layer.title, 17));
       result.push({ x: (1440 - width) / 2, y: layer.y + 5, width, height: 24 });
     }

@@ -187,6 +187,8 @@ jobs:
         run: npm run lint
       - name: 验证评测入口与耗时统计
         run: npm run eval:check
+      - name: 验证架构实测固定版本、隔离与实际文件验收
+        run: node --test evals/architecture-runtime-checks.mjs evals/architecture-server-checks.mjs evals/architecture-server-acceptance-checks.mjs
       - name: 验证多文件项目隔离执行与取消
         run: |
           docker pull node:22-bookworm-slim
@@ -259,6 +261,8 @@ jobs:
           node e2e/architecture-workflow.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-objects" objects
           node e2e/architecture-workflow.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-content-repair" content-repair
           node e2e/architecture-workflow.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-review-recovery" review-recovery
+          node e2e/architecture-director.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-director"
+          node e2e/architecture-integration.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-integration"
           node e2e/architecture-package.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-package"
           node e2e/architecture-bends.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-package"
           node e2e/architecture-package.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-parallel" parallel

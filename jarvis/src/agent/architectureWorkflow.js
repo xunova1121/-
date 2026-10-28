@@ -10,6 +10,7 @@ import { createArchitecturePlanTool } from './architectureTool.js';
 import { createArchitecturePackageTool } from './architecturePackage.js';
 import { diagramDigest } from './diagramExport.js';
 import { throwControl } from '../core/networkRequest.js';
+import { loadWorkflowContent, saveWorkflowContent, mapWorkflowDiagnostics } from './architectureWorkflowIntegrity.js';
 const invalid = (message) => Object.assign(new Error(message), { code: 'ARCHITECTURE_WORKFLOW', kind: 'input' });
 /** 文件管理状态；不把正文/草稿写入会话。最多3次内容模型尝试，无自动网络重试。 */
 export function createArchitectureWorkflowTool(ctx) {
@@ -84,40 +85,44 @@ export function createArchitectureWorkflowTool(ctx) {
       )
         throw invalid('视图参数无效');
       const save = async () => {
-        await ws.write(jobPath, JSON.stringify(state));
+        await ws.writeArchitectureState(jobPath, JSON.stringify(state), { signal: execution.signal });
         await execution.checkpoint?.({ type: 'file', path: jobPath });
       };
       const { sources, materials } = await workflowMaterials(state.files, read, execution.signal);
       const hash = await diagramDigest(JSON.stringify(materials));
       if (state.materialHash && state.materialHash !== hash) throw invalid('原件已变化，请新建任务，不能续用旧内容');
-      if (state.terminalFailure) throw workflowStop(state, (state.stage === 'review' ? '业务审查恢复已达上限' : '内容整理已达3次上限') + '；任务保留：' + jobPath);
+      if (state.terminalFailure) throw workflowStop(state, (state.terminalFailure.phase === 'integrity' ? '架构内容完整性核验失败，本任务停止续接' : state.stage === 'review' ? '业务审查恢复已达上限' : '内容整理已达3次上限') + '；任务保留：' + jobPath);
       state.materialHash = hash;
       await save();
       try {
+        // 在模型读取、业务审查或导出之前核对，外部改写不能成为新的可信基线。
+        const previousContent = await loadWorkflowContent(state, jobPath);
         if (state.stage === 'content') {
           const response = await architectureContentResponse(ctx, state, jobPath, materials, save, execution);
-          let previousContent = null;
-          if (state.contentPath) {
-            const blob = await ws.readBlob(state.contentPath);
-            if (blob.size > 320000) throw invalid('历史业务内容超限');
-            previousContent = JSON.parse(await blob.text());
-          }
-          const { content, adapters } = applyArchitectureCorrections(response, previousContent);
-          const contentPath = jobPath.replace(/\.json$/, '.content.json');
-          await ws.write(contentPath, JSON.stringify(content));
-          state.contentPath = contentPath;
-          state.contentAdapters = adapters;
+          // 同一模型等待期间也可能有目录同步/外部编辑，完成后再次校验。
+          await loadWorkflowContent(state, jobPath);
+          const { content, adapters, correctionAudit } = applyArchitectureCorrections(response, previousContent, { strictTopology: true });
+          await saveWorkflowContent(state, jobPath, content, adapters, correctionAudit, execution);
           await save();
-          const input = compileArchitectureContent(content, sources, materials);
+          const compilation = { relationIntents: content.relations.flatMap((row, index) => row.intent || row.data ? [{ index, ...(row.intent && { intent: row.intent }), ...(row.type && { type: row.type }), ...(row.data && { data: row.data }) }] : []) };
+          const input = compileArchitectureContent(content, sources, materials, { onRequirementMap: mapping => {
+            state.requirementSourceIndices = [];
+            for (const row of mapping) for (const index of row.outputIndices) state.requirementSourceIndices[index] = row.sourceIndex;
+            compilation.requirementGroups = mapping.filter(row => row.outputIndices.length > 1).map(({ sourceIndex, outputIndices }) => ({ sourceIndex, outputIndices }));
+          } });
+          await save();
           if (state.views.includes('workflow') && !input.relations.some((row) => ['workflow', 'feedback'].includes(row.type)))
             throw invalid('已要求业务闭环，但内容未登记业务流/反馈关系；应核原文补齐内容，不进入导出阶段');
           if (state.views.includes('dataflow') && !input.relations.some((row) => row.type === 'dataflow'))
             throw invalid('已要求数据流，但内容未登记数据流关系；应核原文补齐内容，不进入导出阶段');
           // 用原校验器一次收齐字段问题，不能为只修一个错反复消耗整份理解请求。
-          validateArchitectureContent(input, materials, state.request);
-          const receipt = JSON.parse(
-            await createArchitecturePlanTool({ ...ctx, readDocument: read }).run(input, { ...execution, rawRequestText: state.request })
-          );
+          try { validateArchitectureContent(input, materials, state.request); }
+          catch (error) { error.diagnostics = mapWorkflowDiagnostics(error.diagnostics, state.requirementSourceIndices); throw error; }
+          let receipt;
+          try {
+            receipt = JSON.parse(await createArchitecturePlanTool({ ...ctx, readDocument: read }).run(input, { ...execution, rawRequestText: state.request, architectureCompilation: compilation, workflowMaterialHash: hash }));
+          } catch (error) { error.diagnostics = mapWorkflowDiagnostics(error.diagnostics, state.requirementSourceIndices); throw error; }
+          await loadWorkflowContent(state, jobPath);
           setWorkflowReview(state, receipt);
           if (!receipt.readyForRender) {
             if (state.stage === 'content' && state.attempts >= 3) throw workflowStop(state, '业务审查指出实质问题，但内容整理已达3次上限');
@@ -135,6 +140,7 @@ export function createArchitectureWorkflowTool(ctx) {
         }
         if (state.stage === 'review') {
           const review = await continueWorkflowReview(ctx, state, execution);
+          await loadWorkflowContent(state, jobPath);
           await save();
           if (!review.readyForRender) {
             if (state.stage === 'review') throw workflowStop(state, '同一底稿业务审查恢复未完成；不重新改写已通过结构检查的内容');
@@ -155,7 +161,7 @@ export function createArchitectureWorkflowTool(ctx) {
         error = await saveWorkflowFailure(error, state, jobPath, save, execution);
         throw Object.assign(error, {
           statePath: jobPath,
-          message: `${error.message}；任务保留：${jobPath}；` + (error.terminal ? '恢复额度已用尽，本任务不再自动续跑，已有文件和真实诊断保留。' : '仅用build_architecture({jobPath})继续，不切换修订工具。')
+          message: `${error.message}；任务保留：${jobPath}；` + (state.terminalFailure?.phase === 'integrity' ? '完整性故障已终止本任务，已有原稿和真实诊断保留。' : error.terminal ? '恢复额度已用尽，本任务不再自动续跑，已有文件和真实诊断保留。' : '仅用build_architecture({jobPath})继续，不切换修订工具。')
         });
       }
     }

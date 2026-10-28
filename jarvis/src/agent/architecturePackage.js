@@ -27,7 +27,7 @@ export function createArchitecturePackageTool(ctx) {
       const save = async () => {
         manifest.completedViews.sort((a, b) => selected.indexOf(a.view) - selected.indexOf(b.view));
         manifest.files = manifest.completedViews.flatMap(item => item.files.map(file => file.path));
-        await workspace.write(manifestPath, JSON.stringify(manifest));
+        await workspace.writeArchitectureState(manifestPath, JSON.stringify(manifest));
         await execution.checkpoint?.({ type: 'file', path: manifestPath });
         ctx.onFileChanged?.(manifestPath);
       };

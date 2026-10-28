@@ -1,4 +1,6 @@
 import {createArchitectureWorkflowTool} from './architectureWorkflow.js';
+import { assertArchitectureMutationBatch } from './architectureStateProtection.js';
+import { architecturePathParts, isArchitectureMetadataPath } from './architectureStateOwnership.js';
 import {createDocumentNavigation} from './documentNavigation.js';
 import {createDocumentFileAccess} from './documentFileAccess.js';
 import { createArchitecturePackageTool } from './architecturePackage.js';
@@ -207,7 +209,8 @@ export function createTools(ctx) {
       name: 'copy_skill_file',
       description: '把技能附带的文件复制到工作区（模板 .pptx / .docx / .xlsx、图片、脚本等），之后 run_python 可以在 /workspace 下读到。path 以 / 结尾时复制整个文件夹（如 "scripts/"、"templates/某模板/"）。在线附件会自动下载。',
       input_schema: S({ name: str('技能名称'), path: str('文件或文件夹的相对路径（use_skill 的文件列表里）'), to: str('复制到工作区的路径（可选，只对单个文件有效；默认 skills/技能名/原路径）') }, ['name', 'path']),
-      run: async ({ name, path, to }, { progress } = {}) => {
+      run: async ({ name, path, to }, { progress, signal } = {}) => {
+        throwControl(null, signal);
         const p = await packs.get(name);
         if (!p) throw new Error(`没有名为「${name}」的技能`);
         const rel = String(path).replace(/^\.?\//, '');
@@ -216,12 +219,29 @@ export function createTools(ctx) {
         const list = folder !== null ? all.filter((k) => k.startsWith(folder)) : [rel];
         if (!list.length || (folder === null && p.files[rel] == null)) throw new Error(`技能「${name}」里没有 ${path}（可用：${all.slice(0, 20).join('、') || '无'}）`);
         if (list.length > 60) throw new Error(`${path} 下有 ${list.length} 个文件，太多了：请复制更具体的子文件夹或单个文件`);
+        const planned = list.map((key, index) => ({ key, index, path: folder === null && to ? to : `skills/${p.name}/${key}` }));
+        await assertArchitectureMutationBatch(planned, { signal });
+        const load = async (item) => {
+          throwControl(null, signal);
+          if (packs.isRemoteFile(p.files[item.key])) progress?.(`正在下载 ${item.key}（${item.index + 1}/${list.length}）`);
+          try {
+            const blob = await packs.fileBlob(p.files[item.key], signal ? { fetchImpl: url => globalThis.fetch(url, { signal }) } : undefined);
+            throwControl(null, signal);
+            return blob;
+          } catch (error) { throwControl(error, signal); throw error; }
+        };
+        // 先核对所有候选JSON再写首文件；最多60份×2MB，普通大模板仍按原顺序流式复制。
+        for (const item of planned) if (isArchitectureMetadataPath(architecturePathParts(item.path).join('/'))) {
+          item.data = await load(item);
+          await assertArchitectureMutationBatch([item], { signal });
+        }
+        await assertArchitectureMutationBatch(planned, { signal });
         const out = [];
         let bytes = 0;
-        for (const [n, k] of list.entries()) {
-          if (packs.isRemoteFile(p.files[k])) progress?.(`正在下载 ${k}（${n + 1}/${list.length}）`);
-          const blob = await packs.fileBlob(p.files[k]);
-          const w = await ws.write(folder === null && to ? to : `skills/${p.name}/${k}`, blob);
+        for (const item of planned) {
+          const blob = item.data ?? await load(item);
+          throwControl(null, signal);
+          const w = await ws.write(item.path, blob);
           ctx.onFileChanged?.(w.path);
           out.push(w.path);
           bytes += blob.size;
@@ -524,6 +544,7 @@ export function createTools(ctx) {
         const r = await runPython(code, { files, signal });
         throwControl(null, signal);
         if(!r.ok)throw new Error(formatRun(r));
+        await assertArchitectureMutationBatch(r.changed ?? [], { signal });
         const saved = [];
         for (const c of r.changed ?? []) {
           const w = await ws.write(c.path, new Blob([c.bytes]));

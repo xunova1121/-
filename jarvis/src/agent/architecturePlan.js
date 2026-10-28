@@ -2,7 +2,7 @@ import { architectureBusinessMarkdown } from './architectureBusiness.js';
 import { excerptDiagnostics } from './architectureDiagnostics.js';
 /** 业务关系先于坐标；最多60对象、100关系、80需求，事实须绑定实际材料，不能据名称猜归属。 */
 export const ARCHITECTURE_KINDS = ['interface', 'application', 'capability', 'data', 'acquisition', 'infrastructure', 'system', 'security'];
-export const ARCHITECTURE_RELATIONS = ['contains', 'supports', 'dataflow', 'workflow', 'feedback'];
+export const ARCHITECTURE_RELATIONS = ['contains', 'supports', 'dataflow', 'workflow', 'feedback', 'integration'];
 const invalid = (message, field = '', stage = 'arguments', action = '按该字段修正本次底稿参数，不重新读取无关材料') =>
   Object.assign(new Error(message), { code: 'ARCHITECTURE_PLAN', kind: 'input', diagnostics: [{ field, stage, action }] });
 function atField(path, build, diagnostics) {
@@ -79,15 +79,25 @@ export function makeArchitecturePlan(input, materials = [], requestText = '', pr
     }, diagnostics)
   );
   const links = new Set();
+  const byId = new Map(entities.filter(Boolean).map(item => [item.id, item]));
   const relations = input.relations.map((item, index) =>
     atField(`relations[${index}]`, () => {
       if (!ids.has(item.from) || !ids.has(item.to)) throw invalid('关系端点必须是已登记对象ID', 'from/to');
       if (item.from === item.to) throw invalid('关系不能把对象连接到自身', 'to');
       if (!ARCHITECTURE_RELATIONS.includes(item.type)) throw invalid('关系类型无效', 'type');
-      const key = [item.from, item.to, item.type].join('\u0000');
+      if (item.type === 'integration') {
+        if (![item.from, item.to].every(id => ['system', 'application', 'capability'].includes(byId.get(id)?.kind)))
+          throw invalid('应用集成仅连接系统、业务应用或共用能力，不代表硬件、数据或界面集成', 'from/to');
+        if (Object.hasOwn(item, 'intent') || Object.hasOwn(item, 'data')) throw invalid('无向应用集成不能混填方向intent或传输data', 'type');
+      }
+      const ends = item.type === 'integration' ? [item.from, item.to].sort() : [item.from, item.to];
+      const key = [...ends, item.type].join('\u0000');
       if (links.has(key)) throw invalid('同类型关系重复');
       links.add(key);
-      return { from: item.from, to: item.to, type: item.type, meaning: field(item.meaning, 120, '关系含义'), ...evidence(item, materials, requestText, previousUserEvidence) };
+      const proof = evidence(item, materials, requestText, previousUserEvidence);
+      if (item.type === 'integration' && proof.evidence !== 'excerpt_matched')
+        throw invalid('应用集成须引用材料明确登记的集成关系，不能仅用假设替代', 'excerpt', 'fact');
+      return { from: item.from, to: item.to, type: item.type, meaning: field(item.meaning, 120, '关系含义'), ...proof };
     }, diagnostics)
   );
   const requirements = input.requirements.map((item, index) =>
@@ -140,7 +150,7 @@ export function architectureMarkdown(plan) {
     lines.push(
       '- ' +
         byId.get(item.from) +
-        ' → ' +
+        (item.type === 'integration' ? ' — ' : ' → ') +
         byId.get(item.to) +
         ' [' +
         item.type +

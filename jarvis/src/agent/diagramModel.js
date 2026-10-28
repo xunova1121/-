@@ -14,7 +14,7 @@ export function layoutDiagram(input) {
   const ids = new Set();
   let count = 0;
   const layers = input.layers.map(layer => {
-    if (!Array.isArray(layer.nodes) || !layer.nodes.length || layer.nodes.length > (layer.kind === 'grid' ? 18 : 12)) throw invalid('普通层需1～12个节点；网格层需8～18个节点');
+    if (!Array.isArray(layer.nodes) || !layer.nodes.length || layer.nodes.length > (['grid', 'catalog'].includes(layer.kind) ? 18 : 12)) throw invalid('普通层需1～12个节点；网格层或业务组合层需8～18个节点');
     const section = sectionFields(layer);
     const nodes = layer.nodes.map(node => {
       const id = short(node.id, 64, '节点ID');
@@ -29,6 +29,7 @@ export function layoutDiagram(input) {
   const edgeIds = new Set();
   const edgeLabels = new Map();
   const cleanEdges = edges.map(edge => {
+    if (edge.type === 'integration' && !input.semanticRouting) throw invalid('应用集成需使用已审架构底稿的语义投影，不能按普通有向连线绘制');
     if (!ids.has(edge.from) || !ids.has(edge.to) || edge.from === edge.to) throw invalid('连线引用了不存在的节点或自身');
     const key = edge.from + '\u0000' + edge.to + (input.semanticRouting ? '\u0000' + edge.type : '');
     if (edgeIds.has(key)) {

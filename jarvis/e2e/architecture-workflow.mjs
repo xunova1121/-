@@ -9,6 +9,7 @@ import {compareDiagramPpt} from '../server/diagramCompare.mjs';
 import {renderSvg} from '../server/svgRender.mjs';
 import * as ws from '../src/agent/workspace.js';
 import {mediaReceipt} from '../src/agent/actionDelivery.js';
+import {architectureServerAcceptance} from '../evals/architecture-server-acceptance.mjs';
 const spec=structuredClone(architectureSpec),names=new Map(spec.entities.map(e=>[e.id,e.title]));
 const lines=[];const cite=text=>{lines.push(text);return {material:0,quote:text};};
 const content={title:spec.title,entities:spec.entities.map(({assumption,source,excerpt,evidenceId,...e})=>({...e,citation:cite(e.title+'：'+e.responsibility+'。')})),relations:spec.relations.map(({assumption,source,excerpt,evidenceId,...r})=>({...r,citation:cite(names.get(r.from)+'→'+names.get(r.to)+'：'+r.meaning+'。')})),requirements:spec.requirements.map(r=>({entities:r.entities,citation:cite(r.text)}))};
@@ -35,11 +36,17 @@ if(reviewRecovery){assert.equal(result.stage,'review');assert.equal(result.ready
 const expectedCalls=repair||correction||reviewRecovery?3:2;
 assert.equal(result.status,'complete');assert.equal(result.completedViews.length,3);assert.equal(calls,expectedCalls);
 assert.equal(mediaReceipt('build_architecture',true,JSON.stringify(result)).state,'completed');
+const accepted=await architectureServerAcceptance(startArgs.directory);
+assert.equal(accepted.state,'complete',JSON.stringify(accepted));
+assert.equal(accepted.views.length,3);assert.equal(accepted.views.flatMap(view=>view.files).length,15);
+assert.equal(accepted.modelBusinessReview,'passed');assert.equal(accepted.customerBusiness,'not_reviewed');assert.equal(accepted.customerVisual,'not_reviewed');
 const output=path.resolve(process.argv[2]||'/tmp/weiyang-architecture-workflow');await fs.mkdir(output,{recursive:true});
 for(const view of result.completedViews){assert.equal(view.editable,true);assert.equal(view.files.length,5);assert.deepEqual(view.files.map(f=>f.format).sort(),['pdf','png','pptx','pptx','svg']);assert.equal(view.files.filter(f=>f.path.endsWith('-可编辑.pptx')).length,1);assert.equal(view.files.filter(f=>f.path.endsWith('-展示.pptx')).length,1);for(const file of view.files){const blob=await ws.readBlob(file.path);assert.ok(blob.size);await fs.writeFile(path.join(output,path.basename(file.path)),new Uint8Array(await blob.arrayBuffer()));}}
 await fs.writeFile(path.join(output,'receipt.json'),JSON.stringify(result,null,2));
 const resumed=JSON.parse(await createArchitectureWorkflowTool({llm,renderSvg,compareDiagramPpt}).run({jobPath:result.jobPath}));
 assert.equal(calls,expectedCalls);assert.equal(resumed.status,'complete');assert.equal(resumed.reusedViews.length,3);
 await ws.write('虚构原文.md','原件已更新');
+const changedSource=await architectureServerAcceptance(startArgs.directory);
+assert.equal(changedSource.state,'failed');assert.equal(changedSource.failure.code,'ARCHITECTURE_PROJECTION');
 await assert.rejects(createArchitectureWorkflowTool({llm,renderSvg,compareDiagramPpt}).run({jobPath:result.jobPath}),/原件已变化/);assert.equal(calls,expectedCalls);
 console.log(`统一入口通过：${expectedCalls}次合成模型回复，3视图15真实文件；完成后续接不新增模型调用，原件变化拒绝旧稿；原生PPT门槛保持，非真实模型理解验收。`);

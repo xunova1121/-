@@ -91,8 +91,8 @@ export async function validateArchitectureSubmission(input, materials, checks, e
   const base = '文档检查/架构输入/' + crypto.randomUUID();
   const serialized = JSON.stringify({ version: 1, state: 'invalid', input });
   if (new TextEncoder().encode(serialized).length > 1e6) throw failure('输入草稿超过1MB，请拆分提交');
-  const draft = await ws.write(base + '.submission.json', serialized);
-  const receipt = await ws.write(base + '.issues.json', JSON.stringify({ total: diagnostics.length, diagnostics }));
+  const draft = await ws.writeArchitectureState(base + '.submission.json', serialized);
+  const receipt = await ws.writeArchitectureState(base + '.issues.json', JSON.stringify({ total: diagnostics.length, diagnostics }));
   for (const file of [draft, receipt]) await execution.checkpoint?.({ type: 'file', path: file.path });
   const error = Object.assign(
     failure(

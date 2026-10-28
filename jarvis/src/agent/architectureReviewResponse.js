@@ -44,8 +44,8 @@ export async function saveArchitectureReviewResponse(response, options = {}) {
   const base = '文档检查/架构审查回复/' + digest.split(':').at(-1) + '.response-' + (options.reviewAttempt === 1 ? 1 : 0);
   const responsePath = base + '.txt', responseMetaPath = base + '.meta.json';
   const captured = typeof text === 'string' ? text.slice(0, 12000) : '';
-  await workspace.write(responsePath, captured);
-  await workspace.write(responseMetaPath, JSON.stringify({
+  await workspace.writeArchitectureState(responsePath, captured);
+  await workspace.writeArchitectureState(responseMetaPath, JSON.stringify({
     stop, receivedText: typeof text === 'string', chars: typeof text === 'string' ? text.length : 0,
     capturedChars: captured.length, captureTruncated: typeof text === 'string' && text.length > 12000
   }));

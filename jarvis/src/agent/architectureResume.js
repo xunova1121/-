@@ -18,7 +18,7 @@ export async function resumeArchitectureReview(ctx, bundle, options = {}) {
     // 获取并发占位后再读持久状态，另一个请求可能已经完成恢复，不能拿旧bundle重置次数。
     bundle = await loadArchitecture(bundle.path, options.signal);
     if (bundle.report.structure !== 'passed' || bundle.report.semantic !== 'not_checked' || bundle.report.resumeAttempts >= 1) return bundle;
-    await workspace.write(bundle.reviewPath, JSON.stringify({ ...bundle.report, resumeAttempts: 1 }));
+    await workspace.writeArchitectureState(bundle.reviewPath, JSON.stringify({ ...bundle.report, resumeAttempts: 1 }));
     options.progress?.('沿用已有底稿，恢复业务审查（最多一次）…');
     // 推理分工未完成时仅恢复一次到已配置写作分工，不暗中换第三方服务商。
     const reviewer = ctx.reasonLlm && ctx.llm ? { ...ctx, reasonLlm: null } : ctx;
@@ -30,12 +30,12 @@ export async function resumeArchitectureReview(ctx, bundle, options = {}) {
       recoveryReason: bundle.report.errorCode || '前次审查未完成；沿用本底稿重新审查，仅返回约定JSON'
     });
     throwControl(null, options.signal);
-    await workspace.write(bundle.reviewPath, JSON.stringify({ ...report, planHash: bundle.planHash, resumeAttempts: 1 }));
+    await workspace.writeArchitectureState(bundle.reviewPath, JSON.stringify({ ...report, planHash: bundle.planHash, resumeAttempts: 1 }));
     ctx.onFileChanged?.(bundle.reviewPath);
     // 审查期间材料或底稿可能改变，出图前重新核对摘要，不能用旧结果覆盖新内容。
     const current = await loadArchitecture(bundle.path, options.signal);
     const markdownPath = bundle.path.replace(/\.architecture\.json$/, '.md');
-    await workspace.write(markdownPath, architectureMarkdown({ ...current.plan, semantic: current.report.semantic }));
+    await workspace.writeArchitectureState(markdownPath, architectureMarkdown({ ...current.plan, semantic: current.report.semantic }));
     ctx.onFileChanged?.(markdownPath);
     return current;
   } finally {

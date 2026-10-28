@@ -1,5 +1,6 @@
 import { nativeOrthogonalRoute } from './diagramPptxRoutes.js';
 import { escapeSvg } from './diagramText.js';
+import { diagramInchesPerPixel } from './diagramPptxViewport.js';
 const fail = (message) => Object.assign(new Error(message), { code: 'DIAGRAM_PPTX_STRUCTURE', kind: 'input' });
 /** 保留scene分组树；输出对象最多8000个，不能把整图贴成一张图片冒充可编辑。 */
 export function nativeTree(scene) {
@@ -42,7 +43,7 @@ const port = (point, box) =>
     .sort((a, b) => a.distance - b.distance)[0].index;
 
 /** 仅处理本程序刚生成的单页包；连接到组内背景形状，移动整组时端点随形状联动。 */
-export async function groupNativeDiagram(bytes, scene, tree) {
+export async function groupNativeDiagram(bytes, scene, tree, { scale = diagramInchesPerPixel(scene) } = {}) {
   const { default: JSZip } = await import('jszip');
   const zip = await JSZip.loadAsync(bytes);
   const entry = zip.file('ppt/slides/slide1.xml');
@@ -73,7 +74,7 @@ export async function groupNativeDiagram(bytes, scene, tree) {
       }
   };
   assign(tree);
-  const emu = (value) => Math.round(((value * 13.333333) / scene.width) * 914400);
+  const emu = (value) => Math.round(value * scale * 914400);
   const nextId = () => {
     if (++nativeCount > 8000) throw fail('原生对象超过8000，请拆图');
     return ++serial;

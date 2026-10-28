@@ -1,13 +1,15 @@
 import { diagramLines } from './diagramText.js';
 import { cardMetrics, cardElements, isDiagramCard, DIAGRAM_ICON_VERSION, DIAGRAM_ACCENTS } from './diagramCards.js';
+import { catalogFields, layoutCatalog, catalogElements } from './diagramCatalog.js';
+import { sectionFooterFields, layoutSectionFooter, sectionFooterElements } from './diagramSectionFooter.js';
 
 const invalid = (message) => Object.assign(new Error(message), { code: 'DIAGRAM_SECTION', kind: 'input' });
-export const SECTION_KINDS = ['cards', 'band', 'grid', 'columns'];
+export const SECTION_KINDS = ['cards', 'band', 'grid', 'columns', 'catalog'];
 /** 通栏文字距色条左右边的距离 */
 const BAND_PAD = 16;
 export function sectionFields(layer) {
   const kind = layer.kind === undefined ? 'cards' : layer.kind;
-  if (!SECTION_KINDS.includes(kind)) throw invalid('层类型只支持cards/band/grid/columns');
+  if (!SECTION_KINDS.includes(kind)) throw invalid('层类型只支持cards/band/grid/columns/catalog');
   if (layer.group !== undefined && (typeof layer.group !== 'string' || !layer.group.trim() || [...layer.group].length > 48))
     throw invalid('平台分组名称需1～48字');
   const count = layer.nodes?.length;
@@ -23,7 +25,7 @@ export function sectionFields(layer) {
     if (node.subtitle !== undefined && (typeof node.subtitle !== 'string' || !node.subtitle.trim() || [...node.subtitle].length > 48))
       throw invalid('分栏副标题需1～48字');
   }
-  return { kind, ...(layer.group ? { group: layer.group.trim() } : {}) };
+  return { kind, ...(layer.group ? { group: layer.group.trim() } : {}), ...(kind === 'catalog' && { catalog: catalogFields(layer) }), ...sectionFooterFields(layer) };
 }
 
 export function columnMetrics(node, width, compact = false) {
@@ -33,7 +35,10 @@ export function columnMetrics(node, width, compact = false) {
   if (node.subtitle) cursor = subtitleY + (diagramLines(node.subtitle, (width - 36) / 14, 2).length - 1) * 19.6;
   const detailY = cursor + (node.icon && !node.subtitle ? 31 : 23);
   if (node.detail) cursor = detailY + (diagramLines(node.detail, (width - 36) / 13, 3).length - 1) * 18.2;
-  return { titleWidth, subtitleY, detailY, height: Math.ceil(Math.max(compact ? 56 : 84, cursor + 18)) };
+  const badgeLines = node.compactSummary && node.badge ? diagramLines(node.badge, (width - 56) / 14, 2).length : 0;
+  const badgeY = cursor + 32;
+  if (badgeLines) cursor = badgeY + (badgeLines - 1) * 19.6;
+  return { titleWidth, subtitleY, detailY, badgeLines, badgeY, height: Math.ceil(Math.max(compact ? 56 : 84, cursor + 18)) };
 }
 function sideHeight(layer) {
   const [heading, ...captions] = layer.title.split(/\s*[|｜·]\s*/);
@@ -44,8 +49,12 @@ function sideHeight(layer) {
 /** 新组合层独立计算；旧主题的普通卡片继续走原布局，避免旧稿被统一重排。 */
 export function layoutSection(layer, y, edges, govBlue) {
   const kind = layer.kind;
+  if (kind === 'catalog') {
+    layoutCatalog(layer, y, edges, govBlue, layoutSection);
+    return layoutSectionFooter(layer);
+  }
   if (layer.semanticRouting && kind === 'cards' && layer.role !== 'application')
-    for (const node of layer.nodes) node.compactSummary = !node.bullets && !node.badge;
+    for (const node of layer.nodes) node.compactSummary = !node.bullets;
   layer.y = y;
   layer.compact = kind === 'columns' && layer.nodes.every((node) => !node.subtitle && !node.detail);
   layer.sideHeading = Boolean(layer.group || kind === 'grid' || kind === 'band' || layer.compact);
@@ -70,19 +79,28 @@ export function layoutSection(layer, y, edges, govBlue) {
     // 通栏文字左右各留 BAND_PAD：贴着色条边写，字体稍宽的机器上首字会出框 1 像素（2026-10-26 CI 实测）
     rowHeight = Math.max(48, 18 + diagramLines([node.title, node.detail].filter(Boolean).join(' · '), (totalWidth - BAND_PAD * 2) / 15, 2).length * 21);
   }
-  const width = (totalWidth - (columns - 1) * gap) / columns;
+  let width = (totalWidth - (columns - 1) * gap) / columns;
   layer.rows = Math.ceil(layer.nodes.length / columns);
   if (kind === 'columns') {
     top = layer.compact ? 0 : top;
     rowHeight = Math.max(...layer.nodes.map((node) => columnMetrics(node, width, layer.compact).height));
   }
   if (kind === 'cards') {
-    rowHeight = Math.max(
-      ...layer.nodes.map((node) => {
-        node.compactLayout = govBlue;
-        return isDiagramCard(node) && !node.compactSummary ? cardMetrics(node, width, { compact: govBlue }).height : columnMetrics(node, width).height;
-      })
-    );
+    // 按实际文字量选可容纳的列宽；不放松原换行上限、不截字、不缩小字号。
+    for (;;) {
+      try {
+        rowHeight = Math.max(...layer.nodes.map((node) => {
+          node.compactLayout = govBlue;
+          return isDiagramCard(node) && !node.compactSummary ? cardMetrics(node, width, { compact: govBlue }).height : columnMetrics(node, width).height;
+        }));
+        break;
+      } catch (error) {
+        if (error.code !== 'DIAGRAM_TEXT_OVERFLOW' || !layer.semanticRouting || columns === 1) throw error;
+        columns--; width = (totalWidth - (columns - 1) * gap) / columns;
+      }
+    }
+    layer.rows = Math.ceil(layer.nodes.length / columns);
+    if (layer.semanticRouting && flow && layer.rows > 1) rowGap = 64;
   }
   for (const [index, node] of layer.nodes.entries()) {
     if (kind === 'grid') diagramLines(node.title, (width - 20) / 14, 2);
@@ -95,7 +113,7 @@ export function layoutSection(layer, y, edges, govBlue) {
   }
   layer.height = top + layer.rows * rowHeight + (layer.rows - 1) * rowGap + (kind === 'band' || layer.compact ? 0 : 16);
   if (layer.sideHeading && kind !== 'band') layer.height = Math.max(layer.height, sideHeight(layer));
-  return layer.height;
+  return layoutSectionFooter(layer);
 }
 
 export function centerText(content, y, width, fontSize, fill, bold, text, { left = 0, inset = 48 } = {}) {
@@ -106,6 +124,7 @@ export function centerText(content, y, width, fontSize, fill, bold, text, { left
   });
 }
 export function sectionElements(layer, colors, { rect, text }) {
+  if (layer.kind === 'catalog') return [...catalogElements(layer, colors, { rect, text }, sectionElements), ...sectionFooterElements(layer, colors, { rect, text })];
   const children = [];
   if (layer.kind === 'band' || (!layer.group && (layer.kind === 'grid' || layer.compact)))
     children.push(
@@ -181,8 +200,12 @@ export function sectionElements(layer, colors, { rect, text }) {
       );
       if (node.subtitle) parts.push(text(node.subtitle, node.x + 18, node.y + metrics.subtitleY, node.width - 36, 14, 2, accent, true));
       if (node.detail) parts.push(text(node.detail, node.x + 18, node.y + metrics.detailY, node.width - 36, 13, 3, colors.muted));
+      if (metrics.badgeLines) {
+        parts.push(rect(node.x + 14, node.y + metrics.badgeY - 19, node.width - 28, metrics.badgeLines * 19.6 + 10, colors.light, colors.line, 4));
+        parts.push(text(node.badge, node.x + 28, node.y + metrics.badgeY, node.width - 56, 14, 2, accent, true));
+      }
     }
     children.push({ type: 'group', nodeId: node.id, bounds: { x: node.x, y: node.y, width: node.width, height: node.height }, children: parts });
   }
-  return children;
+  return [...children, ...sectionFooterElements(layer, colors, { rect, text })];
 }

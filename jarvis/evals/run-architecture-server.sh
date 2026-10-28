@@ -11,8 +11,19 @@ case "$BASE_DIR" in /tmp/weiyang-architecture-code-*) ;; *) printf '测试目录
 chmod 700 "$BASE_DIR"
 printf '测试代码目录：%s\n' "$BASE_DIR"
 RUNTIME_ROOT='https://raw.githubusercontent.com/xunova1121/-/refs/heads/claude/jolly-darwin-tijh97/jarvis/evals'
-curl --fail --silent --show-error --connect-timeout 15 --max-time 60 --retry 2 --retry-delay 2 "$RUNTIME_ROOT/architecture-runtime-manifest.json" -o "$BASE_DIR/runtime-manifest.json"
-curl --fail --silent --show-error --connect-timeout 15 --max-time 60 --retry 2 --retry-delay 2 "$RUNTIME_ROOT/architecture-runtime-fetch.mjs" -o "$BASE_DIR/runtime-fetch.mjs"
+RUNTIME_QUERY="$(date +%s)-$$"
+curl --fail --silent --show-error --connect-timeout 15 --max-time 60 --retry 2 --retry-delay 2 --header 'Cache-Control: no-cache' "$RUNTIME_ROOT/architecture-runtime-manifest.json?v=$RUNTIME_QUERY" -o "$BASE_DIR/runtime-manifest.json"
+node --input-type=module - "$BASE_DIR/runtime-manifest.json" <<'JS'
+import fs from 'node:fs';
+const manifest=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+const expected=process.env.JARVIS_ARCHITECTURE_EXPECTED_REVISION;
+if(expected&&(!/^[a-f0-9]{40}$/.test(expected)||manifest.revision!==expected)){
+ console.error('测试清单不是指定提交；尚未安装依赖、读取生产配置或请求模型。');process.exit(1);
+}
+if(!/^[a-f0-9]{40}$/.test(manifest.revision)){console.error('测试清单版本无效。');process.exit(1);}
+console.log('本次固定源码：'+manifest.revision);
+JS
+curl --fail --silent --show-error --connect-timeout 15 --max-time 60 --retry 2 --retry-delay 2 --header 'Cache-Control: no-cache' "$RUNTIME_ROOT/architecture-runtime-fetch.mjs?v=$RUNTIME_QUERY" -o "$BASE_DIR/runtime-fetch.mjs"
 TEST_APP="$BASE_DIR/source/jarvis"
 PRODUCTION_APP="${JARVIS_PRODUCTION_APP:-/opt/jarvis/current}"
 node "$BASE_DIR/runtime-fetch.mjs" "$BASE_DIR/runtime-manifest.json" "$PRODUCTION_APP" "$TEST_APP"

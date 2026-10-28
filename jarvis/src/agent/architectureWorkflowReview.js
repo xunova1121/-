@@ -1,6 +1,7 @@
 import { architectureReviewStatus } from './architectureReview.js';
 import { loadArchitecture } from './architectureProjection.js';
 import { resumeArchitectureReview } from './architectureResume.js';
+import { mapWorkflowDiagnostics } from './architectureWorkflowIntegrity.js';
 /** 审查服务/格式失败只恢复同一底稿，不能消耗内容次数或重新改业务。 */
 export function setWorkflowReview(state, receipt) {
   state.architecturePath = receipt.architecturePath;
@@ -12,7 +13,7 @@ export function setWorkflowReview(state, receipt) {
   state.stage = receipt.structure === 'passed' && receipt.semantic === 'not_checked' ? 'review' : 'content';
   state.lastError = {
     code: receipt.reviewErrorCode || 'ARCHITECTURE_REVIEW', issuesPath: receipt.reviewPath,
-    issues: receipt.reviewIssues, note: receipt.reviewNote,
+    issues: mapWorkflowDiagnostics(receipt.reviewIssues, state.requirementSourceIndices), note: receipt.reviewNote,
     diagnostics: [{ field: 'architecturePath', stage: 'review', action: receipt.nextAction }]
   };
 }

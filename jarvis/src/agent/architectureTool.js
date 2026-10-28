@@ -8,6 +8,7 @@ import { ARCHITECTURE_KINDS, ARCHITECTURE_RELATIONS, makeArchitecturePlan, archi
 import { checkSources } from './diagramSources.js';
 import { throwControl } from '../core/networkRequest.js';
 import { architectureSources } from './architectureSources.js';
+import { assertWorkflowMaterials } from './architectureWorkflowIntegrity.js';
 const text = (maxLength) => ({ type: 'string', maxLength });
 const proof = {
   evidenceId: { ...text(120), description: 'prepare_architecture_evidence返回的原文编号；推荐只填编号，由程序回填路径和摘录，不手写编号' },
@@ -22,7 +23,7 @@ export function createArchitecturePlanTool(ctx) {
   return {
     name: 'plan_architecture',
     description:
-      '重要架构图先生成业务关系底稿：逐对象明确类型、职责、输入输出，区分包含/支撑/数据流/业务流/反馈。每个对象和每条关系都必须有evidenceId，或显式assumption（可配basisEvidenceId）；事实和推导不得混填。需求用编号可省略text，程序沿用原文；概括放职责。失败先读issues清单，再用draftPath/corrections续改，不重发全部数组。首次先用prepare_architecture_evidence读取相关采购章节，sources沿用回执，逐项引用evidenceId，不手抄source/excerpt；旧手填参数仍兼容。完整规划须读完相关范围，原始需求逐项映射，关系不确定须写假设；不会自动判定业务正确。已有底稿的技术性审查未完成交create_diagram恢复一次，不要重建；业务failed才按具体意见修正。回执给路径及短审查状态，用read_file按需读，不把原文塞进对话。',
+      '重要架构图先生成业务关系底稿：逐对象明确类型、职责、输入输出，区分包含/支撑/数据流/业务流/反馈。材料仅明确应用级集成而未给方向或数据时，用integration无向集成，只连system/application/capability且必须有真实引用，不能补造数据或依赖方向。每个对象和每条关系都必须有evidenceId，或显式assumption（可配basisEvidenceId，integration除外）；事实和推导不得混填。需求用编号可省略text，程序沿用原文；概括放职责。失败先读issues清单，再用draftPath/corrections续改，不重发全部数组。首次先用prepare_architecture_evidence读取相关采购章节，sources沿用回执，逐项引用evidenceId，不手抄source/excerpt；旧手填参数仍兼容。完整规划须读完相关范围，原始需求逐项映射，关系不确定须写假设；不会自动判定业务正确。已有底稿的技术性审查未完成交create_diagram恢复一次，不要重建；业务failed才按具体意见修正。回执给路径及短审查状态，用read_file按需读，不把原文塞进对话。',
     input_schema: { ...object(
       {
         draftPath: { ...text(400), description: '上次失败回执里的输入草稿；恢复时仅填draftPath和corrections，仍重新核原件' },
@@ -60,17 +61,20 @@ export function createArchitecturePlanTool(ctx) {
       },
       []
     ), anyOf:[{required:['title','entities','relations','requirements']},{required:['draftPath','corrections']}] },
-    run: async (input, { signal, checkpoint, rawRequestText, progress, retrieval, architectureRevision, previousUserEvidence } = {}) => {
+    run: async (input, { signal, checkpoint, rawRequestText, progress, retrieval, architectureRevision, previousUserEvidence, architectureCompilation, workflowMaterialHash } = {}) => {
       throwControl(null, signal);
       progress?.('正在整理业务职责、关系及原文映射…');
       input = await loadArchitectureSubmission(input);
       const sources = architectureSources(input);
       const { materials, checks } = await checkSources(sources, signal,ctx.readDocument);
+      await assertWorkflowMaterials(materials, workflowMaterialHash);
       const resolved = await validateArchitectureSubmission(input, materials, checks, {signal, checkpoint, rawRequestText, previousUserEvidence});
       const plan = makeArchitecturePlan(resolved, materials.map((item, index) => ({ ...item, truncated: checks[index].truncated, scope: checks[index].scope })), rawRequestText, previousUserEvidence);
       plan.sources = bindEvidenceSources(sources, checks, materials, resolved);
       plan.materialHashes = await Promise.all(materials.map(async (item) => ({ path: item.path, hash: await diagramDigest(item.text) })));
       plan.layoutProfile = 'business-v2';
+      // 仅记录程序编译轨迹，正式关系按受控枚举表达，摘要绑定后供首次及恢复审查共用。
+      if (architectureCompilation) plan.compilation = structuredClone(architectureCompilation);
       if (architectureRevision) {
         const contentHash = await diagramDigest(JSON.stringify({ entities: plan.entities, relations: plan.relations, requirements: plan.requirements }));
         if (contentHash === architectureRevision.contentHash) throw Object.assign(new Error('规范化后没有实质变更，不能重复审查'), { code: 'ARCHITECTURE_REVISION', kind: 'input', diagnostics: [{ stage: 'review', field: 'changes', action: '按具体审查意见修改底稿，不反复请求通过' }] });
@@ -78,7 +82,7 @@ export function createArchitecturePlanTool(ctx) {
       }
       const base = '文档检查/架构底稿/' + crypto.randomUUID();
       throwControl(null, signal);
-      const saved = await workspace.write(base + '.architecture.json', JSON.stringify(plan));
+      const saved = await workspace.writeArchitectureState(base + '.architecture.json', JSON.stringify(plan));
       await checkpoint?.({ type: 'file', path: saved.path });
       let review;
       try {
@@ -87,8 +91,8 @@ export function createArchitecturePlanTool(ctx) {
       } catch (error) {
         throw Object.assign(error, { statePath: saved.path });
       }
-      const reviewFile = await workspace.write(base + '.review.json', JSON.stringify({ ...review, planHash: await diagramDigest(JSON.stringify(plan)) }));
-      const markdown = await workspace.write(base + '.md', architectureMarkdown({ ...plan, semantic: review.semantic }));
+      const reviewFile = await workspace.writeArchitectureState(base + '.review.json', JSON.stringify({ ...review, planHash: await diagramDigest(JSON.stringify(plan)) }));
+      const markdown = await workspace.writeArchitectureState(base + '.md', architectureMarkdown({ ...plan, semantic: review.semantic }));
       for (const path of [reviewFile.path, markdown.path]) {
         ctx.onFileChanged?.(path);
         await checkpoint?.({ type: 'file', path });

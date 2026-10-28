@@ -58,7 +58,7 @@ export function createDiagramTool(ctx, { requireArchitecture = false } = {}) {
             type: 'object',
             properties: {
               title: { type: 'string', maxLength: 48 },
-              kind: { type: 'string', enum: SECTION_KINDS },
+              kind: { type: 'string', enum: SECTION_KINDS.filter(kind => kind !== 'catalog') },
               group: { type: 'string', maxLength: 48 },
               role: {
                 type: 'string',
@@ -110,7 +110,7 @@ export function createDiagramTool(ctx, { requireArchitecture = false } = {}) {
               from: { type: 'string' },
               to: { type: 'string' },
               label: { type: 'string', maxLength: 12 },
-              type: { type: 'string', enum: ['supports', 'dataflow', 'workflow', 'feedback'] }
+              type: { type: 'string', enum: ['supports', 'dataflow', 'workflow', 'feedback', 'integration'] }
             },
             required: ['from', 'to'],
             additionalProperties: false
@@ -154,6 +154,8 @@ export function createDiagramTool(ctx, { requireArchitecture = false } = {}) {
     run: async (input, { signal, checkpoint, progress, retrieval, rawRequestText } = {}) => {
       if (!/\.(svg|png|pdf|pptx)$/i.test(input.path))
         throw Object.assign(new Error('图形输出需使用SVG/PNG/PDF/PPTX后缀'), { code: 'DIAGRAM_FORMAT', kind: 'input' });
+      if (!input.architecturePath && input.edges?.some(edge => edge.type === 'integration'))
+        throw Object.assign(new Error('应用集成须通过已审架构底稿投影，不能以普通有向连线替代'), { code: 'ARCHITECTURE_PLAN_REQUIRED', kind: 'input' });
       if (requireArchitecture && !input.architecturePath && (!input.diagramType || input.diagramType === 'architecture' || /架构/.test(rawRequestText || '')))
         throw Object.assign(new Error('先调用plan_architecture理顺业务关系并取得architecturePath，再生成架构图；不能跳过底稿改用自由图片'), {
           code: 'ARCHITECTURE_PLAN_REQUIRED',

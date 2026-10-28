@@ -75,7 +75,7 @@ export async function chooseDiagram(ctx, scene, options = {}) {
   const state = { version: 1, state: 'running', candidates: [], reviews: [] };
   const candidates = [];
   const save = async () => {
-    await workspace.write(statePath, JSON.stringify(state));
+    await workspace.writeArchitectureState(statePath, JSON.stringify(state));
     await options.checkpoint?.({ type: 'file', path: statePath });
   };
   const render = async (candidateScene) => {

@@ -17,6 +17,8 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { skillDeps, hasDeps, depsKey, PY_SPEC, NPM_SPEC } from '../src/agent/skillDeps.js';
 import { isBinaryFile, isRemoteFile } from '../src/agent/skillPacks.js';
+import { assertArchitectureMutationBatch } from '../src/agent/architectureStateProtection.js';
+import { throwControl } from '../src/core/networkRequest.js';
 
 const execute = promisify(execFile);
 export const SKILL_RUNNER_IMAGE = 'jarvis-skill-runner';
@@ -242,15 +244,21 @@ export function skillRunnerTool({ runner, getPack, saveFile }) {
       additionalProperties: false
     },
     run: async ({ skill, command, timeout_seconds, python_packages, npm_packages }, { signal, progress } = {}) => {
+      throwControl(null, signal);
       const pack = await getPack(skill);
       if (!pack) throw Object.assign(new Error(`服务器上没有技能「${skill}」：先在“技能”里安装，并同步到服务器`), { code: 'SKILL_NOT_FOUND', kind: 'api' });
       if (pack.enabled === false) throw Object.assign(new Error(`技能「${pack.name}」已停用`), { code: 'SKILL_DISABLED', kind: 'api' });
+      throwControl(null, signal);
       const r = await runner.run(pack, command, { timeoutSec: timeout_seconds, signal, onProgress: progress, extra: { python: python_packages, node: npm_packages } });
+      throwControl(null, signal);
+      const outputs = r.files.map(file => ({ path: `skills-output/${safeName(pack.name)}/${file.path}`, data: file.data }));
+      // 容器前缀不等于内容可信；整个结果批次先核对，不能先保存普通文件再伪造架构清单。
+      await assertArchitectureMutationBatch(outputs, { signal });
       const saved = [];
-      for (const f of r.files) {
-        const p = `skills-output/${safeName(pack.name)}/${f.path}`;
-        await saveFile(p, f.data);
-        saved.push(p);
+      for (const file of outputs) {
+        throwControl(null, signal);
+        await saveFile(file.path, file.data);
+        saved.push(file.path);
       }
       return [
         `退出码：${r.exitCode}${r.timedOut ? '（超时被停止）' : ''}`,

@@ -6,10 +6,13 @@
  *
  * 安全约定：智能体不能删除文件；在本地文件夹里写文件时，同名文件不会被覆盖，
  * 而是另存为“名称 (2).扩展名”，并在结果里说明。
+ * 架构工作流的私有状态只由专用内部写入器原路径更新，不应用于普通用户成果。
  * 虚拟工作区里覆盖、删除之前自动留一份旧版本，可在“改动记录”里恢复（见 fileHistory.js）。
  */
 import { collection } from './store.js';
 import * as history from './fileHistory.js';
+import { isArchitecturePrivateFilePath, isArchitectureMetadataPath, ownsArchitectureInternalRecord, architectureJsonValue } from './architectureStateOwnership.js';
+import { throwControl } from '../core/networkRequest.js';
 
 const files = collection('files');
 const kv = collection('kv');
@@ -101,7 +104,7 @@ export async function readBlob(path) {
   path = normalize(path);
   if (dirHandle) return (await folderFileHandle(path)).getFile();
   const f = await files.get(path);
-  if (!f) throw new Error(`找不到文件：${path}`);
+  if (!f) throw Object.assign(new Error(`找不到文件：${path}`), { code: 'WORKSPACE_NOT_FOUND', kind: 'input' });
   return f.data instanceof Blob ? f.data : new Blob([f.data], { type: MIME[ext(path)] || 'text/plain' });
 }
 
@@ -132,6 +135,60 @@ export async function write(path, data) {
   }
   const e = await writeVirtual(path, blob);
   return { path, renamed: false, backup: e.op === 'create' ? 'recorded' : e.stored ? 'saved' : 'too-big' };
+}
+
+/**
+ * 仅供内部架构工作流更新受管状态；通用文件工具不可暴露此能力。
+ * 文件夹模式必须更新原jobPath/reviewPath，否则默认同名另存会让恢复一直读到旧状态。
+ * 普通成果仍走write；动态清单须新旧内容都属于架构，不能覆盖用户同名文件。
+ */
+export async function writeArchitectureState(path, data, { signal } = {}) {
+  throwControl(null, signal);
+  path = normalize(path);
+  const blob = data instanceof Blob ? data : new Blob([data], { type: MIME[ext(path)] || 'text/plain' });
+  await checkArchitectureStateTarget(path, blob);
+  throwControl(null, signal);
+  if (dirHandle) {
+    const handle = await folderFileHandle(path, true);
+    throwControl(null, signal);
+    const writable = await handle.createWritable();
+    try {
+      throwControl(null, signal);
+      await writable.write(blob);
+      throwControl(null, signal);
+      await writable.close();
+    } catch (error) {
+      // FSA写流在close前保持暂存；取消或失败时丢弃，不提交半份状态。
+      try { await writable.abort?.(); } catch { /* 保留原始写入/停止错误 */ }
+      throw error;
+    }
+    return { path, renamed: false, backup: null };
+  }
+  const event = await writeVirtual(path, blob, '架构工作流内部状态更新');
+  return { path, renamed: false, backup: event.op === 'create' ? 'recorded' : event.stored ? 'saved' : 'too-big' };
+}
+
+async function checkArchitectureStateTarget(path, blob) {
+  if (isArchitecturePrivateFilePath(path)) return;
+  const invalid = () => Object.assign(new Error('内部架构写入仅允许私有状态或已登记的架构清单，不能覆盖普通用户成果：' + path.slice(0, 400)), { code: 'ARCHITECTURE_STATE_WRITE_SCOPE', kind: 'input' });
+  if (!isArchitectureMetadataPath(path)) throw invalid();
+  const next = await architectureJsonValue(blob);
+  if (!ownsArchitectureInternalRecord(next)) throw invalid();
+  let previous;
+  if (dirHandle) {
+    try { previous = await (await folderFileHandle(path)).getFile(); } catch (error) {
+      // 不把权限/读取错误当作新文件，否则无法确认是否覆盖了用户文件。
+      if (error.name !== 'NotFoundError') throw error;
+    }
+  } else {
+    const record = await files.get(path);
+    if (record) previous = asBlob(record, path);
+  }
+  if (!previous) return;
+  const current = await architectureJsonValue(previous);
+  if (!ownsArchitectureInternalRecord(current)) throw invalid();
+  const reference = value => value.architecturePath ?? value.architecture?.planPath;
+  if (reference(current) && reference(current) !== reference(next)) throw invalid();
 }
 
 const asBlob = (f, path) => (f.data instanceof Blob ? f.data : new Blob([f.data], { type: MIME[ext(path)] || 'text/plain' }));

@@ -2,15 +2,19 @@ import { nativeTree, nativeLeaves, groupNativeDiagram } from './diagramPptxStruc
 import { ICON_PNG } from './pptIcons.js';
 import { imageData } from './imageRegion.js';
 import { validateScene } from './diagramScene.js';
+import { diagramPptxViewport } from './diagramPptxViewport.js';
 
 /** 展示版使用同一张PNG；可编辑版逐元素照抄设计坐标，不增加封面、不重新换行。 */
 export async function makeDiagramPptx(scene, { png, editable = false } = {}) {
   validateScene(scene);
+  const frame = diagramPptxViewport(scene);
+  scene = frame.scene;
   const { default: PptxGenJS } = await import('pptxgenjs');
   const pptx = new PptxGenJS();
-  const scale = 13.333333 / scene.width;
+  const scale = frame.scale;
+  const width = scene.width * scale;
   const height = scene.height * scale;
-  pptx.defineLayout({ name: 'DIAGRAM', width: 13.333333, height });
+  pptx.defineLayout({ name: 'DIAGRAM', width, height });
   pptx.layout = 'DIAGRAM';
   pptx.author = '未央';
   pptx.subject = editable ? '同一设计稿的原生可编辑图形，需渲染对照验收' : '同一设计稿的展示版，画面来自共享PNG';
@@ -20,7 +24,7 @@ export async function makeDiagramPptx(scene, { png, editable = false } = {}) {
   if (!editable) {
     if (!(png instanceof Blob)) throw Object.assign(new Error('展示版需要实际PNG'), { code: 'DIAGRAM_PPT_PREVIEW', kind: 'input' });
     const image = await imageData(png);
-    slide.addImage({ data: `data:${image.mime};base64,${image.data}`, x: 0, y: 0, w: 13.333333, h: height });
+    slide.addImage({ data: `data:${image.mime};base64,${image.data}`, x: 0, y: 0, w: width, h: height });
   } else {
     const tree = nativeTree(scene);
     diagramTree = tree;
@@ -59,9 +63,8 @@ export async function makeDiagramPptx(scene, { png, editable = false } = {}) {
         for (const line of item.lines)
           slide.addText(line.text, {
             objectName: objectName(),
-            // Noto在Office文本框的左字面与SVG相差半个设计像素；保持字号/画布，校正字面定位。
-            x: (line.x + (scene.fontFace === 'Noto Sans CJK SC' ? 0.5 : 0)) * scale,
-            y: (line.y - item.fontSize * (scene.fontFace === 'Noto Sans CJK SC' ? 0.98 : 1)) * scale,
+            x: line.x * scale,
+            y: (line.y - item.fontSize) * scale,
             w: item.width * scale,
             h: item.fontSize * 1.5 * scale,
             margin: 0,
@@ -108,6 +111,6 @@ export async function makeDiagramPptx(scene, { png, editable = false } = {}) {
     }
   }
   let bytes = await pptx.write({ outputType: 'arraybuffer' });
-  if (editable) bytes = await groupNativeDiagram(bytes, scene, diagramTree);
+  if (editable) bytes = await groupNativeDiagram(bytes, scene, diagramTree, { scale });
   return new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
 }

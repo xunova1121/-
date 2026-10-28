@@ -1,4 +1,5 @@
 import { createDiagramRecovery } from './diagramRecovery.js';
+import { runArchitectureDirector } from './architectureDirector.js';
 import { asksDocumentStyles } from './documentStyleQuery.js';
 import { IMAGE_RECHECK, IMAGE_READING_RULES } from './imageReading.js';
 import { conversationFocus } from '../core/responseRevision.js';
@@ -327,6 +328,23 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   };
 
   let preFound = null;
+  if (depth === 0 && !images.length) {
+    const directed = await runArchitectureDirector({
+      text: userText, tools: availableTools, emit, signal, shouldYield: () => Boolean(inbox?.length),
+      onStart: () => { lookupControl?.release?.(); retrieval.upgrade('制作架构图'); light = false; if (!loader.get('build_architecture')) loader = createToolLoader([...availableTools, ...own]); },
+      run: calls => executeToolCalls(calls, { loader, emit, seen, diagramRecovery, executionScope, closing: false, retrieval, approve, signal, checkpoint, review, sessionId, requirementText, lookupDeadline: false, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch: false })
+    });
+    if (directed) {
+      lookupControl?.release?.(); retrieval.upgrade('制作架构图');
+      toolCount += directed.calls; failCount += directed.failures;
+      if (!directed.yielded) {
+        emit({ type: 'text', delta: directed.text });
+        return finishAgentRun({ step: Math.max(0, directed.calls - 1), limit: 7, retrievalStopped: false, retrieval, stuck: false, review, nativeSearchCalls: 0, light: false, signal, quiet, toolCount, lastToolOk: directed.lastOk, failCount: directed.lastOk ? 0 : failCount, userText, finalText: directed.text, emit, lookupDeadline: false });
+      }
+      convo.push({ role: 'user', content: '程序架构流程已按实际回执执行' + directed.calls + '步；现有任务：' + (directed.jobPath || '尚未开始') + '。用户追加了新要求，保留已有成果并按新要求处理，不重建任务绕过额度。' });
+      takeInbox();
+    }
+  }
   // 明显要查实时信息的短问题：先按原话搜一次，结果随问题交给模型，一轮答完（见 preSearch.js）；问赛程比分的先查比分接口
   const sportsArgs = depth === 0 && loader.get('get_sports_scores') ? sportsPreCall(requirementText) : null;
   if (depth === 0 && !light && !images.length && (sportsArgs || wantsPreSearch(requirementText)) && !creativeWithoutLookup(requirementText) && (sportsArgs || loader.get('web_search'))) {
