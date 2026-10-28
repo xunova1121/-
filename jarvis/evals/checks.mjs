@@ -1,3 +1,4 @@
+import './architecture-runtime-checks.mjs';
 import './architecture-server-checks.mjs';
 import './reliability-checks.mjs';
 import './baseline-checks.mjs';

@@ -4,16 +4,21 @@ umask 077
 command -v node >/dev/null
 command -v curl >/dev/null
 command -v tar >/dev/null
-BASE_DIR=$(mktemp -d /tmp/weiyang-architecture-code-XXXXXX)
+BASE_DIR="${JARVIS_ARCHITECTURE_CODE_DIR:-$(mktemp -d /tmp/weiyang-architecture-code-XXXXXX)}"
+case "$BASE_DIR" in /tmp/weiyang-architecture-code-*) ;; *) printf '测试目录必须在/tmp/weiyang-architecture-code-*下\n' >&2; exit 1;; esac
+[ -d "$BASE_DIR" ]
+[ ! -e "$BASE_DIR/results" ] || { printf '此目录已有测试结果；不会重复提交任务，请新建测试目录。\n' >&2; exit 1; }
+chmod 700 "$BASE_DIR"
 printf '测试代码目录：%s\n' "$BASE_DIR"
-REVISION=$(curl --fail --silent --show-error --max-time 30 'https://api.github.com/repos/xunova1121/-/commits/claude%2Fjolly-darwin-tijh97' | node --input-type=module -e "let x='';for await(const c of process.stdin)x+=c;const s=JSON.parse(x).sha;if(!/^[a-f0-9]{40}$/.test(s))process.exit(1);process.stdout.write(s)")
-curl --fail --silent --show-error --max-time 120 --max-filesize 100000000 "https://codeload.github.com/xunova1121/-/tar.gz/$REVISION" -o "$BASE_DIR/source.tar.gz"
-mkdir "$BASE_DIR/source"
-tar -xzf "$BASE_DIR/source.tar.gz" -C "$BASE_DIR/source" --strip-components=1
+RUNTIME_ROOT='https://raw.githubusercontent.com/xunova1121/-/refs/heads/claude/jolly-darwin-tijh97/jarvis/evals'
+curl --fail --silent --show-error --connect-timeout 15 --max-time 60 --retry 2 --retry-delay 2 "$RUNTIME_ROOT/architecture-runtime-manifest.json" -o "$BASE_DIR/runtime-manifest.json"
+curl --fail --silent --show-error --connect-timeout 15 --max-time 60 --retry 2 --retry-delay 2 "$RUNTIME_ROOT/architecture-runtime-fetch.mjs" -o "$BASE_DIR/runtime-fetch.mjs"
 TEST_APP="$BASE_DIR/source/jarvis"
 PRODUCTION_APP="${JARVIS_PRODUCTION_APP:-/opt/jarvis/current}"
+node "$BASE_DIR/runtime-fetch.mjs" "$BASE_DIR/runtime-manifest.json" "$PRODUCTION_APP" "$TEST_APP"
+REVISION=$(cat "$TEST_APP/runtime-revision.txt")
 if [ -d "$PRODUCTION_APP/node_modules" ] && cmp -s "$PRODUCTION_APP/package-lock.json" "$TEST_APP/package-lock.json"; then
-  ln -s "$PRODUCTION_APP/node_modules" "$TEST_APP/node_modules"
+  [ -e "$TEST_APP/node_modules" ] || ln -s "$PRODUCTION_APP/node_modules" "$TEST_APP/node_modules"
 else
   (cd "$TEST_APP" && npm ci --omit=dev --ignore-scripts --registry=https://registry.npmmirror.com)
 fi
