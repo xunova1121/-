@@ -43,7 +43,7 @@ function evidence(item, materials, requestText) {
     Object.assign(error.diagnostics[0], excerptDiagnostics(excerpt, original, materials));
     throw error;
   }
-  return { source, excerpt, evidence: 'excerpt_matched' };
+  return { source, excerpt, evidence: 'excerpt_matched', ...(item.evidenceId && { evidenceId: item.evidenceId }) };
 }
 function strings(values, label) {
   if (!Array.isArray(values) || values.length > 8) throw invalid(label + '最多8条');

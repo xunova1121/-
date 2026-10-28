@@ -247,6 +247,7 @@ jobs:
           node e2e/diagram-candidates.mjs "$RUNNER_TEMP/jarvis-e2e/candidates"
           node e2e/architecture-editable.mjs "$RUNNER_TEMP/jarvis-e2e/architecture"
           node e2e/architecture-resume.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-resume"
+          node e2e/architecture-evidence.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-evidence"
           ARCHITECTURE_VIEW=workflow node e2e/architecture-logic.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-workflow"
           ARCHITECTURE_VIEW=dataflow node e2e/architecture-logic.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-dataflow"
           node e2e/workspace-management.mjs "$RUNNER_TEMP/jarvis-e2e"
@@ -313,12 +314,12 @@ jobs:
           make_latest: true
           files: dist/*
           body: |
-            ## 本版更新 · 架构原文诊断与历史来源边界
-            - 架构底稿原文匹配失败时，返回实际读取的材料路径、字数、已知截断/章节状态，以及字段和真实阶段。
-            - 引号、零宽、全半角等差异可给出最多120字的原文候选和位置；候选只供核对，不自动替换、不放行。无法可靠定位时明确未找到，不推断编造。
-            - 保留原错误码、空白处理、严格来源/业务审查、恢复上限、四格式同稿及原生PPT对照门槛。没有全量编辑距离扫描，不新增模型请求或付费服务。
-            - 旧助手关于限制、能力与承诺的说法不得自动升级为系统规则；原消息保留，压缩与普通/闲聊上下文补来源说明。当前有效规则继续遵守，未保证消除上游模型限制。
-            - 合成材料/假模型验证，不代表用户招标原件、真实模型或安卓/Windows真机已验收。
+            ## 本版更新 · 架构原文证据编号（第1步）
+            - 新增prepare_architecture_evidence，程序读取选定原文件/章节并提取连续原文编号，支持有界分页与精确关键词过滤，不调用提取模型。
+            - plan_architecture的对象、关系、需求可只引用evidenceId，由程序重新读取当前材料并填回原文路径/摘录；旧手填参数继续兼容。
+            - 编号绑定实际路径、内容和片段位置，材料变更/编号不存在/证据冲突拒绝；超过读取范围须明确章节，不把部分读取当全文覆盖。
+            - 原业务审查、恢复上限、四格式同稿与原生PPT对照门槛不变。无全局原文注册表，无新增收费接口或依赖。
+            - 新增合成原文取号到真实SVG/PNG/PDF/原生PPT验收；客户原件、真实模型与真机尚未验收。业务分层、自动版式和客户图质量为后续步骤，本版不宣称架构目标全部完成。
 
             ## 更新与使用
             先在设置里“立即更新服务器”，再更新电脑和手机。仅安装APK不会替换远端服务器代码。

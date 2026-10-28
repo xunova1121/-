@@ -1,3 +1,7 @@
+## A1架构证据编号已完成本地检查，待正式发布CI（2026-10-28）
+
+按用户要求顺序推进。新增prepare_architecture_evidence，程序从当前来源取连续原文编号，plan_architecture逐项引用并重读核验回填；旧手填、原审查/恢复/原生PPT门槛保持。201文件1744项、lint、build及真实原文取号到四格式/原生PPT通过；测试/自查见`docs/架构证据编号第1步-20261028.md`。A2业务分层/A3版式/A5客户验收仍未完成，未声称真实客户图成功。原件/真实模型/安卓Windows真机未测。正式发布和下载包校验随后记录。
+
 ## 已发布1.0.318：摘录短诊断；架构总体交付仍未完成
 
 - 发布：https://github.com/xunova1121/-/releases/tag/desktop-v1.0.318 。APK：https://github.com/xunova1121/-/releases/download/desktop-v1.0.318/Jarvis-1.0.318-android.apk 。先“立即更新服务器”再装APK；未登录或更新用户生产服务器。

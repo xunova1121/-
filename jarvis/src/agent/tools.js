@@ -39,6 +39,7 @@ import { preferenceClaim, preferenceSupported } from './memoryPreference.js';
 import { evidence as evidenceStore } from './evidenceStore.js';
 import { createSongTool } from './music.js';
 import { createOcrTool } from './ocrTool.js';
+import { createArchitectureEvidenceTool } from './architectureEvidenceTool.js';
 import { createArchitecturePlanTool } from './architectureTool.js';
 import { createDiagramTool } from './diagramTool.js';
 import { createInspectImageTool } from './inspectImage.js';
@@ -102,6 +103,7 @@ export function createTools(ctx) {
     createSongTool(ctx),
     createOcrTool(ctx),
     createInspectImageTool(ctx),
+    createArchitectureEvidenceTool(),
     createArchitecturePlanTool(ctx),
     createDiagramTool(ctx, {requireArchitecture:true}),
     createExportDiagramTool(ctx),
