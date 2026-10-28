@@ -83,7 +83,7 @@ export function createArchitecturePlanTool(ctx) {
       let review;
       try {
         progress?.('正在审查业务归属、支撑方向与数据流…');
-        review = await reviewArchitecture(ctx, plan, { signal, retrieval, materials, rawRequestText, previousUserEvidence });
+        review = await reviewArchitecture(ctx, plan, { signal, checkpoint, retrieval, materials, rawRequestText, previousUserEvidence, reviewPath: base + '.review.json' });
       } catch (error) {
         throw Object.assign(error, { statePath: saved.path });
       }

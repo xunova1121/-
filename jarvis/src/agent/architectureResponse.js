@@ -18,7 +18,7 @@ const invalid = (message, code = 'ARCHITECTURE_CONTENT_FORMAT') =>
 /** 最多3次模型总尝试；原始可见回复逐次存工作区（最多8万字符/份），状态只存路径与停止类型。 */
 export async function architectureContentResponse(ctx, state, jobPath, materials, save, execution = {}) {
   throwControl(null, execution.signal);
-  if (state.attempts >= 3) throw invalid('内容整理已达3次上限，保留原始回复与任务，不继续收费重试', 'ARCHITECTURE_WORKFLOW');
+  if (state.attempts >= 3) throw Object.assign(invalid('内容整理已达3次上限，保留原始回复与任务，不继续收费重试', 'ARCHITECTURE_WORKFLOW'), { terminal: true });
   const llm = ctx.reasonLlm || ctx.llm;
   if (!llm) throw invalid('未配置业务理解模型');
   let previousContent = null,
@@ -34,7 +34,7 @@ export async function architectureContentResponse(ctx, state, jobPath, materials
   }
   let completeDiagnostics = null;
   if (pendingText === null && state.lastError?.issuesPath) {
-    if (!/^文档检查\/架构(?:诊断\/[\w-]+\.issues-\d+|底稿\/[\w-]+\.review)\.json$/.test(state.lastError.issuesPath))
+    if (!/^文档检查\/架构(?:诊断\/[\w-]+\.issues-\d+(?:-[\w-]+)?|底稿\/[\w-]+\.review)\.json$/.test(state.lastError.issuesPath))
       throw invalid('架构诊断路径无效，不能读取其他文件作纠错指令');
     const blob = await ws.readBlob(state.lastError.issuesPath);
     if (blob.size > 1000000) throw invalid('架构诊断超过1MB');

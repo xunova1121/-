@@ -258,6 +258,7 @@ jobs:
           node e2e/architecture-workflow.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-json-repair" json-repair
           node e2e/architecture-workflow.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-objects" objects
           node e2e/architecture-workflow.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-content-repair" content-repair
+          node e2e/architecture-workflow.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-review-recovery" review-recovery
           node e2e/architecture-package.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-package"
           node e2e/architecture-bends.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-package"
           node e2e/architecture-package.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-parallel" parallel

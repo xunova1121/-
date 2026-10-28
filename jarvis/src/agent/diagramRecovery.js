@@ -61,7 +61,7 @@ export function createDiagramRecovery() {
       counts.set(key, failures);
       if (counts.size > 24) counts.delete(counts.keys().next().value);
       total++;
-      stopped = error.code === 'DIAGRAM_DUPLICATE_CALL' || failures >= 3 || total >= 6;
+      stopped = (name === 'build_architecture' && error.terminal === true) || error.code === 'DIAGRAM_DUPLICATE_CALL' || failures >= 3 || total >= 6;
       return {
         stopped,
         stage,

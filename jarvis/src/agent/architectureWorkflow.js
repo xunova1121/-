@@ -1,6 +1,8 @@
 import { architectureContentResponse } from './architectureResponse.js';
 import { applyArchitectureCorrections } from './architectureContentContract.js';
 import { validateArchitectureContent } from './architectureContentValidation.js';
+import { setWorkflowReview, continueWorkflowReview } from './architectureWorkflowReview.js';
+import { workflowStop, saveWorkflowFailure } from './architectureWorkflowFailure.js';
 import * as ws from './workspace.js';
 import { createDocumentNavigation } from './documentNavigation.js';
 import { workflowMaterials, compileArchitectureContent, requestedArchitectureViews } from './architectureWorkflowInput.js';
@@ -48,16 +50,17 @@ export function createArchitectureWorkflowTool(ctx) {
         }
         if (state.version !== 1 || !state.files || !state.directory) throw invalid('任务状态无效');
       } else {
+        const directory = typeof args.directory === 'string' ? args.directory.replace(/\/+$/, '') : args.directory;
         if (
           typeof args.request !== 'string' ||
           !args.request.trim() ||
           args.request.length > 4000 ||
           typeof args.directory !== 'string' ||
           args.directory.length > 200 ||
-          !args.directory ||
-          args.directory.startsWith('/') ||
-          args.directory.split('/').some((x) => !x || x === '.' || x === '..') ||
-          args.directory.includes('\\')
+          !directory ||
+          directory.startsWith('/') ||
+          directory.split('/').some((x) => !x || x === '.' || x === '..') ||
+          directory.includes('\\')
         )
           throw invalid('需明确任务要求和合法相对交付目录');
         state = {
@@ -66,7 +69,7 @@ export function createArchitectureWorkflowTool(ctx) {
           attempts: 0,
           files: args.files,
           request: args.request,
-          directory: args.directory,
+          directory,
           views: requestedArchitectureViews(args.request, args.views),
           lastError: null
         };
@@ -87,6 +90,7 @@ export function createArchitectureWorkflowTool(ctx) {
       const { sources, materials } = await workflowMaterials(state.files, read, execution.signal);
       const hash = await diagramDigest(JSON.stringify(materials));
       if (state.materialHash && state.materialHash !== hash) throw invalid('原件已变化，请新建任务，不能续用旧内容');
+      if (state.terminalFailure) throw workflowStop(state, (state.stage === 'review' ? '业务审查恢复已达上限' : '内容整理已达3次上限') + '；任务保留：' + jobPath);
       state.materialHash = hash;
       await save();
       try {
@@ -114,22 +118,29 @@ export function createArchitectureWorkflowTool(ctx) {
           const receipt = JSON.parse(
             await createArchitecturePlanTool({ ...ctx, readDocument: read }).run(input, { ...execution, rawRequestText: state.request })
           );
-          state.architecturePath = receipt.architecturePath;
+          setWorkflowReview(state, receipt);
           if (!receipt.readyForRender) {
-            state.lastError = { code: 'ARCHITECTURE_REVIEW', issuesPath: receipt.reviewPath, issues: receipt.reviewIssues, note: receipt.reviewNote };
+            if (state.stage === 'content' && state.attempts >= 3) throw workflowStop(state, '业务审查指出实质问题，但内容整理已达3次上限');
             await save();
             return JSON.stringify({
               jobPath,
-              stage: 'content',
+              stage: state.stage,
               ready: false,
               attemptsRemaining: 3 - state.attempts,
               review: state.lastError,
               note: '底稿仍未通过审查；只用jobPath继续，未生成正式图。'
             });
           }
-          state.stage = 'export';
-          state.lastError = null;
           await save();
+        }
+        if (state.stage === 'review') {
+          const review = await continueWorkflowReview(ctx, state, execution);
+          await save();
+          if (!review.readyForRender) {
+            if (state.stage === 'review') throw workflowStop(state, '同一底稿业务审查恢复未完成；不重新改写已通过结构检查的内容');
+            if (state.attempts >= 3) throw workflowStop(state, '业务审查指出实质问题，但内容整理已达3次上限');
+            return JSON.stringify({ jobPath, stage: 'content', ready: false, attemptsRemaining: 3 - state.attempts, review: state.lastError, note: '业务审查明确未通过，按真实意见修内容，不冒充技术故障' });
+          }
         }
         const result = JSON.parse(
           await createArchitecturePackageTool(ctx).run({ architecturePath: state.architecturePath, directory: state.directory, views: state.views }, execution)
@@ -141,22 +152,10 @@ export function createArchitectureWorkflowTool(ctx) {
         return JSON.stringify({ jobPath, ...result, note: '实际文件与同稿/原生PPT门槛通过，客户业务及视觉仍需核对。' });
       } catch (error) {
         throwControl(error, execution.signal);
-        let issuesPath;
-        if (error.diagnostics?.length) {
-          issuesPath = jobPath.replace('架构任务/', '架构诊断/').replace(/\.json$/, '.issues-' + state.attempts + '.json');
-          await ws.write(issuesPath, JSON.stringify({ total: error.diagnostics.length, diagnostics: error.diagnostics }));
-          await execution.checkpoint?.({ type: 'file', path: issuesPath });
-        }
-        state.lastError = {
-          ...(issuesPath && { issuesPath }),
-          code: String(error.code || error.name).slice(0, 80),
-          message: String(error.message).slice(0, 2500),
-          diagnostics: error.diagnostics?.slice(0, 8)
-        };
-        await save();
+        error = await saveWorkflowFailure(error, state, jobPath, save, execution);
         throw Object.assign(error, {
           statePath: jobPath,
-          message: `${error.message}；任务保留：${jobPath}，仅用build_architecture({jobPath})继续，不切换修订工具。`
+          message: `${error.message}；任务保留：${jobPath}；` + (error.terminal ? '恢复额度已用尽，本任务不再自动续跑，已有文件和真实诊断保留。' : '仅用build_architecture({jobPath})继续，不切换修订工具。')
         });
       }
     }

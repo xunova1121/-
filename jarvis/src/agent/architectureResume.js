@@ -24,6 +24,8 @@ export async function resumeArchitectureReview(ctx, bundle, options = {}) {
     const reviewer = ctx.reasonLlm && ctx.llm ? { ...ctx, reasonLlm: null } : ctx;
     const report = await reviewArchitecture(reviewer, bundle.plan, {
       ...options,
+      reviewPath: bundle.reviewPath,
+      reviewAttempt: 1,
       materials: bundle.materials,
       recoveryReason: bundle.report.errorCode || '前次审查未完成；沿用本底稿重新审查，仅返回约定JSON'
     });
