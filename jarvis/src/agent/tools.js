@@ -1,3 +1,4 @@
+import {createArchitectureWorkflowTool} from './architectureWorkflow.js';
 import {createDocumentNavigation} from './documentNavigation.js';
 import {createDocumentFileAccess} from './documentFileAccess.js';
 import { createArchitecturePackageTool } from './architecturePackage.js';
@@ -113,6 +114,7 @@ export function createTools(ctx) {
     createArchitecturePlanTool(ctx),
     createArchitectureRevisionTool(ctx),
     createArchitecturePackageTool(ctx),
+    createArchitectureWorkflowTool(ctx),
     createDiagramTool(ctx, {requireArchitecture:true}),
     createExportDiagramTool(ctx),
     createRenderDiagramTool(ctx),

@@ -17,6 +17,11 @@ export function mediaRequirement(text = '') {
 }
 
 export function mediaReceipt(toolName, ok, output = '') {
+  if (toolName === 'build_architecture') {
+    let value; try { value = JSON.parse(String(output)); } catch { value = null; }
+    const complete = ok && value?.status === 'complete' && Array.isArray(value.completedViews) && value.completedViews.length > 0 && value.completedViews.every(view => view.editable === true && ['svg','png','pdf','pptx'].every(format => view.files?.some(file => file.format === format && typeof file.path === 'string')));
+    return {kind:'diagram',state:!ok?'failed':complete?'completed':'pending',files:complete?value.completedViews.map(view=>view.files.find(f=>f.format==='svg').path).slice(0,3):[]};
+  }
   const kinds = { create_diagram: 'diagram', export_diagram: 'diagram', generate_image: 'image', sing_song: 'audio', generate_video: 'video' };
   if (!kinds[toolName]) return null;
   const text = String(output).slice(0, 8000);
