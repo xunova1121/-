@@ -1,5 +1,7 @@
 # 未央（WEIYANG AI，原名贾维斯）开发约定
 
+> 最新用户交接（2026-10-29）：架构图e926602真实服务器实测仍失败；接手前请读 `docs/交接给Claude-架构实测失败与未发布改动-20261029.md`，包含精确复现、未发布改动和验收缺口。本次不是已修复或发版通知。
+
 个人 AI 智能体。界面上的名字叫“未央”；代码、数据目录、环境变量（JARVIS_*）、安装包文件名里的 jarvis / Jarvis 保持不变（改了会丢用户数据、断自动更新）。logo 在 `src/ui/logo.svg`，改完运行 `node scripts/make-icons.mjs` 重新生成电脑和安卓图标。代码在 `jarvis/`：网页界面（Vite）、本机网关（`server/`）、Windows 桌面版（`desktop/`，Electron）、安卓 App（`android/`，Capacitor）。
 
 ## 和用户沟通
