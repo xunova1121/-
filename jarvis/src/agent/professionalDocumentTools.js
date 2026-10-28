@@ -8,6 +8,7 @@ import { boundedText, LIMITS, workflowError } from '../app/doc/workflowSchema.js
 import { createDocumentResearch } from './documentResearch.js';
 import { preserveUserRequest } from '../app/doc/workflowPolicy.js';
 import { STYLE_IDS } from './pptStyles.js';
+import { SHEET_STYLE_IDS } from './spreadsheetDesign.js';
 
 async function readMaterials(args, execution) {
   const parts = [args.material || ''];
@@ -34,6 +35,7 @@ const properties = {
   template: str('已明确选择的Word模板路径；none为不套用'),
   template_id: str('已有场景配方编号，不代替业务推演'),
   theme: str('已有配色主题编号'),
+  sheet_style: { type: 'string', enum: SHEET_STYLE_IDS, description: 'Excel风格：business商务/minimal留白/ledger紧凑台账/analysis分析；保存并支持恢复' },
   style: { type: 'string', enum: STYLE_IDS, description: 'PPT构图风格：business商务/minimal留白/story叙事/data数据；保存到流程，恢复不必重复填写' },
   cover: { type: 'boolean' },
   toc: { type: 'string', enum: ['auto', 'yes', 'no'] },
@@ -103,6 +105,10 @@ export function createProfessionalDocumentTools(ctx) {
       documentContentReview: contentCheck
     });
     const savedState = JSON.parse(await ws.readText(result.stateFile));
+    // 恢复时“继续”不能覆盖原页数/封面/字号；正文资料保留在完整要求里，不拿正文风格名当格式指令。
+    const currentRequest = boundedText(execution.requestText || execution.rawRequestText || args.task || '', LIMITS.task, '本轮用户要求');
+    const generationRequirements = boundedText(savedState.input.task + (currentRequest && currentRequest !== savedState.input.task ? `\n\n【本轮用户原话补充】\n${currentRequest}` : ''), LIMITS.task * 2 + 100, '交付要求');
+    const formattingTask = [savedState.input.task, currentRequest].filter(Boolean).map(text => text.split(/^#{1,6}\s/m)[0]).join('\n\n');
     let generated;
     try {
       generated = await generator.run(
@@ -111,15 +117,16 @@ export function createProfessionalDocumentTools(ctx) {
           path: args.path,
           title: args.title,
           content: result.draft,
-          requirements: taskText || savedState.input.task,
+          requirements: generationRequirements,
           template: args.template,
           template_id: args.template_id,
           theme: args.theme,
           style: args.style || savedState.input.style,
+          sheet_style: args.sheet_style || savedState.input.sheetStyle,
           cover: args.cover,
           toc: args.toc || 'no'
         },
-        execution
+        { ...execution, requestText: formattingTask }
       );
     } catch (error) {
       error.stateFile = result.stateFile;

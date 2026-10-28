@@ -1,6 +1,7 @@
 import { STYLE_IDS, STYLE_NAMES } from './pptStyles.js';
 import { chooseDesign } from './documentDesign.js';
 import { documentError } from './documentPlan.js';
+import { styleRequest } from './documentStyleRequest.js';
 
 // 只解析要求头部，不拿正文/附件里提到的风格改用户的选择。最后一次明确改口优先。
 const EXPRESSIONS = [
@@ -10,29 +11,7 @@ const EXPRESSIONS = [
   ['business', /稳重商务|商务风|正式一点|稳重|政务|汇报风/gi]
 ];
 export function presentationRequest(text = '') {
-  const header = String(text).slice(0, 12000).split(/^#{1,6}\s/m)[0];
-  const events = [];
-  for (const [style, expression] of EXPRESSIONS) {
-    for (const match of header.matchAll(new RegExp(expression.source, expression.flags))) {
-      const prefix = header.slice(0, match.index).split(/[，,。；;\n]/).at(-1).slice(-120);
-      const listedPrefix = EXPRESSIONS.reduce((text, [, re]) => text.replace(new RegExp(re.source, re.flags), ''), prefix).replace(/[、/和或与及\s]+$/, '');
-      // 否定仅作用于紧随其后的风格，不能使“不要封面，使用商务风”也被否定。
-      const negative = /(?:不要|不用|不想要|不喜欢|别用|别|不采用|避免)(?:再|用|采用|做成|选择|那种|这种|这个|太|那么|过于|的|\s)*$/.test(listedPrefix);
-      events.push({ style, negative, at: match.index });
-    }
-  }
-  let style = '';
-  const excluded = new Set();
-  for (const event of events.sort((a, b) => a.at - b.at)) {
-    if (event.negative) {
-      excluded.add(event.style);
-      if (style === event.style) style = '';
-    } else {
-      excluded.delete(event.style);
-      style = event.style;
-    }
-  }
-  return { style, excluded: [...excluded] };
+  return styleRequest(text, EXPRESSIONS);
 }
 
 /** 真实用户原话优先于调用参数；历史只读all/pptx，最多30条，不增加模型调用。 */

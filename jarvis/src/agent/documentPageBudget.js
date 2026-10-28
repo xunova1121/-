@@ -14,6 +14,13 @@ export function requestedSlides(text = '') {
   return Number.isSafeInteger(count) && count > 0 && count <= 120 ? count : null;
 }
 
+/** 合并历史要求后的最后一次明确改口优先，不能让旧“不要封面”压过本轮“加封面”。 */
+export function presentationCover(text = '') {
+  const last = [...String(text).matchAll(/(?:不需要|不要|不用|无需|不加|不含|去掉|去除|包含|需要|含|加|带|要)[^\n，。；,;]{0,5}封面/g)].at(-1)?.[0] || '';
+  const forbidCover = /^(?:不需要|不要|不用|无需|不加|不含|去掉|去除)/.test(last);
+  return { forbidCover, requireCover: Boolean(last) && !forbidCover };
+}
+
 export function slideBudget(bodyCount, expectedSlides, requireCover = false, forbidCover = false) {
   if (expectedSlides == null) return { cover: !forbidCover, strict: false };
   if (!Number.isSafeInteger(expectedSlides) || expectedSlides < 1 || expectedSlides > 120) throw documentError('PPT总页数必须是1至120的整数', 'DOCUMENT_SLIDE_COUNT');

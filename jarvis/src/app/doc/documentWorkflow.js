@@ -8,6 +8,7 @@ import { detectRole, roleGuide, roleKey, ROLES } from './writingRoles.js';
 import { createWorkflowStore } from './workflowStore.js';
 import { writeLongDocument } from '../../agent/longDoc.js';
 import { STYLE_IDS } from '../../agent/pptStyles.js';
+import { SHEET_STYLE_IDS } from '../../agent/spreadsheetDesign.js';
 
 function newState(input, execution) {
   const task = boundedText(input.task, LIMITS.task, '原始要求', true);
@@ -15,7 +16,8 @@ function newState(input, execution) {
   const format = input.format || 'docx';
   const role = input.role === 'internal' ? null : roleKey(input.role) || detectRole(task);
   if (!['docx', 'pdf', 'html', 'md', 'pptx', 'xlsx'].includes(format)) throw workflowError('不支持的文档格式', 'DOCUMENT_INPUT');
-  if (input.style && (format !== 'pptx' || !STYLE_IDS.includes(input.style))) throw workflowError('PPT风格参数无效', 'DOCUMENT_INPUT');
+  if (format === 'pptx' && input.style && !STYLE_IDS.includes(input.style)) throw workflowError('PPT风格参数无效', 'DOCUMENT_INPUT');
+  if (format === 'xlsx' && input.sheet_style && !SHEET_STYLE_IDS.includes(input.sheet_style)) throw workflowError('Excel风格参数无效', 'DOCUMENT_INPUT');
   const id = globalThis.crypto.randomUUID();
   const referenceTime = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' });
   return {
@@ -28,7 +30,16 @@ function newState(input, execution) {
     revisionAttempts: 0,
     timings: [],
     // 写作角色：调用方指定的优先，internal 表示明确要内部分析口吻；auto / 没填按原话认
-    input: { task, material, format, allowResearch: input.research !== false, referenceTime, role, ...(input.style ? { style: input.style } : {}) },
+    input: {
+      task,
+      material,
+      format,
+      allowResearch: input.research !== false,
+      referenceTime,
+      role,
+      ...(format === 'pptx' && input.style ? { style: input.style } : {}),
+      ...(format === 'xlsx' && input.sheet_style ? { sheetStyle: input.sheet_style } : {})
+    },
     // 有写作角色的（给客户的方案、合同、实施方案……）走完整流程：要按角色审一遍、查推辞话术
     depth: role && ['auto', undefined].includes(input.depth) ? 'expert' : documentDepth({ task, format, depth: input.depth }),
     business: 'not_checked',

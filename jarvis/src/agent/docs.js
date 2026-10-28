@@ -207,7 +207,7 @@ function toBase64(bytes) {
  * @param {Uint8Array|ArrayBuffer} [o.template]  Word 模板（沿用它的样式）
  * @returns {Promise<{blob: Blob, ext: string, note?: string, theme: object, info?: object}>}
  */
-export async function generate(format, { title = '未命名', content = '', theme: themeName = '', cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, toPdf = null, template = null, layout = 'report', issuer = '', docNo = '', style = 'business', kind = '', expectedSlides = null, requireCover = false, forbidCover = false, typography = {} } = {}) {
+export async function generate(format, { title = '未命名', content = '', theme: themeName = '', cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, toPdf = null, template = null, layout = 'report', issuer = '', docNo = '', style = 'business', sheetStyle = '', kind = '', expectedSlides = null, requireCover = false, forbidCover = false, typography = {} } = {}) {
   const theme = resolveTheme(themeName, `${title}\n${content}`);
   const page = { theme, cover, subtitle, author, date, toc, layout };
   switch (format) {
@@ -237,7 +237,7 @@ export async function generate(format, { title = '未命名', content = '', them
       return { blob: r.blob, ext: 'pptx', theme, info: r.info };
     }
     case 'xlsx': {
-      const r = await makeXlsx(content, { theme, kind });
+      const r = await makeXlsx(content, { theme, kind, sheetStyle });
       return { blob: r.blob, ext: 'xlsx', theme, info: r.info };
     }
     case 'csv': return { blob: makeCsv(content), ext: 'csv', theme };

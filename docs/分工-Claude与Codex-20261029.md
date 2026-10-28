@@ -39,6 +39,7 @@
 
 ## 协调记录
 （要动对方名下文件时在这里写：日期、谁、改哪个文件、为什么）
+- 2026-10-29 Codex：PPT批真实文件及冻结验证通过，Excel另开批。只在xlsxWriter外加风格规则、生成/专业工作流sheet_style传递和可选恢复字段；不移动原行列、不改公式/数值/打印范围计算、不改writingRoles。样式要求解析提取为共用纯函数，保留PPT全部守护；不动Claude模块。
 - 2026-10-29 Codex：PPT批只补风格要求解析/历史PPT偏好、专业文档style入参和恢复传递，回执按实际风格写；documentWorkflow仅增加可选style持久化，不改角色、表达、业务审查、调用预算或writingRoles.js。已有四种渲染构图和公文主题规则保持，用虚构同稿输出原生PPT/PDF作对比。
 - 2026-10-29 Codex：足球/技能批次需改`src/agent/tools.js`中install_skill回执及安装后读回，给出真实安装批次、声明版本、启停状态，并区分安装/读取/执行；不动定时任务、持仓工具、CORE或Claude话术。skillPacks只加安装身份元数据，原权限/停用保持。
 - 2026-10-29 Codex：已从acc71aa按用户调整开工，Word→股票行情接口→足球/技能→PPT→Excel。Word只改文档生成/样式/交付模块；FFmpeg补部署及svgRaster缺失诊断，不改Claude CI、holdings.js、架构分支或一分钟收尾。过程见`docs/Codex推进记录-20261029.md`；每批[skip ci]，不触发发布。

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { presentationRequest, presentationDesign } from '../src/agent/presentationDesign.js';
 import { createDocumentGenerateTool } from '../src/agent/documentGenerateTool.js';
 import { createProfessionalDocumentTools } from '../src/agent/professionalDocumentTools.js';
+import { createTools } from '../src/agent/tools.js';
 import { createDocumentStyles } from '../src/agent/documentStyles.js';
 import { useBackend } from '../src/agent/store.js';
 import { createFileStore } from '../server/fileStore.mjs';
@@ -84,4 +85,19 @@ it('自动设计的提醒缓存不能绕过后来明确风格的冲突验收', a
   const explicit = await tool.run({ ...args, style: 'story' });
   expect(explicit).not.toContain('没有重新生成');
   expect(JSON.parse(await ws.readText('文档检查/约束-pptx.json')).errors).toBeGreaterThan(0);
+});
+it('实际恢复收到“继续”或换风格仍保留原页数/不要封面，明确改口再加封面', async () => {
+  let calls = 0;
+  const tool = createTools({ llm: async () => { calls++; return content; } }).find(t => t.name === 'write_professional_document');
+  await tool.run({ task: '做两页PPT，不要封面', format: 'pptx', style: 'story', path: '初稿.pptx', depth: 'simple', research: false }, { sessionId: 'ppt-resume' });
+  const stateFile = JSON.parse(await ws.readText('文档检查/初稿-pptx.json')).contentReview.workflowFile;
+  for (const request of ['继续', '改用极简']) {
+    await tool.run({ state_file: stateFile, path: '再生成.pptx' }, { sessionId: 'ppt-resume', rawRequestText: request });
+    const report = JSON.parse(await ws.readText('文档检查/再生成-pptx.json'));
+    expect(report.slides).toBe(2); expect(report.expectedSlides).toBe(2);
+    if (request === '改用极简') expect(report.design.effective).toBe('minimal');
+  }
+  await tool.run({ state_file: stateFile, path: '带封面.pptx' }, { sessionId: 'ppt-resume', rawRequestText: '这次加一页封面，总共3页' });
+  const covered = JSON.parse(await ws.readText('文档检查/带封面-pptx.json'));
+  expect(covered.slides).toBe(3); expect(covered.expectedSlides).toBe(3); expect(calls).toBe(1);
 });

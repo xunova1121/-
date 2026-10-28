@@ -12,6 +12,7 @@
 import { parseSheets, parseBlocks } from './sheetParse.js';
 import { checkFormulas, sheetLayout, colName } from './formulaCheck.js';
 import { evaluateWorkbook } from './formulaEval.js';
+import { spreadsheetTokens } from './spreadsheetDesign.js';
 
 const CJK = /[⺀-￿]/;
 const width = (v) => [...String(v ?? '')].reduce((n, ch) => n + (CJK.test(ch) ? 2 : 1), 0);
@@ -319,7 +320,7 @@ function tableRules(ws, { headers, first, last, grid, kind }) {
  * @param {{ theme: object, kind?: string }} o  kind：settlement 结算 / ledger 台账 / budget 预算 / analysis 分析 / general（documentDesign.js 判断）
  * @returns {Promise<{ blob: Blob, info: { sheets: number, formulas: number, formulaIssues: object[], layout: string, duplicatesRemoved: number, duplicatesKept: number } }>}
  */
-export async function makeXlsx(content, { theme, kind = 'general' }) {
+export async function makeXlsx(content, { theme, kind = 'general', sheetStyle = '' }) {
   const mod = await import('exceljs');
   const ExcelJS = mod.default ?? mod;
   const wb = new ExcelJS.Workbook();
@@ -328,13 +329,10 @@ export async function makeXlsx(content, { theme, kind = 'general' }) {
   wb.calcProperties.fullCalcOnLoad = true; // Excel / WPS 打开时重新计算全部公式
   const C = theme.colors;
   const official = Boolean(theme.official);
-  const headFill = official ? 'FFD9D9D9' : `FF${C.accent}`;
-  const headFont = official ? 'FF000000' : 'FFFFFFFF';
-  const zebra = `FF${official ? 'FFFFFF' : C.soft}`;
-  const titleFill = official ? 'FFFFFFFF' : `FF${C.primary}`;
-  const titleFont = official ? 'FF000000' : 'FFFFFFFF';
+  const T = spreadsheetTokens(sheetStyle, theme, kind);
+  const { headFill, headFont, zebra, titleFill, titleFont } = T;
   const border = { style: 'thin', color: { argb: 'FFBFC7D1' } };
-  const borders = { top: border, left: border, bottom: border, right: border };
+  const borders = T.rulesOnly ? { bottom: { style: 'hair', color: { argb: 'FFE0E6ED' } } } : { top: border, left: border, bottom: border, right: border };
   const FONT = '微软雅黑';
   let formulas = 0;
   let duplicatesRemoved = 0;
@@ -359,7 +357,8 @@ export async function makeXlsx(content, { theme, kind = 'general' }) {
     // 只有一张表、没有说明和小节：数据表，表头就在第一行（方便筛选、透视）；否则按报表排：大标题、小节、说明
     const report = s.blocks.some((b) => b.kind !== 'table') || tables.length > 1;
     const W = Math.max(1, ...tables.map((t) => Math.max(...t.rows.map((r) => r.length))));
-    const ws = wb.addWorksheet(name, { views: [{ showGridLines: !report }] });
+    const showGridLines = !report && ['business', 'ledger'].includes(T.style);
+    const ws = wb.addWorksheet(name, { views: [{ showGridLines }] });
     const cells = new Map();
     checked.push({ name, cells, rows: 0, cols: W });
     if (!tables.length && !s.blocks.length) continue;
@@ -369,6 +368,11 @@ export async function makeXlsx(content, { theme, kind = 'general' }) {
       const w = Math.max(4, ...tables.flatMap((t) => t.rows.map((r) => width(r[ci]))));
       return tables.length ? Math.min(50, Math.max(report ? 10 : 8, w + 3)) : 100;
     });
+    // 短报表也利用A4可打印宽度；只展开列宽，不插行/列或重写公式，普通数据表维持原逻辑。
+    const naturalWidth = colW.reduce((a, b) => a + b, 0);
+    if (report && W > 1 && naturalWidth < T.reportWidth) {
+      colW.forEach((value, ci) => { colW[ci] = Math.min(50, value * T.reportWidth / naturalWidth); });
+    }
     colW.forEach((w, ci) => { ws.getColumn(ci + 1).width = w; });
     const fullW = colW.reduce((a, b) => a + b, 0);
 
@@ -387,7 +391,7 @@ export async function makeXlsx(content, { theme, kind = 'general' }) {
       r++;
     };
     if (report) {
-      band(name, { font: { size: 15, bold: true, color: { argb: titleFont } }, fill: titleFill, height: 32, align: 'center' });
+      band(name, { font: { size: T.titleSize, bold: true, color: { argb: titleFont } }, fill: titleFill, height: 32, align: T.titleAlign });
       // 紧跟在工作表名下面、第一张表 / 小节之前的文字是副标题
       while (s.blocks[0]?.kind === 'text') band(s.blocks.shift().text, { font: { size: 10, italic: true, color: { argb: 'FF595959' } }, height: 20, align: 'center' });
       // 有公式的报表：标题格加批注说明怎么看（不插行：模型写的公式按固定行号引用，插一行就全错位）
@@ -429,29 +433,29 @@ export async function makeXlsx(content, { theme, kind = 'general' }) {
           }
           if (c.numFmt) cell.numFmt = c.numFmt;
           cell.border = borders;
-          cell.font = { name: FONT, size: 10.5 };
+          cell.font = { name: FONT, size: T.bodySize };
           cell.alignment = { vertical: 'middle', wrapText: true, horizontal: seqCol(ci) ? 'center' : typeof c.value === 'number' || c.formula ? 'right' : undefined, indent: !seqCol(ci) && (typeof c.value === 'number' || c.formula) ? 1 : 0 };
           if (labelCol(ci)) {
-            cell.font = { name: FONT, size: 10.5, bold: true, color: { argb: official ? 'FF000000' : `FF${C.primary}` } };
+            cell.font = { name: FONT, size: T.bodySize, bold: true, color: { argb: official ? 'FF000000' : `FF${C.primary}` } };
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: official ? 'FFF2F2F2' : `FF${C.soft}` } };
           } else if (header && ri === 0) {
-            cell.font = { name: FONT, size: 10.5, bold: true, color: { argb: headFont } };
+            cell.font = { name: FONT, size: T.headSize, bold: true, color: { argb: headFont } };
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headFill } };
             cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
           } else if (total) {
-            cell.font = { name: FONT, size: 10.5, bold: true };
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: official ? 'FFF2F2F2' : `FF${C.soft}` } };
+            cell.font = { name: FONT, size: T.bodySize, bold: true, color: { argb: T.totalFont } };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: T.totalFill } };
           } else if (header && ri % 2 === 0) {
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: zebra } };
           }
           // 录入的数和公式算的数分开：录入是蓝字，公式是灰底（表里有公式时才分，免得满屏颜色）
           if (t.formulas && header && ri > 0 && !total && !labelCol(ci) && !seqCol(ci)) {
             if (c.formula) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: CALC_FILL } };
-            else if (typeof c.value === 'number') cell.font = { name: FONT, size: 10.5, color: { argb: INPUT_FONT } };
+            else if (typeof c.value === 'number') cell.font = { name: FONT, size: T.bodySize, color: { argb: INPUT_FONT } };
           }
           if (typeof c.value === 'string') lines = Math.max(lines, linesFor(c.value, colW[ci] ?? 10));
         });
-        xr.height = Math.max(header && ri === 0 ? 24 : 20, lines * 15 + 6);
+        xr.height = Math.max(header && ri === 0 ? T.headHeight : T.bodyHeight, lines * (T.style === 'business' ? 15 : T.bodySize + 4) + (T.style === 'ledger' ? 4 : 6));
         r++;
       });
       if (header) {
@@ -463,9 +467,9 @@ export async function makeXlsx(content, { theme, kind = 'general' }) {
       r++; // 表格之后空一行
     });
     // 冻结到第一张表的表头；只有一张表时加筛选
-    if (firstHeader) ws.views = [{ state: 'frozen', ySplit: firstHeader, showGridLines: !report }];
+    if (firstHeader) ws.views = [{ state: 'frozen', ySplit: firstHeader, showGridLines }];
     if (tables.length === 1 && tables[0].header !== false && tables[0].rows.length > 1 && firstHeader) {
-      ws.autoFilter = { from: { row: firstHeader, column: 1 }, to: { row: firstHeader, column: Math.max(...tables[0].rows.map((x) => x.length)) } };
+      ws.autoFilter = { from: { row: firstHeader, column: 1 }, to: { row: firstHeader + tables[0].rows.length - 1, column: Math.max(...tables[0].rows.map((x) => x.length)) } };
     }
     // 打印：宽表横向；所有列缩到一页宽
     ws.pageSetup = { orientation: fullW > 110 ? 'landscape' : 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 } };
@@ -478,7 +482,7 @@ export async function makeXlsx(content, { theme, kind = 'general' }) {
     // 宽表（结算、台账常见）：左边的名称列也冻结，横着拉时还看得到是谁
     if (firstHeader && W > 6) {
       const nameCol = tables[0].rows[0].findIndex((h) => /姓名|名称|户名|客户|项目|品名|事项|任务/.test(String(h ?? '')));
-      if (nameCol >= 0 && nameCol <= 2) ws.views = [{ state: 'frozen', ySplit: firstHeader, xSplit: nameCol + 1, showGridLines: !report }];
+      if (nameCol >= 0 && nameCol <= 2) ws.views = [{ state: 'frozen', ySplit: firstHeader, xSplit: nameCol + 1, showGridLines }];
     }
     checked.at(-1).rows = Math.max(0, ...[...cells.keys()].map((a) => Number(a.match(/\d+$/)[0])));
   }
@@ -494,7 +498,7 @@ export async function makeXlsx(content, { theme, kind = 'general' }) {
     }
   }
   const buf = await wb.xlsx.writeBuffer();
-  return { blob: new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), info: { sheets: sheets.length, formulas, formulaIssues: checkFormulas(checked), layout: sheetLayout(checked), duplicatesRemoved, duplicatesKept } };
+  return { blob: new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), info: { sheets: sheets.length, formulas, formulaIssues: checkFormulas(checked), layout: sheetLayout(checked), duplicatesRemoved, duplicatesKept, sheetStyle: T.style } };
 }
 
 /** CSV：带 UTF-8 BOM，Excel 双击打开中文不乱码 */

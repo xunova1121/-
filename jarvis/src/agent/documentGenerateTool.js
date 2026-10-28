@@ -1,4 +1,4 @@
-import { requestedSlides } from './documentPageBudget.js';
+import { requestedSlides, presentationCover } from './documentPageBudget.js';
 import * as ws from './workspace.js';
 import { generate } from './docs.js';
 import { THEME_IDS, themeList } from './themes.js';
@@ -14,6 +14,7 @@ import { formattingSource, verifyFormattingContent } from './documentPreservatio
 import { formatDocumentFile } from './documentFileFormat.js';
 import { documentTypography } from './documentTypography.js';
 import { presentationDesign } from './presentationDesign.js';
+import { spreadsheetDesign, SHEET_STYLE_IDS, SHEET_STYLE_NAMES } from './spreadsheetDesign.js';
 
 /** 保留原有一轮自修复与PPT看图检查，不额外叠加无界模型审稿。 */
 /** 同一轮里同一个文件：内容一样就直接用上次的结果；已经请模型自查过的文件，重新生成时不再自查（评测里一份 PPT 生成了四遍，每遍都等自查） */
@@ -72,6 +73,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         source_path: str('只排版已有Word时绑定工作区原DOCX路径；保留原文表格图片及关联，与source_requirement_id二选一'),
         theme: { type: 'string', enum: THEME_IDS, description: '配色主题，不填自动选' },
         style: { type: 'string', enum: STYLE_IDS, description: 'PPT 设计风格（构图不同，不只是颜色）：business 稳重商务（汇报、方案）/ minimal 简洁留白（产品、设计、品牌）/ story 叙事氛围（剧情、人物、历史、文化、旅行）/ data 数据报告（经营、财务、统计）。不填按用户要求和内容自动选' },
+        sheet_style: { type: 'string', enum: SHEET_STYLE_IDS, description: 'Excel视觉风格：business商务表格/minimal简洁留白/ledger紧凑台账/analysis分析报表；不填按用户原话、Excel偏好和kind选。样式不移动行列，不改公式数据' },
         kind: { type: 'string', enum: [...Object.keys(DOC_KINDS), ...Object.keys(SHEET_KINDS)], description: `文种 / 用途，决定结构和排法。Word：${Object.entries(DOC_KINDS).map(([k, v]) => `${k} ${v}`).join('、')}；Excel：${Object.entries(SHEET_KINDS).map(([k, v]) => `${k} ${v}`).join('、')}。不填按标题和要求自动判断` },
         cover: { type: 'boolean', description: 'Word / PDF 加封面（正式报告、方案、标书类建议加）' },
         subtitle: str('副标题（可选）'),
@@ -88,7 +90,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       ['format', 'path', 'content']
     ),
     run: async (
-      { format, path, title, content, theme, style, kind, cover, subtitle, author, issuer, docNo, toc, template, template_id: templateId, requirements, source_requirement_id: sourceId, source_path: sourcePath },
+      { format, path, title, content, theme, style, sheet_style: sheetStyle, kind, cover, subtitle, author, issuer, docNo, toc, template, template_id: templateId, requirements, source_requirement_id: sourceId, source_path: sourcePath },
       execution = {}
     ) => {
       const { progress, signal, checkpoint, rawRequestText, requestText, executionScope, sessionId } = execution;
@@ -109,9 +111,10 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       const design = format === 'pptx'
         ? await presentationDesign(ctx, goal, designOptions, signal)
         : chooseDesign(designOptions);
-      const forbidCover = /(?:不要|不用|无需|不加|不含|去掉|去除).{0,3}封面/.test(goal);
+      const sheetDesign = format === 'xlsx' ? await spreadsheetDesign(ctx, goal, { kind: design.kind, sheetStyle }, signal) : null;
+      const { forbidCover, requireCover } = presentationCover(goal);
       const expectedSlides = format === 'pptx' ? requestedSlides('PPT ' + goal) : null;
-      const callKey = await keyOf({ format, path, title, content, theme, design, kind, cover, subtitle, author, issuer, docNo, toc, template, templateId, requirements, goal, typography, sessionId, sourceId: source?.id, workflow: ctx.documentContentReview?.workflowFile || null });
+      const callKey = await keyOf({ format, path, title, content, theme, design, sheetDesign, kind, cover, subtitle, author, issuer, docNo, toc, template, templateId, requirements, goal, typography, sessionId, sourceId: source?.id, workflow: ctx.documentContentReview?.workflowFile || null });
       // 记住的结果只管 10 分钟（同一个任务里重复调用）；隔得久了照常重新生成
       const fresh = (m, key, ms) => m.has(key) && Date.now() - m.get(key).at < ms;
       const cached = cache.results.get(callKey);
@@ -153,10 +156,11 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
           content: text,
           typography,
           expectedSlides,
-          requireCover: !forbidCover && /含封面|包含封面|加(?:一页)?封面|带封面/.test(goal),
+          requireCover,
           forbidCover,
           theme: chosenTheme,
           style: design.style,
+          sheetStyle: sheetDesign?.style,
           kind: design.kind,
           layout: plan?.options.layout,
           cover: cover ?? plan?.options.cover ?? false,
@@ -238,10 +242,11 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       if (ctx.documentContentReview && finalContent !== content) {
         ctx.documentContentReview.business = 'needs_recheck';
       }
-      const r = await deliverDocument(ctx, out, target, { progress, signal, checkpoint, plan, issues: lint(format, finalContent), generatorReview: looked, requirements: goal || requirements, preservation, design });
+      const r = await deliverDocument(ctx, out, target, { progress, signal, checkpoint, plan, issues: lint(format, finalContent), generatorReview: looked, requirements: goal || requirements, preservation, design: sheetDesign || design });
       const notes = [
         `主题：${out.theme.name}`,
         ...(design.label ? [`设计：${STYLE_NAMES[out.info?.style] || design.label}（${out.info?.style && out.info.style !== design.style ? '公文主题固定稳重商务，与请求风格冲突；未按请求风格生成' : design.reason}）`] : []),
+        ...(sheetDesign ? [`表格样式：${SHEET_STYLE_NAMES[out.info?.sheetStyle] || sheetDesign.label}（${out.info?.sheetStyle !== sheetDesign.style ? '公文主题与请求风格冲突；未按请求风格生成' : sheetDesign.reason}）`] : []),
         r.validation.readback === 'passed' ? '已检查真实文件并读回有效内容' : '已检查文件头或结构',
         ...(plan ? ['制作方案：' + plan.templateName] : []),
         ...r.notes

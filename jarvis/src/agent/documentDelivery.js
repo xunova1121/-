@@ -15,10 +15,11 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
     issues = [...issues, ...typographyIssues];
   }
   const validation = await inspectDocument(out.blob, target, { info: out.info, requiredText, signal, requirements });
-  if (validation.format === 'pptx' && design && out.info?.style) {
-    const conflict = design.style !== out.info.style;
-    validation.design = { requested: design.style, effective: out.info.style, state: conflict ? 'conflict' : 'applied' };
-    if (conflict) issues = [...issues, { level: design.required || design.excluded?.includes(out.info.style) ? 'error' : 'warn', text: '公文主题固定稳重商务，与选择的PPT风格冲突；请调整主题后再交付' }];
+  const effectiveStyle = validation.format === 'pptx' ? out.info?.style : validation.format === 'xlsx' ? out.info?.sheetStyle : null;
+  if (design?.style && effectiveStyle) {
+    const conflict = design.style !== effectiveStyle;
+    validation.design = { requested: design.style, effective: effectiveStyle, state: conflict ? 'conflict' : 'applied' };
+    if (conflict) issues = [...issues, { level: design.required || design.excluded?.includes(effectiveStyle) ? 'error' : 'warn', text: `公文主题固定稳重商务，与选择的${validation.format === 'pptx' ? 'PPT' : 'Excel'}风格冲突；请调整主题后再交付` }];
   }
   if (out.wordLayout) validation.wordLayout = out.wordLayout;
   if (out.info?.typographyProfile && Object.keys(out.info.typographyProfile).length) validation.typography = { profile: out.info.typographyProfile, scope: '正文和标题样式；原件直接格式、代码、页眉页脚独立格式保留' };
