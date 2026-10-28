@@ -7,6 +7,7 @@ import * as workspace from './workspace.js';
 import { checkSources } from './diagramSources.js';
 import { DIAGRAM_PLANNING, planDiagramContent, strictArchitecture } from './diagramPlanning.js';
 import { layoutDiagram } from './diagramModel.js';
+import { layoutWithRepair } from './diagramRepair.js';
 import { diagramScene } from './diagramScene.js';
 import { deliverDiagram, diagramFormats, diagramDigest } from './diagramExport.js';
 
@@ -154,10 +155,13 @@ export function createDiagramTool(ctx, { requireArchitecture = false } = {}) {
     run: async (input, { signal, checkpoint, progress, retrieval, rawRequestText } = {}) => {
       if (!/\.(svg|png|pdf|pptx)$/i.test(input.path))
         throw Object.assign(new Error('图形输出需使用SVG/PNG/PDF/PPTX后缀'), { code: 'DIAGRAM_FORMAT', kind: 'input' });
-      if (!input.architecturePath && input.edges?.some(edge => edge.type === 'integration'))
-        throw Object.assign(new Error('应用集成须通过已审架构底稿投影，不能以普通有向连线替代'), { code: 'ARCHITECTURE_PLAN_REQUIRED', kind: 'input' });
       // 'strict'：用户明确要逐条核对需求原文时才强制先走架构底稿；平时直接画（见 diagramPlanning.js）
       const strict = requireArchitecture === true || (requireArchitecture === 'strict' && strictArchitecture(rawRequestText));
+      // 来自架构底稿投影的集成关系（带 relationId / semanticRouting）不能丢掉类型冒充普通箭头；
+      // 普通画图里模型自己标的 integration 由 diagramRepair 按普通连线画
+      const projected = input.semanticRouting !== undefined || input.edges?.some(edge => edge.type === 'integration' && (edge.relationId || edge.meaning));
+      if ((strict || projected) && !input.architecturePath && input.edges?.some(edge => edge.type === 'integration'))
+        throw Object.assign(new Error('应用集成须通过已审架构底稿投影，不能以普通有向连线替代'), { code: 'ARCHITECTURE_PLAN_REQUIRED', kind: 'input' });
       if (strict && !input.architecturePath && (!input.diagramType || input.diagramType === 'architecture' || /架构/.test(rawRequestText || '')))
         throw Object.assign(new Error('先调用plan_architecture理顺业务关系并取得architecturePath，再生成架构图；不能跳过底稿改用自由图片'), {
           code: 'ARCHITECTURE_PLAN_REQUIRED',
@@ -170,7 +174,11 @@ export function createDiagramTool(ctx, { requireArchitecture = false } = {}) {
       if (architecture) input = projectArchitecture(architecture, { ...input, view: input.view || 'overview' });
       if (input.draft && !/草图|示意/.test(input.path)) input.path = input.path.replace(/(\.[^/.]+)$/, '-逻辑草图$1');
       if (architecture && !input.draft) input = { ...input, formats: input.formats || ['svg', 'png', 'pdf', 'pptx'], pptxMode: input.pptxMode || 'editable' };
-      const model = layoutDiagram(input);
+      // 普通画图：版式参数不合规则时程序就地调整（层类型、箭头文字、分组），不让模型反复重填；严格模式和架构底稿照原规则
+      let repairNotes = [];
+      let model;
+      if (strict || architecture || projected) model = layoutDiagram(input);
+      else ({ model, input, notes: repairNotes } = layoutWithRepair(input));
       if (input.draft) model.monochrome = true;
       progress?.('正在核对材料和图形结构…');
       const direct = await checkSources(input.sources || [], signal);
@@ -224,7 +232,7 @@ export function createDiagramTool(ctx, { requireArchitecture = false } = {}) {
       };
       await checkpoint?.({ type: 'artifact_validation', path: result.sourcePath, validation });
       ctx.onPreview?.(result.sourcePath);
-      return `${input.draft ? '仅生成逻辑草图，非正式交付' : '已生成可编辑SVG'}：${result.sourcePath}\n${JSON.stringify({ validation, sources, architecture: architecture ? { path: architecture.path, reviewPath: architecture.reviewPath, semantic: architecture.report.semantic, structure: architecture.report.structure, draft: Boolean(input.draft), view: input.view, availableViews: ['overview', ...(architecture.plan.relations.some((link) => ['workflow', 'feedback'].includes(link.type)) ? ['workflow'] : []), ...(architecture.plan.relations.some((link) => link.type === 'dataflow') ? ['dataflow'] : [])].filter((view) => view !== input.view) } : undefined, candidateStatePath: candidate?.statePath, contentPlan: { path: contentPlanPath, coverage: contentPlan.coverage, factCount: contentPlan.facts.length, recommendationCount: contentPlan.recommendations.length }, ...result })}\nSVG为原生图形；展示PPT与PDF复用同一PNG，展示PPT不冒充原生可编辑版。原文摘录匹配不等于业务全面核实，未做的检查及失败格式须如实说明。只有primaryEditablePath实际存在且editable.passed=true，才可称可编辑PPT已完成；展示版是图片，不能冒充逐对象编辑。architecture.availableViews只是可另行生成的视图，未生成文件不能说已交付；总览中的dataflow_view关系需用同底稿view=dataflow另行呈现。`;
+      return `${input.draft ? '仅生成逻辑草图，非正式交付' : '已生成可编辑SVG'}：${result.sourcePath}\n${JSON.stringify({ validation, sources, ...(repairNotes.length && { layoutAdjusted: repairNotes }), architecture: architecture ? { path: architecture.path, reviewPath: architecture.reviewPath, semantic: architecture.report.semantic, structure: architecture.report.structure, draft: Boolean(input.draft), view: input.view, availableViews: ['overview', ...(architecture.plan.relations.some((link) => ['workflow', 'feedback'].includes(link.type)) ? ['workflow'] : []), ...(architecture.plan.relations.some((link) => link.type === 'dataflow') ? ['dataflow'] : [])].filter((view) => view !== input.view) } : undefined, candidateStatePath: candidate?.statePath, contentPlan: { path: contentPlanPath, coverage: contentPlan.coverage, factCount: contentPlan.facts.length, recommendationCount: contentPlan.recommendations.length }, ...result })}\nSVG为原生图形；展示PPT与PDF复用同一PNG，展示PPT不冒充原生可编辑版。layoutAdjusted是程序为符合版式自动做的调整，交付时简要告诉用户。原文摘录匹配不等于业务全面核实，未做的检查及失败格式须如实说明。只有primaryEditablePath实际存在且editable.passed=true，才可称可编辑PPT已完成；展示版是图片，不能冒充逐对象编辑。architecture.availableViews只是可另行生成的视图，未生成文件不能说已交付；总览中的dataflow_view关系需用同底稿view=dataflow另行呈现。`;
     }
   };
 }
