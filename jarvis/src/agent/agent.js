@@ -237,7 +237,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   tools = toolsForQuestion(tools, questionProfile);
   const capabilities = capabilityBlock(availableTools);
   // 环境完全没有产物/计算核验能力时，直接说明未验收，不空转两轮模型。
-  const canReview = availableTools.some(tool => /^(?:create_document|write_long_document|edit_office_document|read_file|write_file|run_javascript|run_python|computer_run|computer_read_file|verify_numbers|create_diagram|export_diagram|generate_image|sing_song|generate_video)$/.test(tool.name));
+  const canReview = availableTools.some(tool => /^(?:create_document|write_long_document|edit_office_document|read_file|write_file|run_javascript|run_python|computer_run|computer_read_file|verify_numbers|create_diagram|export_diagram|generate_image|sing_song|generate_video|code_read|code_edit|code_write|code_run)$/.test(tool.name));
   const review = createExecutionReview(requirementText, { visual: images.length > 0 || history.some(message => message.images?.length) });
   const retrieval = createRetrievalBudget(lookupDeadline ? '普通查询' : images.length ? `逐项核验 ${requirementText}` : requirementText, { now, timeBudgetMs });
   let modelAttempts = 0;
@@ -263,7 +263,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     name: 'execution_capabilities',
     description: '核对本轮实际开放的编程、项目测试、文档和电脑操作工具，不把技能说明当已经安装的执行环境。',
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
-    run: async () => JSON.stringify({ tools: availableTools.map(tool => tool.name).slice(0, 100), projectTests: availableTools.some(tool => tool.name === 'run_project_tests'), note: '工具开放不等于本次执行成功，以真实回执为准；没有项目执行器不能声称已运行测试' })
+    run: async () => JSON.stringify({ tools: availableTools.map(tool => tool.name).slice(0, 100), projectTests: availableTools.some(tool => tool.name === 'run_project_tests' || tool.name === 'code_run'), note: '工具开放不等于本次执行成功，以真实回执为准；没有项目执行器不能声称已运行测试' })
   };
   // 普通问题有一分钟时限：让模型自己判断这件事是不是一问一答，不是就先解除时限（关键词判断难免看错）
   const moreTimeTool = {
@@ -561,8 +561,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     for (const { c, ok, output, outImages } of results) {
       toolCount++;
       if (WEB_TOOLS.has(c.name)) retrieval.end(ok);
-      if (ok && /^(write_file|edit_file)$/.test(c.name) && CODE_FILE.test(String(c.args?.path ?? ''))) wroteCode = true;
-      if (ok && /^(run_javascript|run_python|computer_run|run_project_tests)$/.test(c.name)) ranCode = true;
+      if (ok && /^(write_file|edit_file|code_write|code_edit)$/.test(c.name) && CODE_FILE.test(String(c.args?.path ?? ''))) wroteCode = true;
+      if (ok && (/^(run_javascript|run_python|computer_run|run_project_tests)$/.test(c.name) || c.name === 'code_run' && c.args?.command === 'test')) ranCode = true;
       if (!ok) failCount++;
       lastToolOk = ok;
       recent.push(ok);
@@ -625,7 +625,7 @@ export function finishCheck({ steps = [], wroteCode = false, ranCode = false, la
   const tail = String(lastText).trim().split(/(?<=[。！？\n])/).filter((x) => x.trim()).at(-1) ?? '';
   if (ANNOUNCE.test(tail) && !OFFER.test(tail)) lines.push('你刚才说要去做，但这一步没有调用任何工具，事情还没做。现在直接调用工具把它做完，不要只说不做，也不用再解释一遍要做什么。');
   if (left.length) lines.push(`任务清单里还有 ${left.length} 步没标完成：${left.map((s) => `“${s.text}”`).join('、')}。已经做完的用 update_plan 标成 done；没做的接着做；确实做不了或不用做的标成 skip，并在回答里说明原因。`);
-  if (wroteCode && !ranCode) lines.push('你写了代码，但还没有运行或预览过。先用 run_javascript / run_python 运行，或用 preview 打开看一眼，确认能用再交给用户；确实没法运行的，在回答里说明没有验证过。');
+  if (wroteCode && !ranCode) lines.push('你写了代码，但还没有运行或预览过。仓库项目先用 code_run 跑 test；其它代码用 run_javascript / run_python 运行，或用 preview 打开看一眼，确认能用再交给用户；确实没法运行的，在回答里说明没有验证过。');
   return lines.length ? `（系统提示：结束前核对一下。${lines.join('')}核对完再给出最终回答，不要重复前面已经说过的内容。）` : '';
 }
 

@@ -4,12 +4,14 @@ import { createHash, randomUUID } from 'node:crypto';
 import { codeError, createGitRunner, gitRetry, repositoryName } from './codeGit.mjs';
 import { createGitHubHost } from './gitHosting.mjs';
 import { allowedCodePath, readCodeFile, codeLines, searchCode } from './codeRepoFiles.mjs';
+import { writeCodeFile } from './codeRepoWrite.mjs';
 
 /** 仅GitHub只读。最多8仓库缓存/32工作副本；不自动删用户工作，索引不保存代码正文或凭据。 */
-export function createCodeRepos({ baseDir, getConfig, git = createGitRunner(), hosting = createGitHubHost() }) {
+export function createCodeRepos({ baseDir, getConfig, git = createGitRunner(), hosting = createGitHubHost(), editing = false, sandbox = null }) {
   const root = path.resolve(baseDir),
     indexPath = path.join(root, 'index.json');
   const busy = new Map();
+  const operations = new Map(); // 最多两个活动操作，同一worktree不能边写边运行。
   let saving = Promise.resolve();
   const config = async (requested) => {
     const value = (await getConfig()).codeRepos;
@@ -90,7 +92,7 @@ export function createCodeRepos({ baseDir, getConfig, git = createGitRunner(), h
       head,
       defaultBranch: row.defaultBranch,
       protectDefaultBranch: true,
-      readOnly: true,
+      readOnly: !editing,
       connection: '已连接'
     };
   };
@@ -201,15 +203,38 @@ export function createCodeRepos({ baseDir, getConfig, git = createGitRunner(), h
     (await run(['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--'], current.cwd, execution, current.connection)).stdout
       .split('\0')
       .filter(Boolean);
+  const operate = async (id, sessionId, execution, action) => {
+    execution.signal?.throwIfAborted();
+    if (!editing) throw codeError('CODE_READ_ONLY', '当前只开放只读仓库工具');
+    if (operations.has(id) || operations.size >= 2) throw codeError('CODE_REPO_BUSY', '工作副本正在操作，请等当前操作结束');
+    const ctrl = new AbortController();
+    const signal = execution.signal ? AbortSignal.any([execution.signal, ctrl.signal]) : ctrl.signal;
+    operations.set(id, ctrl);
+    try {
+      const current = await resolve(id, sessionId),
+        context = { ...execution, signal };
+      const view = await snapshot(current.row, current.cwd, context, current.connection);
+      const common = (await run(['rev-parse', '--git-common-dir'], current.cwd, context, current.connection)).stdout.trim();
+      const expected = path.join(root, current.row.repository.replace('/', '__'), 'bare.git');
+      if (view.branch === view.defaultBranch || (await fs.realpath(path.resolve(current.cwd, common))) !== expected)
+        throw codeError('CODE_BRANCH', '只能修改本任务的受管工作分支，默认分支或Git目录已变化');
+      return await action(current, context);
+    } finally {
+      operations.delete(id);
+    }
+  };
   return {
     clone,
+    writable: editing,
+    runConfigured: Boolean(editing && sandbox?.configured),
     abortAll() {
       for (const ctrl of busy.values()) ctrl.abort(codeError('CODE_CONNECTION_CHANGED', '仓库连接已变更，当前操作已停止'));
+      for (const ctrl of operations.values()) ctrl.abort(codeError('CODE_CONNECTION_CHANGED', '仓库连接已变更，当前操作已停止'));
     },
     async status(id, sessionId, execution = {}) {
       const current = await resolve(id, sessionId);
       const result = await snapshot(current.row, current.cwd, execution, current.connection);
-      const raw = (await run(['status', '--porcelain=v1', '-z', '--untracked-files=normal'], current.cwd, execution, current.connection)).stdout.split('\0');
+      const raw = (await run(['status', '--porcelain=v1', '-z', '--untracked-files=all'], current.cwd, execution, current.connection)).stdout.split('\0');
       const changes = [];
       for (let i = 0; i < raw.length; i++) {
         if (!raw[i]) continue;
@@ -225,16 +250,28 @@ export function createCodeRepos({ baseDir, getConfig, git = createGitRunner(), h
         names = relative ? [relative] : (await files(current, execution)).filter(allowedCodePath).slice(0, 200);
       if (relative) await readCodeFile(current.cwd, relative, current.connection.token);
       if (!names.length) return { diff: '', truncated: false };
-      const output = await run(
-        ['diff', '--no-ext-diff', '--no-textconv', '--no-color', ...(relative ? [] : ['--stat']), 'HEAD', '--', ...names],
-        current.cwd,
-        execution,
-        current.connection
-      );
+      let untracked = false;
+      if (relative && editing) {
+        const found = await git(['ls-files', '--error-unmatch', '--', relative], {
+          cwd: current.cwd,
+          signal: execution.signal,
+          token: current.connection.token || '',
+          accept: [0, 1]
+        });
+        untracked = found.exitCode === 1;
+      }
+      const args = [
+        'diff',
+        '--no-ext-diff',
+        '--no-textconv',
+        '--no-color',
+        ...(untracked ? ['--no-index', '--', '/dev/null', relative] : [...(relative ? [] : ['--stat']), 'HEAD', '--', ...names])
+      ];
+      const output = await git(args, { cwd: current.cwd, signal: execution.signal, token: current.connection.token || '', accept: untracked ? [0, 1] : [0] });
       return {
         diff: output.stdout.slice(0, 16000),
         truncated: output.stdout.length > 16000 || (!relative && names.length === 200),
-        scope: relative || '前200个可读文件的改动概要'
+        scope: relative || '前200个可读已跟踪文件的改动概要；新文件请按repo_status路径读取补丁'
       };
     },
     async read(id, sessionId, relative, start, end, execution = {}) {
@@ -242,11 +279,27 @@ export function createCodeRepos({ baseDir, getConfig, git = createGitRunner(), h
       const current = await resolve(id, sessionId),
         read = await readCodeFile(current.cwd, relative, current.connection.token);
       execution.signal?.throwIfAborted();
-      return { path: relative, ...codeLines(read.text, start, end) };
+      return { path: relative, sha256: read.sha256, redacted: read.redacted, ...codeLines(read.text, start, end) };
     },
     async search(id, sessionId, query, mode, execution = {}) {
       const current = await resolve(id, sessionId);
       return searchCode(current.cwd, await files(current, execution), query, { mode, token: current.connection.token, signal: execution.signal });
+    },
+    edit(id, sessionId, input, execution = {}) {
+      return operate(id, sessionId, execution, (current, context) =>
+        writeCodeFile(current.cwd, input, { token: current.connection.token, signal: context.signal, edit: true })
+      );
+    },
+    write(id, sessionId, input, execution = {}) {
+      return operate(id, sessionId, execution, (current, context) =>
+        writeCodeFile(current.cwd, input, { token: current.connection.token, signal: context.signal })
+      );
+    },
+    run(id, sessionId, command, execution = {}) {
+      return operate(id, sessionId, execution, async (current, context) => {
+        if (!sandbox) throw codeError('CODE_SANDBOX_UNAVAILABLE', '尚未配置代码隔离器，不在宿主机执行');
+        return sandbox.run({ root: current.cwd, files: await files(current, context), command, token: current.connection.token }, context);
+      });
     }
   };
 }

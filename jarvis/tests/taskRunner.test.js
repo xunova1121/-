@@ -55,6 +55,31 @@ function scripted(steps, { delay = 0 } = {}) {
 }
 
 describe('服务器任务执行器', () => {
+  it('代码P2失败测试→修改→读回→再测，使用真实工具包装且仅最终测试算通过', async () => {
+    const workspace='d'.repeat(24); let edited=false; const scopes=[];
+    const repos={writable:true,
+      async clone(args,scope){scopes.push(scope);return{workspace_id:workspace,readOnly:false};},
+      async read(id,sessionId){scopes.push(sessionId);return{path:'src/demo.js',sha256:'f'.repeat(64),lines:[{line:1,text:edited?'fixed':'bug'}]};},
+      async edit(id,sessionId){scopes.push(sessionId);edited=true;return{saved:true,path:'src/demo.js'};},
+      async run(id,sessionId,command){scopes.push(sessionId);return{ok:edited,stage:'test',command,exitCode:edited?0:1,stdout:edited?'pass 1':'assertion failed',stderr:'',install:{exitCode:0},sourceDigest:'a'.repeat(64),isolation:'docker_offline_snapshot',hostWorktreeWritable:false};}
+    };
+    const call=(name,args)=>({tools:[{id:name+Math.random(),name,args}]});
+    const adapter=scripted([
+      call('repo_clone',{}),call('code_read',{workspace_id:workspace,path:'src/demo.js'}),call('code_run',{workspace_id:workspace,command:'test'}),
+      call('code_edit',{workspace_id:workspace,path:'src/demo.js',old:'bug',new:'fixed'}),call('code_read',{workspace_id:workspace,path:'src/demo.js'}),call('code_run',{workspace_id:workspace,command:'test'}),
+      {text:'已修复代码，修改后重新测试通过。'}
+    ]);
+    const runner=createTaskRunner({getConfig:mockCfg,codeRepos:repos,makeAdapter:()=>({adapter,model:'m'})});
+    const task=await runner.start({text:'修改仓库代码并运行测试'});
+    await until(()=>['done','error'].includes(runner.get(task.id).status));
+    expect(runner.get(task.id).status).toBe('done');
+    const events=runner.events(task.id).filter(e=>e.type==='tool_end'&&e.name==='code_run');
+    expect(events.map(e=>e.ok)).toEqual([false,true]);expect(events[0].code).toBe('CODE_TEST_FAILED');
+    expect(scopes[0]).toEqual({sessionId:task.sessionId,taskId:task.id});expect(scopes.slice(1).every(s=>s===task.sessionId)).toBe(true);
+    expect((await sessions.get(task.sessionId)).messages.at(-1).failures[0].tool).toBe('code_run');
+    expect(runner.get(task.id).review).toMatchObject({codeExecution:'executed_scope_needs_review',failures:[],pendingReadback:[],warnings:[]});
+  });
+
   it('代码只读工具绑定真实任务；GitHub凭据不进入适配器、工具上下文、事件或对话', async () => {
     const secret = 'ghp_' + 'TestPrivateOnly'.repeat(3);
     const seen = [], scopes = [];

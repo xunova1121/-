@@ -13,7 +13,7 @@
 const TOOL_FORMS = [
   [/^(deep_research)$/, ['galaxy', 'globe']],
   [/^(web_search|fetch_url)$/, ['globe', 'globe', 'galaxy']],
-  [/^(write_file|run_javascript|run_python|preview|read_skill_file)$/, ['lattice']],
+  [/^(write_file|run_javascript|run_python|preview|read_skill_file|code_edit|code_write|code_run)$/, ['lattice']],
   [/^(create_document)$/, ['pages']],
   [/^(remember|recall|forget|core_memory_update|kb_search|search_conversations|read_conversation|save_skill|use_skill)$/, ['constellation']],
   [/^(schedule_task|list_schedules|update_schedule|cancel_schedule|get_current_time)$/, ['clock']],

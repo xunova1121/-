@@ -266,7 +266,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     }).filter((t) => !SERVER_BLOCKED.has(t.name)), task.evaluationId);
     const projectTool = projectExecutionTool({ image: process.env.JARVIS_CODE_SANDBOX_IMAGE });
     if (projectTool) tools.push(projectTool);
-    if (codeRepos && !task.evaluationId) tools.push(...createCodeTools({ repos: codeRepos, sessionId: session.id, taskId: task.id }));
+    if (codeRepos && !task.evaluationId) tools.push(...createCodeTools({ repos: codeRepos, sessionId: session.id, taskId: task.id, editing: codeRepos.writable === true }));
     // 装了带脚本的技能：给模型“运行技能命令”的工具（在服务器的隔离 Docker 里跑，见 skillRunner.mjs；没装运行器时会照实说怎么装）
     if (skillRunner && !task.evaluationId && (await skillPacks.enabled().catch(() => [])).some(needsRunner)) {
       tools.push(skillRunnerTool({

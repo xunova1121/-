@@ -39,6 +39,11 @@
 
 ## 协调记录
 （要动对方名下文件时在这里写：日期、谁、改哪个文件、为什么）
+- 2026-10-29 Codex P2已完成编辑与Docker测试：虚构项目真实红→绿/原测试与main不变、真实npm包离线安装、运行中取消及输出上限通过。全量2030、最终91定向、三构建及其余界面通过；smoke 173/174，旧P1 ef78099独立对照也173/174（同一WebGL恢复项）。未改/放宽GL门禁，保留为发版阻塞；只[skip ci]保存，不发版。详见《代码智能体-P2验收与后续计划-20261029.md》，P7/续做索引/旧执行器共享目录及真实模型验收待用户下一批确认。
+- 2026-10-29 Codex P2收尾显示：reviewOutcome.js只在工具名表增加code_edit/write/run中文名，不动收尾提示、partial判断或Claude已修话术；部署说明补可选代码沙箱配置，保留原PrivateTmp防护。
+- 2026-10-29 Codex P2验收接入：executionReview只补仓库ID/命令隔离的代码回执，防止lint冒充测试或改后沿用旧测试；agent.js仅接入execution_capabilities/运行记录/收尾工具名，不改系统提示表达段、架构路由、步数或P7模型工作方式。
+- 2026-10-29 Codex P2界面接入：transcript.js只补八个代码工具的中文名，formDirector.js只把code_edit/write/run映射到原格栅形态；不改Claude通知、失败步骤或表达逻辑。
+- 2026-10-29 Codex P2：用户已确认下一步。新增独立文件写入/快照/npm依赖检查/Docker隔离执行模块；在serverMode配置沙箱、taskRunner显式开放code_edit/write/run，设置页只更新能力说明。修改仅任务worktree；安装脚本禁用，依赖受控下载后离线npm ci，lint/test断网，不挂Git目录/凭据/宿主工作副本为可写。不动架构/表达/提醒/持仓，不推测试仓库，不合并、不发版。
 - 2026-10-29 Codex P1收尾：GitHub独立设置/每任务worktree/五项只读工具完成，配置剥离覆盖模型/PC辅助/搜索；249文件2013单测、三构建及原界面回归通过，真实公开sandbox只读验收main不变。无编辑/运行/推送工具、无发版；下一批P2清单见《代码智能体-P1验收与P2计划-20261029.md》，等待用户逐批确认。
 - 2026-10-29 Codex：用户已确认代码智能体P1，仅GitHub连接/只读工具。将少量接入serverMode.mjs（独立配置路由及GitHub凭据脱敏）、taskRunner.mjs（注入五项只读工具，模型配置剥离仓库凭据）、serverClient/serverPanel设置入口。新模块承载Git执行、仓库副本与文件边界；不改Claude架构/表达/持仓/提醒，不开放代码执行、推送、PR或合并。每任务工作副本、服务器凭据0600、输出有界，补真实本地Git及API/UI测试。
 - 2026-10-29 Codex：PPT批真实文件及冻结验证通过，Excel另开批。只在xlsxWriter外加风格规则、生成/专业工作流sheet_style传递和可选恢复字段；不移动原行列、不改公式/数值/打印范围计算、不改writingRoles。样式要求解析提取为共用纯函数，保留PPT全部守护；不动Claude模块。

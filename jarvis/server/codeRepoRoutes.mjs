@@ -3,11 +3,12 @@ import { codeConnection, githubSettings } from './gitHosting.mjs';
 /** 已通过服务器登录鉴权后才调用；不接受通用模型配置接口写入GitHub凭据。 */
 export function createCodeRepoRoutes({ getConfig, saveConfig, hosting, repos, readJson, json }) {
   let saving = false;
+  const state = (cfg) => ({ ...codeConnection(cfg), capabilities: { read: true, edit: repos.writable === true, runConfigured: repos.runConfigured === true } });
   return async (req, res, pathname) => {
     if (pathname !== '/api/server/code-repos') return false;
     try {
       if (req.method === 'GET') {
-        json(res, 200, codeConnection(getConfig()));
+        json(res, 200, state(getConfig()));
         return true;
       }
       if (req.method === 'DELETE') {
@@ -18,7 +19,7 @@ export function createCodeRepoRoutes({ getConfig, saveConfig, hosting, repos, re
         repos.abortAll();
         const { codeRepos, ...next } = getConfig();
         saveConfig(next);
-        json(res, 200, codeConnection(next));
+        json(res, 200, state(next));
         return true;
       }
       if (req.method !== 'PUT') {
@@ -38,7 +39,7 @@ export function createCodeRepoRoutes({ getConfig, saveConfig, hosting, repos, re
         // 验证期间模型设置可能已改变；只在新读出的配置上替换仓库字段。
         const cfg = { ...getConfig(), codeRepos: { ...next, defaultBranch: meta.defaultBranch, verifiedAt: new Date().toISOString() } };
         saveConfig(cfg);
-        json(res, 200, codeConnection(cfg));
+        json(res, 200, state(cfg));
       } finally {
         saving = false;
       }

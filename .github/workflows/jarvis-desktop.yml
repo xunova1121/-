@@ -211,6 +211,7 @@ jobs:
         run: |
           docker pull node:22-bookworm-slim
           JARVIS_CODE_SANDBOX_IMAGE=node:22-bookworm-slim node e2e/project-execution.mjs
+          JARVIS_CODE_SANDBOX_IMAGE=node:22-bookworm-slim node e2e/code-agent-sandbox.mjs "$RUNNER_TEMP/jarvis-e2e/code-agent"
       - name: 验证Claude协议完成与断流取消
         run: node e2e/anthropic-stream.mjs
       - name: 验证代码隔离与取消

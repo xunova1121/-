@@ -10,13 +10,14 @@ export function initCodeReposPanel() {
   // 全部为固定文案；服务器返回内容只赋给value/textContent。
   panel.innerHTML = `<summary>代码仓库 · GitHub</summary>
     <div class="setting"><div class="sync-form">
-      <p class="muted">连接后可在对话里读取、搜索仓库。每个任务使用独立工作副本，默认分支始终受保护。</p>
+      <p class="muted">在对话里读取、搜索和修改代码。每个任务使用独立工作副本，默认分支始终受保护；测试在隔离副本中运行。</p>
       <label class="field" for="code-repo-name"><span>GitHub 仓库</span><input id="code-repo-name" placeholder="xunova1121/weiyang-code-sandbox" spellcheck="false" autocomplete="off" maxlength="140" /></label>
       <label class="field" for="code-repo-token"><span>访问令牌（公开仓库可留空）</span><input id="code-repo-token" type="password" autocomplete="off" spellcheck="false" maxlength="255" /></label>
-      <p class="muted small">令牌仅存服务器。留空保留已存令牌；清除请先断开连接。当前仅开放只读工具。</p>
+      <p class="muted small">令牌仅存服务器。留空保留已存令牌；清除请先断开连接。隔离测试需要管理员配置Docker镜像。</p>
       <label><input type="checkbox" checked disabled /> 保护默认分支</label>
       <div class="pane-actions"><button class="btn" type="button" id="code-repo-save">验证并连接</button><button class="btn ghost sm" type="button" id="code-repo-disconnect">断开连接</button></div>
       <p class="muted small" id="code-repo-status" role="status"></p>
+      <p class="muted small" id="code-repo-capabilities"></p>
     </div></div>`;
   host.after(panel);
   const field = (id) => panel.querySelector('#' + id);
@@ -45,6 +46,9 @@ export function initCodeReposPanel() {
     line.textContent = value.connected
       ? `已连接 ${value.repository} · 默认分支 ${value.defaultBranch} · ${value.tokenConfigured ? '已存令牌' : '公开只读'}；发任务时创建独立工作副本。`
       : '尚未连接仓库';
+    field('code-repo-capabilities').textContent = value.capabilities?.edit
+      ? '可修改任务分支 · ' + (value.capabilities.runConfigured ? '已配置隔离测试镜像' : '测试镜像未配置，请管理员设置')
+      : '此服务器当前只读；修改和隔离测试需要升级服务器';
   }
   async function act(operation) {
     if (busy) return;

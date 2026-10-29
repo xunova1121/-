@@ -3,6 +3,7 @@ import { createSearchTest } from './searchTest.mjs';
 import { createGitHubHost, withoutCodeCredentials } from './gitHosting.mjs';
 import { createCodeRepos } from './codeRepos.mjs';
 import { createCodeRepoRoutes } from './codeRepoRoutes.mjs';
+import { createCodeSandbox } from './codeSandbox.mjs';
 /**
  * 服务器模式（部署在自己的云服务器上）：任务交给服务器做，手机 / 电脑只负责发任务、看进度、取结果。
  *
@@ -89,7 +90,7 @@ export function mergeConfig(old, next) {
 /**
  * @param {{ dataDir: string, password: string, maxRunning?: number, runner?: object }} o
  */
-export function createServerMode({ dataDir, password, maxRunning = 1, runner: injected = null, appDir = APP_DIR, updateUnit = UPDATE_UNIT, makeModelAdapter, autoSchedules = false, codeHosting = createGitHubHost(), codeGit } = {}) {
+export function createServerMode({ dataDir, password, maxRunning = 1, runner: injected = null, appDir = APP_DIR, updateUnit = UPDATE_UNIT, makeModelAdapter, autoSchedules = false, codeHosting = createGitHubHost(), codeGit, codeSandbox = null } = {}) {
   if (!password || String(password).length < 8) throw new Error('服务器模式需要设置 JARVIS_PASSWORD（至少 8 位）');
   const store = createFileStore(path.join(dataDir, 'store'));
   useBackend(store);
@@ -104,7 +105,9 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     try { fs.fchmodSync(fd, 0o600); fs.writeFileSync(fd, JSON.stringify(cfg, null, 2)); } finally { fs.closeSync(fd); }
     fs.renameSync(`${configFile}.tmp`, configFile);
   };
-  const codeRepos = createCodeRepos({ baseDir: path.join(dataDir, 'repos'), getConfig: loadConfig, hosting: codeHosting, ...(codeGit && { git: codeGit }) });
+  // systemd的PrivateTmp不与Docker守护进程共享/tmp，必须把绑定源放到数据目录。
+  const sandbox = codeSandbox ?? createCodeSandbox({ image: process.env.JARVIS_CODE_SANDBOX_IMAGE, registry: process.env.JARVIS_CODE_NPM_REGISTRY, baseDir: path.join(dataDir, 'code-jobs') });
+  const codeRepos = createCodeRepos({ baseDir: path.join(dataDir, 'repos'), getConfig: loadConfig, hosting: codeHosting, editing: true, sandbox, ...(codeGit && { git: codeGit }) });
   // 技能脚本运行器：技能里的 Python / Node 命令在隔离的 Docker 里跑（没装 Docker 或镜像时照实告诉模型怎么装）
   const skillRunner = createSkillRunner({ image: process.env.JARVIS_SKILL_RUNNER_IMAGE || SKILL_RUNNER_IMAGE, baseDir: path.join(dataDir, 'skill-runner') });
   const runner = injected ?? createTaskRunner({ getConfig: async () => withoutCodeCredentials(loadConfig()), maxRunning, skillRunner, codeRepos });

@@ -49,6 +49,7 @@ try {
     await page.fill('#code-repo-token', 'rejected_token_1234567890');
     await page.click('#code-repo-save');
     await page.waitForFunction(() => /GitHub令牌无效/.test(document.querySelector('#code-repo-status').textContent));
+    assert.match(await page.textContent('#code-repo-capabilities'), /可修改任务分支/);
     assert.equal(await page.inputValue('#code-repo-token'), '');
     // 修改未登录的网址不能把PAT带到新地址；仍用已保存的登录服务器。
     await page.fill('#server-url', 'https://must-not-send.invalid');

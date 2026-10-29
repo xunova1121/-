@@ -1,3 +1,4 @@
+import { repositoryReceipt, repositoryRepair } from './codeRepositoryReview.js';
 import { IMAGE_RECHECK } from './imageReading.js';
 import { newsCandidates } from './newsDelivery.js';
 import { mediaReceipt, mediaDelivery, blockedAfterDenial } from './actionDelivery.js';
@@ -67,15 +68,17 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     const media = mediaReceipt(toolName, ok, output);
     const path = typeof args.path === 'string' ? args.path.slice(0, 400) : '';
     sequence++;
+    const repository = repositoryReceipt(toolName, args, ok, output);
     receipts.push({
       tool: toolName,
       ok: Boolean(ok),
+      ...(repository || {}),
       ...(media && { media }),
       ...(['NOT_APPROVED', 'TASK_SCOPE_AFTER_DENIAL'].includes(code) && { code }),
       path,
       version,
       sequence,
-      key: toolName + ':' + path + ':' + String(args.query ?? args.url ?? '').slice(0, 200)
+      key: toolName + ':' + path + ':' + String(args.query ?? args.url ?? '').slice(0, 200) + (repository ? ':' + repository.workspaceId + ':' + repository.command : '')
     });
     if (receipts.length > 64) receipts.shift();
     // 文件被改了：之前的“已验过”作废；生成工具自己在这次调用里发来的验收结果（at 是这次调用的序号）保留
@@ -96,6 +99,14 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     if (ok && /^(?:read_file|computer_read_file)$/.test(toolName) && files.has(path)) files.get(path).verified = true;
     if (ok && /^(?:read_file|computer_read_file)$/.test(toolName) && files.has(path) && /\.(?:pptx|docx|xlsx)$/i.test(path)) {
       artifact({ path, validation: { format: path.split('.').pop().toLowerCase(), readback: 'passed', structure: 'not_checked', render: 'not_checked' } }, sequence);
+    }
+    if (ok && repository?.workspaceId && path) {
+      const key = repository.workspaceId + ':' + path;
+      if (/^code_(?:edit|write)$/.test(toolName)) {
+        files.set(key, { path, workspaceId: repository.workspaceId, written: sequence, verified: false });
+        if (files.size > 32) files.delete(files.keys().next().value);
+      }
+      if (toolName === 'code_read' && files.has(key)) files.get(key).verified = true;
     }
     if (validation) return validation;
   };
@@ -142,7 +153,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
       : '';
   };
   const report = () => {
-    const codeFiles = [...files.values()].filter((file) => /\.(?:[cm]?js|jsx|tsx?|py|html|css|json)$/i.test(file.path));
+    const codeFiles = [...files.values()].filter((file) => /\.(?:[cm]?js|jsx|tsx?|py|html|css|json)$/i.test(file.path) || file.workspaceId && /\.(?:vue|svelte|sh|ya?ml|toml)$/i.test(file.path));
     const lastWrite = Math.max(0, ...codeFiles.map((file) => file.written));
     const current = receipts.filter((receipt) => receipt.version === version);
     const lastNumeric = current.filter(receipt => receipt.tool === 'verify_numbers').at(-1);
@@ -154,11 +165,16 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     const unresolved = (receipt) =>
       !receipt.ok && receipt.code !== 'TASK_SCOPE_AFTER_DENIAL' &&
       (!isReadOnlyTool(receipt.tool) || receipt.tool === 'run_project_tests') &&
-      !current.some((later) => later.sequence > receipt.sequence && later.ok && (later.tool === receipt.tool || sameDoc(later, receipt)));
-    const ran = receipts.some(
+      !current.some((later) => later.sequence > receipt.sequence && later.ok && (receipt.workspaceId ? repositoryRepair(receipt, later) : later.tool === receipt.tool || sameDoc(later, receipt)));
+    const legacyRan = receipts.some(
       (receipt) => receipt.sequence > lastWrite && receipt.ok && /^(?:run_javascript|run_python|computer_run|run_project_tests)$/.test(receipt.tool)
     );
-    const pending = codeFiles.filter((file) => !file.verified).map((file) => file.path);
+    const ran = codeFiles.every(file => {
+      if (!file.workspaceId) return legacyRan;
+      const latestTest = current.filter(item => item.tool === 'code_run' && item.workspaceId === file.workspaceId && item.command === 'test').at(-1);
+      return latestTest?.sequence > file.written && latestTest.ok && latestTest.testVerified;
+    });
+    const pending = [...files.values()].filter((file) => !file.verified && (file.workspaceId || codeFiles.includes(file))).map((file) => file.path);
     return {
       media: mediaDelivery(request, receipts.filter((receipt) => receipt.version === version)),
       pendingFormats: taskContract(request).formats.filter(

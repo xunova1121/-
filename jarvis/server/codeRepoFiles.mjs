@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { codeError, redactCode } from './codeGit.mjs';
 
 export function allowedCodePath(value) {
@@ -15,7 +16,7 @@ export function allowedCodePath(value) {
       !/\.(?:pem|key|p12|pfx|keystore|jks)$/i.test(part)
   );
 }
-export async function readCodeFile(root, relative, token = '') {
+export async function readCodeFile(root, relative, token = '', { asAsset = false } = {}) {
   if (!allowedCodePath(relative)) throw codeError('CODE_PATH', '文件路径越界或属于凭据文件，不能读取');
   const base = await fs.realpath(root);
   let target = base;
@@ -33,14 +34,15 @@ export async function readCodeFile(root, relative, token = '') {
   const handle = await fs.open(target, constants.O_RDONLY | (constants.O_NOFOLLOW || 0) | (constants.O_NONBLOCK || 0));
   try {
     const info = await handle.stat();
-    if (!info.isFile() || info.size > 1_000_000) throw codeError('CODE_FILE_SIZE', '只读取1MB以内的普通文本文件');
+    const limit = asAsset ? 4_000_000 : 1_000_000;
+    if (!info.isFile() || info.size > limit) throw codeError('CODE_FILE_SIZE', asAsset ? '执行副本中单个文件不能超过4MB' : '只读取1MB以内的普通文本文件');
     // Linux服务端核对真正打开的文件，而不是只检查打开前的路径。
     if (process.platform === 'linux') {
       const actual = await fs.realpath('/proc/self/fd/' + handle.fd);
       if (!actual.startsWith(base + path.sep)) throw codeError('CODE_PATH', '实际打开的文件不在工作副本内');
     }
     // 即使文件被并发增大，也不无界分配内存或卡在FIFO上。
-    const buffer = Buffer.alloc(1_000_001);
+    const buffer = Buffer.alloc(limit + 1);
     let length = 0;
     while (length < buffer.length) {
       const part = await handle.read(buffer, length, buffer.length - length, null);
@@ -48,14 +50,21 @@ export async function readCodeFile(root, relative, token = '') {
       length += part.bytesRead;
     }
     const bytes = buffer.subarray(0, length);
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    if (asAsset) {
+      if (bytes.length > limit) throw codeError('CODE_FILE_SIZE', '执行副本中单个文件不能超过4MB');
+      const probe = bytes.toString('utf8');
+      return { data: bytes, bytes: bytes.length, sha256, executable: Boolean(info.mode & 0o111), redacted: redactCode(probe, token) !== probe };
+    }
     if (bytes.length > 1_000_000 || bytes.includes(0)) throw codeError('CODE_FILE_BINARY', '该文件过大或不是普通文本');
     let text;
     try {
-      text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
     } catch {
       throw codeError('CODE_FILE_BINARY', '该文件不是UTF-8文本');
     }
-    return { text: redactCode(text, token), bytes: bytes.length };
+    const safeText = redactCode(text, token);
+    return { text: safeText, bytes: bytes.length, sha256, redacted: safeText !== text };
   } finally {
     await handle.close();
   }
