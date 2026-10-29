@@ -38,6 +38,7 @@
 2026-10-29 用户要求“一起发版”，Claude 已手动触发一次（含 Claude 的架构图新路线 + Codex 1.0.319 之后的 23 个提交）。结果看 GitHub Actions；以后的发布按上面“统一发布”。
 
 ## 协调记录
+- 2026-10-29 Codex 真实模型验收批（用户已确认）：仅补 evals 的三轮串行修错、删测试请求、失效令牌与离线执行反例及证据汇总，沿用已有模型路由和生产代码；正式配置只读、无提交/推送/发布能力。当前云端无服务器登录连接，d.leing.top 状态接口503，不能冒充用户服务器已验；先完成可执行入口和本地真实Docker/HTTP反例，再提供服务器命令。不动Claude Word/PPT/架构/表达模块。
 - 2026-10-29 Codex 第4.5批验收接入：既有jarvis-unit.yml增加手动skill_only只测试入口，跑完整单测、固定运行时、真实Archify+Chromium/普通技能/取消回归与原smoke，不自动打包发布，原unit/P7/WebGL入口保留。部署只补可选Dockerfile.browser及setup选装入口（Archify完整finalize需要浏览器），不把构建/仅HTML成功说成浏览器门禁成功；原非root/只读/资源限制不变。
 - 2026-10-29 Codex 第4.5批（用户已确认）：仅扩展server/skillRunner.mjs及新增独立技能附件准备/构建模块，安装文件内容哈希缓存、隔离副本装开发依赖并生成、运行只读挂载；补Archify真实HTML和无构建技能/普通架构路线守护。现有prepareSource跳过在线附件、依赖识别忽略devDependencies，会同时造成缺入口/校验模块。不会改agent.js架构分流、diagramPlanning/Tool/Repair、原PPT/视觉门槛，不发版、不开始真实模型验收；必要部署/测试CI仅接本批隔离技能测试，先在此记录。
 - 2026-10-29 Codex P7收尾补核：本地原smoke出现恢复总耗时1690ms（app75ms、浏览器恢复事件前1610ms）；保留失败，不改WebGL/原测试/阈值。手动p7_only任务补跑原smoke作独立环境核验，使用原300/1500ms门槛，不自动重试、不取最好值；不触发发版。

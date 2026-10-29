@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
+MODE="${1:-}"
+[ -z "$MODE" ] || [ "$MODE" = '--suite' ] || { echo '仅支持不带参数（一次）或--suite（三轮及反例）' >&2; exit 1; }
 command -v node >/dev/null
 command -v curl >/dev/null
 node -e 'if (Number(process.versions.node.split(".")[0]) < 20) process.exit(1)' || { echo '需要Node.js 20或更高版本，未请求模型' >&2; exit 1; }
@@ -44,8 +46,14 @@ node "$TEST_APP/evals/code-runtime.mjs" "$BASE_DIR/manifest.json" "$TEST_APP"
 export JARVIS_TEST_REVISION="$(cat "$TEST_APP/runtime-revision.txt")"
 printf '固定测试源码：%s；不更新正式服务、不推送测试仓库。\n' "$JARVIS_TEST_REVISION"
 RESULT=0
-JARVIS_CODE_SANDBOX_IMAGE="${JARVIS_CODE_SANDBOX_IMAGE:-node:22-bookworm-slim}" node "$TEST_APP/evals/code-server.mjs" --live "--data-dir=${JARVIS_PRODUCTION_DATA:-/opt/jarvis/data}" "--out-dir=$BASE_DIR/results" || RESULT=$?
-if [ -f "$BASE_DIR/results/report.json" ]; then
+ENTRY='code-server.mjs'
+[ "$MODE" != '--suite' ] || ENTRY='code-live-suite.mjs'
+JARVIS_CODE_SANDBOX_IMAGE="${JARVIS_CODE_SANDBOX_IMAGE:-node:22-bookworm-slim}" node "$TEST_APP/evals/$ENTRY" --live "--data-dir=${JARVIS_PRODUCTION_DATA:-/opt/jarvis/data}" "--out-dir=$BASE_DIR/results" || RESULT=$?
+if [ -f "$BASE_DIR/results/summary.json" ]; then
+  # 只收报告，不把state、worktree、生产配置或运行缓存带进用户下载包。
+  tar -czf "$BASE_DIR/code-results.tar.gz" -C "$BASE_DIR/results" --null -T <(find "$BASE_DIR/results" -maxdepth 2 -type f \( -name report.json -o -name summary.json -o -name offline.json \) -printf '%P\0')
+  printf '私有结果包：%s/code-results.tar.gz\n' "$BASE_DIR"
+elif [ -f "$BASE_DIR/results/report.json" ]; then
   tar -czf "$BASE_DIR/code-results.tar.gz" -C "$BASE_DIR/results" report.json
   printf '私有结果包：%s/code-results.tar.gz\n' "$BASE_DIR"
 fi

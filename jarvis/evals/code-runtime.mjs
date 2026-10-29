@@ -12,6 +12,8 @@ export const CODE_RUNTIME_REQUIRED = Object.freeze([
   'evals/code-server.mjs',
   'evals/code-server-acceptance.mjs',
   'evals/code-live-config.mjs',
+  'evals/code-live-suite.mjs',
+  'evals/code-live-checks.mjs',
   'evals/code-runtime.mjs',
   'evals/run-code-server.sh',
   'evals/architecture-runtime-fetch.mjs',
@@ -73,6 +75,8 @@ export async function checkCodeRuntime(manifest, directory) {
     // 只导入，不调用main；Node真实检查相对模块和已安装的运行依赖，不靠手写正则猜导入。
     const entry = await import(pathToFileURL(path.join(root, 'evals/code-server.mjs')).href);
     if (typeof entry.main !== 'function') throw new Error('entry');
+    const suite = await import(pathToFileURL(path.join(root, 'evals/code-live-suite.mjs')).href);
+    if (typeof suite.main !== 'function') throw new Error('suite entry');
   } catch {
     throw invalid('CODE_RUNTIME_DEPENDENCY', '代码评测入口或运行依赖不能加载；请检查npm依赖安装，未请求模型');
   }
