@@ -38,6 +38,7 @@
 2026-10-29 用户要求“一起发版”，Claude 已手动触发一次（含 Claude 的架构图新路线 + Codex 1.0.319 之后的 23 个提交）。结果看 GitHub Actions；以后的发布按上面“统一发布”。
 
 ## 协调记录
+- 2026-10-29 用户新授权：项目对话建仓/分支与右下角项目入口、浏览器验收、商城质量、PC续做及原队列合批开发，完成后发版；30题移至发版后。本授权覆盖本批所需serverMode/taskRunner、serverClient/main/panels/turnInputs及agent工具接缝，改前在此登记；不改Claude架构制作路线、writingRoles、持仓/提醒/表达主体。开发提交仍[skip ci]，最后一次显式统一发布；账户建仓/工作分支保存由应用内具体确认卡执行，不操作Codex当前GitHub账号创建测试仓库、不推sandbox/main。
 - 2026-10-29 浏览器发现本批仓库链接整段缓冲阻断普通进度，6d715eb改为单独有界流式过滤；agent.js仅接逐片段过滤，不动其他强约束/原停止续做e2e断言，新增逐字符与所有分块守护。
 - 2026-10-29 交付守护补接agent.js：仅在仓库写入后的最终回答审查处，将仍未核实的当前任务GitHub链接改成原副本文件说明，再按原约束复核；不丢整段有用答复、不改架构/表达提示、原返修次数和其他门槛。
 - 2026-10-29 PC服务器误分流已用原话复现：`不要删除…锁文件`匹配router的APP_ACTION，turnInputs将仓库续做留本机。仅给computerTaskKind增加服务器仓库上下文选项，turnInputs传开关；明确本机路径/桌面/GUI仍优先，普通文档/电脑控制保持。新纯判断模块与原PC控制守护一起测；不扩大普通代码预算。
@@ -80,3 +81,5 @@
 - 历史记忆与统计：持仓链路已做；歌曲等成果统计沿用 Codex 的成果索引（workLedger），旧记录只能说“至少”。
 - 架构图收尾：需要用户服务器上的真实模型实测，等用户更新后反馈。
 - 2026-10-29 Claude：表达改造动了 Codex 名下的 `src/agent/answerRequirements.js`（加 deferralCount 与健康回答转介话术检查、answerConstraints 返回 care）和 `src/agent/executionReview.js`（guardsAnswer 加 rules.care 一项），以及 `src/app/turn.js` / `turnEvents.js`（保存失败步骤）；原有逻辑和测试未改。
+
+- 2026-10-29 Codex合批候选本地进度：项目/网页/Office字号/旧DOC代码与专用门禁已写，101项最终本地专项和三构建通过，完整2144项首轮2项旧公网跨域超时；自动审批容量错误持续阻断后续真实Git/HTTP、Docker/浏览器命令。未发布，未经Claude互审，详细缺口和严格发布顺序见《项目与网页验收合批开发-20261029》。原架构图路线、持仓、写作角色和一分钟结尾提示未改。

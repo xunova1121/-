@@ -1,3 +1,5 @@
+import { legacyDocumentTool } from './legacyDocumentTool.js';
+import { parseFile as parseOfficeFile } from './docs.js';
 import {createArchitectureWorkflowTool} from './architectureWorkflow.js';
 import { assertArchitectureMutationBatch } from './architectureStateProtection.js';
 import { architecturePathParts, isArchitectureMetadataPath } from './architectureStateOwnership.js';
@@ -108,13 +110,14 @@ export function fileSegment(text, offset = 0, n = READ_PAGE_CHARS) {
  * @param {(html: string) => Promise<Uint8Array>} [ctx.toPdf]  桌面版：排好版的 HTML 直接转 PDF
  */
 export function createTools(ctx) {
-  const navigation=createDocumentNavigation();
-  const fileAccess=createDocumentFileAccess(navigation,fileSegment);
+  const navigation=createDocumentNavigation({parse:(blob,name,options)=>parseOfficeFile(blob,name,{...options,convertLegacyDoc:ctx.convertLegacyDoc})});
+  const fileAccess=createDocumentFileAccess(navigation,fileSegment,{legacyDoc:Boolean(ctx.convertLegacyDoc)});
   ctx={...ctx,readDocument:navigation.read};
   const readPage = createPageReader(ctx); // 直接打不开或没读到正文时，有 Tavily Key 就让 Tavily 代读
   const seenFiles = new Set(); // 这次读过或写过的工作区文件（覆盖没读过的文件前先拦一下）
   const overwriteWarned = new Set();
   const tools = [
+    ...(ctx.convertLegacyDoc ? [legacyDocumentTool(ctx)] : []),
     createVerificationTool(),
     createWorkRecordsTool(),
     createSongTool(ctx),

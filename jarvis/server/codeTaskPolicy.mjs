@@ -13,11 +13,13 @@ export const codeFollowup = text => {
 };
 
 /** 只给确实要动手的仓库任务放宽预算；寒暄/知识问答沿用旧值和旧路由。 */
-export function codeTaskPolicy({ text, images = 0, hasRepos, hasWorkspaces = false, resume, maxSteps = 28, codeMaxSteps = CODE_MAX_STEPS }) {
+export function codeTaskPolicy({ text, images = 0, hasRepos, hasProjects = false, projectBound = false, hasWorkspaces = false, resume, maxSteps = 28, codeMaxSteps = CODE_MAX_STEPS }) {
   const continuing =
     Boolean(resume?.codeTaskId || (resume?.taskId && ACTION.test(resume.text || '') && REPOSITORY.test(resume.text || '')) || hasWorkspaces) && codeFollowup(text);
   const buildingSite = BUILD_WEB.test(text) && !/架构图|流程图|思维导图|PPT|Word|Excel|文档|报告|海报/i.test(text);
-  const enabled = Boolean(hasRepos && (continuing || buildingSite || (ACTION.test(text) && REPOSITORY.test(text))));
+  const creating = hasProjects && /(?:新建|创建|建立)[^。！？\n]{0,24}(?:项目|仓库|网站|商城)/i.test(text) && (!/Word|Excel|PPT|文档|报告|方案|架构图|流程图/i.test(text) || /GitHub|git仓库|代码项目/i.test(text));
+  const inProject = projectBound && !/天气|新闻|唱歌|Word|Excel|PPT|架构图|文档/i.test(text) && (codeFollowup(text) || ACTION.test(text));
+  const enabled = Boolean(creating || inProject || hasRepos && (continuing || buildingSite || (ACTION.test(text) && REPOSITORY.test(text))));
   return {
     enabled,
     kind: images ? 'vision' : enabled ? 'code' : classifyTask(text, { images }),

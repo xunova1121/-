@@ -1,3 +1,5 @@
+import { convertLegacyDoc } from './officeRender.mjs';
+import { codeProjectTools } from './codeProjectTools.mjs';
 import { codeFollowup, codeTaskPolicy, CODE_TASK_MS } from './codeTaskPolicy.mjs';
 import { prepareCodeWork } from './codeWorkContext.mjs';
 import { editImage } from '../src/llm/imageEdit.js';
@@ -117,7 +119,7 @@ export function serverApproves(ask, text) {
   return false;
 }
 
-export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now, skillRunner = null, codeRepos = null, projectBaseDir, codeMaxSteps = 80, codeTaskMs = CODE_TASK_MS }) {
+export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now, skillRunner = null, codeRepos = null, codeProjects = null, projectBaseDir, codeMaxSteps = 80, codeTaskMs = CODE_TASK_MS }) {
   const tasks = new Map();
   const waiting = [];
   let running = 0;
@@ -236,9 +238,10 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const cfg = withoutCodeCredentials(await getConfig());
     // 记忆按意思找：用能力表“记忆向量”那一项（服务器没有跨域限制）；没有就只按关键字
     memory.configureMemory({ llm: helper(cfg, 'write'), embedder: createEmbedder(cfg, { direct: true }) });
-    const mayUseCode = Boolean(codeRepos && !task.evaluationId && (codeFollowup(task.text) || codeTaskPolicy({ text: task.text, hasRepos: true }).enabled));
+    const taskRepos = codeProjects ? await codeProjects.reposFor(session.id) : codeRepos;
+    const mayUseCode = Boolean((taskRepos || codeProjects) && !task.evaluationId && (codeFollowup(task.text) || codeTaskPolicy({ text: task.text, hasRepos: true, hasProjects: Boolean(codeProjects), projectBound: taskRepos !== codeRepos }).enabled));
     task.codeDeadline = mayUseCode ? setTimeout(() => { task.codeTimeout = true; task.ctrl.abort(Object.assign(new Error('代码任务达到总时限，保留工作副本，可继续'), { code: 'CODE_TASK_TIMEOUT', kind: 'timeout' })); }, Math.max(1, Math.min(20 * 60_000, Number(codeTaskMs) || CODE_TASK_MS))) : null;
-    const { policy, codeTaskId, scopedRepos, codeWork } = await prepareCodeWork({ text: task.text, images: task.images.length, sessionId: session.id, taskId: task.id, checkpoint: task.checkpoint, resume: task.resumeFrom, repos: codeRepos, evaluationId: task.evaluationId, maxSteps, codeMaxSteps, signal: task.ctrl.signal });
+    const { policy, codeTaskId, scopedRepos, codeWork } = await prepareCodeWork({ text: task.text, images: task.images.length, sessionId: session.id, taskId: task.id, checkpoint: task.checkpoint, resume: task.resumeFrom, repos: taskRepos, hasProjects: Boolean(codeProjects), projectBound: taskRepos !== codeRepos, evaluationId: task.evaluationId, maxSteps, codeMaxSteps, signal: task.ctrl.signal });
     const kind = policy.kind;
     if (!policy.enabled) { clearTimeout(task.codeDeadline); task.codeDeadline = null; }
 
@@ -272,12 +275,14 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       // 显示工作区里已有的图片：让手机按文件取回来显示
       onImage: (src, path) => { if (path) record(task, { type: 'file', path }); },
       officeRender:renderOffice,
+      convertLegacyDoc,
       currentSessionId: () => session.id,
       scheduleHost: 'server'
     }).filter((t) => !SERVER_BLOCKED.has(t.name)), task.evaluationId);
     const projectTool = projectExecutionTool({ image: process.env.JARVIS_CODE_SANDBOX_IMAGE, baseDir: projectBaseDir });
     if (projectTool) tools.push(projectTool);
-    if (codeRepos && !task.evaluationId) tools.push(...createCodeTools({ repos: scopedRepos, sessionId: session.id, taskId: task.checkpoint.codeTaskId || task.id, editing: codeRepos.writable === true }));
+    if (taskRepos && !task.evaluationId) tools.push(...createCodeTools({ repos: scopedRepos, sessionId: session.id, taskId: task.checkpoint.codeTaskId || task.id, editing: taskRepos.writable === true, enableBrowser: true, saveBrowserArtifact: async (p, data, type) => { await ws.write(p, new Blob([data], { type })); task.files.add(p); record(task, { type: 'file', path: p }); } }));
+    if (codeProjects && !task.evaluationId) tools.push(...codeProjectTools(codeProjects, session.id));
     // 装了带脚本的技能：给模型“运行技能命令”的工具（在服务器的隔离 Docker 里跑，见 skillRunner.mjs；没装运行器时会照实说怎么装）
     if (skillRunner && !task.evaluationId && (await skillPacks.enabled().catch(() => [])).some(needsRunner)) {
       tools.push(skillRunnerTool({

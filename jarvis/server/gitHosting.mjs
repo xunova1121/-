@@ -14,7 +14,7 @@ export function codeConnection(cfg) {
 }
 /** 模型配置、通用配置读取都不能附带GitHub凭据；专用接口也只回连接状态。 */
 export function withoutCodeCredentials(cfg) {
-  const { codeRepos, ...rest } = cfg;
+  const { codeRepos, codeAccount, ...rest } = cfg;
   return rest;
 }
 export function githubSettings(input, previous = {}) {

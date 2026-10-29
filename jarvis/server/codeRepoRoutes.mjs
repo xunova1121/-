@@ -3,7 +3,7 @@ import { codeConnection, githubSettings } from './gitHosting.mjs';
 /** 已通过服务器登录鉴权后才调用；不接受通用模型配置接口写入GitHub凭据。 */
 export function createCodeRepoRoutes({ getConfig, saveConfig, hosting, repos, readJson, json }) {
   let saving = false;
-  const state = (cfg) => ({ ...codeConnection(cfg), capabilities: { read: true, edit: repos.writable === true, runConfigured: repos.runConfigured === true } });
+  const state = (cfg) => ({ ...codeConnection(cfg), capabilities: { read: true, edit: repos.writable === true, runConfigured: repos.runConfigured === true, browserConfigured: repos.browserConfigured === true } });
   return async (req, res, pathname) => {
     if (pathname !== '/api/server/code-repos') return false;
     try {

@@ -20,11 +20,18 @@ const MAX_CHARS = 60000;
 
 // ---------------------------------------------------------------- 读取
 export async function parseFile(blob, name, options = {}) {
+  options.signal?.throwIfAborted();
   let e = ext(name);
   // 后缀写 .doc 的文件很多其实是新版 Word（zip 包，PK 开头）：按内容认，不按后缀拒（用户的招标文件就是这样）
   if (e === 'doc' || e === 'wps') {
     const head = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
     if (head[0] === 0x50 && head[1] === 0x4b) e = 'docx';
+    else if (head[0] === 0xd0 && head[1] === 0xcf && typeof options.convertLegacyDoc === 'function') {
+      const converted = await options.convertLegacyDoc(blob, { signal: options.signal });
+      options.signal?.throwIfAborted();
+      if (!(converted instanceof Blob)) throw new Error('旧DOC转换没有返回有效文件');
+      return parseFile(converted, name.replace(/\.(?:doc|wps)$/i, '.docx'), { ...options, convertLegacyDoc: null });
+    }
     else throw new Error('这是老版 Word 文件（Word 97-2003 的 .doc），暂时读不了：请在 Word 或 WPS 里“另存为” .docx 后再上传');
   }
   const buf = () => blob.arrayBuffer();
@@ -233,11 +240,11 @@ export async function generate(format, { title = '未命名', content = '', them
       return { blob: r.blob, ext: 'docx', theme, info: r.info };
     }
     case 'pptx': {
-      const r = await makePptx({ title, content, theme, subtitle, author, date, loadImage, style, expectedSlides, requireCover, forbidCover });
+      const r = await makePptx({ title, content, theme, subtitle, author, date, loadImage, style, expectedSlides, requireCover, forbidCover, typography });
       return { blob: r.blob, ext: 'pptx', theme, info: r.info };
     }
     case 'xlsx': {
-      const r = await makeXlsx(content, { theme, kind, sheetStyle });
+      const r = await makeXlsx(content, { theme, kind, sheetStyle, typography });
       return { blob: r.blob, ext: 'xlsx', theme, info: r.info };
     }
     case 'csv': return { blob: makeCsv(content), ext: 'csv', theme };

@@ -1,6 +1,6 @@
 import { codeError } from './codeGit.mjs';
 /** 默认保留P1只读入口；P2由服务器显式开放，仍无提交/推送/合并。 */
-export function createCodeTools({ repos, sessionId, taskId, editing = false }) {
+export function createCodeTools({ repos, sessionId, taskId, editing = false, saveBrowserArtifact = null, enableBrowser = false }) {
   const id = { type: 'string', description: 'repo_clone回执中的workspace_id，限本对话使用' };
   const file = { type: 'string', description: '工作副本内的相对文件路径，不允许.git/凭据文件/符号链接' };
   const schema = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
@@ -93,5 +93,24 @@ export function createCodeTools({ repos, sessionId, taskId, editing = false }) {
         }
       )
     );
+  if (editing && enableBrowser) tools.push(
+      tool(
+        'code_browser',
+        '在只读断网Chromium副本打开工作副本HTML，截图并实际操作检查；静态页或构建产物入口。与npm测试独立，外链未加载会标记视觉受限。步骤支持click/fill/press/assert/reload/wait/scroll，assert可比text/value/count/visible/focused/disabled/scrollY。',
+        schema({ workspace_id: id, entry: file, width: { type: 'integer', minimum: 320, maximum: 1920 }, height: { type: 'integer', minimum: 480, maximum: 1080 }, steps: { type: 'array', maxItems: 40, items: { type: 'object', properties: { action: { type: 'string', enum: ['click','fill','press','assert','reload','wait','scroll'] }, selector: { type: 'string' }, value: { type: 'string' }, key: { type: 'string' }, property: { type: 'string', enum: ['text','value','count','visible','focused','disabled','scrollY'] }, expected: {}, ms: { type: 'integer' }, y: { type: 'integer' } }, required: ['action'], additionalProperties: false } } }, ['workspace_id']),
+        async (a, e) => {
+          const result = await repos.browser(a.workspace_id, sessionId, { entry: a.entry, width: a.width, height: a.height, steps: a.steps }, e);
+          const { screenshotBytes, reportBytes, ...receipt } = result;
+          if (saveBrowserArtifact) {
+            const stem = '网页检查/' + a.workspace_id + '-' + Date.now();
+            await saveBrowserArtifact(stem + '.png', screenshotBytes, 'image/png');
+            await saveBrowserArtifact(stem + '.json', reportBytes, 'application/json');
+            receipt.screenshot = stem + '.png'; receipt.report = stem + '.json';
+          }
+          if (!result.ok) throw codeError('CODE_BROWSER_FAILED', '浏览器交互检查发现失败。完整回执：' + JSON.stringify(receipt), { result: receipt });
+          return receipt;
+        }
+      )
+  );
   return tools;
 }

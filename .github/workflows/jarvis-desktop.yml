@@ -212,6 +212,10 @@ jobs:
           docker pull node:22-bookworm-slim
           JARVIS_CODE_SANDBOX_IMAGE=node:22-bookworm-slim node e2e/project-execution.mjs
           JARVIS_CODE_SANDBOX_IMAGE=node:22-bookworm-slim node e2e/code-agent-sandbox.mjs "$RUNNER_TEMP/jarvis-e2e/code-agent"
+          docker build --build-arg BASE=node:22-bookworm-slim -t weiyang-code-browser:ci deploy/code-browser
+          JARVIS_CODE_BROWSER_IMAGE=weiyang-code-browser:ci node e2e/code-browser.mjs "$RUNNER_TEMP/jarvis-e2e/code-browser"
+      - name: 验证项目菜单确认与隔离预览
+        run: node e2e/code-projects.mjs "$RUNNER_TEMP/jarvis-e2e/code-projects"
       - name: 验证Claude协议完成与断流取消
         run: node e2e/anthropic-stream.mjs
       - name: 验证代码隔离与取消
@@ -228,6 +232,8 @@ jobs:
           exit 1
       - name: 验证Word、PPT、Excel真实转PDF
         run: node e2e/office-render.mjs
+      - name: 验证PPT和Excel字号及Word97转换
+        run: node e2e/office-typography.mjs "$RUNNER_TEMP/jarvis-e2e/office-typography"
       - name: 验证Word字体字号与有界真实分页
         run: node e2e/word-typography.mjs "$RUNNER_TEMP/jarvis-e2e/word-typography"
       - name: 验证四种PPT风格、可编辑元素与真实PDF

@@ -12,7 +12,7 @@ export async function formatDocumentFile(ctx, source, args, execution = {}) {
   if (args.cover || args.toc === 'yes') throw documentError('原文件样式调整保留原有封面/目录；新增封面目录须单独编辑，不能悄悄重建正文', 'DOCUMENT_SOURCE');
   signal?.throwIfAborted();
   const { tpl, tplPath } = await findTemplate('docx', args.template);
-  const typography = await documentTypography(ctx, execution.requestText || execution.rawRequestText || args.requirements || '', signal);
+  const typography = args.typography || await documentTypography(ctx, execution.requestText || execution.rawRequestText || args.requirements || '', signal);
   // 只在内存里取现有生成器的样式，不把这份示例正文写入任何产物。
   const profile = await generate('docx', {
     title: '样式',

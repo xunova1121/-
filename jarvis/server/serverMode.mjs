@@ -1,3 +1,6 @@
+import { createCodeProjects } from './codeProjects.mjs';
+import { codeProjectRoutes } from './codeProjectRoutes.mjs';
+import { createCodeBrowser } from './codeBrowser.mjs';
 import { listWorkRecords, removeWorkRecord, renameWorkRecord } from '../src/agent/workLedger.js';
 import { createSearchTest } from './searchTest.mjs';
 import { createGitHubHost, withoutCodeCredentials } from './gitHosting.mjs';
@@ -74,7 +77,7 @@ export function maskConfig(cfg) {
 /** 保存时：密钥没改（还是 •••• 或留空）就沿用原来的 */
 export function mergeConfig(old, next) {
   // GitHub凭据只在专用仓库设置接口更新，模型面板的旧快照不能清空或覆盖。
-  const { codeRepos: ignored, ...modelSettings } = next;
+  const { codeRepos: ignored, codeAccount: ignoredAccount, ...modelSettings } = next;
   next = modelSettings;
   const keep = (n, o) => (!n || String(n).startsWith('••••') ? o ?? '' : n);
   const keys = { ...(old.keys ?? {}) };
@@ -107,10 +110,23 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
   };
   // systemd的PrivateTmp不与Docker守护进程共享/tmp，必须把绑定源放到数据目录。
   const sandbox = codeSandbox ?? createCodeSandbox({ image: process.env.JARVIS_CODE_SANDBOX_IMAGE, registry: process.env.JARVIS_CODE_NPM_REGISTRY, baseDir: path.join(dataDir, 'code-jobs') });
-  const codeRepos = createCodeRepos({ baseDir: path.join(dataDir, 'repos'), getConfig: loadConfig, hosting: codeHosting, editing: true, sandbox, ...(codeGit && { git: codeGit }) });
+  const browser = createCodeBrowser({ image: process.env.JARVIS_CODE_BROWSER_IMAGE, baseDir: path.join(dataDir, 'code-browser-jobs') });
+  const codeRepos = createCodeRepos({ browser, baseDir: path.join(dataDir, 'repos'), getConfig: loadConfig, hosting: codeHosting, editing: true, sandbox, ...(codeGit && { git: codeGit }) });
   // 技能脚本运行器：技能里的 Python / Node 命令在隔离的 Docker 里跑（没装 Docker 或镜像时照实告诉模型怎么装）
   const skillRunner = createSkillRunner({ image: process.env.JARVIS_SKILL_RUNNER_IMAGE || SKILL_RUNNER_IMAGE, baseDir: path.join(dataDir, 'skill-runner') });
-  const runner = injected ?? createTaskRunner({ getConfig: async () => withoutCodeCredentials(loadConfig()), maxRunning, skillRunner, codeRepos, projectBaseDir: path.join(dataDir, 'project-jobs') });
+  let runner;
+  const projects = createCodeProjects({ dataDir, getConfig: loadConfig, saveConfig, legacyRepos: codeRepos, hosting: codeHosting, git: codeGit, sandbox, browser,
+    validateSession: async sessionId => { if (!await sessions.get(sessionId)) throw Object.assign(new Error('请先开始服务器对话，再管理项目'), { code: 'CODE_SCOPE' }); },
+    isBusy: sessionId => (runner?.list() || []).some(t => t.sessionId === sessionId && ['queued','running'].includes(t.status)),
+    onBind: async (sessionId, projectId, taskId) => {
+      const s = await sessions.get(sessionId);
+      if (!s) throw Object.assign(new Error('对话不存在，请先开始对话'), { code: 'CODE_SCOPE' });
+      if (s.codeProjectId !== projectId) { s.codeProjectId = projectId; s.taskCheckpoint = null; }
+      if (taskId) s.taskCheckpoint = { text: 'GitHub项目开发', status: 'done', codeTaskId: taskId, taskId, steps: [], inFlight: [] };
+      await sessions.save(s);
+    }
+  });
+  runner = injected ?? createTaskRunner({ codeProjects: projects, getConfig: async () => withoutCodeCredentials(loadConfig()), maxRunning, skillRunner, codeRepos, projectBaseDir: path.join(dataDir, 'project-jobs') });
   // 定时任务 / 提醒：服务器自己按时执行（手机关着也做），见 serverSchedules.mjs；测试里不自动开始计时
   const schedules = createServerSchedules({ runner });
   if (autoSchedules) schedules.start();
@@ -145,6 +161,8 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
 
   const searchTest = createSearchTest({ getConfig: () => withoutCodeCredentials(loadConfig()), readJson, json });
   const codeRoutes = createCodeRepoRoutes({ getConfig: loadConfig, saveConfig, hosting: codeHosting, repos: codeRepos, readJson, json });
+
+  const projectRoutes = codeProjectRoutes({ projects, readJson, json });
 
   function login(req, res, body) {
     const ip = String(req.headers['x-real-ip'] || req.socket.remoteAddress || '');
@@ -183,6 +201,10 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
   async function handle(req, res, pathname) {
     const url = new URL(req.url, 'http://x');
     if (pathname === '/api/server/login' && req.method === 'POST') { login(req, res, await readJson(req)); return true; }
+    if (pathname.startsWith('/api/server/code-projects')) {
+      if (!authorized(req)) { json(res, 401, { error: '服务器登录已失效' }); return true; }
+      return projectRoutes(req, res, pathname, url);
+    }
     if (pathname === '/api/server/code-repos') {
       if (!authorized(req)) { json(res, 401, { error: '服务器登录已失效' }); return true; }
       return codeRoutes(req, res, pathname);

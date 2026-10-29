@@ -2,7 +2,7 @@ import { requiresSources } from './retrievalQuality.js';
 import { explainedRepositoryFailure } from './codeRepositoryReview.js';
 
 /** 失败提示里说人话 */
-const TOOL_NAMES = { code_edit: '修改仓库代码', code_write: '保存仓库文件', code_run: '隔离运行检查', create_document: '生成文档', write_long_document: '写长文档', write_professional_document: '写正式文档', edit_office_document: '修改文档', edit_spreadsheet: '修改表格', write_file: '写文件', edit_file: '改文件', run_javascript: '运行代码', run_python: '运行代码', generate_image: '画图', sing_song: '生成歌曲', schedule_task: '定时任务', remember: '记忆', computer_run: '电脑上运行命令', run_project_tests: '运行测试' };
+const TOOL_NAMES = { code_browser: '网页浏览器检查', project_prepare: '准备项目确认', project_save: '准备分支保存', convert_legacy_doc: '转换旧Word', code_edit: '修改仓库代码', code_write: '保存仓库文件', code_run: '隔离运行检查', create_document: '生成文档', write_long_document: '写长文档', write_professional_document: '写正式文档', edit_office_document: '修改文档', edit_spreadsheet: '修改表格', write_file: '写文件', edit_file: '改文件', run_javascript: '运行代码', run_python: '运行代码', generate_image: '画图', sing_song: '生成歌曲', schedule_task: '定时任务', remember: '记忆', computer_run: '电脑上运行命令', run_project_tests: '运行测试' };
 
 /** 执行结束不等于任务验收通过；这里只报告可确定的缺口，不自动评判语义正确率。 */
 export function reviewOutcome(report, { interrupted = false, nativeSearchCalls = 0, answer = '' } = {}) {

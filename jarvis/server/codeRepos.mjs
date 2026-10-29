@@ -1,3 +1,5 @@
+import { codePublishPlan, commitCodeBranch, pushCodeBranch } from './codePublish.mjs';
+import { codePreview } from './codePreview.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -7,7 +9,7 @@ import { allowedCodePath, readCodeFile, codeLines, searchCode } from './codeRepo
 import { writeCodeFile } from './codeRepoWrite.mjs';
 
 /** 仅GitHub只读。最多8仓库缓存/32工作副本；不自动删用户工作，索引不保存代码正文或凭据。 */
-export function createCodeRepos({ baseDir, getConfig, git = createGitRunner(), hosting = createGitHubHost(), editing = false, sandbox = null }) {
+export function createCodeRepos({ baseDir, getConfig, git = createGitRunner(), hosting = createGitHubHost(), editing = false, sandbox = null, browser = null }) {
   const root = path.resolve(baseDir),
     indexPath = path.join(root, 'index.json');
   const busy = new Map();
@@ -244,6 +246,7 @@ export function createCodeRepos({ baseDir, getConfig, git = createGitRunner(), h
     },
     writable: editing,
     runConfigured: Boolean(editing && sandbox?.configured),
+    browserConfigured: Boolean(editing && browser?.configured),
     abortAll() {
       for (const ctrl of busy.values()) ctrl.abort(codeError('CODE_CONNECTION_CHANGED', '仓库连接已变更，当前操作已停止'));
       for (const ctrl of operations.values()) ctrl.abort(codeError('CODE_CONNECTION_CHANGED', '仓库连接已变更，当前操作已停止'));
@@ -311,6 +314,25 @@ export function createCodeRepos({ baseDir, getConfig, git = createGitRunner(), h
       return operate(id, sessionId, execution, (current, context) =>
         writeCodeFile(current.cwd, input, { token: current.connection.token, signal: context.signal })
       );
+    },
+    async preview(id, sessionId, entry = 'index.html', execution = {}) {
+      const current = await resolve(id, sessionId);
+      return codePreview(current.cwd, entry, current.connection.token);
+    },
+    publishPlan(id, sessionId, execution = {}) {
+      return operate(id, sessionId, execution, (current, context) => codePublishPlan(current, context, run));
+    },
+    commit(id, sessionId, input, execution = {}) {
+      return operate(id, sessionId, execution, (current, context) => commitCodeBranch(current, input, context, run));
+    },
+    push(id, sessionId, input, execution = {}) {
+      return operate(id, sessionId, execution, (current, context) => pushCodeBranch(current, input, context, run));
+    },
+    browser(id, sessionId, input, execution = {}) {
+      return operate(id, sessionId, execution, async (current, context) => {
+        if (!browser) throw codeError('CODE_BROWSER_UNAVAILABLE', '网页浏览器尚未配置');
+        return browser.run({ root: current.cwd, files: await files(current, context), token: current.connection.token, ...input }, context);
+      });
     },
     run(id, sessionId, command, execution = {}) {
       return operate(id, sessionId, execution, async (current, context) => {
