@@ -12,13 +12,14 @@
  */
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { skillDeps, hasDeps, depsKey, PY_SPEC, NPM_SPEC } from '../src/agent/skillDeps.js';
-import { isBinaryFile, isRemoteFile } from '../src/agent/skillPacks.js';
 import { assertArchitectureMutationBatch } from '../src/agent/architectureStateProtection.js';
 import { throwControl } from '../src/core/networkRequest.js';
+import { createSkillBuilder } from './skillBuild.mjs';
+import { materializeSkill, skillSignature, writeSkillSource } from './skillSource.mjs';
 
 const execute = promisify(execFile);
 export const SKILL_RUNNER_IMAGE = 'jarvis-skill-runner';
@@ -49,24 +50,25 @@ const LIMITS = ['--pull=never', '--read-only', '--cap-drop=ALL', '--security-opt
 /**
  * @param {{ image?: string, baseDir: string, runDocker?: typeof docker, ttlMs?: number }} o
  */
-export function createSkillRunner({ image = SKILL_RUNNER_IMAGE, baseDir, runDocker = docker, ttlMs = 60_000, pipIndex = process.env.JARVIS_SKILL_PIP_INDEX || PIP_INDEX, npmRegistry = process.env.JARVIS_SKILL_NPM_REGISTRY || NPM_REGISTRY }) {
+export function createSkillRunner({ image = SKILL_RUNNER_IMAGE, baseDir, runDocker = docker, ttlMs = 60_000, pipIndex = process.env.JARVIS_SKILL_PIP_INDEX || PIP_INDEX, npmRegistry = process.env.JARVIS_SKILL_NPM_REGISTRY || NPM_REGISTRY, fetchImpl = globalThis.fetch }) {
   let checked = 0;
   let ok = false;
   const configDir = path.join(baseDir, '.docker');
   const dockerRun = (args, o = {}) => runDocker(args, { configDir, ...o });
+  const builder = createSkillBuilder({ image, dockerRun, limits: LIMITS, registry: npmRegistry });
   const installing = new Map();
 
   /** 镜像在不在（缓存一分钟） */
   async function available() {
     if (!image || !/^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,240}$/.test(image)) return false;
     if (Date.now() - checked < ttlMs) return ok;
-    checked = Date.now();
     try {
       await dockerRun(['image', 'inspect', image], { timeout: 5000 });
       ok = true;
     } catch {
       ok = false;
     }
+    checked = Date.now(); // 首次inspect未返回时不能先缓存false，误拒并发任务。
     return ok;
   }
 
@@ -74,32 +76,24 @@ export function createSkillRunner({ image = SKILL_RUNNER_IMAGE, baseDir, runDock
   async function prepareSource(pack) {
     const dir = path.join(baseDir, safeName(pack.name));
     const src = path.join(dir, 'src');
-    const entries = Object.entries(pack.files ?? {}).filter(([, f]) => !isRemoteFile(f));
-    const sig = createHash('sha256').update(JSON.stringify([pack.body, entries.map(([k, f]) => [k, isBinaryFile(f) ? f.b64.length + ':' + f.b64.slice(0, 64) : f])])).digest('hex');
+    const sig = skillSignature(pack);
     const mark = path.join(dir, 'src.sig');
     if ((await fs.readFile(mark, 'utf8').catch(() => '')) !== sig) {
       await fs.rm(src, { recursive: true, force: true });
-      await fs.mkdir(src, { recursive: true, mode: 0o755 });
-      await fs.writeFile(path.join(src, 'SKILL.md'), pack.body ?? '', { mode: 0o644 });
-      for (const [rel, f] of entries) {
-        const parts = rel.split('/');
-        if (!rel || parts.some((p) => !p || p === '..' || p === '.') || rel.startsWith('/') || rel.includes('\\')) continue;
-        const target = path.join(src, ...parts);
-        await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o755 });
-        await fs.writeFile(target, isBinaryFile(f) ? Buffer.from(f.b64, 'base64') : String(f), { mode: /\.(sh|py)$/.test(rel) ? 0o755 : 0o644 });
-      }
+      await writeSkillSource(pack, src);
       await fs.writeFile(mark, sig);
     }
     return { dir, src };
   }
 
   /** 装依赖（每个技能一份，依赖没变不重装；同一个技能同时只装一次） */
-  async function ensureDeps(pack, dir, src, { signal, onProgress, extra = {} } = {}) {
+  async function ensureDeps(pack, dir, src, { signal, onProgress, extra = {}, built = false } = {}) {
     // 模型另外指定过的包记下来：下次不指定也照样在（不然每次都要重装）
     const extraFile = path.join(dir, 'extra.json');
     const saved = JSON.parse(await fs.readFile(extraFile, 'utf8').catch(() => '{}'));
     const merged = { python: [...(saved.python ?? []), ...(extra.python ?? [])], node: [...(saved.node ?? []), ...(extra.node ?? [])] };
     const deps = withExtra(skillDeps(pack), merged);
+    if (built) deps.nodePackage = false; // Node依赖已在独立构建副本中安装，ESM也从该副本解析。
     await fs.writeFile(extraFile, JSON.stringify({ python: deps.python, node: deps.node }));
     const depsDir = path.join(dir, 'deps');
     await fs.mkdir(depsDir, { recursive: true });
@@ -138,11 +132,22 @@ export function createSkillRunner({ image = SKILL_RUNNER_IMAGE, baseDir, runDock
    * @returns {Promise<{ exitCode: number, stdout: string, stderr: string, timedOut: boolean, files: Array<{ path: string, data: Buffer }> }>}
    */
   async function run(pack, command, { timeoutSec = 60, signal, onProgress, extra = {} } = {}) {
+    throwControl(null, signal);
+    if (['', '.', '..'].includes(safeName(pack.name))) throw Object.assign(new Error('技能名不能是空白或目录跳转符'), { code: 'INVALID_SKILL_NAME' });
     const cmd = String(command ?? '').trim();
     if (!cmd || cmd.length > 4000 || cmd.includes('\0')) throw Object.assign(new Error('命令为空或太长'), { code: 'INVALID_SKILL_COMMAND' });
     if (!(await available())) throw Object.assign(new Error(UNAVAILABLE), { code: 'SKILL_RUNNER_UNAVAILABLE', kind: 'api' });
-    const { dir, src } = await prepareSource(pack);
-    const depsDir = await ensureDeps(pack, dir, src, { signal, onProgress, extra });
+    const dir = path.join(baseDir, safeName(pack.name));
+    pack = await materializeSkill(pack, dir, { signal, onProgress, fetchImpl });
+    const built = await builder.prepare(pack, dir, { signal, onProgress });
+    try {
+      const src = built?.src || (await prepareSource(pack)).src;
+      return await runPrepared(pack, dir, src, cmd, { timeoutSec, signal, onProgress, extra, built: Boolean(built) });
+    } finally { built?.release(); }
+  }
+
+  async function runPrepared(pack, dir, src, cmd, { timeoutSec, signal, onProgress, extra, built }) {
+    const depsDir = await ensureDeps(pack, dir, src, { signal, onProgress, extra, built });
     const work = path.join(dir, 'runs', randomUUID());
     await fs.mkdir(work, { recursive: true });
     await fs.chmod(work, 0o777);
@@ -163,7 +168,7 @@ export function createSkillRunner({ image = SKILL_RUNNER_IMAGE, baseDir, runDock
         '-w', '/work', image, 'timeout', '--signal=KILL', `${secs}s`, 'sh', '-c', script],
       { signal, timeout: (secs + 15) * 1000 });
     } catch (e) {
-      if (signal?.aborted) { await dockerRun(['rm', '-f', container], { timeout: 5000 }).catch(() => {}); throw e; }
+      if (signal?.aborted) { await dockerRun(['rm', '-f', container], { timeout: 5000 }).catch(() => {}); await removeWork(work); throw e; }
       // 命令自己失败（退出码非 0）也是结果：交回模型看错误信息
       out = { stdout: e.stdout ?? '', stderr: e.stderr ?? String(e.message) };
       exitCode = typeof e.code === 'number' ? e.code : 1;
@@ -243,11 +248,18 @@ export function skillRunnerTool({ runner, getPack, saveFile }) {
       required: ['skill', 'command'],
       additionalProperties: false
     },
-    run: async ({ skill, command, timeout_seconds, python_packages, npm_packages }, { signal, progress } = {}) => {
+    run: async ({ skill, command, timeout_seconds, python_packages, npm_packages }, { signal, progress, rawRequestText = '' } = {}) => {
       throwControl(null, signal);
       const pack = await getPack(skill);
       if (!pack) throw Object.assign(new Error(`服务器上没有技能「${skill}」：先在“技能”里安装，并同步到服务器`), { code: 'SKILL_NOT_FOUND', kind: 'api' });
       if (pack.enabled === false) throw Object.assign(new Error(`技能「${pack.name}」已停用`), { code: 'SKILL_DISABLED', kind: 'api' });
+      // 普通架构图保持原内置工具；只有用户点名才允许技能在此执行，不改agent的架构分流。
+      if (/架构图|architecture\s+diagram/i.test(rawRequestText)) {
+        const name = String(pack.name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const named = new RegExp(`(?:^|[^a-z0-9_-])${name}(?:$|[^a-z0-9_-])`, 'i').test(rawRequestText);
+        const denied = new RegExp(`(?:不要|不用|别|禁止|不使用)\\s*(?:用|使用)?\\s*[「“"']?${name}`, 'i').test(rawRequestText);
+        if (!named || denied) throw Object.assign(new Error('本轮没有点名使用此技能；普通架构图请继续使用内置create_diagram'), { code: 'SKILL_EXPLICIT_REQUIRED' });
+      }
       throwControl(null, signal);
       const r = await runner.run(pack, command, { timeoutSec: timeout_seconds, signal, onProgress: progress, extra: { python: python_packages, node: npm_packages } });
       throwControl(null, signal);

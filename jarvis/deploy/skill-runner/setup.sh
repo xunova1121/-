@@ -49,6 +49,13 @@ if ! docker build -t "$IMAGE" "$DIR"; then
 fi
 docker run --rm --user 65534:65534 "$IMAGE" sh -c 'python3 --version && node --version'
 
+# 仅需要真实浏览器验收的技能（如Archify）选装；普通技能不额外下载Chromium。
+if [[ "${JARVIS_SKILL_BROWSER:-0}" == 1 ]]; then
+  docker build --build-arg "BASE=$IMAGE" -f "$DIR/Dockerfile.browser" -t "$IMAGE-browser" "$DIR"
+  docker run --rm --user 65534:65534 "$IMAGE-browser" chromium --version
+  docker tag "$IMAGE-browser" "$IMAGE"
+fi
+
 echo "== 让 jarvis 账号能用 Docker"
 id jarvis >/dev/null 2>&1 || { echo "没找到 jarvis 账号：先按部署说明装好未央服务器版"; exit 1; }
 usermod -aG docker jarvis

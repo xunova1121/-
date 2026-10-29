@@ -16,11 +16,15 @@ on:
         description: '只验证P7及固定评测运行时，不打包、不发布'
         type: boolean
         default: false
+      skill_only:
+        description: '技能构建与Archify真实出图验收，不打包、不发布'
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   unit:
-    if: inputs.webgl_only != true && inputs.p7_only != true
+    if: inputs.webgl_only != true && inputs.p7_only != true && inputs.skill_only != true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -35,6 +39,51 @@ jobs:
           cache-dependency-path: jarvis/package-lock.json
       - run: npm ci --no-audit --no-fund
       - run: npm test
+  skill-build:
+    if: github.event_name == 'workflow_dispatch' && inputs.skill_only == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - run: npm run lint
+      - run: npm test
+      - run: node evals/code-runtime.mjs --from-source evals/code-runtime-manifest.json .
+      - name: Fetch fixed public Apache-2.0 skill
+        run: |
+          git init "$RUNNER_TEMP/archify"
+          git -C "$RUNNER_TEMP/archify" fetch --depth 1 https://github.com/tt-a1i/archify.git d6059331abbddb49bca380ff46dca8ce33158b04
+          git -C "$RUNNER_TEMP/archify" checkout --detach FETCH_HEAD
+      - name: Build isolated browser test image
+        run: docker build --build-arg BASE=node:22-bookworm-slim -f deploy/skill-runner/Dockerfile.browser -t weiyang-skill-browser:test deploy/skill-runner
+      - name: Real skill generation, cache, ordinary skill and cancellation
+        env:
+          JARVIS_SKILL_RUNNER_IMAGE: weiyang-skill-browser:test
+        run: node e2e/skill-build.mjs "$RUNNER_TEMP/archify" "$RUNNER_TEMP/skill-build"
+      - run: npm run build
+      - name: Original browser regression (unchanged thresholds)
+        run: |
+          mkdir -p "$RUNNER_TEMP/skill-build/smoke"
+          node server/server.mjs > "$RUNNER_TEMP/skill-build/gateway.log" 2>&1 &
+          gateway_pid=$!
+          trap 'kill "$gateway_pid" 2>/dev/null || true' EXIT
+          node --input-type=module -e 'for(let i=0;i<100;i++){try{if((await fetch("http://127.0.0.1:8787")).ok)process.exit(0)}catch{}await new Promise(r=>setTimeout(r,100))}process.exit(1)'
+          node e2e/smoke.mjs "$RUNNER_TEMP/skill-build/smoke"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: skill-build-${{ github.run_id }}
+          path: ${{ runner.temp }}/skill-build
   p7:
     if: github.event_name == 'workflow_dispatch' && inputs.p7_only == true
     runs-on: ubuntu-latest
