@@ -24,7 +24,7 @@ export async function localCodeDocker(args, { signal, timeout = 70000 } = {}) {
     );
   }
 }
-async function removeContainer(name, runDocker, timeoutMs) {
+export async function removeCodeContainer(name, runDocker, timeoutMs) {
   const end = Date.now() + Math.max(1, Math.min(10000, timeoutMs));
   // rm与--rm可能相遇“正在删除”；只有ps确认消失才算清理完成。
   try {
@@ -87,7 +87,7 @@ export async function codeContainer({
   } finally {
     // 无论成功/失败/停止均确认容器消失，再清理临时目录。容器内部还有60秒独立寿命上限。
     try {
-      await removeContainer(name, runDocker, cleanupTimeoutMs);
+      await removeCodeContainer(name, runDocker, cleanupTimeoutMs);
     } catch {
       failure = codeError('CODE_SANDBOX_CLEANUP', '未确认隔离容器清理，请管理员核查：' + name);
     }

@@ -2,8 +2,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
+import { projectDirectory, writeProjectSnapshot } from './projectSnapshot.mjs';
+import { removeCodeContainer } from './codeDocker.mjs';
 import * as workspace from '../src/agent/workspace.js';
 
 const execute = promisify(execFile);
@@ -25,19 +25,20 @@ function relative(value) {
   return text;
 }
 async function docker(args, { signal, timeout = 25000 } = {}) {
-  return execute('docker', args, {
+  return execute('docker', ['--host=unix:///var/run/docker.sock', ...args], {
     signal,
     timeout,
     maxBuffer: 64000,
+    killSignal: 'SIGKILL',
     windowsHide: true,
-    env: { PATH: process.env.PATH, ...(process.platform === 'win32' && { SystemRoot: process.env.SystemRoot }) }
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, ...(process.env.DOCKER_CONFIG && { DOCKER_CONFIG: process.env.DOCKER_CONFIG }) }
   });
 }
 
 /** 只运行管理员配置、含node与coreutils timeout的本地镜像。容器PID1限制22秒生命周期，应用崩溃也不会留下无限运行的任务。没有Docker或镜像就明确不可用，不降级到宿主机执行。 */
 export async function runProject(
   { root, tests, entry, mode = 'test' },
-  { image, signal, runDocker = docker, list = workspace.list, read = workspace.readBlob } = {}
+  { image, baseDir, signal, runDocker = docker, list = workspace.list, read = workspace.readBlob } = {}
 ) {
   root = relative(root);
   if (!image || !/^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,240}$/.test(image))
@@ -62,13 +63,12 @@ export async function runProject(
   if (!files.length || files.length > 40 || files.reduce((sum, file) => sum + (Number(file.size) || 0), 0) > 2 * 1024 * 1024)
     throw invalid('项目为空或超过40文件/2MB的隔离验证上限');
   if (entries.some((file) => !files.some((item) => item.path === root + '/' + file))) throw invalid('测试或运行入口不在项目中');
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'jarvis-project-'));
+  const directory = await projectDirectory(baseDir);
   const container = 'jarvis-code-' + randomUUID();
   let started = false;
   let output;
   let failure;
   try {
-    await fs.chmod(directory, 0o755);
     let bytes = 0;
     for (const file of files) {
       stopped(signal);
@@ -76,9 +76,7 @@ export async function runProject(
       const data = new Uint8Array(await (await read(file.path)).arrayBuffer());
       bytes += data.byteLength;
       if (bytes > 2 * 1024 * 1024) throw invalid('项目实际内容超过2MB');
-      const target = path.join(directory, ...local.split('/'));
-      await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o755 });
-      await fs.writeFile(target, data, { mode: 0o644, flag: 'wx' });
+      await writeProjectSnapshot(directory, local, data);
     }
     stopped(signal);
     started = true;
@@ -114,17 +112,17 @@ export async function runProject(
   } catch (error) {
     failure = error;
   } finally {
-    if (started && failure) {
+    if (started) {
       try {
-        await runDocker(['rm', '-f', container], { timeout: 5000 });
+        await removeCodeContainer(container, async (args, options) => ({ exitCode: 0, ...await runDocker(args, options) }), 10000);
       } catch (error) {
         // 未确认清理时不能宣称成功，保留随机容器名供管理员核查。
-        failure ??= Object.assign(new Error('隔离容器清理未确认：' + container), { code: 'SANDBOX_CLEANUP_FAILED', kind: 'api', cause: error });
+        failure = Object.assign(new Error('隔离容器清理未确认，保留副本供管理员核查：' + container), { code: 'SANDBOX_CLEANUP_FAILED', kind: 'api', cause: error });
       }
     }
-    await fs.rm(directory, { recursive: true, force: true });
+    if (failure?.code !== 'SANDBOX_CLEANUP_FAILED') await fs.rm(directory, { recursive: true, force: true });
   }
-  stopped(signal);
+  if (failure?.code !== 'SANDBOX_CLEANUP_FAILED') stopped(signal);
   if (failure)
     throw Object.assign(new Error('隔离代码验证失败：' + String(failure.stderr || failure.message).slice(0, 4000)), {
       code: failure.code === 'SANDBOX_CLEANUP_FAILED' ? failure.code : 'PROJECT_TEST_FAILED',
@@ -144,7 +142,7 @@ export async function runProject(
   };
 }
 
-export function projectExecutionTool({ image } = {}) {
+export function projectExecutionTool({ image, baseDir } = {}) {
   if (!image) return null;
   return {
     name: 'run_project_tests',
@@ -160,6 +158,6 @@ export function projectExecutionTool({ image } = {}) {
       required: ['root'],
       additionalProperties: false
     },
-    run: async (args, { signal } = {}) => JSON.stringify(await runProject(args, { image, signal }))
+    run: async (args, { signal } = {}) => JSON.stringify(await runProject(args, { image, baseDir, signal }))
   };
 }

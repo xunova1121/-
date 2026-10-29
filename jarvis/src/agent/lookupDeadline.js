@@ -40,6 +40,7 @@ export function moreTimeRequest(text, history = []) {
 const abortError = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
 
 export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_MS } = {}) {
+  if (options.codeWork?.enabled) return run(options); // 代码任务有独立硬期限，不叠普通查询时限。
   // “再查”：按原问题重查，不再套一分钟时限（联网最多 3 分钟）
   const again = moreTimeRequest(options.userText, options.history);
   if (again) {

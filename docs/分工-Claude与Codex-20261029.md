@@ -45,6 +45,8 @@
 - 2026-10-29 Codex WebGL补充：callouts.js只加布局输入/按钮高度未变的跳过，styles.css只在真实上下文丢失到三帧真实绘制完成之间暂停舞台HUD/引线CSS动画，节点仍显示，恢复后自动继续；不改主题/字号/形象/普通动效。软件缓冲/颜色计算实验逐像素相同但未稳定消除总耗时失败，撤回这两项，不混入最终方案。
 - 2026-10-29 Codex WebGL定位补充：暂停WebGL后GPU仍繁忙；orbitHud.layout每33ms无条件replaceChildren重建最多8个卫星并重写三处相同textContent，恢复期间也继续。仅改orbitHud的输入不变跳过和有界节点复用，外观/刷新目标保持，防止重复DOM绘制争用恢复。先做对照，不把推测当已验证根因。
 - 2026-10-29 Codex WebGL批（用户确认开始）：先用临时计时完成原smoke前置后20次采样，保留原失败行、P50/P95/最大值；只按证据改render/stage.js恢复调度及无效resize，画质/N/像素上限和300ms/1500ms门槛保持。拟在jarvis-unit.yml增加手动只测WebGL选项（contents:read、无发布job），原单测入口保持，不动jarvis-desktop发版工作流。完成后交Claude审再接P7；所有提交[skip ci]。
+- 2026-10-29 Codex P7补充：toolLoader只增加可选常驻集合（默认CORE不变），仓库开发常驻8个代码工具及少量审查/技能入口；lookupDeadline只对服务器实际开启的代码工作模式绕过普通查询60秒限制，原MORE_TIME_ASK及收尾话术保持。
+- 2026-10-29 Codex P7（用户已确认）：补独立代码开发技能及有界代码任务预算，沿用现有code能力路由/固定模型设置；taskRunner与agent.js只增加可选工作模式、硬步数上限和总期限，不动Claude表达/架构/提醒/持仓。codeRepos增加真实会话内的有界工作副本恢复索引；旧projectExecution改为数据目录共享暂存并修umask 077。skillCatalog只加入新技能，保留停用/卸载语义。验收不读sandbox隐藏答案、不推测试仓库；只提交[skip ci]，不发版。
 （要动对方名下文件时在这里写：日期、谁、改哪个文件、为什么）
 - 2026-10-29 Codex P2已完成编辑与Docker测试：虚构项目真实红→绿/原测试与main不变、真实npm包离线安装、运行中取消及输出上限通过。全量2030、最终91定向、三构建及其余界面通过；smoke 173/174，旧P1 ef78099独立对照也173/174（同一WebGL恢复项）。未改/放宽GL门禁，保留为发版阻塞；只[skip ci]保存，不发版。详见《代码智能体-P2验收与后续计划-20261029.md》，P7/续做索引/旧执行器共享目录及真实模型验收待用户下一批确认。
 - 2026-10-29 Codex P2收尾显示：reviewOutcome.js只在工具名表增加code_edit/write/run中文名，不动收尾提示、partial判断或Claude已修话术；部署说明补可选代码沙箱配置，保留原PrivateTmp防护。
