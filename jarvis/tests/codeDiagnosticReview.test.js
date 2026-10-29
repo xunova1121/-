@@ -42,7 +42,7 @@ it('普通修错、失败lint、安装失败和裸报错仍须提示；不能套
 it('有实际仓库写入时，不得把未推送分支链接冒充成果；正常相对文件链接保留', () => {
   const r = createExecutionReview('制作商城网页');
   r.record({ name: 'code_write', args: { workspace_id: id, path: 'index.html' }, ok: true });
-  expect(r.guardsAnswer()).toBe(true);
+  expect(r.guardsAnswer()).toBe(false); // 链接单独流式过滤，不挡住普通进度；其他强约束仍整段审查。
   expect(r.checkAnswer('页面：https://github.com/demo/repo/blob/weiyang/task-' + id + '/index.html').join()).toContain('尚无推送');
   const corrected = r.repositoryText('页面做好了：[商城页面](https://github.com/demo/repo/blob/weiyang/task-' + id + '/index.html)。');
   expect(corrected).toContain('页面做好了');

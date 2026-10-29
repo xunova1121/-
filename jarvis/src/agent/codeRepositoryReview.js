@@ -98,3 +98,57 @@ export function correctRepositoryLinks(text, workspaceIds) {
     .replace(/\[([^\]\n]{1,200})\]\((https?:\/\/github\.com\/[^\s)]+)\)/gi, (all, label, url) => (pending(url) ? describe(url, label) : all))
     .replace(/https?:\/\/github\.com\/[^\s<>()\[\]，。；！？“”]+/gi, (url) => (pending(url) ? describe(url) : url));
 }
+
+/** 只暂存可能尚未闭合的链接（最多8KB），普通进度立即显示，避免整段缓冲阻断首字。 */
+export function repositoryTextStream(correct) {
+  let pending = '';
+  let dropping = false;
+  const delimiter = /[\s<>()\[\]，。；！？“”]/;
+  return {
+    push(fragment, final = false) {
+      let text = pending + fragment;
+      let out = '';
+      pending = '';
+      while (text) {
+        if (dropping) {
+          const end = text.search(delimiter);
+          if (end < 0) return out;
+          text = text.slice(end);
+          dropping = false;
+        }
+        const start = text.search(/\[|https?:\/\/|h(?:t(?:t(?:p(?:s)?)?)?)?:?\/{0,2}$/);
+        if (start < 0) return out + text;
+        out += text.slice(0, start);
+        text = text.slice(start);
+        let end = -1;
+        if (text[0] === '[') {
+          const close = text.indexOf(']');
+          if (close >= 0 && text[close + 1] === '(') {
+            const paren = text.indexOf(')', close + 2);
+            if (paren >= 0) end = paren + 1;
+          } else if (close >= 0 && close + 1 < text.length || close < 0 && text.length > 201) {
+            out += '[';
+            text = text.slice(1);
+            continue;
+          }
+        } else if (/^https?:\/\//.test(text)) {
+          const stop = text.search(delimiter);
+          if (stop >= 0) end = stop;
+        }
+        if (end >= 0) {
+          out += correct(text.slice(0, end));
+          text = text.slice(end);
+          continue;
+        }
+        if (final) return out + correct(text);
+        if (text.length > 8192) {
+          dropping = true;
+          return out + '（链接过长，未展示）';
+        }
+        pending = text;
+        return out;
+      }
+      return out;
+    }
+  };
+}

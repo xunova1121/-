@@ -405,6 +405,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     let stripper = new EmotionTagStripper();
     // 收尾核对之后的步骤：整段写完再显示——模型把刚才的答案又写一遍、或只回一句“收到”的，不显示（评测里出现过答案重复两遍）
     let held = '';
+    const repositoryStream = review.repositoryStream();
     const guardedAnswer = review.guardsAnswer();
     const holding = Boolean(checkedText) || guardedAnswer;
     const showText = (text) => {
@@ -429,7 +430,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       if (hint) emit({type:'emotion',value:hint});
       if (!text) return;
       if (holding) { request.clearSearchTimer(); held += text; return; }
-      showText(text);
+      const visible = repositoryStream.push(text);
+      if (visible) showText(visible);
     };
     let r;
     let primaryActivity = null;
@@ -510,8 +512,9 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     if (!r.toolCalls.length && r.stop !== 'pause_turn') {
       const rest = stripper.flush();
       if (rest.hint) emit({ type: 'emotion', value: rest.hint });
-      if (rest.text) { if (holding) held += rest.text; else { stepText += rest.text; emit({ type: 'text', delta: rest.text }); } }
+      if (rest.text) { if (holding) held += rest.text; else { const visible = repositoryStream.push(rest.text); if (visible) showText(visible); } }
     }
+    if (!holding) { const tail = repositoryStream.push('', true); if (tail) showText(tail); }
     if (guardedAnswer && !r.toolCalls.length && r.stop !== 'pause_turn') {
       const issues = review.checkAnswer(held, now());
       const canCheckNumbers = availableTools.some(tool => /^(?:verify_numbers|run_javascript|run_python)$/.test(tool.name));

@@ -1,4 +1,4 @@
-import { repositoryReceipt, repositoryRepair, repositoryDeliveryIssue, correctRepositoryLinks } from './codeRepositoryReview.js';
+import { repositoryReceipt, repositoryRepair, repositoryDeliveryIssue, correctRepositoryLinks, repositoryTextStream } from './codeRepositoryReview.js';
 import { IMAGE_RECHECK } from './imageReading.js';
 import { newsCandidates } from './newsDelivery.js';
 import { mediaReceipt, mediaDelivery, blockedAfterDenial } from './actionDelivery.js';
@@ -268,10 +268,11 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   };
   const guardsAnswer = () => {
     const rules = answerConstraints(request);
-    return repositoryChanged || visualEvidence.active() || (styleRequests(request).length > 0 && Boolean(lastDocument())) || rules.noTime || rules.literals.length > 0 || rules.todayNews || rules.care || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
+    return visualEvidence.active() || (styleRequests(request).length > 0 && Boolean(lastDocument())) || rules.noTime || rules.literals.length > 0 || rules.todayNews || rules.care || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
   };
   /** 改写一次后仍对不上：不吞掉回答（文件链接要留着），末尾补一句读回的实际情况 */
   const styleCorrection = () => (styleProblems.length ? '（读回文件核对：' + styleNote(request, lastDocument()).replace(/^用户要的调整，读回文件的实际结果：/, '').replace(/。回答照这个说$/, '') + '。）' : '');
   const repositoryText = text => repositoryChanged ? correctRepositoryLinks(text, [...new Set([...files.values()].map(file => file.workspaceId).filter(Boolean))]) : text;
-  return { repositoryText, styleCorrection, newsCandidates: () => [...newsLinks.values()], toolBlock, noteVisual: visualEvidence.note, record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked, checkAnswer, guardsAnswer };
+  const repositoryStream = () => repositoryChanged ? repositoryTextStream(repositoryText) : { push: fragment => fragment };
+  return { repositoryStream, repositoryText, styleCorrection, newsCandidates: () => [...newsLinks.values()], toolBlock, noteVisual: visualEvidence.note, record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked, checkAnswer, guardsAnswer };
 }
