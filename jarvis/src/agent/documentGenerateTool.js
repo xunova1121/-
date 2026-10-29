@@ -4,6 +4,7 @@ import { generate } from './docs.js';
 import { THEME_IDS, themeList } from './themes.js';
 import { planDocument, documentError } from './documentPlan.js';
 import { chooseDesign, DOC_KINDS, SHEET_KINDS } from './documentDesign.js';
+import { styleRequests, relativeTypography, lastStyle } from './styleCheck.js';
 import { STYLE_IDS, STYLE_NAMES } from './pptStyles.js';
 import { deliverDocument } from './documentDelivery.js';
 import { selfCheck, lint, fixAfterBuild, reviewSlidesByImage } from './selfCheck.js';
@@ -46,6 +47,7 @@ export function createDocumentGenerateTool(ctx) {
     description: `生成 Office / 文档文件并保存到工作区；需要模板时先get_document_template。已有Word仅重排时用source_path保留原件结构，content可空；粘贴原文可用source_requirement_id绑定，不改写正文。生成后自动检查文件结构、读回内容，可用时由本机LibreOffice生成真实PDF预览。结构/估算检查不等于Office视觉验收。排版自动完成（A4、标题样式、编号列表、带表头底色的表格、页码；Word / PDF 的二级标题有 3 个以上时自动加目录）。
 content 用 Markdown：
 - docx / pdf / html：开头一个“# 文档标题”，正文用 ## 一级标题、### 二级标题、#### 三级标题；支持多级列表（缩进两个空格）、| 表格 |（:--: 居中、--: 右对齐）、**粗体**、*斜体*、~~删除线~~、[链接](https://…)、> 引用、代码块、--- 分隔线、单独一行 [分页]、![图注](工作区里的图片路径)
+  招租、出租、招聘、启事、寻物、海报、宣传单这类贴出去的一页告示：kind 填 poster（不填也会自动认），字号按页面自动取最大、上下铺满一页、不加横线。用户说“字大点 / 小点 / 不要横线 / 铺满”时照原话调用，程序会换算成真实字号；改刚做好的文件时 path 用原文件路径直接覆盖，不要另起新文件名。交付后按回执里“读回实际”的字号回答，不要自己说“已加大”
 - pptx：每页用“## 页标题”。汇报、方案类的页标题写成一句观点（如“建设必要性：补齐告警到处置的人工断点”）；剧情、介绍、攻略类用简洁准确的标题，不硬写观点句。用户自己给了分段的，一段一页、顺序不变。设计风格用 style（不填自动选）。版式按内容自动选：
   · 3–8 条“标签：说明”的要点 → 卡片（如“预警研判：多源证据汇聚……”）；页标题含流程 / 场景 / 步骤 / 闭环时 → 一排步骤箭头
   · 2–6 条以数字开头的要点（“67 万元：总投资”“0/12：雷达安装数”）→ 大数字卡片
@@ -102,7 +104,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         cache = memo.scopes.get(executionScope);
       }
       const goal = requestText || rawRequestText || requirements || '';
-      const typography = format === 'docx' ? await documentTypography(ctx, goal, signal) : {};
+      let typography = format === 'docx' ? await documentTypography(ctx, goal, signal) : {};
       const source = format === 'docx' ? await formattingSource({ request: rawRequestText || goal, sessionId, sourceId, sourcePath, signal }) : null;
       if (source?.kind === 'docx') return formatDocumentFile(ctx, source, { path, theme, kind, cover, toc, template, requirements }, execution);
       // 排版时绕过模型提供的正文和改写审稿，确定性沿用已绑定的用户原文。
@@ -112,9 +114,16 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         ? await presentationDesign(ctx, goal, designOptions, signal)
         : chooseDesign(designOptions);
       const sheetDesign = format === 'xlsx' ? await spreadsheetDesign(ctx, goal, { kind: design.kind, sheetStyle }, signal) : null;
+      // 用户说“字大点 / 小点 / 铺满 / 不要横线”：换算成真实的字号和排法（见 styleCheck.js），改完由读回核对确认
+      const asks = format === 'docx' ? styleRequests(rawRequestText || goal) : [];
+      if (asks.some((a) => a.id === 'fill') && design.kind === 'general' && String(content).replace(/\s/g, '').length <= 400) design.kind = 'poster';
+      const noRules = asks.some((a) => a.id === 'noRule');
+      let scale = 0;
+      if (asks.some((a) => a.id === 'bigger' || a.id === 'smaller'))
+        ({ typography, scale } = relativeTypography(typography, asks, { kind: design.kind, previous: await lastStyle(sessionId, executionScope), request: rawRequestText || goal }));
       const { forbidCover, requireCover } = presentationCover(goal);
       const expectedSlides = format === 'pptx' ? requestedSlides('PPT ' + goal) : null;
-      const callKey = await keyOf({ format, path, title, content, theme, design, sheetDesign, kind, cover, subtitle, author, issuer, docNo, toc, template, templateId, requirements, goal, typography, sessionId, sourceId: source?.id, workflow: ctx.documentContentReview?.workflowFile || null });
+      const callKey = await keyOf({ format, path, title, content, theme, design, sheetDesign, kind, cover, subtitle, author, issuer, docNo, toc, template, templateId, requirements, goal, typography, noRules, scale, sessionId, sourceId: source?.id, workflow: ctx.documentContentReview?.workflowFile || null });
       // 记住的结果只管 10 分钟（同一个任务里重复调用）；隔得久了照常重新生成
       const fresh = (m, key, ms) => m.has(key) && Date.now() - m.get(key).at < ms;
       const cached = cache.results.get(callKey);
@@ -155,6 +164,8 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
           title: (title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, '')).replace(/[_\s-]*\d+\s*页$/, ''),
           content: text,
           typography,
+          noRules,
+          scale,
           expectedSlides,
           requireCover,
           forbidCover,

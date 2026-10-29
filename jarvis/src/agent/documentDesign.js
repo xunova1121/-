@@ -20,7 +20,7 @@ const STYLE_TOPIC = [
   ['business', /汇报|方案|立项|决策|述职|总结|计划|建设|项目|工作/]
 ];
 
-export const DOC_KINDS = { notice: '通知 / 函', minutes: '会议纪要', policy: '制度 / 办法', proposal: '方案 / 建议书', report: '报告 / 总结', general: '一般文档' };
+export const DOC_KINDS = { notice: '通知 / 函', minutes: '会议纪要', policy: '制度 / 办法', proposal: '方案 / 建议书', report: '报告 / 总结', poster: '单页告示（招租、招聘、启事、海报，一页大字铺满）', general: '一般文档' };
 const DOC_KIND_RULES = [
   ['minutes', /会议纪要|会议记录|纪要/],
   ['notice', /通知|通告|公告|请示|批复|函$|邀请函|告知书/],
@@ -30,6 +30,8 @@ const DOC_KIND_RULES = [
 ];
 
 export const SHEET_KINDS = { settlement: '结算 / 对账表', ledger: '台账 / 清单', budget: '预算 / 测算表', analysis: '分析报表', general: '一般表格' };
+const POSTER = /招租|出租|求租|转让|招聘|招工|启事|寻物|寻人|失物招领|海报|宣传单|传单|告示|广告/;
+
 const SHEET_KIND_RULES = [
   ['settlement', /结算|对账|结账|称重|收购|收款|付款|账单|货款|工资表|提成/],
   ['budget', /预算|测算|投资估算|成本测算|报价|概算/],
@@ -59,6 +61,9 @@ export function chooseDesign({ format, title = '', content = '', requirements = 
   if (['docx', 'pdf', 'html'].includes(format)) {
     if (DOC_KINDS[kind]) return { kind, label: DOC_KINDS[kind], reason: '按指定的文种' };
     // 先看标题，再看要求，最后看正文开头
+    // 单页告示：标题或要求像告示、内容短（一页放得下），且不是“招聘方案 / 招租工作总结”这类文书
+    if (POSTER.test(`${title}\n${ask}`) && !firstHit(DOC_KIND_RULES.filter(([id]) => id !== 'notice'), title) && String(content).replace(/\s/g, '').length <= 400)
+      return { kind: 'poster', label: DOC_KINDS.poster, reason: '是一页贴出去的告示' };
     const k = firstHit(DOC_KIND_RULES, title) || firstHit(DOC_KIND_RULES, ask) || firstHit(DOC_KIND_RULES, String(content).slice(0, 300)) || 'general';
     return { kind: k, label: DOC_KINDS[k], reason: k === 'general' ? '没看出是哪种公文 / 文书' : '按标题和要求判断' };
   }

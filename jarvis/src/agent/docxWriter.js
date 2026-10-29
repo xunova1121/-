@@ -16,6 +16,7 @@ import { openOfficePackage } from './officePackage.js';
 import { imageInfo } from './imageInfo.js';
 import { normalizeTypography, typographyFont } from './documentTypography.js';
 import { applyDocxTypography } from './docxTypography.js';
+import { makePosterDocx } from './docxPoster.js';
 
 const PT = (n) => Math.round(n * 2); // 字号：磅 → 半磅
 const MM = (n) => Math.round((n * 1440) / 25.4); // 毫米 → twip
@@ -44,7 +45,7 @@ const font = (key) => {
  * @param {Uint8Array|ArrayBuffer} [o.template]  用户的 .docx 模板：沿用其样式
  * @returns {Promise<{ blob: Blob, info: { toc: boolean, images: number, missingImages: string[], headings: number } }>}
  */
-export async function makeDocx({ title, content, theme, cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, template = null, layout = 'report', issuer = '', docNo = '', kind = '', typography = {} }) {
+export async function makeDocx({ title, content, theme, cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, template = null, layout = 'report', issuer = '', docNo = '', kind = '', typography = {}, noRules = false, scale = 0 }) {
   typography = normalizeTypography(typography);
   const d = await import('docx');
   const {
@@ -65,6 +66,8 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
   const bodyFont = typographyFont(typography.body, font(theme.fonts.body));
   const headFont = font(theme.fonts.heading);
   const titleFont = typographyFont(typography.title, font(theme.fonts.title ?? theme.fonts.heading));
+  // 单页告示：一页大字铺满，另有排法（docxPoster.js）；有用户模板时仍按模板排
+  if (K === 'poster' && !template) return makePosterDocx(d, { docTitle: title, content, titleFont, bodyFont, colors: C, typography, scale });
   const bodySize = typography.body?.size ?? (official ? 16 : brief ? 11 : 12);
   const lineSpacing = official ? { line: 579, lineRule: LineRuleType.EXACT } : { line: brief ? 300 : 360, lineRule: LineRuleType.AUTO };
   const page = official
@@ -264,7 +267,7 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
           break;
         case 'quote': await render(b.blocks, out, { inQuote: true }); break;
         case 'image': await imageBlock(b, out); break;
-        case 'hr': out.push(new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: official ? '000000' : C.soft, space: 1 } }, spacing: { after: 200 }, children: [] })); break;
+        case 'hr': if (noRules) break; out.push(new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: official ? '000000' : C.soft, space: 1 } }, spacing: { after: 200 }, children: [] })); break;
         case 'pagebreak': out.push(new Paragraph({ children: [new PageBreak()] })); break;
         default: break;
       }
@@ -287,7 +290,7 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
         margins: { top: 400, bottom: 500, left: 500, right: 500 },
         children: [
           new Paragraph({ heading: HeadingLevel.TITLE, spacing: { after: 240 }, children: [new TextRun({ text: docTitle, bold: true, size: PT(typography.title?.size ?? 28), color: 'FFFFFF', font: titleFont })] }),
-          new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 18, color: C.extra, space: 1 } }, indent: { right: 11906 - page.left - page.right - 1000 - 1400 }, spacing: { after: 240, line: 80, lineRule: LineRuleType.EXACT }, children: [] }),
+          ...(noRules ? [] : [new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 18, color: C.extra, space: 1 } }, indent: { right: 11906 - page.left - page.right - 1000 - 1400 }, spacing: { after: 240, line: 80, lineRule: LineRuleType.EXACT }, children: [] })]),
           ...(subtitle ? [new Paragraph({ children: [new TextRun({ text: subtitle, size: PT(14), color: C.soft, font: headFont })] })] : [])
         ]
       })] })]
@@ -304,7 +307,7 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
       // 用段前距留白，不用空段落：空段落会继承正文的 1.5 倍行距和段后距，封面会被挤到第二页
       new Paragraph({ heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER, spacing: { before: 3400, after: 360 }, children: [new TextRun({ text: docTitle, bold: true, size: PT(typography.title?.size ?? (official ? 22 : 28)), font: titleFont, color: official ? '000000' : C.primary })] }),
       ...(subtitle ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 240 }, children: [new TextRun({ text: subtitle, size: PT(16), color: official ? '000000' : C.accent, font: headFont })] })] : []),
-      ...(official ? [] : [new Paragraph({ alignment: AlignmentType.CENTER, border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: C.accent, space: 1 } }, indent: { left: 3000, right: 3000 }, children: [] })]),
+      ...(official || noRules ? [] : [new Paragraph({ alignment: AlignmentType.CENTER, border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: C.accent, space: 1 } }, indent: { left: 3000, right: 3000 }, children: [] })]),
       ...(author ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 4200, after: 120 }, indent: { firstLine: 0 }, children: [new TextRun({ text: author, size: PT(14), font: bodyFont })] })] : []),
       new Paragraph({ style: 'Caption', alignment: AlignmentType.CENTER, spacing: { before: author ? 0 : 4200, after: 0 }, indent: { firstLine: 0 }, children: [new TextRun({ text: date || today(), size: PT(14), font: bodyFont })] }),
       new Paragraph({ children: [new PageBreak()] })
@@ -318,12 +321,13 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
       titleBlock.push(
         new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 0, after: docNo ? 360 : 120, line: PT(org.length > 10 ? 30 : 36) * 10 + 120, lineRule: LineRuleType.EXACT }, children: [new TextRun({ text: /文件$/.test(org) ? org : `${org}文件`, size: PT(org.length > 10 ? 30 : 36), color: 'C00000', font: font('xiaobiaosong'), characterSpacing: org.length <= 6 ? 60 : 0 })] }),
         ...(docNo ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 120 }, children: [new TextRun({ text: docNo, size: PT(16), font: bodyFont })] })] : []),
-        new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 18, color: 'C00000', space: 1 } }, spacing: { after: 480 }, children: [] })
+        new Paragraph({ ...(!noRules && { border: { bottom: { style: BorderStyle.SINGLE, size: 18, color: 'C00000', space: 1 } } }), spacing: { after: 480 }, children: [] })
       );
     }
     titleBlock.push(new Paragraph({ heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER, children: [new TextRun(docTitle)] }));
     // 设计样式：标题下一条金色短线
-    if (!official) titleBlock.push(new Paragraph({ alignment: AlignmentType.CENTER, border: { bottom: { style: BorderStyle.SINGLE, size: 18, color: C.extra, space: 1 } }, indent: { left: 3800, right: 3800 }, spacing: { before: 0, after: 360, line: 80, lineRule: LineRuleType.EXACT }, children: [] }));
+    // 用户说“不要横线”（noRules）时不加
+    if (!official && !noRules) titleBlock.push(new Paragraph({ alignment: AlignmentType.CENTER, border: { bottom: { style: BorderStyle.SINGLE, size: 18, color: C.extra, space: 1 } }, indent: { left: 3800, right: 3800 }, spacing: { before: 0, after: 360, line: 80, lineRule: LineRuleType.EXACT }, children: [] }));
     if (subtitle) titleBlock.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 240 }, children: [new TextRun({ text: subtitle, color: official ? '000000' : C.accent, size: PT(bodySize + 1), font: headFont })] }));
     (wantToc ? front : children).push(...titleBlock);
   }
@@ -345,8 +349,8 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
   // 设计样式：一级标题是浅底色条 + 左边深色粗边；二级标题下面一条细线
   // 文种不同，标题的样子不同：方案是浅底色条；报告、纪要是一道底线；制度的“第一章”居中
   const ruled = { border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: C.primary, space: 5 } } };
-  const h1Look = official ? {} : K === 'policy' ? { alignment: AlignmentType.CENTER } : brief || K === 'report' || K === 'minutes' ? ruled : { border: { left: { style: BorderStyle.SINGLE, size: 36, color: C.primary, space: 8 } }, shading: { type: ShadingType.CLEAR, fill: C.soft, color: 'auto' }, indent: { left: 160 } };
-  const h2Look = official ? {} : { border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'D5DCE6', space: 2 } } };
+  const h1Look = official ? {} : K === 'policy' ? { alignment: AlignmentType.CENTER } : brief || K === 'report' || K === 'minutes' ? (noRules ? {} : ruled) : { border: { left: { style: BorderStyle.SINGLE, size: 36, color: C.primary, space: 8 } }, shading: { type: ShadingType.CLEAR, fill: C.soft, color: 'auto' }, indent: { left: 160 } };
+  const h2Look = official || noRules ? {} : { border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'D5DCE6', space: 2 } } };
   const H2font = official ? font(theme.fonts.h2) : headFont;
   const H3font = official ? font(theme.fonts.h3) : headFont;
   const paragraphStyles = [
@@ -387,7 +391,7 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
     })]
   });
   const header = official || short ? null : new Header({
-    children: [new Paragraph({ alignment: AlignmentType.RIGHT, border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: C.soft, space: 4 } }, children: [new TextRun({ text: docTitle, size: PT(9), color: muted, font: bodyFont })] })]
+    children: [new Paragraph({ alignment: AlignmentType.RIGHT, ...(!noRules && { border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: C.soft, space: 4 } } }), children: [new TextRun({ text: docTitle, size: PT(9), color: muted, font: bodyFont })] })]
   });
   const empty = () => new Footer({ children: [new Paragraph({ children: [] })] });
 

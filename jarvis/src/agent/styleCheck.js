@@ -100,6 +100,35 @@ export async function rememberStyle({ sessionId, scope, facts }) {
   }
 }
 
+/** 上一轮最后一版的量值（生成前用来算“再大点”的基准；只读不写） */
+export async function lastStyle(sessionId, scope) {
+  if (!sessionId) return null;
+  try {
+    const entry = (await kv.get(KEY))?.sessions?.[sessionId];
+    return !entry ? null : entry.scope === scope ? entry.previous ?? null : entry.current ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const DEFAULT = { body: 12, title: 22 }; // 一般文档默认字号（docxWriter.js）
+const step = (n, up) => Math.max(8, Math.min(72, Math.round(up ? Math.max(n * 1.25, n + 2) : Math.min(n * 0.85, n - 1))));
+/**
+ * 把“字大点 / 小点”换算成字号：在上一版实际字号上放大 / 缩小一档（约 25% / 15%）。
+ * 用户说了具体字号的那个角色不动；单页告示本来就按页面取最大字号，“大点”不再放大（放大就排不进一页），“小点”缩一档。
+ * @returns {{ typography: object, scale: number }}
+ */
+export function relativeTypography(typography = {}, asks = [], { kind = '', previous = null, request = '' } = {}) {
+  const dir = asks.some((a) => a.id === 'bigger') ? 1 : asks.some((a) => a.id === 'smaller') ? -1 : 0;
+  if (!dir) return { typography, scale: 0 };
+  if (kind === 'poster') return { typography, scale: dir < 0 && !typography.body?.size ? 0.85 : 0 };
+  const base = previous || DEFAULT;
+  const roles = titleOnly(request) ? ['title'] : /内文|内筒|正文|内容/.test(request) && !/标题/.test(request) ? ['body'] : ['body', 'title'];
+  const next = { ...typography };
+  for (const role of roles) if (!typography[role]?.size) next[role] = { ...typography[role], size: step(base[role], dir > 0) };
+  return { typography: next, scale: 0 };
+}
+
 /**
  * 逐项判断：done 做到了 / missed 没做到 / unchecked 没法核对
  * @param {string} request 用户原话
