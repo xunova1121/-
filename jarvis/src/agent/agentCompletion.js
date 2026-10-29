@@ -53,7 +53,7 @@ export async function finishAgentRun({
     finalText = blank;
     emit({ type: 'text', delta: blank });
   }
-  const acceptance = { ...review.report(), ...reviewOutcome(review.report(), { interrupted: retrievalStopped && !quickStop, nativeSearchCalls }) };
+  const acceptance = { ...review.report(), ...reviewOutcome(review.report(), { interrupted: retrievalStopped && !quickStop, nativeSearchCalls, answer: finalText }) };
   const delivery = missingDeliveries(finalText, acceptance);
   if (delivery) {
     finalText += delivery;

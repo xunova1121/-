@@ -1,4 +1,4 @@
-import { repositoryReceipt, repositoryRepair } from './codeRepositoryReview.js';
+import { repositoryReceipt, repositoryRepair, repositoryDeliveryIssue, correctRepositoryLinks } from './codeRepositoryReview.js';
 import { IMAGE_RECHECK } from './imageReading.js';
 import { newsCandidates } from './newsDelivery.js';
 import { mediaReceipt, mediaDelivery, blockedAfterDenial } from './actionDelivery.js';
@@ -25,6 +25,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   const artifacts = new Map();
   const reads = new Map(); // 文件路径 → 验过可用之后又读了几次（最多 32 个文件）
   let version = 0;
+  let repositoryChanged = false;
   let sequence = 0;
   let answerIssues = [];
   let sourceIssue = '';
@@ -72,6 +73,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     const path = typeof args.path === 'string' ? args.path.slice(0, 400) : '';
     sequence++;
     const repository = repositoryReceipt(toolName, args, ok, output);
+    if (ok && /^code_(?:edit|write)$/.test(toolName)) repositoryChanged = true;
     receipts.push({
       tool: toolName,
       ok: Boolean(ok),
@@ -181,6 +183,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
       return latestTest?.sequence > file.written && latestTest.ok && latestTest.testVerified;
     });
     const pending = [...files.values()].filter((file) => !file.verified && (file.workspaceId || codeFiles.includes(file))).map((file) => file.path);
+    const codeFailures = [...latest.values()].filter(receipt => receipt.tool === 'code_run' && unresolved(receipt));
     return {
       media: mediaDelivery(request, receipts.filter((receipt) => receipt.version === version)),
       pendingFormats: taskContract(request).formats.filter(
@@ -211,6 +214,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
       contract: taskContract(request),
       artifacts: [...artifacts.values()],
       failures: [...latest.values()].filter(unresolved).map((receipt) => receipt.tool),
+      diagnosticRepositoryTest: !repositoryChanged && codeFailures.length > 0 && codeFailures.every(receipt => receipt.diagnosticTest),
       pendingReadback: pending,
       codeExecution: !codeFiles.length ? 'not_required' : ran ? 'executed_scope_needs_review' : 'not_run',
       note: '回执不是完整需求验收；运行任意代码、打开预览不等于所有交付文件测试通过。'
@@ -251,6 +255,10 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   const lastDocument = () => [...artifacts.values()].filter((item) => /^(?:docx|pptx|xlsx)$/.test(item.format)).sort((a, b) => a.at - b.at).at(-1) ?? null;
   const checkAnswer = (text, now) => {
     answerIssues = answerConstraintIssues(request, text, now);
+    if (repositoryChanged) {
+      const issue = repositoryDeliveryIssue(text, [...new Set([...files.values()].map(file => file.workspaceId).filter(Boolean))]);
+      if (issue) answerIssues.push(issue);
+    }
     styleProblems = styleIssues(request, text, lastDocument());
     visualIssue = visualEvidence.issue(text);
     sourceIssue = sourceAnswerIssue(request, text, [...candidateSources]);
@@ -260,9 +268,10 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   };
   const guardsAnswer = () => {
     const rules = answerConstraints(request);
-    return visualEvidence.active() || (styleRequests(request).length > 0 && Boolean(lastDocument())) || rules.noTime || rules.literals.length > 0 || rules.todayNews || rules.care || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
+    return repositoryChanged || visualEvidence.active() || (styleRequests(request).length > 0 && Boolean(lastDocument())) || rules.noTime || rules.literals.length > 0 || rules.todayNews || rules.care || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
   };
   /** 改写一次后仍对不上：不吞掉回答（文件链接要留着），末尾补一句读回的实际情况 */
   const styleCorrection = () => (styleProblems.length ? '（读回文件核对：' + styleNote(request, lastDocument()).replace(/^用户要的调整，读回文件的实际结果：/, '').replace(/。回答照这个说$/, '') + '。）' : '');
-  return { styleCorrection, newsCandidates: () => [...newsLinks.values()], toolBlock, noteVisual: visualEvidence.note, record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked, checkAnswer, guardsAnswer };
+  const repositoryText = text => repositoryChanged ? correctRepositoryLinks(text, [...new Set([...files.values()].map(file => file.workspaceId).filter(Boolean))]) : text;
+  return { repositoryText, styleCorrection, newsCandidates: () => [...newsLinks.values()], toolBlock, noteVisual: visualEvidence.note, record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked, checkAnswer, guardsAnswer };
 }

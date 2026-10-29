@@ -522,6 +522,11 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         continue;
       }
       // 违约草稿未先推给用户；不能修好时也不把违禁内容当正式回答。
+      const repositoryText = review.repositoryText(held);
+      if (repositoryText !== held) {
+        held = repositoryText;
+        review.checkAnswer(held, now());
+      }
       if (review.report().visualIssue) held = '本轮没有足够的识别依据确认截图细节，需要重新核对原图；不能把未确认的识别结果当结论。';
       if (review.report().answerIssues.length) held = safeNewsPartial(requirementText, held, now()) || newsCandidateLinks(requirementText, review.newsCandidates()) || '本轮未能生成符合当前要求的答复，请重新生成。';
       if (review.report().styleIssues.length) held = held.trimEnd() + '\n\n' + review.styleCorrection();

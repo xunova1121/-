@@ -1,4 +1,5 @@
 import { isResponseRevision } from '../core/responseRevision.js';
+import { serverRepositoryIntent } from './repositoryIntent.js';
 /**
  * 模型分工：不同的事交给更擅长的模型。
  *   日常对话 → 快模型（首字快，便宜）
@@ -96,7 +97,8 @@ export function needsComputer(text, { history = [] } = {}) {
     (lastComputerTools(history).length>0&&/(这个|这份|刚才的|它|里面)/.test(t)&&/(修改|编辑|填写|计算|求和|保存)/.test(t));
 }
 /** GUI任务优先走看图模型，文件和命令操作无需无故切模型；只在PC本机路由使用。 */
-export function computerTaskKind(text, { history = [] } = {}) {
+export function computerTaskKind(text, { history = [], serverRepositories = false, codeTaskKnown = false } = {}) {
+  if (serverRepositories && serverRepositoryIntent(text, { history, codeTaskKnown })) return null;
   if (!needsComputer(text,{history})) return null;
   return GUI_ACTION.test(String(text)) || /^(继续|接着|下一步|然后|点)/.test(String(text)) && lastComputerTools(history).some(t=>/^computer_(look|click|type|key|scroll|drag)$/.test(t)) ? 'gui' : 'files';
 }

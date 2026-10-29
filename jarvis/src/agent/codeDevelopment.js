@@ -37,11 +37,12 @@ export function codeWorkBlock(mode, skill) {
   const records = (mode.workspaces || []).slice(-8).filter((item) => /^[a-f0-9]{24}$/.test(item.workspace_id));
   return [
     '## 当前代码任务\nGitHub仓库操作使用repo_clone/repo_status/repo_diff/code_search/code_read/code_edit/code_write/code_run。工作区文件工具不能定位仓库。',
+    '这是服务器持有的工作副本，不是电脑桌面/文档/下载目录。未提交、未推送的分支不在GitHub；远端404不能证明原副本丢失。先查以下编号，不用MCP GitHub读取替代本地未提交文件；没推送不能给github.com/blob工作分支链接。',
     records.length
       ? '服务器核对的本对话工作副本编号：' +
         records.map((item) => `${item.workspace_id}（${item.repository}，${item.branch}）`).join('；') +
         '。先status/diff检查实际状态，不从旧摘要猜内容。'
-      : '本轮没有可恢复的工作副本编号，先repo_clone。',
+      : mode.continuing ? '本轮续做尚未核到原工作副本；不能新建/克隆副本替代，不搜索电脑目录。应明确报告服务器会话索引的缺口，保留原文件。' : '本轮没有可恢复的工作副本编号，先repo_clone。',
     mode.truncated ? '仅展示最近8个副本；未列出的旧副本仍保留，不代表被删除。' : '',
     mode.indexError ? '工作副本索引暂不可用（' + mode.indexError + '），不得把它说成没有旧修改。' : '',
     skill?.enabled ? '## 已启用的代码开发技能（code-development）\n' + String(skill.body || '').slice(0, 6000) : ''

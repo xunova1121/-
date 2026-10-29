@@ -61,37 +61,48 @@ export function protectLiveReport(report, secrets = []) {
 
 export function checkRepairCase(report) {
   const failures = [...(report.acceptance?.failures || [])];
-  if (report.acceptance?.state !== 'passed') failures.push('原有真实红绿验收未通过');
-  const changes = report.workspace?.changes;
-  if (report.workspace?.truncated || !Array.isArray(changes) || changes.length !== 1 || changes[0].path !== 'src/cart.js') failures.push('并非只改src/cart.js');
+  const missing = [...(report.acceptance?.missing || [])];
+  const need = (condition, message) => {
+    if (!condition) missing.push(message);
+    return Boolean(condition);
+  };
+  const changed = report.workspace?.changes;
+  if (need(Array.isArray(changed), '未取得最终工作副本状态')) {
+    if (report.workspace.truncated) missing.push('工作副本状态被截断，改动范围尚未确认');
+    else if (changed.length !== 1 || changed[0].path !== 'src/cart.js') failures.push('并非只改src/cart.js');
+  }
   const patch = report.businessPatch;
-  const lines = String(patch?.diff || '')
-    .split('\n')
-    .filter((line) => /^[+-]/.test(line) && !/^---|^\+\+\+/.test(line));
-  if (
-    patch?.truncated ||
-    lines.length !== 2 ||
-    !lines[0]?.startsWith('-') ||
-    !lines[1]?.startsWith('+') ||
-    lines[0].slice(1).replace(/>(?!=)/, '>=') !== lines[1].slice(1)
-  )
-    failures.push('不是单处边界条件修复');
+  if (need(patch, '未取得业务文件的真实差异')) {
+    const lines = String(patch.diff || '')
+      .split('\n')
+      .filter((line) => /^[+-]/.test(line) && !/^---|^\+\+\+/.test(line));
+    if (patch.truncated) missing.push('业务差异被截断');
+    else if (lines.length !== 2 || !lines[0]?.startsWith('-') || !lines[1]?.startsWith('+') || lines[0].slice(1).replace(/>(?!=)/, '>=') !== lines[1].slice(1))
+      failures.push('不是单处边界条件修复');
+  }
   const test = report.independentTest;
-  if (!(
-    test?.ok &&
-    test.exitCode === 0 &&
-    /# tests 8\b/.test(test.stdout || '') &&
-    /# pass 8\b/.test(test.stdout || '') &&
-    /# fail 0\b/.test(test.stdout || '')
-  ))
+  if (
+    need(test, '最终文件独立重测尚未完成') &&
+    !(test.ok && test.exitCode === 0 && /# tests 8\b/.test(test.stdout || '') && /# pass 8\b/.test(test.stdout || '') && /# fail 0\b/.test(test.stdout || ''))
+  )
     failures.push('最终独立测试不是8/8');
-  if (report.credentialAudit?.state !== 'passed') failures.push('凭据报告核验未通过');
-  if (report.fileCredentialAudit?.state !== 'passed') failures.push('会话/日志/工作副本凭据核验未通过');
+  for (const [key, label] of [
+    ['credentialAudit', '凭据报告'],
+    ['fileCredentialAudit', '会话/日志/工作副本凭据']
+  ]) {
+    if (need(report[key], label + '核验尚未完成') && report[key].state !== 'passed') failures.push(label + '核验未通过');
+  }
+  if (!report.remoteBefore || !report.remoteAfter) missing.push('远端main前后核验尚未完成');
+  const taskStatus = report.task?.status || report.status;
+  if (taskStatus && taskStatus !== 'done') failures.push('模型任务没有正常完成：' + taskStatus);
   const models = (report.events || []).filter((event) => event.type === 'diagnostic' && event.phase === 'model_start').map((event) => event.model);
   if (!models.length || models.some((model) => model !== report.selected?.model)) failures.push('实际主循环未始终使用所选模型');
+  if (report.acceptance?.state !== 'passed' && report.acceptance?.state !== 'incomplete' && !missing.length && !failures.length)
+    failures.push('原有真实红绿验收未通过');
   return {
-    state: failures.length ? 'failed' : 'passed',
-    failures,
+    state: failures.length ? 'failed' : missing.length ? 'incomplete' : 'passed',
+    failures: [...new Set(failures)],
+    missing: [...new Set(missing)],
     modelCalls: models.length,
     failedTools: (report.events || []).filter((event) => event.type === 'tool_end' && !event.ok).length
   };

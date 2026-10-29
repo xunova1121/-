@@ -1,10 +1,11 @@
 import { requiresSources } from './retrievalQuality.js';
+import { explainedRepositoryFailure } from './codeRepositoryReview.js';
 
 /** 失败提示里说人话 */
 const TOOL_NAMES = { code_edit: '修改仓库代码', code_write: '保存仓库文件', code_run: '隔离运行检查', create_document: '生成文档', write_long_document: '写长文档', write_professional_document: '写正式文档', edit_office_document: '修改文档', edit_spreadsheet: '修改表格', write_file: '写文件', edit_file: '改文件', run_javascript: '运行代码', run_python: '运行代码', generate_image: '画图', sing_song: '生成歌曲', schedule_task: '定时任务', remember: '记忆', computer_run: '电脑上运行命令', run_project_tests: '运行测试' };
 
 /** 执行结束不等于任务验收通过；这里只报告可确定的缺口，不自动评判语义正确率。 */
-export function reviewOutcome(report, { interrupted = false, nativeSearchCalls = 0 } = {}) {
+export function reviewOutcome(report, { interrupted = false, nativeSearchCalls = 0, answer = '' } = {}) {
   const warnings = [];
   if (report.visualIssue) warnings.push('图像识别的执行依据不足，不能视为已核实。');
   let partial = interrupted || Boolean(report.visualIssue);
@@ -40,7 +41,8 @@ export function reviewOutcome(report, { interrupted = false, nativeSearchCalls =
     warnings.push('文档仍有未解决的生成或排版检查问题。');
     partial = true;
   }
-  if (report.failures?.length) warnings.push(`这些操作没成功：${[...new Set(report.failures)].map((tool) => TOOL_NAMES[tool] || tool).join('、')}，相关结果仍需核对。`);
+  const failures = report.failures?.filter(tool => tool !== 'code_run' || !explainedRepositoryFailure(report, answer));
+  if (failures?.length) warnings.push(`这些操作没成功：${[...new Set(failures)].map((tool) => TOOL_NAMES[tool] || tool).join('、')}，相关结果仍需核对。`);
   if (requiresSources(report.request) && !report.retrievalReceipts && !nativeSearchCalls) {
     warnings.push('尚未取得可核查的联网资料，不能当作查询成功。');
     partial = true;

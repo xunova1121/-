@@ -12,6 +12,7 @@ export function suiteVerdict(cases) {
   if (repairs.length !== 3 || new Set(repairs.map((item) => item.id)).size !== 3 || counters.some((id) => !cases.some((item) => item.id === id)))
     return 'incomplete';
   if (cases.some((item) => item.state === 'failed' || item.state === 'blocked_readiness')) return 'failed';
+  if (cases.some((item) => item.state === 'incomplete')) return 'incomplete';
   if (cases.some((item) => item.state !== 'passed')) return 'not_reviewed';
   return 'passed';
 }
@@ -49,7 +50,10 @@ export async function main(args = process.argv.slice(2), dependencies = {}) {
       const report = await execute(['--live', '--data-dir=' + production, '--out-dir=' + path.join(folder, relative), '--expect-model=' + expectedModel]);
       const assessment = checkRepairCase(report);
       if (round === 1) summary.remoteBaseline = report.remoteBefore;
-      if (!report.remoteBefore || report.remoteBefore !== summary.remoteBaseline || report.remoteAfter !== summary.remoteBaseline) {
+      if (!report.remoteBefore || !report.remoteAfter || !summary.remoteBaseline) {
+        assessment.missing = [...(assessment.missing || []), '三轮远端main基线尚未完整核验'];
+        if (assessment.state !== 'failed') assessment.state = 'incomplete';
+      } else if (report.remoteBefore !== summary.remoteBaseline || report.remoteAfter !== summary.remoteBaseline) {
         assessment.state = 'failed';
         assessment.failures.push('三轮之间远端main基线不一致，不能算同题连续通过');
       }
@@ -63,7 +67,7 @@ export async function main(args = process.argv.slice(2), dependencies = {}) {
       });
       await save();
       // 第一轮环境没准备好则立即停止，不再空耗三轮或改线上配置。
-      if (report.status === 'blocked_readiness') throw liveInputError('首轮环境预检未通过，详见repair-1/report.json；未继续请求模型');
+      if (report.status === 'blocked_readiness') throw liveInputError('本轮环境预检未通过，详见' + relative + '/report.json；未继续请求模型');
       if (report.status === 'stopped') throw liveInputError('任务已停止，整批不再发起下一轮模型请求');
     }
     const deletion = await execute([

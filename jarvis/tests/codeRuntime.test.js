@@ -16,6 +16,7 @@ async function fixture(entry = 'export async function main(){throw new Error("ä¸
   contents['package-lock.json'] = '{"lockfileVersion":3}';
   contents['evals/code-server.mjs'] = entry;
   contents['evals/code-live-suite.mjs'] = entry;
+  contents['evals/code-recheck.mjs'] = entry;
   const files = [];
   for (const [name, body] of Object.entries(contents)) {
     await fs.mkdir(path.dirname(path.join(app, name)), { recursive: true });

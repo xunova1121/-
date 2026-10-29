@@ -238,7 +238,7 @@ export function createCodeRepos({ baseDir, getConfig, git = createGitRunner(), h
       for (const row of rows.slice(-8)) {
         execution.signal?.throwIfAborted();
         const current = await resolve(row.id, sessionId);
-        items.push(await snapshot(row, current.cwd, execution, connection));
+        items.push({ ...await snapshot(row, current.cwd, execution, connection), task_id: row.taskId });
       }
       return { items, truncated: rows.length > 8 };
     },

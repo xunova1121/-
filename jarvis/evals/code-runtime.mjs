@@ -14,6 +14,9 @@ export const CODE_RUNTIME_REQUIRED = Object.freeze([
   'evals/code-live-config.mjs',
   'evals/code-live-suite.mjs',
   'evals/code-live-checks.mjs',
+  'evals/code-postflight.mjs',
+  'evals/code-remote-head.mjs',
+  'evals/code-recheck.mjs',
   'evals/code-runtime.mjs',
   'evals/run-code-server.sh',
   'evals/architecture-runtime-fetch.mjs',
@@ -77,6 +80,8 @@ export async function checkCodeRuntime(manifest, directory) {
     if (typeof entry.main !== 'function') throw new Error('entry');
     const suite = await import(pathToFileURL(path.join(root, 'evals/code-live-suite.mjs')).href);
     if (typeof suite.main !== 'function') throw new Error('suite entry');
+    const recheck = await import(pathToFileURL(path.join(root, 'evals/code-recheck.mjs')).href);
+    if (typeof recheck.main !== 'function') throw new Error('recheck entry');
   } catch {
     throw invalid('CODE_RUNTIME_DEPENDENCY', '代码评测入口或运行依赖不能加载；请检查npm依赖安装，未请求模型');
   }

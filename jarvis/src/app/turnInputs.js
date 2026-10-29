@@ -53,7 +53,13 @@ export function createTurnInputs(app) {
   /** 这一轮用哪个模型：按这句话的类型分工；服务器模式下动这台电脑的事留在本机做 */
   function chooseModel(text, turn, st, { imgs, withImages }) {
     // 模型分工：按这句话的类型换模型；日常对话让推理模型少想一点（首字更快）
-    const computerKind = DESKTOP ? computerTaskKind(text, { history: app.history }) : null;
+    const computerKind = DESKTOP
+      ? computerTaskKind(text, {
+          history: app.history,
+          serverRepositories: Boolean(app.server),
+          codeTaskKnown: Boolean(app.session?.taskCheckpoint?.codeTaskId)
+        })
+      : null;
     const task =
       computerKind === 'gui'
         ? 'vision'

@@ -25,6 +25,7 @@ export function codeAcceptance(events, changed, { before, after, head, workspace
     }
   }
   const failures = [];
+  const missing = [];
   if (!/^[a-f0-9]{24}$/.test(workspaceId || '')) failures.push('缺工作副本编号');
   if (!runs.some((item) => !item.eventOk && item.command === 'test' && item.stage === 'test' && item.exitCode !== 0 && item.install?.exitCode === 0 && (firstWrite === -1 || item.eventIndex < firstWrite)))
     failures.push('没有在第一次改代码之前复现原始测试失败');
@@ -34,14 +35,16 @@ export function codeAcceptance(events, changed, { before, after, head, workspace
   if (!runs.some((item) => item.command === 'lint' && item.eventOk && item.ok && item.exitCode === 0 && item.sourceDigest === lastTest?.sourceDigest))
     failures.push('没有与最终test同一份代码的成功lint');
   if (!changed.length || changed.some((item) => !/^src\//.test(item.path))) failures.push('没有业务代码修改，或改了测试/配置等范围外文件');
-  if (!before || before !== after || head !== before) failures.push('远端main或本地HEAD与测试前不一致');
+  if (!before || !after || !head) missing.push('远端main或本地HEAD尚未完整核验');
+  if ((before && after && before !== after) || (before && head && head !== before)) failures.push('远端main或本地HEAD与测试前不一致');
   // 代码测试结果和“完整自主流程”分开：任务报错或被停止，测试再绿也只是代码测试通过
   const codeTests = failures.length ? 'failed' : 'passed';
   if (taskStatus !== undefined && taskStatus !== 'done') failures.push(`任务以 ${taskStatus} 结束，完整自主流程不算通过（代码测试结果另见 codeTests）`);
   return {
-    state: failures.length ? 'failed' : 'passed',
+    state: failures.length ? 'failed' : missing.length ? 'incomplete' : 'passed',
     codeTests,
     failures,
+    missing,
     runs: runs.map(({ command, stage, exitCode, sourceDigest, imageId, install }) => ({
       command,
       stage,

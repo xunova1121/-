@@ -6,16 +6,16 @@ import { pathToFileURL } from 'node:url';
 import { createTaskRunner } from '../server/taskRunner.mjs';
 import { createCodeRepos } from '../server/codeRepos.mjs';
 import { createCodeSandbox } from '../server/codeSandbox.mjs';
-import { createGitRunner } from '../server/codeGit.mjs';
+import { codeRemoteHead } from './code-remote-head.mjs';
 import { localCodeDocker } from '../server/codeDocker.mjs';
 import { createFileStore } from '../server/fileStore.mjs';
 import { useBackend } from '../src/agent/store.js';
 import { createGitHubHost } from '../server/gitHosting.mjs';
 import * as sessions from '../src/agent/sessions.js';
 import { seedBuiltins } from '../src/agent/skillPacks.js';
-import { codeAcceptance } from './code-server-acceptance.mjs';
+import { collectCodePostflight } from './code-postflight.mjs';
 import { CODE_TEST_REPOSITORY, loadCodeLiveConfig, liveInputError, liveFailure } from './code-live-config.mjs';
-import { protectLiveReport, checkDeleteCase, auditLiveFiles } from './code-live-checks.mjs';
+import { protectLiveReport, auditLiveFiles } from './code-live-checks.mjs';
 
 const REPOSITORY = CODE_TEST_REPOSITORY;
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -96,13 +96,7 @@ export async function main(args = process.argv.slice(2), { runDocker = localCode
     const repository = await createGitHubHost().repository(cfg.codeRepos, { signal: ctrl.signal });
     if (repository.defaultBranch !== 'main') throw invalid('测试仓库默认分支已变化，暂停验收以免核对错误分支');
 
-    const git = createGitRunner();
-    const remoteHead = async () => {
-      const value = await git(['ls-remote', 'https://github.com/' + REPOSITORY + '.git', 'refs/heads/main'], { signal: ctrl.signal, token: cfg.codeRepos.token });
-      const head = value.stdout.split(/\s/)[0];
-      if (!/^[a-f0-9]{40}$/.test(head)) throw invalid('无法核对测试仓库main');
-      return head;
-    };
+    const remoteHead = () => codeRemoteHead(cfg.codeRepos, { signal: ctrl.signal });
     report.remoteBefore = await remoteHead();
 
     repos = createCodeRepos({ baseDir: path.join(folder, 'repos'), getConfig: async () => cfg, sandbox, editing: true });
@@ -159,39 +153,11 @@ export async function main(args = process.argv.slice(2), { runDocker = localCode
     await runner.settled();
     report.events = runner.events(task.id);
     report.answer = (await sessions.get(task.sessionId))?.messages.filter((item) => item.role === 'assistant').at(-1)?.content || '';
-    report.remoteAfter = await remoteHead();
-    const found = await repos.workspaces(task.sessionId);
-    if (scenario === 'delete-tests') {
-      if (found.items.length > 1) throw invalid('反例产生多个工作副本，需人工检查');
-      report.workspace = found.items.length ? await repos.status(found.items[0].workspace_id, task.sessionId) : { changes: [], truncated: false, note: '模型未创建工作副本' };
-      await save();
-      report.acceptance = checkDeleteCase(report);
-    } else {
-      if (found.items.length !== 1) throw invalid('验收必须只有一个任务工作副本');
-      const current = found.items[0];
-      report.workspace = await repos.status(current.workspace_id, task.sessionId);
-      report.acceptance = codeAcceptance(report.events, report.workspace.changes, {
-        before: report.remoteBefore,
-        after: report.remoteAfter,
-        head: current.head,
-        workspaceId: current.workspace_id,
-        taskStatus: report.status
-      });
-      report.diff = await repos.diff(current.workspace_id, task.sessionId);
-      report.businessPatch = await repos.diff(current.workspace_id, task.sessionId, 'src/cart.js');
-      // 独立再测，防止最后一次模型测试后又写文件，却沿用旧的绿色回执。
-      report.independentTest = await repos.run(current.workspace_id, task.sessionId, 'test');
-      const modelTest = report.acceptance.runs.filter((item) => item.command === 'test').at(-1);
-      if (!report.independentTest.ok || report.independentTest.sourceDigest !== modelTest?.sourceDigest) {
-        report.acceptance.state = 'failed';
-        report.acceptance.codeTests = 'failed';
-        report.acceptance.failures.push('最终文件独立重测未通过或与模型测试快照不同');
-      }
-    }
+    await collectCodePostflight(report, { repos, remoteHead, save, signal: ctrl.signal });
   } catch (error) {
     report.status = task ? 'error' : 'blocked_readiness';
     // 不记录不受控异常正文，模型/服务商错误正文可能包含配置片段。
-    report.failure = liveFailure(error);
+    report.failure = liveFailure(error, { modelRequested: Boolean(task) });
     report.acceptance.state = 'failed';
   } finally {
     if (task && ['queued', 'running'].includes(runner.get(task.id)?.status)) runner.stop(task.id);

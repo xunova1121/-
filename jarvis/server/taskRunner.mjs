@@ -1,4 +1,5 @@
-import { codeTaskPolicy, CODE_TASK_MS } from './codeTaskPolicy.mjs';
+import { codeFollowup, codeTaskPolicy, CODE_TASK_MS } from './codeTaskPolicy.mjs';
+import { prepareCodeWork } from './codeWorkContext.mjs';
 import { editImage } from '../src/llm/imageEdit.js';
 import { renderSvg } from './svgRender.mjs';
 import { compareDiagramPpt } from './diagramCompare.mjs';
@@ -235,26 +236,15 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const cfg = withoutCodeCredentials(await getConfig());
     // 记忆按意思找：用能力表“记忆向量”那一项（服务器没有跨域限制）；没有就只按关键字
     memory.configureMemory({ llm: helper(cfg, 'write'), embedder: createEmbedder(cfg, { direct: true }) });
-    const candidate = codeTaskPolicy({ text: task.text, images: task.images.length, hasRepos: Boolean(codeRepos && !task.evaluationId), resume: task.resumeFrom, maxSteps, codeMaxSteps });
-    // 管理器始终存在，不代表用户已连接仓库；不能因此给普通代码问答套80步工作模式。
-    const connected = candidate.enabled && codeRepos.connected ? await codeRepos.connected() : candidate.enabled;
-    const policy = candidate.enabled && !connected ? codeTaskPolicy({ text: task.text, images: task.images.length, hasRepos: false, maxSteps, codeMaxSteps }) : candidate;
+    const mayUseCode = Boolean(codeRepos && !task.evaluationId && (codeFollowup(task.text) || codeTaskPolicy({ text: task.text, hasRepos: true }).enabled));
+    task.codeDeadline = mayUseCode ? setTimeout(() => { task.codeTimeout = true; task.ctrl.abort(Object.assign(new Error('代码任务达到总时限，保留工作副本，可继续'), { code: 'CODE_TASK_TIMEOUT', kind: 'timeout' })); }, Math.max(1, Math.min(20 * 60_000, Number(codeTaskMs) || CODE_TASK_MS))) : null;
+    const { policy, codeTaskId, scopedRepos, codeWork } = await prepareCodeWork({ text: task.text, images: task.images.length, sessionId: session.id, taskId: task.id, checkpoint: task.checkpoint, resume: task.resumeFrom, repos: codeRepos, evaluationId: task.evaluationId, maxSteps, codeMaxSteps, signal: task.ctrl.signal });
     const kind = policy.kind;
-    task.codeDeadline = policy.enabled ? setTimeout(() => { task.codeTimeout = true; task.ctrl.abort(Object.assign(new Error('代码任务达到总时限，保留工作副本，可继续'), { code: 'CODE_TASK_TIMEOUT', kind: 'timeout' })); }, Math.max(1, Math.min(20 * 60_000, Number(codeTaskMs) || CODE_TASK_MS))) : null;
+    if (!policy.enabled) { clearTimeout(task.codeDeadline); task.codeDeadline = null; }
 
-    const codeWork = { enabled: policy.enabled, workspaces: [] };
     if (policy.enabled) {
-      task.checkpoint.codeTaskId = task.resumeFrom?.codeTaskId || task.resumeFrom?.taskId || task.id;
+      task.checkpoint.codeTaskId = codeTaskId;
       await saveCheckpoint(task, true);
-      if (codeRepos.workspaces) {
-        try {
-          const found = await codeRepos.workspaces(session.id, { signal: task.ctrl.signal });
-          codeWork.workspaces = found.items; codeWork.truncated = found.truncated;
-        } catch (error) {
-          if (task.ctrl.signal.aborted) throw error;
-          codeWork.indexError = /^[A-Z_]{1,60}$/.test(error.code || '') ? error.code : 'CODE_INDEX_UNAVAILABLE';
-        }
-      }
     }
     const route = routeFor(cfg, kind);
     const { adapter, model, problem } = makeAdapter(route.cfg);
@@ -287,7 +277,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     }).filter((t) => !SERVER_BLOCKED.has(t.name)), task.evaluationId);
     const projectTool = projectExecutionTool({ image: process.env.JARVIS_CODE_SANDBOX_IMAGE, baseDir: projectBaseDir });
     if (projectTool) tools.push(projectTool);
-    if (codeRepos && !task.evaluationId) tools.push(...createCodeTools({ repos: codeRepos, sessionId: session.id, taskId: task.checkpoint.codeTaskId || task.id, editing: codeRepos.writable === true }));
+    if (codeRepos && !task.evaluationId) tools.push(...createCodeTools({ repos: scopedRepos, sessionId: session.id, taskId: task.checkpoint.codeTaskId || task.id, editing: codeRepos.writable === true }));
     // 装了带脚本的技能：给模型“运行技能命令”的工具（在服务器的隔离 Docker 里跑，见 skillRunner.mjs；没装运行器时会照实说怎么装）
     if (skillRunner && !task.evaluationId && (await skillPacks.enabled().catch(() => [])).some(needsRunner)) {
       tools.push(skillRunnerTool({
@@ -461,6 +451,9 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         }
         session.messages.push({role:'user',content:text,ts:now()});session.updatedAt=now();
         const task=busy||{id:uid('t'),sessionId:id,evaluationId:evaluationScope,text,status:'queued',seq:0,events:[],listeners:new Set(),files:new Set(),inbox:[],notes:[],images,voice:Boolean(voice),ctrl:new AbortController(),createdAt:now(),checkpoint:{text,notes:[],steps:[],inFlight:[],files:[],status:'queued',createdAt:now()}};
+        if (!busy && codeFollowup(text) && (previous?.codeTaskId || codeTaskPolicy({ text: previous?.text || '', hasRepos: Boolean(codeRepos && !evaluationScope) }).enabled)) {
+          task.checkpoint.codeTaskId = previous.codeTaskId || previous.taskId;
+        }
         task.checkpoint.taskId=task.id;
         if(!busy&&incomplete&&/^(继续|恢复|接着)/.test(text))task.resumeFrom=previous;
         const nextCheckpoint=busy?checkpointEvent(task.checkpoint,{type:'user_note',text},now()):task.checkpoint;

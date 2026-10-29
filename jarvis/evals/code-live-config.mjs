@@ -38,7 +38,7 @@ export async function loadCodeLiveConfig(directory) {
 }
 
 /** 不回显上游错误正文，避免HTTP/JSON错误夹带配置；保留可处理的失败类别。 */
-export function liveFailure(error) {
+export function liveFailure(error, { modelRequested = false } = {}) {
   const code = /^[A-Z_]{1,80}$/.test(error?.code || '') ? error.code : 'CODE_LIVE_FAILED';
   const notes = {
     CODE_DOCKER_UNAVAILABLE: 'Docker不可用；请安装并启动本机Docker，未请求模型',
@@ -46,7 +46,9 @@ export function liveFailure(error) {
     CODE_GITHUB_FORBIDDEN: 'GitHub拒绝访问；请核对测试仓库权限与额度，未请求模型',
     CODE_GITHUB_NOT_FOUND: '测试仓库不可读取；请核对仓库名和令牌权限，未请求模型',
     CODE_GITHUB_NETWORK: '暂时无法连接GitHub；未请求模型',
-    CODE_GITHUB_TIMEOUT: 'GitHub连接超时；未请求模型'
+    CODE_GITHUB_TIMEOUT: 'GitHub连接超时；未请求模型',
+    CODE_GIT_TIMEOUT: 'Git操作超时；对应阶段尚未核验，不能据此断定代码错误'
   };
-  return { code, ...(code === 'CODE_LIVE_INPUT' ? { message: error.message } : notes[code] ? { message: notes[code] } : {}) };
+  const note = notes[code];
+  return { code, ...(code === 'CODE_LIVE_INPUT' ? { message: error.message } : note ? { message: modelRequested ? note.replace(/[，；]未请求模型/g, '') : note } : {}) };
 }
