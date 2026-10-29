@@ -213,3 +213,45 @@ describe('DeepSeek官方Search/Fetch', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
+
+// 用户 2026-10-29：读网页时 DeepSeek Fetch 连续 500，额度很快扣光，还报“search 调用已达到预算”
+describe('服务商出错熔断与预算报错写清楚', () => {
+  it('DeepSeek Fetch 返回 500 后，3 分钟内同一读取器直接走直连，不再先撞坏接口，也不另扣读预算', async () => {
+    const sequence = [];
+    const get = vi.fn(async (url) => {
+      if (String(url).includes('/v1/tools/fetch')) {
+        sequence.push('official');
+        return new Response('', { status: 500 });
+      }
+      sequence.push('direct');
+      return new Response('<html><body><p>原网站正文已经读取。</p></body></html>', { headers: { 'Content-Type': 'text/html' } });
+    });
+    const reader = createPageReader({ ...options, fetchViaGateway: get });
+    await reader('https://www.gov.cn/a', { consume: (kind) => sequence.push(kind) });
+    expect(sequence).toEqual(['official', 'read', 'direct']);
+    sequence.length = 0;
+    expect(await reader('https://www.gov.cn/b', { consume: (kind) => sequence.push(kind) })).toContain('原网站正文');
+    expect(sequence).toEqual(['direct']);
+  });
+
+  it('404 这类请求本身的问题不熔断，下次照常先试 DeepSeek', async () => {
+    const hits = [];
+    const get = vi.fn(async (url) => {
+      hits.push(String(url).includes('/v1/tools/fetch') ? 'official' : 'direct');
+      return String(url).includes('/v1/tools/fetch') ? new Response('', { status: 404 }) : new Response('<html><body><p>正文内容已经读取到了。</p></body></html>', { headers: { 'Content-Type': 'text/html' } });
+    });
+    const reader = createPageReader({ ...options, fetchViaGateway: get });
+    await reader('https://www.gov.cn/c');
+    await reader('https://www.gov.cn/d');
+    expect(hits.filter((h) => h === 'official')).toHaveLength(2);
+  });
+
+  it('整轮联网收尾后：报错写清是哪一类先用完、这次哪一步没执行', async () => {
+    const { createRetrievalBudget } = await import('../src/agent/retrievalBudget.js');
+    const budget = createRetrievalBudget('今天有什么新闻');
+    budget.begin();
+    for (let i = 0; i < 6; i++) budget.consume('search');
+    expect(() => budget.consume('search')).toThrow('普通查询的搜索（search）预算已用完（6次）');
+    expect(() => budget.consume('read')).toThrow('普通查询的搜索（search）预算已用完（6次），这次读网页没有执行');
+  });
+});

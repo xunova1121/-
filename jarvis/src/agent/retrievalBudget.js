@@ -7,6 +7,8 @@ export const strictVerification = text => /逐[项一条].{0,12}(?:核[实验对
 export function extensiveRetrieval(text = '') {
   return strictVerification(text) || /深度|深入|全面|调研|研究报告|逐项|逐一|多来源|交叉核[验对]|报告|方案|文档|论文|PPT|Word|Excel|代码|编程|开发|文件|保存|对比|比较|这几|这些|每场|多场|清单|架构图|流程图|示意图|拓扑图|画图|海报|research|report|document|code|diagram/i.test(String(text));
 }
+/** 预算类别的中文名（报错给用户看） */
+const KIND_LABEL = { search: '搜索', read: '读网页', model: '模型调用' };
 export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs } = {}) {
   const resources = { search: 0, read: 0, model: 0 };
   let strict = strictVerification(text);
@@ -24,10 +26,11 @@ export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs } = {
     registerQuery: createQueryLedger(),
     begin() { if (check()) return false; if (started === null) started = now(); calls++; return true; },
     consume(kind) {
-      if (reason || started !== null && duration()>0 && now()-started>=duration()) throw Object.assign(new Error(reason || '本轮联网检索已达到时间预算'), {code:'RETRIEVAL_BUDGET'});
+      // 整轮已收尾时，写清是哪一类先用完、这次哪一步没执行（用户 2026-10-29：读网页却报“search 调用已达到预算”，看不懂）
+      if (reason || started !== null && duration()>0 && now()-started>=duration()) throw Object.assign(new Error(`${reason || '本轮联网检索已达到时间预算'}，这次${KIND_LABEL[kind] || kind}没有执行`), {code:'RETRIEVAL_BUDGET'});
       const limit = (strict ? { search:20, read:16 } : !extensive ? { search:6, read:4, model:3 } : {})[kind];
       // 某一类用完：整轮检索就此收尾（主循环下一步会让模型直接用已有资料回答，而不是换个工具接着查）
-      if (limit && resources[kind] >= limit) { reason ||= `${strict ? '逐项核验' : '普通查询'}的${kind}调用已达到预算`; throw Object.assign(new Error(reason), { code:'RETRIEVAL_BUDGET' }); }
+      if (limit && resources[kind] >= limit) { reason ||= `${strict ? '逐项核验' : '普通查询'}的${KIND_LABEL[kind] || kind}（${kind}）预算已用完（${limit}次）`; throw Object.assign(new Error(reason), { code:'RETRIEVAL_BUDGET' }); }
       if (kind in resources) resources[kind]++;
     },
     get active() { return started !== null; },

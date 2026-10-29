@@ -89,18 +89,22 @@ export function createPageReader(options = {}) {
     const state = blocked.get(host);
     try {
       if (state?.count >= 2 && now() - state.at < 10 * 60_000) throw new Error('该网站连续拒绝访问，暂时跳过直接读取，请换其他来源');
+      // 只有真的向 DeepSeek 发过请求，改走直连时才另扣一次读预算；熔断跳过时不扣
+      let triedDeepseek = false;
       if (deepseek) {
         try {
           progress?.('正在使用DeepSeek Fetch读取原文');
+          triedDeepseek = true;
           text = await deepseek.read(url, { signal, consume });
         } catch (error) {
           throwControl(error, signal);
           if (error.code === 'PRIVATE_NETWORK_BLOCKED') throw error;
+          if (error.skipped) triedDeepseek = false;
           progress?.('DeepSeek Fetch不可用，尝试原直接读取：' + error.message);
         }
       }
       if (!text) {
-        if (deepseek) consume?.('read');
+        if (triedDeepseek) consume?.('read');
         text = await withWebDeadline((readSignal) => retryRead((activeSignal) => direct(url, activeSignal), { signal: readSignal, timeoutMs: 20000, beforeAttempt: attempt => { if (attempt) consume?.('read'); } }), { signal, timeoutMs: 20000 });
       }
     } catch (e) {

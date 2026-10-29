@@ -42,7 +42,20 @@ function publicUrl(address) {
 export function createDeepseekSearch({ deepseekSearchEnabled, deepseekSearchKey, fetchViaGateway, fetchImpl = (...args) => globalThis.fetch(...args) } = {}) {
   if (!deepseekSearchEnabled) return null;
   const get = fetchViaGateway || fetchImpl;
+  // 熔断：服务商自身出错（5xx / 连不上）后 3 分钟内不再先试它，直接走下一条线路，
+  // 免得每次都先撞一次坏接口、白扣用户的查询额度（用户 2026-10-29 实测 DeepSeek Fetch 连续 500）
+  const unavailableUntil = { search: 0, fetch: 0 };
   async function request(kind, body, { signal, consume } = {}) {
+    if (unavailableUntil[kind] > Date.now())
+      throw Object.assign(new Error('DeepSeek ' + (kind === 'search' ? '搜索' : '读网页') + '接口刚刚连续出错，3 分钟内先走其他线路'), { code: 'DEEPSEEK_UNAVAILABLE', kind: 'api', skipped: true });
+    try {
+      return await requestOnce(kind, body, { signal, consume });
+    } catch (error) {
+      if (error.status >= 500 || ['network', 'timeout'].includes(error.kind) || error.name === 'TimeoutError') unavailableUntil[kind] = Date.now() + 3 * 60_000;
+      throw error;
+    }
+  }
+  async function requestOnce(kind, body, { signal, consume } = {}) {
     if (!secret(deepseekSearchKey))
       throw Object.assign(new Error('请配置DeepSeek官方搜索Key，或该位置的DeepSeek官方模型Key'), { code: 'DEEPSEEK_SEARCH_KEY_MISSING', kind: 'api' });
     return retryRead(
