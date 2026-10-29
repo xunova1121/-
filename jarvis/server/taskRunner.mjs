@@ -202,28 +202,42 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   }
 
   /** 给模型用的辅助调用（深度调研、逐项查证等工具用） */
-  function helper(cfg, kind, task = null) {
+  function helper(cfg, kind, task = null, purpose = kind) {
     const { adapter, model, problem } = createAdapter(routeFor(cfg, kind).cfg);
     if (problem || providerById(cfg.provider)?.kind === 'mock') return null;
-    // 只采集数字，不保存提示、回答或密钥；后台记忆调用不属于当前任务。
-    const measured = task ? {
+    return createHelperLlm(task ? measuredAdapter(adapter, model, task, purpose) : adapter, model);
+  }
+  /**
+   * 只采集数字（用途、型号、耗时、Token），不保存提示、回答或密钥。
+   * purpose 为 memory 的是后台记忆整理：单独记成 background，不算进这道题的辅助调用。
+   */
+  function measuredAdapter(adapter, model, task, purpose) {
+    let seq = 0;
+    return {
       ...adapter,
-      stream(options) {
-        task.timing.event({ type: 'diagnostic', phase: 'helper_start', ...measureModelInput(options), inputChars: (options.messages || []).reduce((total, message) => total + String(message.content || '').length, 0) });
-        return adapter.stream(options);
+      async stream(options) {
+        const id = 'h' + ++seq + '-' + purpose;
+        const background = purpose === 'memory';
+        task.timing.event({ type: 'diagnostic', phase: background ? 'background_start' : 'helper_start', id, purpose, model, ...measureModelInput(options), inputChars: (options.messages || []).reduce((total, message) => total + String(message.content || '').length, 0) });
+        let result = null;
+        try {
+          result = await adapter.stream(options);
+          return result;
+        } finally {
+          task.timing.event({ type: 'diagnostic', phase: background ? 'background_end' : 'helper_end', id, ok: Boolean(result), ...(result?.usage && { usage: result.usage }) });
+        }
       }
-    } : adapter;
-    return createHelperLlm(measured, model);
+    };
   }
 
   /** 当前模型看不了图时替它看图的模型（见 router.visionRoute、agent/imageSight.js） */
-  function sight(cfg) {
+  function sight(cfg, task = null) {
     const r = visionRoute(cfg);
     if (providerById(cfg.provider)?.kind === 'mock') return {};
     if (!r) return { readImageText: ocrLine(cfg) ? (file, o) => recognizeText(cfg, file, o) : null };
     const { adapter, model, problem } = makeAdapter(r.cfg);
     const readImageText = ocrLine(cfg) ? (file, o) => recognizeText(cfg, file, o) : null; // 文字识别（GLM-OCR）
-    return problem || !adapter ? { readImageText } : { describeImages: createHelperLlm(adapter, model), visionLabel: model, readImageText };
+    return problem || !adapter ? { readImageText } : { describeImages: createHelperLlm(task ? measuredAdapter(adapter, model, task, 'vision') : adapter, model), visionLabel: model, readImageText };
   }
 
   async function execute(task) {
@@ -237,7 +251,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const session = await sessions.get(task.sessionId);
     const cfg = withoutCodeCredentials(await getConfig());
     // 记忆按意思找：用能力表“记忆向量”那一项（服务器没有跨域限制）；没有就只按关键字
-    memory.configureMemory({ llm: helper(cfg, 'write'), embedder: createEmbedder(cfg, { direct: true }) });
+    memory.configureMemory({ llm: helper(cfg, 'write', task, 'memory'), embedder: createEmbedder(cfg, { direct: true }) });
     const taskRepos = codeProjects ? await codeProjects.reposFor(session.id) : codeRepos;
     const mayUseCode = Boolean((taskRepos || codeProjects) && !task.evaluationId && (codeFollowup(task.text) || codeTaskPolicy({ text: task.text, hasRepos: true, hasProjects: Boolean(codeProjects), projectBound: taskRepos !== codeRepos }).enabled));
     task.codeDeadline = mayUseCode ? setTimeout(() => { task.codeTimeout = true; task.ctrl.abort(Object.assign(new Error('代码任务达到总时限，保留工作副本，可继续'), { code: 'CODE_TASK_TIMEOUT', kind: 'timeout' })); }, Math.max(1, Math.min(20 * 60_000, Number(codeTaskMs) || CODE_TASK_MS))) : null;
@@ -261,7 +275,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       tavilyKey: cfg.tavilyKey, qweather: qweatherConfig(cfg), bochaKey: cfg.bochaKey, falKey: cfg.falKey, searchRegion: cfg.searchRegion || 'auto',
       fetchViaGateway: (url, init) => publicFetch(url, init), // 不填搜索密钥也能联网搜索、读网页
       llm: helper(cfg, 'write', task), reasonLlm: helper(cfg, 'reason', task),
-      documentReviewer: createDocumentReviewer(cfg, (selected) => helper({ ...selected, routing: { enabled: false } }, 'write', task)),
+      documentReviewer: createDocumentReviewer(cfg, (selected) => helper({ ...selected, routing: { enabled: false } }, 'write', task, 'document_review')),
       onFileChanged: (p) => { if (!/^skills\//.test(p)) { task.files.add(p); record(task, { type: 'file', path: p }); } },
       // 画图、做视频：用服务器上的模型设置；生成的文件照常存进工作区，手机按文件下载后显示在对话里
       imageGen: (o) => generateImage(cfg, { ...o, download: publicFetch }),
@@ -269,7 +283,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       cropImage: cropImageRegion,
       renderSvg,
       compareDiagramPpt,
-      visionLlm: sight(cfg).describeImages || null,
+      visionLlm: sight(cfg, task).describeImages || null,
       ocr: ocrLine(cfg) ? (file, o) => recognizeText(cfg, file, o) : null, // 文字识别（智谱 GLM-OCR）
       videoGen: (o) => generateVideo(cfg, o),
       // 显示工作区里已有的图片：让手机按文件取回来显示
@@ -314,7 +328,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     arm();
     try {
       const r = await runAgent({
-        adapter, model, fallbacks, maxSteps: policy.maxSteps, maxTotalSteps: policy.maxTotalSteps, codeWork, ...sight(cfg), hedgeMs: cfg.hedgeBackup === false ? 0 : HEDGE_MS, modelNote: modelNote(cfg, { provider: route.cfg.provider, model }),
+        adapter, model, fallbacks, maxSteps: policy.maxSteps, maxTotalSteps: policy.maxTotalSteps, codeWork, ...sight(cfg, task), hedgeMs: cfg.hedgeBackup === false ? 0 : HEDGE_MS, modelNote: modelNote(cfg, { provider: route.cfg.provider, model }),
         history: unsummarized(history, session.summary).map(({ role, content }) => ({ role, content })),
         userText: task.resumeFrom ? task.text+'\n\n'+checkpointRecoveryText(task.resumeFrom) : task.text, requirementText: task.text, images: task.images,
         // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省

@@ -57,14 +57,25 @@ export function sseLines(buffer) {
   return { events, rest };
 }
 
+/** OpenAI 兼容接口的用量 → { input, output, cached }（缓存命中：OpenAI 写在 details 里，DeepSeek 写 prompt_cache_hit_tokens） */
+export function tokenUsage(u = {}) {
+  const n = (v) => (Number.isFinite(v) && v >= 0 ? v : null);
+  const input = n(u.prompt_tokens ?? u.input_tokens), output = n(u.completion_tokens ?? u.output_tokens);
+  if (input === null && output === null) return null;
+  return { input, output, cached: n(u.prompt_tokens_details?.cached_tokens ?? u.prompt_cache_hit_tokens ?? u.input_tokens_details?.cached_tokens) };
+}
+
 /** 累积流式 delta：文本与按 index 拼接的 tool_calls */
 export function createAccumulator(onText) {
   const calls = [];
   let text = '';
   let finish = null;
   let reasoning = '', hasReasoning = false;
+  let usage = null;
   return {
     push(chunk) {
+      // 服务商在最后一包带用量时记下（评测看每次调用花了多少 Token）；没带就是 null，不当成 0
+      if (chunk.usage) usage = tokenUsage(chunk.usage);
       const choice = chunk.choices?.[0];
       if (!choice) return;
       const d = choice.delta ?? {};
@@ -106,7 +117,7 @@ export function createAccumulator(onText) {
         try { args = c.argText ? JSON.parse(c.argText) : {}; } catch (e) { parseError = `参数不是合法 JSON：${e.message}`; }
         return { id: c.id || `call_${i}_${Date.now().toString(36)}`, name: c.name, args, parseError };
       });
-      return { text, toolCalls, stop: finish, ...(hasReasoning && { raw: { kind: 'openai', reasoning_content: reasoning } }) };
+      return { text, toolCalls, stop: finish, ...(usage && { usage }), ...(hasReasoning && { raw: { kind: 'openai', reasoning_content: reasoning } }) };
     }
   };
 }

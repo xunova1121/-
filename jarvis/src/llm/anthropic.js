@@ -88,7 +88,10 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
         return { text: text + note, toolCalls: [], raw: null, stop: 'end_turn' };
       }
       const toolCalls = msg.content.filter((b) => b.type === 'tool_use').map((b) => ({ id: b.id, name: b.name, args: b.input ?? {} }));
-      return { text, toolCalls, raw: msg.content, stop: msg.stop_reason };
+      // 用量只记数字（评测用）；cache_read 是缓存命中的输入
+      const u = msg.usage;
+      const usage = u && Number.isFinite(u.input_tokens) ? { input: u.input_tokens + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0), output: Number.isFinite(u.output_tokens) ? u.output_tokens : null, cached: u.cache_read_input_tokens ?? null } : null;
+      return { text, toolCalls, raw: msg.content, stop: msg.stop_reason, ...(usage && { usage }) };
     } catch (e) {
       const error = guard.error(e);
       // 卡住检测会重建错误，已展示的半成品仍要交给上层保留。

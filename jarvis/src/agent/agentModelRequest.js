@@ -21,6 +21,7 @@ export function createModelRequest({ current, effort, signal, lookupDeadline, lo
   let streamed = false;
   let outputObserved = false;
   let resultKind = 'error';
+  let usage = null;
   const observeOutput = () => {
     if (outputObserved || requestCtrl.signal.aborted) return;
     outputObserved = true;
@@ -95,11 +96,12 @@ export function createModelRequest({ current, effort, signal, lookupDeadline, lo
           throw Object.assign(new Error('模型输出达到长度上限，回答尚未完成'), { code: 'MODEL_OUTPUT_LIMIT', kind: 'api' });
         }
       resultKind = result.toolCalls?.length ? 'tools' : 'answer';
+      usage = result.usage ?? null;
       return result;
     },
     dispose() {
       requestWindow?.dispose();
-      emit({ type: 'diagnostic', phase: 'model_end', resultKind });
+      emit({ type: 'diagnostic', phase: 'model_end', resultKind, ...(usage && { usage }) });
       clearTimeout(searchTimer);
       signal?.removeEventListener('abort', relayAbort);
     }

@@ -447,7 +447,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     const measuredSystem = questionProfile ? [BASIC_ANSWER_PROMPT, [ctx.dynamic, usingNote, responseNote, imagePreferenceNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : light ? [LIGHT_PROMPT, [ctx.dynamic, usingNote, responseNote, imagePreferenceNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, usingNote, dialoguePolicy(review.report().request), responseNote, imagePreferenceNote, capabilities, computerNote, requirementContext, toolHint, singleDocumentTask(review.report().request) && '单份文档由文档引擎内部规划和检查；如需外层计划只列一次，不用update_plan逐节重复同步。有效产物回执可直接交付，不重复查找、读回或重做。', review.contractNote(), creativeWithoutLookup(currentRequest) && CREATIVE_NOTE, voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
     const measuredTools = closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list();
     const requestTools = measuredTools.filter((tool) => allowWebSearch || !WEB_TOOLS.has(tool.name) && tool.name !== 'delegate_task').map(conciseTool);
-    emit({ type: 'diagnostic', phase: 'model_start', model: cur.model, protocol: cur.adapter.kind, closing, ...measureModelInput({ system: measuredSystem, messages: convo, tools: requestTools }), inputChars: convo.reduce((sum, item) => sum + String(item.content || '').length, 0) });
+    emit({ type: 'diagnostic', phase: 'model_start', model: cur.model, protocol: cur.adapter.kind, closing, purpose: callPurpose(convo, closing), ...measureModelInput({ system: measuredSystem, messages: convo, tools: requestTools }), inputChars: convo.reduce((sum, item) => sum + String(item.content || '').length, 0) });
     try {
     modelAttempts++;
     const input = { system: measuredSystem, messages: convo, tools: requestTools };
@@ -461,7 +461,10 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         input,
         hedgeMs,
         onText: acceptVisible,
-        onHedge: () => emit({ type: 'tool_progress', id: 'hedge', text: `${cur.model} ${Math.round(hedgeMs / 1000)} 秒没有反应，同时请求备用模型 ${next.model}` }),
+        onHedge: () => {
+          emit({ type: 'tool_progress', id: 'hedge', text: `${cur.model} ${Math.round(hedgeMs / 1000)} 秒没有反应，同时请求备用模型 ${next.model}` });
+          emit({ type: 'diagnostic', phase: 'hedge_start', model: next.model });
+        },
         onSwitch: () => {
           emit({ type: 'fallback', from: cur.model, to: next.model, slow: true, reason: `${Math.round(hedgeMs / 1000)} 秒没有反应` });
           backups.shift();
@@ -520,6 +523,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       const canCheckNumbers = availableTools.some(tool => /^(?:verify_numbers|run_javascript|run_python)$/.test(tool.name));
       if (issues.length && answerRepairs < 1 && !closing && !signal?.aborted && cur.adapter.kind !== 'mock' && (!review.report().calculationIssue || canCheckNumbers)) {
         answerRepairs++;
+        // 评测统计：这次重写是哪条核对规则触发的（只记规则名，不记回答）
+        emit({ type: 'diagnostic', phase: 'answer_rewrite', rules: [...new Set(issues.map(rewriteRule))] });
         convo.push({ role: 'assistant', content: held, toolCalls: [], raw: r.raw });
         convo.push({ role: 'user', content: '（系统交付检查，仅修正本轮要求，不回应检查、不改做旧任务：' + issues.join('；') + '。最多本次修正，无法完成则如实说明。）' });
         continue;
@@ -630,6 +635,30 @@ const OFFER = /需要|如果|要不要|的话|可以|是否|吗[？?]?\s*$/;
 const ANNOUNCE = /(现在|马上|这就|立刻|接下来|下面|稍等|开始)[^。！？\n]{0,24}(做|生成|制作|写|整理|补上|动手|开始)[^。！？\n]{0,30}[。！…：:]?\s*$|(请稍等|稍等片刻|马上就好)[。！…]?\s*$/;
 
 /** 收尾核对：该结束时，清单没勾完 / 写了代码没运行过，就给模型一句提醒；都没问题返回空 */
+/** 这次模型调用是干什么的（评测按用途看哪一步多余）：回答 / 拿到工具结果后接着做 / 收尾核对 / 被回答核对拦下后重写 / 时限到了整理 */
+export function callPurpose(convo = [], closing = false) {
+  if (closing) return 'closing';
+  const last = convo.at(-1);
+  if (last?.role === 'tool') return 'after_tools';
+  const text = typeof last?.content === 'string' ? last.content : '';
+  if (last?.role === 'user' && text.startsWith('（系统交付检查')) return 'rewrite';
+  if (last?.role === 'user' && text.startsWith('（以下是系统自动核对')) return 'finish_check';
+  return 'answer';
+}
+/** 回答核对问题 → 规则名 */
+export function rewriteRule(issue = '') {
+  const t = String(issue);
+  if (/读回文件/.test(t)) return 'style_claim';
+  if (/医生/.test(t)) return 'care_deferral';
+  if (/时间或日期/.test(t)) return 'no_time';
+  if (/禁止输出/.test(t)) return 'forbidden_text';
+  if (/今日新闻|非今日/.test(t)) return 'today_news';
+  if (/verify_numbers|计算|数值/.test(t)) return 'calculation';
+  if (/截图|识别|原图/.test(t)) return 'visual';
+  if (/渠道|入口|候选证据/.test(t)) return 'source';
+  return 'other';
+}
+
 export function finishCheck({ steps = [], wroteCode = false, ranCode = false, lastText = '' } = {}) {
   const left = unfinished(steps);
   const lines = [];
