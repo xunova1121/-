@@ -1,0 +1,13 @@
+{
+  "name": "weiyang-code-sandbox",
+  "version": "0.1.0",
+  "description": "未央代码智能体的练手仓库：小型购物车与日期工具，带单元测试",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "lint": "node scripts/lint.mjs",
+    "test": "node --test"
+  },
+  "engines": { "node": ">=20" },
+  "license": "MIT"
+}
