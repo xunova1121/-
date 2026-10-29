@@ -227,6 +227,12 @@ jobs:
           exit 1
       - name: 验证Word、PPT、Excel真实转PDF
         run: node e2e/office-render.mjs
+      - name: 验证Word字体字号与有界真实分页
+        run: node e2e/word-typography.mjs "$RUNNER_TEMP/jarvis-e2e/word-typography"
+      - name: 验证四种PPT风格、可编辑元素与真实PDF
+        run: node e2e/presentation-styles.mjs "$RUNNER_TEMP/jarvis-e2e/presentation-styles"
+      - name: 验证四种Excel样式、公式筛选与真实PDF
+        run: node e2e/spreadsheet-styles.mjs "$RUNNER_TEMP/jarvis-e2e/spreadsheet-styles"
       - name: 验证文档场景模板、精确修改及真实PDF逐页检查
         run: node e2e/document-quality.mjs "$RUNNER_TEMP/jarvis-e2e/documents"
       - name: 验证只排版正文保留与真实Word、PDF读回
