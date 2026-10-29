@@ -77,3 +77,25 @@ it('未配置真实模型时实测入口先阻断，报告不带配置或凭据�
     await fs.rm(folder, { recursive: true, force: true });
   }
 });
+
+// Codex 2026-10-29 P7 恢复清单里记下、由 Claude 补上的两个验收漏洞
+it('先改错、测试红、再修绿：失败发生在第一次成功写文件之后，不算“先复现原 bug”', () => {
+  const write = { type: 'tool_end', name: 'code_edit', ok: true };
+  const late = [write, ...receipt('test', false), { type: 'tool_end', name: 'code_write', ok: true }, ...receipt('lint', true), ...receipt('test', true)];
+  const result = codeAcceptance(late, [{ path: 'src/main.mjs' }], scope);
+  expect(result.state).toBe('failed');
+  expect(result.failures.join()).toContain('没有在第一次改代码之前复现原始测试失败');
+  const early = [...receipt('test', false), write, ...receipt('lint', true), ...receipt('test', true)];
+  expect(codeAcceptance(early, [{ path: 'src/main.mjs' }], scope).state).toBe('passed');
+});
+
+it('任务报错或被停止：测试再绿也不算完整自主流程通过，代码测试结果另列', () => {
+  const events = [...receipt('test', false), { type: 'tool_end', name: 'code_edit', ok: true }, ...receipt('lint', true), ...receipt('test', true)];
+  for (const taskStatus of ['error', 'stopped']) {
+    const result = codeAcceptance(events, [{ path: 'src/main.mjs' }], { ...scope, taskStatus });
+    expect(result.state).toBe('failed');
+    expect(result.codeTests).toBe('passed');
+    expect(result.failures.join()).toContain(`任务以 ${taskStatus} 结束`);
+  }
+  expect(codeAcceptance(events, [{ path: 'src/main.mjs' }], { ...scope, taskStatus: 'done' })).toMatchObject({ state: 'passed', codeTests: 'passed' });
+});

@@ -151,7 +151,8 @@ export async function main(args = process.argv.slice(2)) {
       before: report.remoteBefore,
       after: report.remoteAfter,
       head: current.head,
-      workspaceId: current.workspace_id
+      workspaceId: current.workspace_id,
+      taskStatus: report.status
     });
     report.diff = await repos.diff(current.workspace_id, task.sessionId);
     // 独立再测，防止最后一次模型测试后又写文件，却沿用旧的绿色回执。
