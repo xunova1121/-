@@ -79,9 +79,43 @@ export function initOrbitHud({ root, getAnchor, reducedMotion = () => false }) {
     }
   }
 
+  let lastLayoutKey = '';
+  let satelliteKey = '';
+  let satelliteNodes = []; // 与satellites同上限8个，位置变化只移动原节点，不重建文字/动画。
+  const textIfChanged = (node, text) => { if (node.textContent !== text) node.textContent = text; };
+  function layoutSatellites(lp, radius) {
+    const key = JSON.stringify(satellites);
+    if (key !== satelliteKey) {
+      satelliteKey = key;
+      satelliteNodes = satellites.map((item, i) => {
+        const deg = satelliteAngle(i, satellites.length);
+        const right = Math.sin((deg * Math.PI) / 180) >= 0;
+        const g = svgEl('g', { class: `oh-sat ${item.state}` });
+        g.append(svgEl('circle', { r: 5 }), svgEl('circle', { r: 10, class: 'halo' }));
+        const text = svgEl('text', { x: right ? 14 : -14, y: 4, 'text-anchor': right ? 'start' : 'end' });
+        text.textContent = item.label;
+        g.append(text);
+        return { g, deg, state: item.state };
+      });
+      sats.replaceChildren(...satelliteNodes.map(item => item.g));
+    }
+    let active = null;
+    for (const item of satelliteNodes) {
+      const [sx, sy] = lp(item.deg, radius);
+      const transform = `translate(${sx.toFixed(1)} ${sy.toFixed(1)})`;
+      if (item.g.getAttribute('transform') !== transform) item.g.setAttribute('transform', transform);
+      if (item.state === 'run') active = [sx, sy];
+    }
+    return active;
+  }
+
   function layout() {
     const a = getAnchor();
     const w = root.clientWidth, h = root.clientHeight;
+    const key = JSON.stringify([w, h, a?.x, a?.y, a?.r, metrics.cpu, metrics.mem, statusText, satellites]);
+    // 场景暂停、隐藏或锚点未变时不重新栅格化HUD，给上下文恢复留出绘制资源。
+    if (key === lastLayoutKey) return;
+    lastLayoutKey = key;
     svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
     // 舞台被隐藏（如工作台的“对话”视图）时尺寸为 0，光核半径可能算成负数：不画
     if (!a || !(a.r > 4) || !w || !h) { svg.style.opacity = '0'; return; }
@@ -100,25 +134,12 @@ export function initOrbitHud({ root, getAnchor, reducedMotion = () => false }) {
     const lp = (deg, r) => [x + r * Math.sin((deg * Math.PI) / 180), y - r * Math.cos((deg * Math.PI) / 180)];
     const [cx, cy] = lp(306, gR + 12);
     const [mx, my] = lp(54, gR + 12);
-    cpuT.setAttribute('x', cx); cpuT.setAttribute('y', cy); cpuT.textContent = `CPU ${Math.round(metrics.cpu * 100)}%`;
-    memT.setAttribute('x', mx); memT.setAttribute('y', my); memT.textContent = `MEM ${Math.round(metrics.mem * 100)}%`;
+    cpuT.setAttribute('x', cx); cpuT.setAttribute('y', cy); textIfChanged(cpuT, `CPU ${Math.round(metrics.cpu * 100)}%`);
+    memT.setAttribute('x', mx); memT.setAttribute('y', my); textIfChanged(memT, `MEM ${Math.round(metrics.mem * 100)}%`);
     textArc.setAttribute('d', arcPath(x, y, R + 34, -42, 42));
-    statusPath.textContent = statusText;
-    // 卫星
-    const oR = R + 4;
-    let active = null;
-    sats.replaceChildren(...satellites.map((s, i) => {
-      const deg = satelliteAngle(i, satellites.length);
-      const [sx, sy] = lp(deg, oR);
-      const g = svgEl('g', { class: `oh-sat ${s.state}`, transform: `translate(${sx.toFixed(1)} ${sy.toFixed(1)})` });
-      g.append(svgEl('circle', { r: 5 }), svgEl('circle', { r: 10, class: 'halo' }));
-      const right = Math.sin((deg * Math.PI) / 180) >= 0;
-      const t = svgEl('text', { x: right ? 14 : -14, y: 4, 'text-anchor': right ? 'start' : 'end' });
-      t.textContent = s.label;
-      g.append(t);
-      if (s.state === 'run') active = [sx, sy];
-      return g;
-    }));
+    textIfChanged(statusPath, statusText);
+    // 工具状态改变才重建卫星；锚点移动保留节点与动画进度。
+    const active = layoutSatellites(lp, R + 4);
     if (active) {
       beam.setAttribute('x1', x); beam.setAttribute('y1', y); beam.setAttribute('x2', active[0]); beam.setAttribute('y2', active[1]);
       beam.style.opacity = '1';

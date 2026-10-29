@@ -73,6 +73,7 @@ export function initCallouts({ root, getAnchor, onPick, onHover, reducedMotion =
   let busy = false;
   let raf = 0;
   let lastOrb = null;
+  let lastLayoutKey = '';
 
   function hover(slot, on) {
     slot.g.classList.toggle('hot', on);
@@ -140,6 +141,11 @@ export function initCallouts({ root, getAnchor, onPick, onHover, reducedMotion =
     const height = root.clientHeight;
     const orb = getAnchor() ?? { x: width / 2, y: height * 0.45, r: Math.min(width, height) * 0.16 };
     lastOrb = orb;
+    // 先批量读高度，再写位置；冻结的锚点不应每帧重绘相同的SVG滤镜/标注。
+    const heights = slots.map(slot => slot.btn.offsetHeight || 46);
+    const key = JSON.stringify([width, height, orb.x, orb.y, orb.r, ...heights]);
+    if (key === lastLayoutKey) return;
+    lastLayoutKey = key;
     const tooSmall = height < 170 || width < 320;
     root.classList.toggle('cl-hidden', tooSmall);
     if (tooSmall) return;
@@ -150,7 +156,7 @@ export function initCallouts({ root, getAnchor, onPick, onHover, reducedMotion =
       const b = boxes[s.i];
       s.btn.style.transform = `translate(${Math.round(b.x)}px, ${Math.round(b.y)}px)`;
       s.btn.style.width = `${Math.round(b.w)}px`;
-      const h = s.btn.offsetHeight || 46;
+      const h = heights[s.i];
       const end = b.side === 'left' ? { x: b.x, y: b.y + h / 2 } : b.side === 'right' ? { x: b.x + b.w, y: b.y + h / 2 } : { x: b.x + b.w / 2, y: b.y };
       // 折线：先从光核边缘斜着出去，再水平（或垂直）接到卡片，像仪表上的引线
       const elbow = b.side === 'top' ? { x: end.x, y: end.y - 16 } : { x: end.x + (b.side === 'left' ? -26 : 26), y: end.y };

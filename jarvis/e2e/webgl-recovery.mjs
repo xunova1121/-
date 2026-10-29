@@ -2,15 +2,44 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import http from 'node:http';
 import { chromium } from 'playwright';
 import { createServer } from '../server/server.mjs';
 import { MockAgent } from '../server/agents.mjs';
 
 const out = path.resolve(process.argv[2] || '/tmp/weiyang-webgl-recovery');
 await fs.mkdir(out, { recursive: true });
-const server = createServer({ agent: new MockAgent(), staticDir: path.resolve('dist'), ollama: null });
+const server = createServer({ agent: new MockAgent(), staticDir: path.resolve(process.env.JARVIS_WEBGL_DIST || 'dist'), ollama: null });
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const base = 'http://127.0.0.1:' + server.address().port;
+// 本地HTTP夹具经过真实网关；不依赖外部模型，也不通过DevTools改写响应。
+const fixture = http.createServer(async (req, res) => {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' });
+    res.end();
+    return;
+  }
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const request = JSON.parse(Buffer.concat(chunks).toString() || '{}');
+  const finished = request.messages?.some((message) => message.role === 'tool');
+  const delta = finished
+    ? { content: '八个片段已运行，界面检查完成。' }
+    : {
+        tool_calls: Array.from({ length: 8 }, (_, i) => ({
+          index: i,
+          id: 'webgl-fixture-' + i,
+          type: 'function',
+          function: { name: 'run_javascript', arguments: JSON.stringify({ code: 'return ' + (i + 1) + ';' }) }
+        }))
+      };
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Access-Control-Allow-Origin': '*' });
+  res.end(
+    `data: ${JSON.stringify({ choices: [{ delta }] })}\n\ndata: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: finished ? 'stop' : 'tool_calls' }] })}\n\ndata: [DONE]\n\n`
+  );
+});
+await new Promise((resolve) => fixture.listen(0, '127.0.0.1', resolve));
+const fixtureBase = 'http://127.0.0.1:' + fixture.address().port;
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const records = [],
   errors = [];
@@ -19,8 +48,19 @@ try {
   const ctx = await browser.newContext({ viewport: { width: 1600, height: 960 }, reducedMotion: 'no-preference' });
   const page = await ctx.newPage();
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.addInitScript(() => {
+  await page.addInitScript((baseURL) => {
+    if (window !== window.top) return; // 不向不透明来源的代码沙箱注入存储配置。
     localStorage.setItem('jarvis.settings.v1', JSON.stringify({ quality: 'auto', speechOutput: false, autoMemory: false, directVoice: false }));
+    localStorage.setItem(
+      'jarvis.llm.v1',
+      JSON.stringify({
+        provider: 'custom',
+        keys: { custom: 'sk-local-ui-fixture' },
+        models: { custom: 'webgl-ui-fixture' },
+        baseURLs: { custom: baseURL + '/v1' },
+        routing: { enabled: false }
+      })
+    );
     // capture阶段先于Three及应用的恢复处理，不能把同步重建/首帧移到计时之外。
     document.addEventListener(
       'webglcontextrestored',
@@ -29,7 +69,7 @@ try {
       },
       true
     );
-  });
+  }, fixtureBase);
   await page.goto(base);
   await page.bringToFront();
   await page.waitForFunction(() => window.__jarvis?.showPanel);
@@ -48,6 +88,24 @@ try {
     }, quality);
     await page.waitForTimeout(400);
   }
+  await page.evaluate(() => window.__jarvis.send('运行八个独立的JavaScript小片段，检查界面反馈。'));
+  await page.click('.wb-tabs button:nth-child(2)');
+  console.log(
+    '工具/HUD前置',
+    await page.evaluate(() => ({
+      satellites: document.querySelectorAll('.oh-sat').length,
+      running: window.__jarvis.stage.running,
+      form: window.__jarvis.stage.stats.form,
+      size: [window.__jarvis.stage.renderer.domElement.width, window.__jarvis.stage.renderer.domElement.height],
+      states: [...document.querySelectorAll('.oh-sat')].map((node) => node.getAttribute('class'))
+    }))
+  );
+  await page.waitForFunction(() => window.__jarvis.stage.running && document.querySelectorAll('.oh-sat').length === 8);
+  await page.evaluate(() => {
+    globalThis.__webglSatellite = document.querySelector('.oh-sat');
+  });
+  await page.waitForTimeout(300);
+  assert(await page.evaluate(() => globalThis.__webglSatellite === document.querySelector('.oh-sat')), '锚点移动时不能重建相同卫星节点/重启其动画');
   for (let round = 1; round <= 20; round++) {
     const record = await page.evaluate(async () => {
       const stage = window.__jarvis.stage,
@@ -56,6 +114,9 @@ try {
       if (!ext) throw new Error('本机缺WEBGL_lose_context，不能冒充恢复通过');
       ext.loseContext();
       await new Promise((resolve) => setTimeout(resolve, 100));
+      const decorationsPaused =
+        canvas.hasAttribute('data-restoring') &&
+        [...document.querySelectorAll('.cl-line')].every((node) => getComputedStyle(node).animationPlayState === 'paused');
       globalThis.__webglEventStart = 0;
       let smokeEvent = 0;
       canvas.addEventListener(
@@ -75,6 +136,8 @@ try {
         app: smokeEvent ? Math.round(ended - smokeEvent) : null,
         captureApp: globalThis.__webglEventStart ? Math.round(ended - globalThis.__webglEventStart) : null,
         frames: stage.stats.frames - before,
+        decorationsPaused,
+        decorationsResumed: !canvas.hasAttribute('data-restoring'),
         hidden: document.hidden,
         focused: document.hasFocus(),
         parallel: stage.stats.parallelCompile,
@@ -83,6 +146,8 @@ try {
         draws: stage.stats.restoreDrawMs,
         simple: stage.stats.simpleScene,
         aa: stage.renderer.getContext().getContextAttributes()?.antialias,
+        form: stage.stats.form,
+        size: [canvas.width, canvas.height],
         particles: stage.stats.particles,
         calls: stage.stats.drawCalls,
         software: stage.stats.softwareRenderer,
@@ -96,7 +161,9 @@ try {
       record.captureApp <= 300 &&
       record.total <= 1500 &&
       record.frames >= 3 &&
-      !record.hidden;
+      !record.hidden &&
+      record.decorationsPaused &&
+      record.decorationsResumed;
     records.push({ round, ok, ...record });
     console.log(`${ok ? '✓' : '✗'} WebGL恢复 ${round}/20 ${JSON.stringify(record)}`);
     await fs.writeFile(path.join(out, 'report.json'), JSON.stringify({ records, errors }, null, 2));
@@ -177,5 +244,6 @@ try {
   );
 } finally {
   await browser.close();
+  await new Promise((resolve) => fixture.close(resolve));
   await new Promise((resolve) => server.close(resolve));
 }

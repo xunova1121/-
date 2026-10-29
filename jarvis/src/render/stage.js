@@ -228,14 +228,18 @@ export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
   const tmpSize = new Vector2();
   let bloom = null;
   let quality = { bloom: false, stars: true };
+  let sizedWidth = 0, sizedHeight = 0, sizedRatio = 0;
   function resize() {
     const w = canvas.clientWidth || 1;
     const h = canvas.clientHeight || 1;
     // 软件渲染没有 GPU：限制实际绘图像素，避免大窗口的填充与上下文重建拖住界面。
     // CSS 尺寸、相机比例和粒子数量保持一致；硬件渲染仍按设备像素比输出。
     const ratio = Math.min(window.devicePixelRatio || 1, softGL ? 540 / Math.max(w,h) : 2);
+    // 同尺寸写canvas.width/height也会清空并重分配绘图缓冲；恢复时保留已有尺寸。
+    if (w === sizedWidth && h === sizedHeight && ratio === sizedRatio) return;
     if (renderer.getPixelRatio() !== ratio) renderer.setPixelRatio(ratio);
     renderer.setSize(w, h, false);
+    sizedWidth = w; sizedHeight = h; sizedRatio = ratio;
     camera.aspect = w / h;
     camera.position.z = w / h < 1 ? 250 / Math.max(0.55, w / h) : 250;
     camera.updateProjectionMatrix();
@@ -254,13 +258,21 @@ export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
   let last = 0;
   let lastDrawn = 0;
   let fpsCap = 60;
+  let recoveryFrames = 0;
   let frameFn = null;
   const pausedBy = new Set();
   const stats = { frames: 0, fps: 0, isWebGL2, softwareRenderer: softGL, particles: N, drawCalls: 0, bloom: false, form: 'core', _acc: 0, _n: 0 };
 
   function loop(now) {
     raf = requestAnimationFrame(loop);
-    if (now - lastDrawn < 1000 / fpsCap - 2) return;
+    // 恢复窗口仍画真实帧，只临时取消省电/手机帧率等待；后续恢复原上限。
+    if (!recoveryFrames && now - lastDrawn < 1000 / fpsCap - 2) return;
+    renderFrame(now);
+  }
+
+  function renderFrame(now) {
+    // 浏览器恢复后的首个rAF可能带着丢失前的时间戳，不能倒退动画时间。
+    now = Math.max(now, last);
     const dt = last ? Math.min(now - last, 100) : 16.7;
     last = now;
     lastDrawn = now;
@@ -270,6 +282,10 @@ export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
     draw();
     if(stats.restoreDrawMs&&stats.restoreDrawMs.length<3)stats.restoreDrawMs.push(Math.round(performance.now()-drawStart));
     stats.frames++;
+    if (recoveryFrames) {
+      recoveryFrames--;
+      if (!recoveryFrames) canvas.removeAttribute('data-restoring');
+    }
     stats.drawCalls = renderer.info.render.calls;
     stats._acc += dt;
     stats._n++;
@@ -340,6 +356,8 @@ export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
   canvas.addEventListener('webglcontextlost', (e) => {
     e.preventDefault();
     contextGeneration++;
+    recoveryFrames = 0;
+    canvas.setAttribute('data-restoring', '');
     lostAt = performance.now();
     stats.restoreDrawMs=[];
     pausedBy.add('context');
@@ -357,7 +375,11 @@ export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
     ready.catch(error => console.warn('预编译未完成，将按需重建',error)).then(() => {
       if (gen !== contextGeneration) return;
       stats.restoreCompileMs = Math.round(performance.now()-started);
-      pausedBy.delete('context'); sync();
+      recoveryFrames = 3;
+      pausedBy.delete('context');
+      // 先真实画出当前场景，不等可能拥堵的下一次rAF；隐藏/离屏时仍遵守暂停。
+      sync();
+      if (!pausedBy.size) renderFrame(performance.now());
       onContextChange?.('restored', performance.now() - lostAt);
     });
   });
@@ -421,6 +443,8 @@ export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
     },
     dispose() {
       contextGeneration++;
+      recoveryFrames = 0;
+      canvas.removeAttribute('data-restoring');
       cancelAnimationFrame(raf);
       raf = 0;
       ro.disconnect();

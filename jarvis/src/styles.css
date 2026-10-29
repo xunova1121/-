@@ -1398,3 +1398,17 @@ body.reduced-motion .welcome-hero * { animation: none !important; }
 .set-more .setting:last-child { border-bottom: 0; }
 .set-card { margin-top: 18px; padding: 4px 14px 12px; border: 1px solid var(--line); border-radius: 14px; }
 .set-card > h3.sub:first-child { margin-top: 12px; }
+
+/* WebGL重建时保留HUD/引线画面，但暂停其重绘动画；三帧真实渲染后自动续播。 */
+#stage[data-restoring] ~ .orbit-hud, #stage[data-restoring] ~ .orbit-hud *,
+#stage[data-restoring] ~ .callout-lines, #stage[data-restoring] ~ .callout-lines *,
+#stage[data-restoring] ~ .callouts, #stage[data-restoring] ~ .callouts * {
+  animation-play-state: paused !important;
+}
+
+/* 工作台两处背景已是实色；模糊背后内容既不可见，还会争用软件GL的绘制资源。
+   只移除不透明顶栏/输入框的无效滤镜，半透明舞台标注和其他主题保持原效果。 */
+body.workbench .topbar, body.workbench .composer {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
