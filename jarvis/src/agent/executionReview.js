@@ -7,6 +7,7 @@ import { taskContract } from './taskContract.js';
 import { isReadOnlyTool } from '../../shared/taskCheckpoint.js';
 import { creativeWithoutLookup } from '../core/imageFollowup.js';
 import { answerConstraints, answerConstraintIssues, concreteSourceRequirement, sourceCandidates, sourceAnswerIssue } from './answerRequirements.js';
+import { styleRequests, styleIssues, styleNote } from './styleCheck.js';
 
 /** 核实文件内容的工具：同一文件验过可用后只再放行一次 */
 export const VERIFY_TOOLS = /^(?:read_file|computer_read_file|check_document)$/;
@@ -28,6 +29,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   let answerIssues = [];
   let sourceIssue = '';
   let calculationIssue = '';
+  let styleProblems = [];
   const candidateSources = new Set();
   const newsLinks = new Map(); // 仅本轮最多8条候选标题/网址，不保存摘要。
   const revise = (text) => {
@@ -39,6 +41,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     version++;
     declinedTool = '';
     answerIssues = [];
+    styleProblems = [];
     sourceIssue = '';
     calculationIssue = '';
     candidateSources.clear();
@@ -130,6 +133,9 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
       expectedSlides: Number.isSafeInteger(data.expectedSlides) ? data.expectedSlides : null,
       pages: Number.isSafeInteger(data.pages) ? data.pages : null,
       pdfPageMatch: data.pdfPageMatch === 'passed' ? 'passed' : data.pdfPageMatch === 'failed' ? 'failed' : null,
+      ...(data.styleFacts && { styleFacts: data.styleFacts }),
+      // 同一文件第二次回执（渲染后）没带上一版时，沿用第一次的基准
+      previousStyle: event.previousStyle ?? artifacts.get(event.path.slice(0, 400))?.previousStyle ?? null,
       at
     });
     if (artifacts.size > 16) artifacts.delete(artifacts.keys().next().value);
@@ -185,6 +191,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
       version,
       calls: sequence,
       answerIssues: [...answerIssues],
+      styleIssues: [...styleProblems],
       sourceIssue,
       visualIssue,
       visualReceipts: visualEvidence.snapshot(),
@@ -213,6 +220,8 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     const result = report();
     const issues = [];
     issues.push(...result.answerIssues);
+    const style = styleNote(request, lastDocument());
+    if (style) issues.push(style);
     if (result.visualIssue) issues.push(result.visualIssue);
     if (result.media && result.media.state !== 'completed') issues.push(`用户要求生成${result.media.label}，当前${result.media.state}；应实际调用${result.media.tool}取得文件，不能只写“我来做”收尾。已有歌词/文字保留，失败明确区分，不能虚构下载或播放。`);
     if (result.sourceIssue) issues.push(result.sourceIssue);
@@ -238,17 +247,22 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
     run: async () => JSON.stringify(report())
   };
+  // 最后生成 / 修改的那份 Office 文件（核对“字大点、不要横线”这类改动用）
+  const lastDocument = () => [...artifacts.values()].filter((item) => /^(?:docx|pptx|xlsx)$/.test(item.format)).sort((a, b) => a.at - b.at).at(-1) ?? null;
   const checkAnswer = (text, now) => {
     answerIssues = answerConstraintIssues(request, text, now);
+    styleProblems = styleIssues(request, text, lastDocument());
     visualIssue = visualEvidence.issue(text);
     sourceIssue = sourceAnswerIssue(request, text, [...candidateSources]);
     const result = report();
     calculationIssue = result.calculation === 'failed' ? '关键verify_numbers校验失败，修正输入重算；不能核验时必须明确校验失败、请人工复核' : result.contract.calculation && result.calculation === 'not_checked' ? '关键计算尚无工具校验，请先调用verify_numbers核对，不能用心算冒充工具结果' : '';
-    return [...answerIssues, ...(visualIssue ? [visualIssue] : []), ...(sourceIssue ? [sourceIssue] : []), ...(calculationIssue ? [calculationIssue] : [])];
+    return [...answerIssues, ...styleProblems, ...(visualIssue ? [visualIssue] : []), ...(sourceIssue ? [sourceIssue] : []), ...(calculationIssue ? [calculationIssue] : [])];
   };
   const guardsAnswer = () => {
     const rules = answerConstraints(request);
-    return visualEvidence.active() || rules.noTime || rules.literals.length > 0 || rules.todayNews || rules.care || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
+    return visualEvidence.active() || (styleRequests(request).length > 0 && Boolean(lastDocument())) || rules.noTime || rules.literals.length > 0 || rules.todayNews || rules.care || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
   };
-  return { newsCandidates: () => [...newsLinks.values()], toolBlock, noteVisual: visualEvidence.note, record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked, checkAnswer, guardsAnswer };
+  /** 改写一次后仍对不上：不吞掉回答（文件链接要留着），末尾补一句读回的实际情况 */
+  const styleCorrection = () => (styleProblems.length ? '（读回文件核对：' + styleNote(request, lastDocument()).replace(/^用户要的调整，读回文件的实际结果：/, '').replace(/。回答照这个说$/, '') + '。）' : '');
+  return { styleCorrection, newsCandidates: () => [...newsLinks.values()], toolBlock, noteVisual: visualEvidence.note, record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked, checkAnswer, guardsAnswer };
 }

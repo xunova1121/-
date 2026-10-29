@@ -6,6 +6,7 @@ import { documentError } from './documentPlan.js';
 import { requestedWordPages, checkWordPages } from './wordPageBudget.js';
 import { coordinateWordLayout } from './wordLayout.js';
 import { directTypographyConflicts } from './docxTypography.js';
+import { measureDocx } from './styleCheck.js';
 
 /** 把短检查报告与真实产物放一起；正文只在工作区文件中，不进会话/检查点。 */
 export async function deliverDocument(ctx, out, target, { progress, signal, checkpoint, issues = [], plan, generatorReview, requiredText = [], requirements = '', preservation = null, design = null } = {}) {
@@ -15,6 +16,8 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
     issues = [...issues, ...typographyIssues];
   }
   const validation = await inspectDocument(out.blob, target, { info: out.info, requiredText, signal, requirements });
+  // 读回实际字号、横线、下划线：回答只能说文件里真的有的（见 styleCheck.js）
+  if (out.ext === 'docx') validation.styleFacts = await measureDocx(out.blob);
   const effectiveStyle = validation.format === 'pptx' ? out.info?.style : validation.format === 'xlsx' ? out.info?.sheetStyle : null;
   if (design?.style && effectiveStyle) {
     const conflict = design.style !== effectiveStyle;
@@ -65,7 +68,8 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
         expectedSlides: validation.expectedSlides,
         pages: validation.pages,
         pdfPageMatch: validation.pdfPageMatch,
-        wordPageBudget: validation.wordPageBudget
+        wordPageBudget: validation.wordPageBudget,
+        styleFacts: validation.styleFacts
       }
     });
   const saveReport = async () => {
@@ -118,6 +122,8 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
   }
   checkedPath = await saveReport();
   if (validation.wordCount) notes.push(`实际文件字数${validation.wordCount.count}，要求${validation.wordCount.min}至${validation.wordCount.max}；${validation.wordCount.scope}；${validation.wordCount.passed ? '在范围内' : '不在范围内，须修改'}`);
+  const facts = validation.styleFacts;
+  if (facts) notes.push(`读回实际：标题${facts.title}磅、正文${facts.body}磅；横线${facts.rules}条、下划线${facts.underlines}处`);
   notes.push(qualitySummary(validation), `检查报告：${checkedPath}`);
   return { ...saved, validation, notes, blob: out.blob };
 }

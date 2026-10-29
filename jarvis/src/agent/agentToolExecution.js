@@ -1,6 +1,7 @@
 import { isDiagramTool, diagramFailureDetails } from './diagramRecovery.js';
 import { uid } from './store.js';
 import { recordWorkAttempt } from './workLedger.js';
+import { rememberStyle } from './styleCheck.js';
 import { validateArgs } from './tools.js';
 import { withWebDeadline } from './retrievalBudget.js';
 import { throwControl } from '../core/networkRequest.js';
@@ -89,8 +90,12 @@ export async function executeToolCalls(
           executionScope,
           rawRequestText: requirementText,
           requestText: review.report().request,
-          checkpoint: (event) => {
-            if (event.type === 'artifact_validation') review.artifact(event);
+          checkpoint: async (event) => {
+            if (event.type === 'artifact_validation') {
+              // 带上上一轮的字号，“再大点”才有基准（见 styleCheck.js）
+              const facts = event.validation?.styleFacts;
+              review.artifact(facts ? { ...event, previousStyle: await rememberStyle({ sessionId, scope: executionScope, facts }) } : event);
+            }
             return checkpoint?.(event);
           }
         });
