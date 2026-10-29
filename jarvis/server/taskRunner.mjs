@@ -272,6 +272,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const history = session.messages.slice(0, -1); // 最后一条是这次的用户原话，单独作为 userText
     const tools = evaluationTools(makeTools({
       ...deepseekSearchOptions(cfg),
+      // 评测不读用户保存的文档偏好（字号、风格），结果才能复现
+      ...(task.evaluationId && { documentStylePreferences: async () => '' }),
       tavilyKey: cfg.tavilyKey, qweather: qweatherConfig(cfg), bochaKey: cfg.bochaKey, falKey: cfg.falKey, searchRegion: cfg.searchRegion || 'auto',
       fetchViaGateway: (url, init) => publicFetch(url, init), // 不填搜索密钥也能联网搜索、读网页
       llm: helper(cfg, 'write', task), reasonLlm: helper(cfg, 'reason', task),
@@ -335,6 +337,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         effort: effortFor(kind, task.text, cfg),
         // 语音对话：口语短答；“你好 / 谢谢”这类寒暄不带工具，回得快
         quiet: Boolean(task.evaluationId),
+        isolated: Boolean(task.evaluationId), // 评测不读用户个人记忆和偏好（见 agent.js isolatedContext）
         voice: task.voice, light: !task.images.length && isSmallTalk(task.text),
         sessionId: session.id, summary: session.summary ?? null,
         requirements: collectRequirements(session.messages, session.requirements),

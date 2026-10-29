@@ -67,3 +67,38 @@ describe('调用明细', () => {
     expect(timing.snapshot().tokens).toEqual({ input: 10, output: 2, cached: 4 });
   });
 });
+
+describe('从接口拿 Token 用量（真实请求格式）', () => {
+  it('Responses：完成事件里的 usage 记下来', async () => {
+    const { vi } = await import('vitest');
+    const { createAdapter } = await import('../src/llm/config.js');
+    vi.stubGlobal('fetch', async () => new Response([
+      { type: 'response.output_text.delta', delta: '好' },
+      { type: 'response.completed', response: { status: 'completed', output: [], usage: { input_tokens: 120, output_tokens: 8, input_tokens_details: { cached_tokens: 100 } } } }
+    ].map((e) => `data: ${JSON.stringify(e)}\n\n`).join(''), { headers: { 'content-type': 'text/event-stream' } }));
+    try {
+      const { adapter, model } = createAdapter({ provider: 'relay-multi', models: { 'relay-multi': 'gpt-6-luna' }, keys: { 'relay-multi': 'sk-t' }, baseURLs: { 'relay-multi': 'https://relay.example/v1' } });
+      const r = await adapter.stream({ model, system: ['s'], messages: [{ role: 'user', content: 'hi' }], tools: [], onText: () => {} });
+      expect(r.usage).toEqual({ input: 120, output: 8, cached: 100 });
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it('Chat Completions：请求带 stream_options；中转站不认就去掉重发，不误伤思考强度', async () => {
+    const { vi } = await import('vitest');
+    const { createAdapter } = await import('../src/llm/config.js');
+    const bodies = [];
+    vi.stubGlobal('fetch', async (url, init) => {
+      const body = JSON.parse(init.body);
+      bodies.push(body);
+      if (body.stream_options) return new Response('{"error":{"message":"Unrecognized request argument supplied: stream_options"}}', { status: 400 });
+      return new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: '好' } }] })}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } });
+    });
+    try {
+      const { adapter, model } = createAdapter({ provider: 'deepseek', models: { deepseek: 'deepseek-chat' }, keys: { deepseek: 'sk-t' } });
+      const r = await adapter.stream({ model, effort: 'low', system: ['s'], messages: [{ role: 'user', content: 'hi' }], tools: [], onText: () => {} });
+      expect(r.text).toBe('好');
+      expect(bodies[0].stream_options).toEqual({ include_usage: true });
+      expect(bodies[1].stream_options).toBeUndefined();
+      expect(bodies[1].reasoning_effort).toBe('low');
+    } finally { vi.unstubAllGlobals(); }
+  });
+});

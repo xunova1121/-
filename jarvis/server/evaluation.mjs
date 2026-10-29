@@ -1,9 +1,12 @@
-/** 评测只隔离长期记忆写入，不改变普通任务，也不切换进程级存储后端。 */
+/** 评测隔离长期记忆写入和个人信息读取，不改变普通任务，也不切换进程级存储后端。 */
 const MEMORY_WRITES = new Set(['remember', 'forget', 'core_memory_update', 'save_skill']);
+
+/** 评测也不读用户的个人记忆、过往对话、持仓和知识库：结果要能复现，报告里也不带真实信息 */
+const PERSONAL_READS = new Set(['recall', 'search_conversations', 'read_conversation', 'list_my_messages', 'list_holdings', 'kb_search']);
 
 export function evaluationTools(tools, evaluationId) {
   if (!evaluationId) return tools;
-  return tools.map((tool) => tool.name === 'list_work_records' ? { ...tool, run: async () => JSON.stringify({ total: 0, items: [], completeHistory: false, note: '评测隔离，不读取正式成果记录' }) } : MEMORY_WRITES.has(tool.name) ? {
+  return tools.map((tool) => PERSONAL_READS.has(tool.name) ? { ...tool, run: async () => '评测隔离：不读取用户的正式记忆、过往对话、持仓或知识库；按题面作答，需要的信息直接问用户。' } : tool.name === 'list_work_records' ? { ...tool, run: async () => JSON.stringify({ total: 0, items: [], completeHistory: false, note: '评测隔离，不读取正式成果记录' }) } : MEMORY_WRITES.has(tool.name) ? {
     ...tool,
     run: async () => '本条测试信息已保留在当前评测会话中，未写入、修改或删除正式长期记忆；本会话后续可继续引用。'
   } : tool);

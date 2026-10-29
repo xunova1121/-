@@ -120,15 +120,27 @@ const step = (n, up) => Math.max(8, Math.min(72, Math.round(up ? Math.max(n * 1.
  * 用户说了具体字号的那个角色不动；单页告示本来就按页面取最大字号，“大点”不再放大（放大就排不进一页），“小点”缩一档。
  * @returns {{ typography: object, scale: number }}
  */
-export function relativeTypography(typography = {}, asks = [], { kind = '', previous = null, request = '', format = 'docx' } = {}) {
+export function relativeTypography(typography = {}, asks = [], { kind = '', previous = null, request = '', format = 'docx', explicit = typography } = {}) {
   const dir = asks.some((a) => a.id === 'bigger') ? 1 : asks.some((a) => a.id === 'smaller') ? -1 : 0;
   if (!dir) return { typography, scale: 0 };
-  if (kind === 'poster') return { typography, scale: dir < 0 && !typography.body?.size ? 0.85 : 0 };
-  const base = previous && (!previous.format || previous.format === format) ? previous : format === 'pptx' ? { body: 20, title: 32 } : format === 'xlsx' ? { body: 11, title: 18 } : DEFAULT;
-  const roles = titleOnly(request) ? ['title'] : /内文|内筒|正文|内容/.test(request) && !/标题/.test(request) ? ['body'] : ['body', 'title'];
+  if (kind === 'poster') return { typography, scale: dir < 0 && !explicit.body?.size ? 0.85 : 0 };
+  const fallback = format === 'pptx' ? { body: 20, title: 32 } : format === 'xlsx' ? { body: 11, title: 18 } : DEFAULT;
+  const last = previous && (!previous.format || previous.format === format) ? previous : null;
+  const roles = sizeRoles(request);
   const next = { ...typography };
-  for (const role of roles) if (!typography[role]?.size) next[role] = { ...typography[role], size: step(base[role], dir > 0) };
+  // 只有用户这次原话里说的具体字号不动；保存过的偏好（比如“正文四号”）只当起点，不能挡住“大点 / 小点”
+  // （第一轮 30 题实测：偏好 14 磅挡住了“正文字大点”，结果从 16 磅变成 14 磅）
+  for (const role of roles) if (!explicit[role]?.size) next[role] = { ...typography[role], size: step(last?.[role] ?? typography[role]?.size ?? fallback[role], dir > 0) };
   return { typography: next, scale: 0 };
+}
+/** “大点 / 小点”说的是哪部分：紧挨着大小词的是正文还是标题；都没说就两样一起 */
+function sizeRoles(request) {
+  const text = String(request);
+  const body = /(?:内文|内筒|正文|内容)[^，,。；;\n]{0,6}(?:大|小)/.test(text);
+  const title = /标题[^，,。；;\n]{0,6}(?:大|小)/.test(text);
+  if (body && !title) return ['body'];
+  if (title && !body) return ['title'];
+  return ['body', 'title'];
 }
 
 /**

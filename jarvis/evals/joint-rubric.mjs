@@ -59,9 +59,12 @@ export function judgePrompt(item, run) {
     .join('\n');
   const turns = run.turns.map((t, i) => `【第${i + 1}轮用户】${t.prompt}\n【第${i + 1}轮回答】${String(t.answer || '（无回答）').slice(0, 6000)}`).join('\n\n');
   const facts = run.fileFacts ? `\n【程序读回的文件事实（以此为准，回答说的和它不一致就是说做到没做到）】\n${JSON.stringify(run.fileFacts).slice(0, 3000)}` : '';
+  // 程序记录的证据：用了哪些工具、交付文件读回（内容、页数、公式、检查报告）、建了哪些提醒。检查点要求的“用工具核对 / 文件里有什么”以这里为准
+  const evidence = run.evidence ? `\n【程序记录的证据（每轮用了哪些工具、交付文件读回、生成时的检查报告）】\n${JSON.stringify(run.evidence).slice(0, 6000)}` : '';
+  const schedules = run.createdSchedules ? `\n【这一轮实际建的提醒（测完已删）】${JSON.stringify(run.createdSchedules)}` : '';
   const mech = run.mechanical?.failures?.length ? `\n【程序检查发现的问题】${run.mechanical.failures.join('；')}` : '';
   return {
-    system: `你是严格、公正的中文评审员。只根据下面给出的题目、检查点、回答原文和程序读回的事实打分，不要脑补没给出的内容。实时信息（天气、新闻、股价、汇率）你无法联网核实时，只看回答是否给了今天的日期、原文链接和自洽的数字，不要因为你不知道今天的数据就判错。
+    system: `你是严格、公正的中文评审员。只根据下面给出的题目、检查点、回答原文和程序读回的事实打分，不要脑补没给出的内容。检查点里要求“用工具核对”“文件里有什么”“真的建了提醒”“用了哪个画图工具”时，以【程序记录的证据】为准：证据里有就算做到，证据里明确没有才算没做到；证据没覆盖的，不要仅因“无法确认”判不过，按回答本身是否合理打分并在 evidence 里写明“证据未覆盖”。实时信息（天气、新闻、股价、汇率）你无法联网核实时，只看回答是否给了今天的日期、原文链接和自洽的数字，不要因为你不知道今天的数据就判错。
 评分维度（每项1～5分，整数，可以给2和4）：
 ${dims}
 失败主因只能从这些里选一个：${Object.keys(FAILURE_REASONS).join(' / ')}。
@@ -69,7 +72,7 @@ ${dims}
 只输出一个 JSON 对象，不要任何其他文字：
 {"scores":{"onPoint":n,"factual":n,"natural":n,"deliverable":n},"checkpoints":[{"passed":true/false,"evidence":"引用回答原文或读回事实，8到200字"}],"overclaim":true/false,"pass":true/false,"failureReason":"…或null","comment":"一句话总评"}
 checkpoints 的数量和顺序必须和题目检查点一一对应。pass 为 true 的前提：所有检查点都过，且四项都不低于3分。`,
-    prompt: `【题号】${item.id}（${item.group}）\n【检查点】\n${item.rubric.map((r, i) => `${i + 1}. ${r}`).join('\n')}\n\n${turns}${facts}${mech}`
+    prompt: `【题号】${item.id}（${item.group}）\n【检查点】\n${item.rubric.map((r, i) => `${i + 1}. ${r}`).join('\n')}\n\n${turns}${facts}${evidence}${schedules}${mech}`
   };
 }
 

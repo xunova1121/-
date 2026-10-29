@@ -169,7 +169,10 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     // 算“失败回执”的只有改东西、跑测试的操作：查资料没查到（门票没搜到）是信息缺口，在交付里标明即可；
     // 后来同一个工具又成功了（换了文件名重新生成）也算已解决
     // 同一份文档：改失败后又用别的文档工具成功生成 / 改好了，也算已解决
-    const sameDoc = (a, b) => a.path && a.path === b.path && DOC_TOOLS.test(a.tool) && DOC_TOOLS.test(b.tool);
+    // 同一份文档：改失败后又用别的文档工具生成好了（另存了新文件名也算，格式相同即可），失败已经补救
+    // （第一轮 30 题实测：改原文件失败、另存新版成功，结尾仍挂“这些操作没成功：修改文档”）
+    const office = (p) => (String(p || '').match(/\.(docx|pptx|xlsx)$/i)?.[1] || '').toLowerCase();
+    const sameDoc = (a, b) => DOC_TOOLS.test(a.tool) && DOC_TOOLS.test(b.tool) && Boolean(a.path) && (a.path === b.path || (office(a.path) && office(a.path) === office(b.path)) || !b.path);
     const unresolved = (receipt) =>
       !receipt.ok && receipt.code !== 'TASK_SCOPE_AFTER_DENIAL' &&
       (!isReadOnlyTool(receipt.tool) || receipt.tool === 'run_project_tests') &&

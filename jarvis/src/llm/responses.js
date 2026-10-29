@@ -5,7 +5,7 @@
  * 中转站可能不认联网搜索或推理参数：被拒（400 / 404 / 422）且还没输出文字时，按顺序降级重试并记住：
  *   0 全部（联网搜索 + 推理强度）→ 1 去掉推理强度 → 2 再去掉联网搜索
  */
-import { sseLines, isTransient, stallGuard, retryWait, retryAfterMs, sleep } from './openai.js';
+import { sseLines, isTransient, stallGuard, retryWait, retryAfterMs, sleep, tokenUsage } from './openai.js';
 import { nativeSearchAllowed } from './nativeSearch.js';
 
 const imagePart = (img) => ({ type: 'input_image', image_url: `data:${img.mime};base64,${img.data}`, ...(img.detail === 'high' && { detail: 'high' }) });
@@ -66,7 +66,9 @@ export function createResponsesAccumulator(onText) {
         try { args = c.args ? JSON.parse(c.args) : {}; } catch (e) { parseError = `参数不是合法 JSON：${e.message}`; }
         return { id: c.call_id || `call_${i}_${Date.now().toString(36)}`, name: c.name, args, parseError };
       });
-      return { text, toolCalls, stop: toolCalls.length ? 'tool_use' : final?.status === 'incomplete' ? 'max_tokens' : 'end_turn' };
+      // 完成事件里带的 Token 用量（评测算每次调用花了多少）；没给就不带，不当成 0
+      const usage = tokenUsage(final?.usage || {});
+      return { text, toolCalls, stop: toolCalls.length ? 'tool_use' : final?.status === 'incomplete' ? 'max_tokens' : 'end_turn', ...(usage && { usage }) };
     }
   };
 }

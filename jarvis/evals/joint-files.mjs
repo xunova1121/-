@@ -79,3 +79,73 @@ export function fileProblems(want, facts) {
   if ('afterRules' in want && (unknown(last?.rules) || last.rules > want.afterRules)) problems.push(`追问后横线${last?.rules ?? '量不出'}条`);
   return problems;
 }
+
+const DELIVERABLE = /\.(docx|pptx|xlsx|png|svg|pdf|md|html)$/i;
+const unescape = (t) => String(t).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+
+/** Excel 内容摘要：行数、公式个数、前 6 行的文字（给评审员核对“三行数据”“公式真的存在”） */
+export async function xlsxContent(bytes) {
+  try {
+    const zip = await JSZip.loadAsync(bytes);
+    const shared = [...((await zip.file('xl/sharedStrings.xml')?.async('string')) || '').matchAll(/<si>([\s\S]*?)<\/si>/g)].map((m) => unescape([...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((t) => t[1]).join('')));
+    const sheet = (await zip.file('xl/worksheets/sheet1.xml')?.async('string')) || '';
+    const rows = [...sheet.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)].map((r) => [...r[1].matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)].map((c) => {
+      const v = c[2].match(/<v>([\s\S]*?)<\/v>/)?.[1] ?? c[2].match(/<t[^>]*>([\s\S]*?)<\/t>/)?.[1] ?? '';
+      const formula = c[2].match(/<f>([\s\S]*?)<\/f>/)?.[1];
+      return (/t="s"/.test(c[1]) ? shared[Number(v)] ?? '' : unescape(v)) + (formula ? `（=${unescape(formula)}）` : '');
+    }).filter(Boolean));
+    return { rows: rows.length, formulas: (sheet.match(/<f>/g) || []).length, preview: rows.slice(0, 6).map((r) => r.join(' | ').slice(0, 160)) };
+  } catch {
+    return null;
+  }
+}
+/** PPT 页数和每页标题文字（前 80 字） */
+export async function pptxContent(bytes) {
+  try {
+    const zip = await JSZip.loadAsync(bytes);
+    const slides = Object.keys(zip.files).filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n)).sort((a, b) => Number(a.match(/(\d+)\.xml/)[1]) - Number(b.match(/(\d+)\.xml/)[1]));
+    const text = [];
+    for (const n of slides.slice(0, 12)) text.push(unescape([...(await zip.file(n).async('string')).matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map((m) => m[1]).join(' ')).slice(0, 80));
+    return { slides: slides.length, text };
+  } catch {
+    return null;
+  }
+}
+/** Word 正文前 600 字 */
+export async function docxContent(bytes) {
+  try {
+    const zip = await JSZip.loadAsync(bytes);
+    const xml = (await zip.file('word/document.xml')?.async('string')) || '';
+    return { text: unescape([...xml.matchAll(/<w:p\b[\s\S]*?<\/w:p>/g)].map((p) => [...p[0].matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g)].map((t) => t[1]).join('')).filter(Boolean).join('\n')).slice(0, 600) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 给评审员的证据：这一轮交付的每个文件（最多 4 个）——能不能下载、Office 字号 / 内容 / 生成时的检查报告（页数、错误、问题）。
+ * 只读文件，不改；读不了照实写 readable:false。
+ */
+export async function turnEvidence(turn, download) {
+  const files = [...new Set((turn.files || []).filter((p) => DELIVERABLE.test(p) && !/文档检查\//.test(p)))].slice(-4);
+  const out = [];
+  for (const path of files) {
+    const format = path.match(DELIVERABLE)[1].toLowerCase();
+    const bytes = await download(path).catch(() => null);
+    if (!bytes) { out.push({ path, format, readable: false }); continue; }
+    const row = { path, format, readable: true, bytes: bytes.byteLength };
+    if (OFFICE.test(path)) {
+      const facts = await measureDocx(new Blob([bytes]));
+      Object.assign(row, facts ? { body: facts.body, title: facts.title, rules: facts.rules, underlines: facts.underlines } : {});
+      Object.assign(row, format === 'xlsx' ? await xlsxContent(bytes) || {} : format === 'pptx' ? await pptxContent(bytes) || {} : await docxContent(bytes) || {});
+      const slash = path.lastIndexOf('/');
+      const report = await download(`${path.slice(0, slash + 1)}文档检查/${path.slice(slash + 1).replace(/\.[^.]+$/, '')}-${format}.json`, { maxBytes: 2e6 }).catch(() => null);
+      try {
+        const r = report ? JSON.parse(new TextDecoder().decode(report)) : null;
+        if (r) row.check = { pages: r.pages ?? null, slides: r.slides ?? null, render: r.render ?? null, pdfCheck: r.pdfCheck ?? null, errors: r.errors ?? null, issues: (r.issues || []).slice(0, 6).map((i) => `${i.level}:${String(i.text).slice(0, 100)}`) };
+      } catch { /* 检查报告读不了就不带 */ }
+    }
+    out.push(row);
+  }
+  return out;
+}

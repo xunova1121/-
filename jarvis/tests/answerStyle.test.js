@@ -79,3 +79,15 @@ describe('健康回答里“找医生”说太多遍：自动重写一次', () =
     expect(shown.join('')).not.toContain('以医生评估为准');
   });
 });
+
+describe('替用户在外面办事：先说清办不了（第一轮 30 题：“帮我订高铁票”直接问出发地）', () => {
+  it('“帮我订 / 给我付 / 订一张”算这一类；问信息的不算', async () => {
+    const { answerStyle } = await import('../src/agent/answerStyle.js');
+    expect(answerStyle('帮我订明天上午去上海的高铁票。').scene).toBe('boundary');
+    expect(answerStyle('帮我付一下电费').scene).toBe('boundary');
+    expect(answerStyle('订一张明天去北京的机票').scene).toBe('boundary');
+    expect(answerStyle('买票去哪买').scene).not.toBe('boundary');
+    expect(answerStyle('帮我写个方案。').scene).not.toBe('boundary');
+    expect(answerStyle('帮我订明天上午去上海的高铁票。').note).toMatch(/第一句就说清/);
+  });
+});

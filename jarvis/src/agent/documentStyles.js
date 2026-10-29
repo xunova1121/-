@@ -88,11 +88,13 @@ export function createDocumentStyles({ store, unsafe = () => false }) {
 }
 
 export function withDocumentStyles(ctx, getContext) {
+  // 调用方给了自己的偏好来源（如评测会话给空的）就用它，写作提示里也不再附真实偏好
+  const preferencesOf = ctx.documentStylePreferences || getContext;
   const wrap = helper => helper && (async request => {
     request.signal?.throwIfAborted();
-    const preferences = await getContext(request.signal);
+    const preferences = await preferencesOf(request.signal);
     request.signal?.throwIfAborted();
     return helper({ ...request, prompt: String(request.prompt || '') + (preferences ? '\n' + preferences : '') });
   });
-  return { ...ctx, documentStylePreferences: ctx.documentStylePreferences || getContext, llm: wrap(ctx.llm), reasonLlm: wrap(ctx.reasonLlm), documentReviewer: wrap(ctx.documentReviewer) };
+  return { ...ctx, documentStylePreferences: preferencesOf, llm: wrap(ctx.llm), reasonLlm: wrap(ctx.reasonLlm), documentReviewer: wrap(ctx.documentReviewer) };
 }

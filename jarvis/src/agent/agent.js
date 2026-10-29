@@ -52,6 +52,7 @@ import * as ws from './workspace.js';
 import * as packs from './skillPacks.js';
 import { summaryBlock, HISTORY_SOURCE_RULE } from './compress.js';
 import { DOCUMENT_TOOLS, createToolLoader } from './toolLoader.js';
+import { styleRequests } from './styleCheck.js';
 import { taskContract } from './taskContract.js';
 import { questionToolProfile, toolsForQuestion, BASIC_ANSWER_PROMPT } from './questionTools.js';
 
@@ -121,7 +122,9 @@ ${STABLE_PROMPT.slice(STABLE_PROMPT.indexOf('## 不写表情标签'))}`;
 /** 语音对话：回答会被念出来 */
 export const VOICE_NOTE = '## 语音对话\n用户正在和你语音对话，你的回答会被念出来：用口语，简短（一般两三句话），不用列表、表格、标题、链接和符号；做了文件就说一句文件名和放在哪，细节让用户看屏幕。';
 
-export async function buildContext(userText, { sessionId = null, turns = 0, summary = null, light = false, history = [] } = {}) {
+export async function buildContext(userText, { sessionId = null, turns = 0, summary = null, light = false, history = [], isolated = false } = {}) {
+  // 评测会话（isolated）：不读用户的个人记忆、过往对话、持仓、知识库和文档偏好——结果要能复现，也不把真实信息带进评测报告
+  if (isolated) return isolatedContext(userText, { sessionId, summary, history });
   const fresh = turns <= 2; // 新对话（或刚开始）：带上最近的对话和没做完的事，方便“接着上次的”
   const [ctx, kbHits, installed, past, recentS, open, rules, currentSession, evidenceContext] = await Promise.all([
     memory.contextFor(conversationFocus(userText, history).memoryQuery, { vector: !light }), light ? [] : kb.search(userText, 4), light ? [] : packs.enabled().catch(() => []),
@@ -184,6 +187,23 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
   return { dynamic: parts.join('\n\n'), kbHits, ...ctx };
 }
 
+/** 评测用的上下文：只有时间、本段对话、项目规则和未央自己的经验 / 技能，没有用户个人信息 */
+async function isolatedContext(userText, { sessionId, summary, history }) {
+  const [ctx, rules, currentSession] = await Promise.all([memory.contextFor(conversationFocus(userText, history).memoryQuery, { vector: false }), loadRules().catch(() => null), sessionId ? sessions.get(sessionId) : null]);
+  const parts = [`当前时间：${new Date().toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' })}（Asia/Shanghai）`, '这是评测会话：不知道用户的个人信息（称呼、家人、过往对话、持仓、偏好），需要时就问或按题面作答。'];
+  if (history.length || summary?.text) parts.push(HISTORY_SOURCE_RULE);
+  const earlier = summaryBlock(summary, sessionId);
+  if (earlier) parts.push(earlier);
+  const work = sessionWorkBlock(currentSession);
+  if (work) parts.push(work);
+  parts.push(ws.mode() === 'folder' ? `工作区：已连接本地文件夹「${ws.folderName()}」` : '工作区：浏览器内的虚拟工作区（用户可下载文件，或连接本地文件夹）');
+  if (rules) parts.push(rulesBlock(rules));
+  if (ctx.core?.persona) parts.push(`## 核心记忆\n【我的设定】${ctx.core.persona}`);
+  if (ctx.lessons?.length) parts.push(`## 经验教训（来自用户反馈）\n${ctx.lessons.map((l) => `- ${l.content}`).join('\n')}`);
+  if (ctx.skills?.length) parts.push(`## 已掌握的技能\n${ctx.skills.map((s) => `### ${s.name}\n${s.description ? `${s.description}\n` : ''}${s.steps}`).join('\n')}`);
+  return { dynamic: parts.join('\n\n'), kbHits: [], core: ctx.core?.persona ? { persona: ctx.core.persona } : null, basics: [], memories: [], episodes: [], lessons: ctx.lessons || [], skills: ctx.skills || [] };
+}
+
 /**
  * @param {object} o
  * @param {{ stream: Function }} o.adapter
@@ -220,7 +240,7 @@ export function trimComputerScreenshots(messages,keep=2) {
   for(const m of shots.slice(0,Math.max(0,shots.length-keep))){delete m.images;m.content=`${m.content}\n（旧界面截图已从模型输入移除；请以最新截图为准。）`;}
 }
 
-async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, maxTotalSteps = null, codeWork = null, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false, describeImages = null, visionLabel = '看图模型', readImageText = null, modelNote = '', hedgeMs = 0 }) {
+async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, maxTotalSteps = null, codeWork = null, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, isolated = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false, describeImages = null, visionLabel = '看图模型', readImageText = null, modelNote = '', hedgeMs = 0 }) {
   const workStartedAt = Date.now();
   const workAnswer = await answerWorkHistory(requirementText, sessionId, { signal, now: now(), onStart: () => emit({ type: 'tool_start', id: 'work-history', name: 'list_work_records', args: {} }) });
   if (workAnswer) {
@@ -246,7 +266,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   let closingTurns = 0;
   let retrievalStopped = false;
   emit({ type: 'state', value: 'processing' });
-  const { ctx, record, requirementContext, archive } = await prepareAgentContext({ userText, priorMessages: history, context, sessionId, summary, light: light || Boolean(questionProfile), requirements, depth, requirementText, emit, buildContext });
+  const { ctx, record, requirementContext, archive } = await prepareAgentContext({ userText, priorMessages: history, context, sessionId, summary, light: light || Boolean(questionProfile), requirements, depth, requirementText, emit, buildContext, isolated });
   ctx.dynamic = (ctx.dynamic || '') + await workHistoryBlock(requirementText, sessionId, { signal });
   if (codeWork?.enabled) ctx.dynamic = (ctx.dynamic || '') + '\n' + codeWorkBlock(codeWork, await packs.get('code-development'));
   const convo = [...history.map((m) => ({ ...m })), { role: 'user', content: userText, ...(images.length && { images }) }];
@@ -287,7 +307,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   const own = [...(oneFile ? [] : [plan.tool]), review.tool, executionTool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: availableTools })] : []), ...(lookupDeadline && lookupControl?.release ? [moreTimeTool] : [])].filter((t) => !tools.some((x) => x.name === t.name));
   // 工具按需加载：工具多时只带常用的完整说明，其余列名字、用 tool_search 加载（见 toolLoader.js）
   // 普通问答、查资料：做文档的工具先只列名字（用到时按名字调用或 tool_search 加载）
-  let loader = createToolLoader(light ? [] : questionProfile ? tools : [...tools, ...own], { defer: isQuickLookup(requirementText, images) ? DOCUMENT_TOOLS : null, ...(codeWork?.enabled && { core: CODE_TASK_CORE }) });
+  // “字大点 / 不要横线”这类短句是在改刚做的文件：做文档的工具要常驻（第一轮 30 题实测：被当成普通问答，先搜工具、再找文件、先试改文字失败，一道题 15 次调用）
+  let loader = createToolLoader(light ? [] : questionProfile ? tools : [...tools, ...own], { defer: isQuickLookup(requirementText, images) && !styleRequests(requirementText).length ? DOCUMENT_TOOLS : null, ...(codeWork?.enabled && { core: CODE_TASK_CORE }) });
   const loadGUI=()=>{if(availableTools.some(t=>t.name==='computer_look'))for(const name of ['computer_look','computer_click','computer_type','computer_key','computer_scroll','computer_drag'])loader.get(name);};
   if(!light&&(computerTask==='gui'||computerTaskKind(requirementText,{history})==='gui'))loadGUI();
   let outputRepairs = 0;

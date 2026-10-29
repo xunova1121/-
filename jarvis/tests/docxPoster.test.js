@@ -85,3 +85,22 @@ describe('“不要横线”', () => {
     expect(after.rules).toBe(0);
   });
 });
+
+describe('保存的字号偏好不能挡住“大点 / 小点”（第一轮 30 题实测：偏好 14 磅让“正文字大点”变成 16→14）', () => {
+  it('偏好只当起点；有上一版就按上一版放大', () => {
+    const asks = styleRequests('正文字大点，标题下面不要横线');
+    const pref = { body: { size: 14 } };
+    const r = relativeTypography(pref, asks, { previous: { body: 16, title: 22 }, request: '正文字大点，标题下面不要横线', explicit: {} });
+    expect(r.typography.body.size).toBe(20);
+    expect(r.typography.title).toBeUndefined(); // 只说了正文，标题不动
+  });
+  it('没有上一版时从偏好起步', () => {
+    const r = relativeTypography({ body: { size: 14 } }, styleRequests('字体大点'), { request: '字体大点', explicit: {} });
+    expect(r.typography.body.size).toBe(18);
+  });
+  it('这次原话里说了具体字号的仍然照用户的', () => {
+    const r = relativeTypography({ body: { size: 14 } }, styleRequests('正文四号，字体大点'), { previous: { body: 16, title: 22 }, request: '正文四号，字体大点', explicit: { body: { size: 14 } } });
+    expect(r.typography.body.size).toBe(14);
+    expect(r.typography.title.size).toBe(28);
+  });
+});

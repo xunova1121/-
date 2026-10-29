@@ -15,7 +15,7 @@ import { jointCases, jointSuiteVersion, JOINT_REPEATS } from './joint-cases.mjs'
 import { runCase, serverAPI } from './runner.mjs';
 import { checkResult } from './baseline-report.mjs';
 import { validateLiveConfig } from './baseline.mjs';
-import { fileDownloader, turnFileFacts, fileProblems } from './joint-files.mjs';
+import { fileDownloader, turnFileFacts, fileProblems, turnEvidence } from './joint-files.mjs';
 import { runMetrics, stability, jointSummary, compareRounds } from './joint-report.mjs';
 import { rubricVersion } from './joint-rubric.mjs';
 
@@ -43,7 +43,10 @@ export async function runJointOnce(api, item, { download, runId, attempt, signal
     turns.push(next);
     if (item.file) fileFacts.push(await turnFileFacts(next, download));
   }
-  if (cleanup) await cleanup().catch(() => {});
+  const createdSchedules = cleanup ? await cleanup().catch(() => []) : null;
+  // 给评审员的证据：每轮用了哪些工具（次数 / 失败）、交付文件读回、建了哪些提醒（第一轮实测评审员看不到这些，误判了一批题）
+  const evidence = [];
+  for (const t of turns) evidence.push({ tools: Object.entries(t.timing?.tools || {}).map(([name, v]) => ({ name, calls: v.calls, failed: v.failed })), files: await turnEvidence(t, download).catch(() => []), outcome: t.review?.outcome ?? null });
   const last = turns.at(-1);
   const mechanical = checkResult(item, last);
   if (item.followup && turns.length !== 2) mechanical.failures.push('追问没跑成');
@@ -56,17 +59,21 @@ export async function runJointOnce(api, item, { download, runId, attempt, signal
     turns: turns.map((t) => ({ prompt: t.prompt, status: t.status, answer: t.answer, files: t.files, timing: t.timing, clientTotalMs: t.clientTotalMs, failure: t.failure || null, review: t.review || null })),
     mechanical: { mechanical: mechanical.failures.length ? 'failed' : 'passed', failures: mechanical.failures, warnings: mechanical.warnings },
     fileFacts: item.file ? fileFacts : null,
+    evidence,
+    ...(createdSchedules && { createdSchedules }),
     fileProblems: problems,
     metrics: runMetrics(turns, prices),
     judgement: null
   };
 }
 
-/** 第 22 题：删掉这一轮新建的提醒（名字或内容带“喝水”的、开跑后才有的） */
+/** 第 22 题：删掉这一轮新建的提醒（名字或内容带“喝水”的、开跑后才有的）；删之前记下建了什么，给评审员当证据 */
 export function scheduleCleaner(api, remove, before) {
   return async () => {
     const list = await api('/api/server/schedules');
-    for (const s of list || []) if (!before.has(s.id) && /喝水/.test(`${s.title || ''}${s.prompt || ''}`)) await remove(s.id);
+    const created = (list || []).filter((s) => !before.has(s.id));
+    for (const s of created) if (/喝水/.test(`${s.title || ''}${s.prompt || ''}`)) await remove(s.id);
+    return created.map((s) => ({ title: String(s.title || '').slice(0, 60), kind: s.kind ?? null, at: s.at ?? null, time: s.time ?? null, nextRun: s.nextRun ?? s.next ?? null, enabled: s.enabled ?? null }));
   };
 }
 

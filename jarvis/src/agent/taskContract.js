@@ -1,5 +1,8 @@
 import { mediaRequirement } from './actionDelivery.js';
 /** 合约只提取明确交付类型，完整要求仍由需求账本保存，不用它猜用户意图。 */
+/** 带数字的方案比较（“选哪个 / 哪个划算 / 值不值”，题里本来就要求有数字）：也要用工具算，第一轮 30 题实测决策题结论对、差额算错 */
+const CHOICE_MATH = /选哪个|哪个(?:更)?(?:划算|便宜|省钱|合适|好)|划不划算|(?:更|还是[^，,。？?]{0,12})划算|合算|值不值|哪种方案更/;
+
 export function taskContract(text = '') {
   const value = String(text).slice(0, 8000);
   // “把结果更新到那个 Excel 里”也是要交文件：以前没认出来，模型口头说“已更新”就收尾了
@@ -26,7 +29,7 @@ export function taskContract(text = '') {
   const codeOnly = /代码|函数|JavaScript|TypeScript|Python/i.test(value) && /不运行|不执行|直接展示|只给代码/.test(value);
   // 用户贴进来的长文（交接记录、报告原文）里顺带出现“计算”“百分比”不算要算数：长文只看开头是不是在请你算
   const askText = value.length > 600 ? value.slice(0, 200) : value;
-  const calculation = !codeOnly && (value.length <= 600 || /计算|核算|验算|算一下|算出|求出|合计|加起来/.test(askText)) && (!formats.length || /计算|核算|验算|算出|算式|求出|数值校验/.test(value)) && /\d/.test(value) && /计算|算式|净重|货款|净盈利|手续费|相隔|权重|盈亏|收益率|孕周|多少天|相差|日期差|百分比|合计|加起来/.test(value);
+  const calculation = !codeOnly && (value.length <= 600 || /计算|核算|验算|算一下|算出|求出|合计|加起来/.test(askText)) && (!formats.length || /计算|核算|验算|算出|算式|求出|数值校验/.test(value)) && /\d/.test(value) && (/计算|算式|净重|货款|净盈利|手续费|相隔|权重|盈亏|收益率|孕周|多少天|相差|日期差|百分比|合计|加起来/.test(value) || CHOICE_MATH.test(value));
   // 用户要她记住（不是在问“记住了吗”）：必须真的调用记忆工具；问有没有记住：必须先查
   const asking =
     /(?:记住|记下|记进去|放进记忆|记到记忆|记得)(?:了)?(?:吗|么|没有|没)[？?]?\s*$/m.test(value) || /有没有(?:记|放进)|你有(?:记|放进)[^。！!]*[吗么]/.test(value);

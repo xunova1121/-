@@ -14,7 +14,7 @@ import { throwControl } from '../core/networkRequest.js';
 import { S, str, fmtSize, findTemplate } from './documentSchema.js';
 import { formattingSource, verifyFormattingContent } from './documentPreservation.js';
 import { formatDocumentFile } from './documentFileFormat.js';
-import { documentTypography } from './documentTypography.js';
+import { documentTypography, typographyFromText } from './documentTypography.js';
 import { presentationDesign } from './presentationDesign.js';
 import { spreadsheetDesign, SHEET_STYLE_IDS, SHEET_STYLE_NAMES } from './spreadsheetDesign.js';
 
@@ -124,7 +124,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       const noRules = asks.some((a) => a.id === 'noRule');
       let scale = 0;
       if (asks.some((a) => a.id === 'bigger' || a.id === 'smaller'))
-        ({ typography, scale } = relativeTypography(typography, asks, { kind: design.kind, previous: await lastStyle(sessionId, executionScope), format, request: rawRequestText || goal }));
+        ({ typography, scale } = relativeTypography(typography, asks, { kind: design.kind, previous: await lastStyle(sessionId, executionScope), format, request: rawRequestText || goal, explicit: typographyFromText(rawRequestText || goal) }));
       const { forbidCover, requireCover } = presentationCover(goal);
       const expectedSlides = format === 'pptx' ? requestedSlides('PPT ' + goal) : null;
       const callKey = await keyOf({ format, path, title, content, theme, design, sheetDesign, kind, cover, subtitle, author, issuer, docNo, toc, template, templateId, requirements, goal, typography, noRules, scale, sessionId, sourceId: source?.id, workflow: ctx.documentContentReview?.workflowFile || null });

@@ -222,6 +222,7 @@ export function createOpenAIAdapter({ baseURL, apiKey, headers = {}, retryDelays
 }
 
 const noTierModels = new Set(); // 不认 service_tier 的型号：去掉后不再带
+const noUsageModels = new Set(); // 不认 stream_options 的中转站+型号：去掉后不再带
 function createOnce({ baseURL, apiKey, headers = {}, serviceTier = '' }) {
   return {
     async stream({ signal: outer, ...req }) {
@@ -230,7 +231,7 @@ function createOnce({ baseURL, apiKey, headers = {}, serviceTier = '' }) {
     }
   };
   async function streamOnce({ model, system, messages, tools, signal, onText, effort }, guard) {
-    const send = (withTools, withEffort, withTier = useTier) => fetch(`${baseURL.replace(/\/$/, '')}/chat/completions`, {
+    const send = (withTools, withEffort, withTier = useTier, withUsage = useUsage) => fetch(`${baseURL.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(apiKey && { Authorization: `Bearer ${apiKey}` }), ...headers },
       body: JSON.stringify({
@@ -240,17 +241,23 @@ function createOnce({ baseURL, apiKey, headers = {}, serviceTier = '' }) {
         ...(withTools && tools?.length && { tools: toOpenAITools(tools) }),
         // 思考强度：日常对话让推理模型少想一点，首字快很多（不支持的模型会报错，自动去掉重试）
         ...(withEffort && { reasoning_effort: effort }),
-        ...(withTier && { service_tier: serviceTier })
+        ...(withTier && { service_tier: serviceTier }),
+        // 让服务商在最后一包带上 Token 用量（评测算每次调用花了多少）；不认这个参数的中转站自动去掉重试
+        ...(withUsage && { stream_options: { include_usage: true } })
       }),
       signal
     });
     let useTier = Boolean(serviceTier) && !noTierModels.has(model);
+    let useUsage = !noUsageModels.has(baseURL + '|' + model);
     let useTools = !noToolModels.has(model);
     let useEffort = Boolean(effort) && !noEffortModels.has(model);
     let res = await guard.race(send(useTools, useEffort));
     for (let retry = 0; retry < 2 && res.status === 400; retry++) {
       const detail = await res.clone().text().catch(() => '');
-      if (useTier && /service_tier|service tier/i.test(detail)) {
+      if (useUsage && /stream_options|include_usage/i.test(detail)) {
+        noUsageModels.add(baseURL + '|' + model);
+        useUsage = false;
+      } else if (useTier && /service_tier|service tier/i.test(detail)) {
         noTierModels.add(model);
         useTier = false;
       } else if (useEffort && /reasoning_effort|reasoning effort|unsupported parameter|unknown parameter|unrecognized/i.test(detail)) {
