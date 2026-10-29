@@ -235,7 +235,10 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const cfg = withoutCodeCredentials(await getConfig());
     // 记忆按意思找：用能力表“记忆向量”那一项（服务器没有跨域限制）；没有就只按关键字
     memory.configureMemory({ llm: helper(cfg, 'write'), embedder: createEmbedder(cfg, { direct: true }) });
-    const policy = codeTaskPolicy({ text: task.text, images: task.images.length, hasRepos: Boolean(codeRepos && !task.evaluationId), resume: task.resumeFrom, maxSteps, codeMaxSteps });
+    const candidate = codeTaskPolicy({ text: task.text, images: task.images.length, hasRepos: Boolean(codeRepos && !task.evaluationId), resume: task.resumeFrom, maxSteps, codeMaxSteps });
+    // 管理器始终存在，不代表用户已连接仓库；不能因此给普通代码问答套80步工作模式。
+    const connected = candidate.enabled && codeRepos.connected ? await codeRepos.connected() : candidate.enabled;
+    const policy = candidate.enabled && !connected ? codeTaskPolicy({ text: task.text, images: task.images.length, hasRepos: false, maxSteps, codeMaxSteps }) : candidate;
     const kind = policy.kind;
     task.codeDeadline = policy.enabled ? setTimeout(() => { task.codeTimeout = true; task.ctrl.abort(Object.assign(new Error('代码任务达到总时限，保留工作副本，可继续'), { code: 'CODE_TASK_TIMEOUT', kind: 'timeout' })); }, Math.max(1, Math.min(20 * 60_000, Number(codeTaskMs) || CODE_TASK_MS))) : null;
 

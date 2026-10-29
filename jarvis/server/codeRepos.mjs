@@ -224,6 +224,10 @@ export function createCodeRepos({ baseDir, getConfig, git = createGitRunner(), h
     }
   };
   return {
+    async connected() {
+      const value = (await getConfig()).codeRepos;
+      return Boolean(value?.repository && value?.verifiedAt);
+    },
     clone,
     // 独立于工具摘要的持久索引；只查真实会话、当前连接仓库，最多8项。
     async workspaces(sessionId, execution = {}) {

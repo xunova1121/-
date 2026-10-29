@@ -249,6 +249,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/jarvis-e2e"
           node e2e/server-mode.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/code-repos.mjs "$RUNNER_TEMP/jarvis-e2e/code-repos"
+          node e2e/code-work.mjs "$RUNNER_TEMP/jarvis-e2e/code-work"
           node scripts/pack-server.mjs "${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('1.0.{0}', github.run_number) }}" release-server
       - name: 上传服务器版
         uses: actions/upload-artifact@v4

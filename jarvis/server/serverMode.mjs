@@ -232,6 +232,16 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     }
     // 手机 / 电脑上卸载技能时，服务器上的那份也删掉（不然任务照样会用到）
     const skillPath = pathname.match(/^\/api\/server\/skills\/([^/]{1,200})$/);
+    if (skillPath && req.method === 'PATCH') {
+      let skillName = '';
+      try { skillName = decodeURIComponent(skillPath[1]); } catch { json(res, 400, { error: '技能名不对' }); return true; }
+      const body = await readJson(req);
+      if (typeof body.enabled !== 'boolean') { json(res, 400, { error: 'enabled必须是布尔值' }); return true; }
+      if (!await skillPacks.get(skillName)) { json(res, 404, { error: '服务器上没有这个技能；不会自动重装已卸载技能' }); return true; }
+      await skillPacks.setEnabled(skillName, body.enabled);
+      json(res, 200, { name: skillName, enabled: (await skillPacks.get(skillName)).enabled });
+      return true;
+    }
     if (skillPath && req.method === 'DELETE') {
       let skillName = '';
       try { skillName = decodeURIComponent(skillPath[1]); } catch { json(res, 400, { error: '技能名不对' }); return true; }

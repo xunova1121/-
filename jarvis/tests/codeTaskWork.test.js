@@ -30,6 +30,36 @@ afterEach(async () => {
 });
 
 describe('代码开发工作方式', () => {
+  it('服务器未连接仓库时不加载代码工作块，也不读取工作副本索引', async () => {
+    await packs.seedBuiltins();
+    const inputs = [];
+    const runner = createTaskRunner({
+      codeRepos: {
+        connected: async () => false,
+        workspaces: async () => {
+          throw new Error('不应读取未连接索引');
+        }
+      },
+      getConfig: async () => ({ ...DEFAULT_CONFIG, provider: 'mock', autoMemory: false }),
+      makeTools: () => [],
+      makeAdapter: () => ({
+        model: 'fixture-default',
+        adapter: {
+          kind: 'mock',
+          stream: async (input) => {
+            inputs.push(JSON.stringify(input));
+            return { text: '请先连接仓库。', toolCalls: [], stop: 'end_turn' };
+          }
+        }
+      })
+    });
+    runners.push(runner);
+    const task = await runner.start({ text: '检查仓库代码' });
+    await until(() => ['done', 'error'].includes(runner.get(task.id).status));
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]).not.toContain('## 当前代码任务');
+    expect((await sessions.get(task.sessionId)).taskCheckpoint.codeTaskId).toBeUndefined();
+  });
   it('80步硬上限仅用于动手的仓库任务，图片/普通问答/未连接不扩预算', () => {
     expect(codeTaskPolicy({ text: '修复GitHub仓库的失败测试', hasRepos: true })).toMatchObject({
       enabled: true,

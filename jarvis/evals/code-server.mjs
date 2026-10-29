@@ -10,24 +10,26 @@ import { createGitRunner } from '../server/codeGit.mjs';
 import { localCodeDocker } from '../server/codeDocker.mjs';
 import { createFileStore } from '../server/fileStore.mjs';
 import { useBackend } from '../src/agent/store.js';
-import { DEFAULT_CONFIG, createAdapter } from '../src/llm/config.js';
-import { routeFor } from '../src/llm/router.js';
+import { createGitHubHost } from '../server/gitHosting.mjs';
 import * as sessions from '../src/agent/sessions.js';
 import { seedBuiltins } from '../src/agent/skillPacks.js';
-import { validateLiveConfig } from './baseline.mjs';
 import { codeAcceptance } from './code-server-acceptance.mjs';
+import { CODE_TEST_REPOSITORY, loadCodeLiveConfig, liveInputError, liveFailure } from './code-live-config.mjs';
 
-const REPOSITORY = 'xunova1121/weiyang-code-sandbox';
+const REPOSITORY = CODE_TEST_REPOSITORY;
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const invalid = (message) => Object.assign(new Error(message), { code: 'CODE_LIVE_INPUT' });
-export async function main(args = process.argv.slice(2)) {
+const invalid = liveInputError;
+export async function main(args = process.argv.slice(2), { runDocker = localCodeDocker } = {}) {
   if (!args.includes('--live')) {
     console.log('仅计划：--live后用服务器当前模型，自主读取公开sandbox、复现失败、只改src业务代码、lint/test。独立目录；不推送、不读samples隐藏答案。');
     return;
   }
   const option = (key, fallback) => args.find((item) => item.startsWith(key + '='))?.slice(key.length + 1) || fallback;
-  const production = await fs.realpath(option('--data-dir', '/opt/jarvis/data'));
-  const folder = path.resolve(option('--out-dir', '/tmp/weiyang-code-live-' + randomUUID()));
+  const inputDirectory = path.resolve(option('--data-dir', '/opt/jarvis/data'));
+  const production = await fs.realpath(inputDirectory).catch(error => { if (['ENOENT', 'ENOTDIR'].includes(error.code)) return inputDirectory; throw error; });
+  const requestedFolder = path.resolve(option('--out-dir', '/tmp/weiyang-code-live-' + randomUUID()));
+  const parent = await fs.realpath(path.dirname(requestedFolder));
+  const folder = path.join(parent, path.basename(requestedFolder));
   if (!folder.startsWith('/tmp/') || folder === production || folder.startsWith(production + path.sep)) throw invalid('输出必须是/tmp下独立新目录');
   await fs.mkdir(folder, { mode: 0o700 }); // 已有目录拒绝重用，防止第二次提交测试。
   await fs.chmod(folder, 0o700);
@@ -52,21 +54,11 @@ export async function main(args = process.argv.slice(2)) {
   const display = console.log.bind(console),
     savedLog = console.log;
   try {
-    const configFile = path.join(production, 'config.json');
-    if ((await fs.stat(configFile)).size > 2_000_000) throw invalid('生产配置过大');
-    const cfg = {
-      ...DEFAULT_CONFIG,
-      ...JSON.parse(await fs.readFile(configFile, 'utf8')),
-      autoMemory: false,
-      codeRepos: { provider: 'github', repository: REPOSITORY, verifiedAt: new Date().toISOString(), token: '', protectDefaultBranch: true }
-    };
-    const route = routeFor(cfg, 'code');
-    report.selected = validateLiveConfig(route.cfg); // 只记录实际代码线路的服务商/型号。
-    const prepared = createAdapter(route.cfg);
-    if (prepared.problem) throw invalid('编程线路未配置完整，未请求模型；请先在模型界面完成设置');
+    const { cfg, selected } = await loadCodeLiveConfig(production);
+    report.selected = selected;
     const image = process.env.JARVIS_CODE_SANDBOX_IMAGE;
     if (!image) throw invalid('缺JARVIS_CODE_SANDBOX_IMAGE；先配置已安装的Node/npm镜像，未请求模型');
-    const ready = await localCodeDocker(['image', 'inspect', '--format', '{{.Id}}', image], { timeout: 5000, signal: ctrl.signal });
+    const ready = await runDocker(['image', 'inspect', '--format', '{{.Id}}', image], { timeout: 5000, signal: ctrl.signal });
     if (ready.exitCode !== 0 || !/^sha256:[a-f0-9]{64}$/.test(ready.stdout.trim())) throw invalid('本地Docker镜像不可用；未请求模型');
     report.imageId = ready.stdout.trim();
     const sandbox = createCodeSandbox({ image, baseDir: path.join(folder, 'jobs'), registry: process.env.JARVIS_CODE_NPM_REGISTRY });
@@ -81,9 +73,13 @@ export async function main(args = process.argv.slice(2)) {
     report.readiness = await sandbox.run({ root: probe, files: ['package.json'], command: 'test' }, { signal: ctrl.signal });
     if (!report.readiness.ok) throw invalid('隔离镜像的node/npm/tar或离线安装预检未通过；未请求模型');
 
+    // 先验证已有令牌，不能把失效凭据扔给模型反复重试，更不能静默换成匿名连接。
+    const repository = await createGitHubHost().repository(cfg.codeRepos, { signal: ctrl.signal });
+    if (repository.defaultBranch !== 'main') throw invalid('测试仓库默认分支已变化，暂停验收以免核对错误分支');
+
     const git = createGitRunner();
     const remoteHead = async () => {
-      const value = await git(['ls-remote', 'https://github.com/' + REPOSITORY + '.git', 'refs/heads/main'], { signal: ctrl.signal });
+      const value = await git(['ls-remote', 'https://github.com/' + REPOSITORY + '.git', 'refs/heads/main'], { signal: ctrl.signal, token: cfg.codeRepos.token });
       const head = value.stdout.split(/\s/)[0];
       if (!/^[a-f0-9]{40}$/.test(head)) throw invalid('无法核对测试仓库main');
       return head;
@@ -160,24 +156,25 @@ export async function main(args = process.argv.slice(2)) {
     const modelTest = report.acceptance.runs.filter((item) => item.command === 'test').at(-1);
     if (!report.independentTest.ok || report.independentTest.sourceDigest !== modelTest?.sourceDigest) {
       report.acceptance.state = 'failed';
+      report.acceptance.codeTests = 'failed';
       report.acceptance.failures.push('最终文件独立重测未通过或与模型测试快照不同');
     }
   } catch (error) {
     report.status = task ? 'error' : 'blocked_readiness';
     // 不记录不受控异常正文，模型/服务商错误正文可能包含配置片段。
-    report.failure = {
-      code: /^[A-Z_]{1,80}$/.test(error.code || '') ? error.code : 'CODE_LIVE_FAILED',
-      ...(error.code === 'CODE_LIVE_INPUT' && { message: error.message })
-    };
+    report.failure = liveFailure(error);
     report.acceptance.state = 'failed';
   } finally {
+    if (task && ['queued', 'running'].includes(runner.get(task.id)?.status)) runner.stop(task.id);
     repos?.abortAll();
+    await runner?.settled();
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);
     console.log = savedLog;
     report.endedAt = new Date().toISOString();
     await save();
     display(`实测状态：${report.status}；代码验收：${report.acceptance.state}`);
+    if (report.failure?.message) display(report.failure.message);
     display('私有报告：' + path.join(folder, 'report.json'));
     display('报告含代码、日志和回答，不含生产配置；不更新正式服务、不推送仓库。');
   }

@@ -12,11 +12,15 @@ on:
         description: '只验证WebGL恢复，不打包、不发布'
         type: boolean
         default: false
+      p7_only:
+        description: '只验证P7及固定评测运行时，不打包、不发布'
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   unit:
-    if: inputs.webgl_only != true
+    if: inputs.webgl_only != true && inputs.p7_only != true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -31,6 +35,40 @@ jobs:
           cache-dependency-path: jarvis/package-lock.json
       - run: npm ci --no-audit --no-fund
       - run: npm test
+  p7:
+    if: github.event_name == 'workflow_dispatch' && inputs.p7_only == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - run: npx vitest run tests/codeRuntime.test.js tests/codeLiveReadiness.test.js tests/codeShell.test.js tests/serverSkillState.test.js tests/codeServerAcceptance.test.js tests/codeTaskWork.test.js tests/codeWorkspaceRecovery.test.js
+      - run: node evals/code-runtime.mjs --from-source evals/code-runtime-manifest.json .
+      - run: npm run build
+      - name: Original browser regression (unchanged thresholds)
+        run: |
+          mkdir -p "$RUNNER_TEMP/p7/smoke"
+          node server/server.mjs > "$RUNNER_TEMP/p7/gateway.log" 2>&1 &
+          gateway_pid=$!
+          trap 'kill "$gateway_pid" 2>/dev/null || true' EXIT
+          node --input-type=module -e 'for(let i=0;i<100;i++){try{if((await fetch("http://127.0.0.1:8787")).ok)process.exit(0)}catch{}await new Promise(r=>setTimeout(r,100))}process.exit(1)'
+          node e2e/smoke.mjs "$RUNNER_TEMP/p7/smoke"
+      - run: node e2e/code-repos.mjs "${{ runner.temp }}/p7/code-repos"
+      - run: node e2e/code-work.mjs "${{ runner.temp }}/p7/code-work"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p7-regression-${{ github.run_id }}
+          path: ${{ runner.temp }}/p7
   webgl:
     if: github.event_name == 'workflow_dispatch' && inputs.webgl_only == true
     runs-on: ubuntu-latest

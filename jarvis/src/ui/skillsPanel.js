@@ -64,7 +64,24 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
     const compatibility = skillCompatibility(p, { mobile: MOBILE });
     const builtinTitle = [...BUILTIN_SKILLS, ...MORE_BUILTIN_SKILLS].find(s => parseFrontmatter(s.text).meta.name === p.name)?.title;
     const toggle = el('input', { type: 'checkbox', checked: p.enabled, title: p.enabled ? '停用' : '启用' });
-    toggle.addEventListener('change', async () => { await packs.setEnabled(p.name, toggle.checked); refresh(); });
+    toggle.addEventListener('change', async () => {
+      const enabled = toggle.checked;
+      toggle.disabled = true;
+      try {
+        const c = server();
+        if (c) {
+          if (!c.setSkillEnabled) throw new Error('请先更新服务器后再修改技能启停');
+          await c.setSkillEnabled(p.name, enabled);
+        }
+        await packs.setEnabled(p.name, enabled);
+        await refresh();
+      } catch (error) {
+        toggle.checked = p.enabled;
+        toast(`技能启停没有保存：${error.message}`);
+      } finally {
+        toggle.disabled = false;
+      }
+    });
     const view = el('button', { type: 'button', className: 'btn ghost sm', textContent: '查看' });
     view.addEventListener('click', () => show(p));
     const use = el('button', { type: 'button', className: 'btn ghost sm', textContent: '使用', disabled: !p.enabled || compatibility.status === 'blocked' });

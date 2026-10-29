@@ -40,3 +40,14 @@ it('索引最多返回8个同会话副本，超出明确标注；停止后不继
     await f.close();
   }
 });
+
+it('仓库管理器存在不等于已连接，断开配置后工作模式不得继续启用', async () => {
+  const f = await codeRepoFixture({ 'a.js': '1' });
+  try {
+    expect(await f.repos.connected()).toBe(true);
+    delete f.cfg.codeRepos;
+    expect(await f.repos.connected()).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
