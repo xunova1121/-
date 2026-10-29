@@ -83,3 +83,13 @@ describe('带数字的“选哪个 / 划算吗”要用工具算（第一轮：�
     expect(taskContract('这件衣服好看吗，199元').calculation).toBe(false);
   });
 });
+
+describe('评审员不能选中语音 / 画图模型（第二轮实测：选中 fun-asr-flash-2026-06-15，每题 400）', () => {
+  it('排除不能聊天的模型，日期不当版本号', () => {
+    const cfg = { provider: 'custom', models: { custom: 'gpt-6-luna', qwen: 'fun-asr-flash-2026-06-15' }, keys: { custom: 'k', qwen: 'k' }, abilities: { reason: { main: { provider: 'custom', model: 'gpt-6.1-sol' } }, embed: { main: { provider: 'qwen', model: 'text-embedding-v4' } } }, fallbackModels: [{ provider: 'qwen', model: 'qwen3-max-2026-01-23' }] };
+    const models = availableModels(cfg).map((l) => l.model);
+    expect(models).not.toContain('fun-asr-flash-2026-06-15');
+    expect(models).not.toContain('text-embedding-v4');
+    expect(judgeConfig(cfg, '', 'gpt-6-luna').models.custom).toBe('gpt-6.1-sol');
+  });
+});

@@ -16,25 +16,31 @@ import { judgePrompt, parseJudgement, rubricVersion } from './joint-rubric.mjs';
 import { stability, jointSummary } from './joint-report.mjs';
 
 const lineCfg = (cfg, provider, model) => ({ ...cfg, provider, models: { ...cfg.models, [provider]: model }, routing: { enabled: false }, abilities: {}, pinModel: true });
-/** 配置里所有能用的模型（能力表、分工、备用线路、各家默认），去重 */
+/** 不能拿来评文字的模型：语音、画图、视频、向量、识字等（第二轮实测：选中了语音识别 fun-asr，每题 400） */
+const NOT_CHAT = /asr|tts|whisper|paraformer|sensevoice|cosyvoice|sambert|speech|audio|realtime|voice|embed|rerank|bge|image|wanx|wan2|flux|cogview|dall|sora|video|kling|ocr|vision|-vl\b|vl-/i;
+/** 配置里能聊天的模型（能力表里除看图 / 识字 / 画图 / 向量以外的项、模型分工、备用线路、主模型），去重 */
 export function availableModels(cfg) {
   const lines = [];
   const add = (provider, model) => {
-    if (!provider || !model || typeof model !== 'string') return;
+    if (!provider || !model || typeof model !== 'string' || NOT_CHAT.test(model)) return;
     if (provider !== cfg.provider && !cfg.keys?.[provider] && !cfg.baseURLs?.[provider]) return;
     if (!lines.some((l) => l.provider === provider && l.model === model)) lines.push({ provider, model });
   };
-  for (const a of Object.values(cfg.abilities || {})) for (const slot of ['main', 'backup']) add(a?.[slot]?.provider, a?.[slot]?.model);
+  for (const [ability, line] of Object.entries(cfg.abilities || {})) if (!['vision', 'ocr', 'image', 'embed'].includes(ability)) for (const slot of ['main', 'backup']) add(line?.[slot]?.provider, line?.[slot]?.model);
   for (const route of Object.values(cfg.routing?.routes || {})) {
     const [p, ...m] = String(route || '').split('::');
     m.length ? add(p, m.join('::')) : add(cfg.routing?.provider || cfg.provider, p);
   }
   for (const f of cfg.fallbackModels || []) add(f?.provider, f?.model);
-  for (const [p, m] of Object.entries(cfg.models || {})) add(p, m);
+  add(cfg.provider, cfg.models?.[cfg.provider]);
   return lines;
 }
-/** 名字看着像强模型的排前面（sol / opus / pro / max / 推理型），同类按版本号 */
-const strength = (model) => (/sol|opus|ultra|\bpro\b|-pro|max|thinking|reason|r1\b/i.test(model) ? 100 : 0) + (Number(String(model).match(/(\d+(?:\.\d+)?)/)?.[1]) || 0);
+/** 名字看着像强模型的排前面（sol / opus / pro / max / 推理型），同类按版本号（只认 0～99，日期不算） */
+const version = (model) => {
+  const n = Number(String(model).match(/(\d+(?:\.\d+)?)/)?.[1]);
+  return Number.isFinite(n) && n < 100 ? n : 0;
+};
+const strength = (model) => (/sol|opus|ultra|\bpro\b|-pro|max|thinking|reason|r1\b/i.test(model) ? 100 : 0) + version(model);
 /**
  * 选评审模型：显式指定 > 配置里和答题模型不同、看着最强的 > 能力表“推理”那一项。
  * 自己评自己分数偏高（第一轮实测：答题和评审都是 gpt-6-luna），所以默认尽量换一个。
