@@ -49,3 +49,28 @@ export async function renderOffice(blob,ext,{signal}={}){
  });
  tail=work;try{return await work;}finally{pending--;}
 }
+
+/** 真正Word97-2003只转换独立副本；PK伪装.doc仍由原内容识别处理。 */
+export async function convertLegacyDoc(blob,{signal}={}){
+ if(signal?.aborted)throw signal.reason;
+ const head=Buffer.from(await blob.slice(0,8).arrayBuffer());
+ if(head.toString('hex')!=='d0cf11e0a1b11ae1')throw Object.assign(new Error('不是Word97-2003的OLE文件，未按后缀强制转换'),{code:'LEGACY_DOC_TYPE'});
+ if(blob.size>20e6)throw Object.assign(new Error('旧DOC超过20MB转换上限'),{code:'LEGACY_DOC_LIMIT'});
+ if(!await officeRenderAvailable())throw Object.assign(new Error('旧DOC转换需要服务器安装LibreOffice'),{code:'LEGACY_DOC_UNAVAILABLE'});
+ if(pending>=4)throw Object.assign(new Error('Office转换繁忙，请稍后重试'),{code:'LEGACY_DOC_BUSY'});pending++;
+ const work=tail.catch(()=>{}).then(async()=>{
+  if(signal?.aborted)throw signal.reason;
+  const dir=await mkdtemp(path.join(os.tmpdir(),'jarvis-old-doc-'));
+  try{
+   const profile=path.join(dir,'profile');await mkdir(path.join(profile,'user'),{recursive:true});
+   await writeFile(path.join(profile,'user','registrymodifications.xcu'),'<?xml version="1.0"?><oor:items xmlns:oor="http://openoffice.org/2001/registry"><item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="MacroSecurityLevel" oor:op="fuse"><value>3</value></prop></item></oor:items>');
+   const input=path.join(dir,'document.doc');await writeFile(input,new Uint8Array(await blob.arrayBuffer()));
+   const result=await command(['-env:UserInstallation='+pathToFileURL(profile).href,'--headless','--nologo','--nodefault','--nolockcheck','--norestore','--convert-to','docx:Office Open XML Text','--outdir',dir,input],{cwd:dir,signal});
+   const output=path.join(dir,'document.docx');if(result.code!==0)throw Object.assign(new Error('旧DOC转换进程失败'),{code:'LEGACY_DOC_FAILED'});
+   const info=await stat(output);if(!info.isFile()||info.size>30e6)throw Object.assign(new Error('旧DOC转换输出无效或超过30MB'),{code:'LEGACY_DOC_OUTPUT'});
+   const bytes=await readFile(output);if(bytes[0]!==0x50||bytes[1]!==0x4b)throw Object.assign(new Error('旧DOC未转换成有效DOCX'),{code:'LEGACY_DOC_OUTPUT'});
+   return new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+  }finally{await rm(dir,{recursive:true,force:true});}
+ });
+ tail=work;try{return await work;}finally{pending--;}
+}

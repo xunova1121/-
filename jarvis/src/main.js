@@ -1,3 +1,4 @@
+import { createCodeProjectsUI } from './app/codeProjects.js';
 /**
  * 未央前端入口：只负责“组装”——按顺序创建各模块、恢复上次的设置、启动。具体功能都在 app/ 下：
  *
@@ -296,4 +297,5 @@ initRenderHealthPanel({
   }
 });
 
+mount(app, createCodeProjectsUI(app));
 app.initPendingList();

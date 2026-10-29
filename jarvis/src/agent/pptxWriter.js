@@ -1,3 +1,4 @@
+import { applyPresentationTypography } from './officeTypography.js';
 import { slideBudget } from './documentPageBudget.js';
 /**
  * Markdown → PPT（.pptx），用 PptxGenJS（MIT）。16:9，配色用主题（themes.js）。
@@ -311,7 +312,7 @@ function chartColumns(table) {
  * @param {{ title: string, content: string, theme: object, subtitle?: string, author?: string, date?: string, loadImage?: (src: string) => Promise<Uint8Array|null> }} o
  * @returns {Promise<{ blob: Blob, info: { slides: number, layouts: string[], missingImages: string[], preview: object[], layoutIssues: object[] } }>}
  */
-export async function makePptx({ title, content, theme, subtitle = '', author = '', date = '', loadImage = null, style = 'business', expectedSlides = null, requireCover = false, forbidCover = false }) {
+export async function makePptx({ title, content, theme, subtitle = '', author = '', date = '', loadImage = null, style = 'business', expectedSlides = null, requireCover = false, forbidCover = false, typography = {} }) {
   const PptxGenJS = (await import('pptxgenjs')).default;
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
@@ -330,7 +331,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   const layouts = [];
   // 每页放了什么都记下来：生成后估算字放不放得下、画预览图给模型看（slidePreview.js）
   const records = [];
-  const addSlide = (title) => { const r = recordSlide(pptx.addSlide()); records.push({ n: records.length + 1, title, items: r.items, slide: r.slide }); return r.slide; };
+  const addSlide = (title) => { const r = recordSlide(pptx.addSlide()); applyPresentationTypography(r.slide, typography, title); records.push({ n: records.length + 1, title, items: r.items, slide: r.slide }); return r.slide; };
 
   let slides = parseSlides(title, content);
   // 第一页如果就是文档标题（# 标题后面没有内容），当作封面

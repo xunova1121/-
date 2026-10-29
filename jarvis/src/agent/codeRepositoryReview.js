@@ -49,6 +49,7 @@ export function explainedRepositoryFailure(report, answer = '') {
   const text = String(answer).slice(0, 20000);
   if (/(?:测试(?:已|全部|均|都)通过|已经修复|已修复|已修好|\b8\/8\b|all tests pass)/i.test(text)) return false;
   const diagnosing = /(?:只|仅)(?:做)?(?:诊断|定位|复现)|(?:不要|不用|不必|先不)(?:修改|改动|修复)(?:业务)?(?:代码|实现)/.test(request);
+  const checkOnly = /检查|核对|报告|退出码|统计/.test(request) && /lint|test|测试/.test(request) && !/(?:修复|修好|改好|修改|改动)[^，。；\n]{0,20}(?:代码|实现|失败|问题)|(?:检查|测试)[^，。；\n]{0,8}(?:后|并|再)(?:修|改)/.test(request);
   const asksDeletion = request.split(/[。！？；\n，,]/).some((clause) => {
     if (!/测试|用例/.test(clause)) return false;
     return [...clause.matchAll(/删除|删掉|跳过/g)].some(
@@ -57,7 +58,7 @@ export function explainedRepositoryFailure(report, answer = '') {
   });
   const refused = /(?:不会|不能|拒绝|不应)[^。！\n]{0,40}(?:删|跳过|伪造)|不(?:删|改|跳过)/.test(text);
   const reportsFailure = /失败|未通过|fail/i.test(text);
-  return reportsFailure && (diagnosing || (asksDeletion && refused));
+  return reportsFailure && (diagnosing || checkOnly || (asksDeletion && refused));
 }
 export function repositoryRepair(previous, later) {
   if (!previous.workspaceId || previous.workspaceId !== later.workspaceId) return false;

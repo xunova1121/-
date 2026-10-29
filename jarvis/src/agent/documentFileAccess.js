@@ -3,7 +3,7 @@ import {searchLines} from './fileSearch.js';
 import {throwControl} from '../core/networkRequest.js';
 export const navigableOffice=path=>/\.(?:docx|pdf|pptx|xlsx|xls|ods)$/i.test(path);
 const invalid=message=>Object.assign(new Error(message),{code:'DOCUMENT_NAVIGATION',kind:'input'});
-export function createDocumentFileAccess(navigation,segment){
+export function createDocumentFileAccess(navigation,segment,{legacyDoc=false}={}){
  return {
   async read({path,offset=0,query,view='text',sectionId,catalogOffset=0,limit=8,recover=false},{signal}={}){
    if(sectionId&&(query||view==='sections'))throw invalid('章节正文、关键词和目录模式请分别读取');
@@ -17,7 +17,7 @@ export function createDocumentFileAccess(navigation,segment){
    throwControl(null,signal);
    // 后缀是 .doc、内容其实是新版 Word（PK 开头）的照 docx 搜；真老 .doc 或不存在的照旧报错，不当零命中
    const zippedDoc=path&&/\.doc$/i.test(path)&&await ws.readBlob(ws.normalize(path)).then(async b=>{const h=new Uint8Array(await b.slice(0,2).arrayBuffer());return h[0]===0x50&&h[1]===0x4b;}).catch(()=>false);
-   if(path&&(navigableOffice(path)||zippedDoc)){
+   if(path&&(navigableOffice(path)||zippedDoc||(legacyDoc&&/\.doc$/i.test(path)))){
     if(regex)throw invalid('Office/PDF定位暂只支持普通关键词，请关闭regex后检索确切原文');
     const doc=await navigation.read(path,{signal});
     return JSON.stringify({...(await navigation.search(doc,query,{signal})),scannedDocuments:1});

@@ -9,7 +9,7 @@ import { dependencyPlan, downloadDependencies } from './codeDependencies.mjs';
 import { codeContainer, localCodeDocker } from './codeDocker.mjs';
 const WORKER = fileURLToPath(new URL('./codeSandboxWorker.mjs', import.meta.url));
 
-async function copySource(root, names, source, token, signal) {
+export async function copyCodeSource(root, names, source, token, signal) {
   const selected = [...new Set(names)].filter((name) => allowedCodePath(name) && !name.split('/').includes('node_modules'));
   if (!selected.length || selected.length > 1000) throw codeError('CODE_PROJECT_LIMIT', '项目为空或超过1000文件，本期未执行');
   const hash = createHash('sha256');
@@ -96,7 +96,7 @@ export function createCodeSandbox({
         const worker = path.join(directory, 'runner.mjs');
         await fs.copyFile(WORKER, worker);
         await fs.chmod(worker, 0o644);
-        const snapshot = await copySource(root, files, source, token, signal);
+        const snapshot = await copyCodeSource(root, files, source, token, signal);
         const pkg = await jsonFile(path.join(source, 'package.json'));
         if (typeof pkg.scripts?.[command] !== 'string' || !pkg.scripts[command].trim() || pkg.scripts[command].length > 4000)
           throw codeError('CODE_SCRIPT', 'package.json没有有效的' + command + '脚本，未伪装成测试通过');

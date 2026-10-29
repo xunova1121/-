@@ -1,3 +1,4 @@
+import { officeTypography } from './officeTypography.js';
 import { requestedSlides, presentationCover } from './documentPageBudget.js';
 import * as ws from './workspace.js';
 import { generate } from './docs.js';
@@ -70,6 +71,8 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         format: { type: 'string', enum: ['docx', 'pptx', 'xlsx', 'pdf', 'html', 'md', 'txt', 'csv'] },
         path: str('保存路径（扩展名会自动修正）'),
         title: str('文档标题'),
+        font_size: { type: 'number', minimum: 8, maximum: 72, description: '正文/单元格字号，磅；用户明确原话优先' },
+        title_font_size: { type: 'number', minimum: 8, maximum: 72, description: '标题字号，磅' },
         content: str('Markdown 内容'),
         source_requirement_id: str('只排版、内容不变时，绑定read_task_requirements中用户原文编号；不从助手旧稿重写正文'),
         source_path: str('只排版已有Word时绑定工作区原DOCX路径；保留原文表格图片及关联，与source_requirement_id二选一'),
@@ -92,7 +95,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       ['format', 'path', 'content']
     ),
     run: async (
-      { format, path, title, content, theme, style, sheet_style: sheetStyle, kind, cover, subtitle, author, issuer, docNo, toc, template, template_id: templateId, requirements, source_requirement_id: sourceId, source_path: sourcePath },
+      { format, path, title, content, font_size: bodySize, title_font_size: titleSize, theme, style, sheet_style: sheetStyle, kind, cover, subtitle, author, issuer, docNo, toc, template, template_id: templateId, requirements, source_requirement_id: sourceId, source_path: sourcePath },
       execution = {}
     ) => {
       const { progress, signal, checkpoint, rawRequestText, requestText, executionScope, sessionId } = execution;
@@ -104,9 +107,10 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         cache = memo.scopes.get(executionScope);
       }
       const goal = requestText || rawRequestText || requirements || '';
-      let typography = format === 'docx' ? await documentTypography(ctx, goal, signal) : {};
+      let typography = format === 'docx' ? await documentTypography(ctx, goal, signal) : ['pptx','xlsx'].includes(format) ? officeTypography(rawRequestText || goal, { body: bodySize, title: titleSize }) : {};
+      if (format === 'docx' && (bodySize !== undefined || titleSize !== undefined)) { const supplied = officeTypography('', { body: bodySize, title: titleSize }); for (const role of ['body','title']) typography[role] = { ...supplied[role], ...typography[role] }; }
       const source = format === 'docx' ? await formattingSource({ request: rawRequestText || goal, sessionId, sourceId, sourcePath, signal }) : null;
-      if (source?.kind === 'docx') return formatDocumentFile(ctx, source, { path, theme, kind, cover, toc, template, requirements }, execution);
+      if (source?.kind === 'docx') return formatDocumentFile(ctx, source, { path, theme, kind, cover, toc, template, requirements, typography }, execution);
       // 排版时绕过模型提供的正文和改写审稿，确定性沿用已绑定的用户原文。
       if (source) content = source.content;
       const designOptions = { format, title, content, requirements, style, kind };
@@ -115,12 +119,12 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         : chooseDesign(designOptions);
       const sheetDesign = format === 'xlsx' ? await spreadsheetDesign(ctx, goal, { kind: design.kind, sheetStyle }, signal) : null;
       // 用户说“字大点 / 小点 / 铺满 / 不要横线”：换算成真实的字号和排法（见 styleCheck.js），改完由读回核对确认
-      const asks = format === 'docx' ? styleRequests(rawRequestText || goal) : [];
-      if (asks.some((a) => a.id === 'fill') && design.kind === 'general' && String(content).replace(/\s/g, '').length <= 400) design.kind = 'poster';
+      const asks = ['docx','pptx','xlsx'].includes(format) ? styleRequests(rawRequestText || goal) : [];
+      if (format === 'docx' && asks.some((a) => a.id === 'fill') && design.kind === 'general' && String(content).replace(/\s/g, '').length <= 400) design.kind = 'poster';
       const noRules = asks.some((a) => a.id === 'noRule');
       let scale = 0;
       if (asks.some((a) => a.id === 'bigger' || a.id === 'smaller'))
-        ({ typography, scale } = relativeTypography(typography, asks, { kind: design.kind, previous: await lastStyle(sessionId, executionScope), request: rawRequestText || goal }));
+        ({ typography, scale } = relativeTypography(typography, asks, { kind: design.kind, previous: await lastStyle(sessionId, executionScope), format, request: rawRequestText || goal }));
       const { forbidCover, requireCover } = presentationCover(goal);
       const expectedSlides = format === 'pptx' ? requestedSlides('PPT ' + goal) : null;
       const callKey = await keyOf({ format, path, title, content, theme, design, sheetDesign, kind, cover, subtitle, author, issuer, docNo, toc, template, templateId, requirements, goal, typography, noRules, scale, sessionId, sourceId: source?.id, workflow: ctx.documentContentReview?.workflowFile || null });

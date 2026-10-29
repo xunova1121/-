@@ -1,3 +1,4 @@
+import { measureOtherOffice } from './officeTypography.js';
 /**
  * 改动核对：用户说“字体大点 / 铺满一页 / 标题下面不要横线 / 不要下划线”，改完要把真实文件读回来对一遍，
  * 回答只能说文件里真的发生了的事（用户 2026-10-29 反馈：招租广告连改 5 次，字号一直没变，回答却说“已加大”）。
@@ -37,6 +38,7 @@ const hasUnderline = (rPr) => { const u = prop(rPr, 'u'); return Boolean(u) && !
 export async function measureDocx(blob) {
   try {
     const zip = await openOfficePackage(blob);
+    if (!zip.file('word/document.xml')) return measureOtherOffice(zip);
     const styles = (await zip.file('word/styles.xml')?.async('string')) || '';
     const doc = (await zip.file('word/document.xml')?.async('string')) || '';
     if (!doc || doc.length > 4e6 || styles.length > 2e6) return null;
@@ -118,11 +120,11 @@ const step = (n, up) => Math.max(8, Math.min(72, Math.round(up ? Math.max(n * 1.
  * 用户说了具体字号的那个角色不动；单页告示本来就按页面取最大字号，“大点”不再放大（放大就排不进一页），“小点”缩一档。
  * @returns {{ typography: object, scale: number }}
  */
-export function relativeTypography(typography = {}, asks = [], { kind = '', previous = null, request = '' } = {}) {
+export function relativeTypography(typography = {}, asks = [], { kind = '', previous = null, request = '', format = 'docx' } = {}) {
   const dir = asks.some((a) => a.id === 'bigger') ? 1 : asks.some((a) => a.id === 'smaller') ? -1 : 0;
   if (!dir) return { typography, scale: 0 };
   if (kind === 'poster') return { typography, scale: dir < 0 && !typography.body?.size ? 0.85 : 0 };
-  const base = previous || DEFAULT;
+  const base = previous && (!previous.format || previous.format === format) ? previous : format === 'pptx' ? { body: 20, title: 32 } : format === 'xlsx' ? { body: 11, title: 18 } : DEFAULT;
   const roles = titleOnly(request) ? ['title'] : /内文|内筒|正文|内容/.test(request) && !/标题/.test(request) ? ['body'] : ['body', 'title'];
   const next = { ...typography };
   for (const role of roles) if (!typography[role]?.size) next[role] = { ...typography[role], size: step(base[role], dir > 0) };
@@ -150,6 +152,7 @@ export function styleReport(request, artifact) {
       const ok = id === 'bigger' ? grew : shrank;
       return { id, label, state: ok ? 'done' : 'missed', detail: `${name}从${prev[role]}磅${f[role] === prev[role] ? '没变' : '变成' + f[role] + '磅'}` };
     }
+    if (id === 'noRule' && f.rules == null) return { id, label, state: 'unchecked', detail: '此格式横线尚未自动量取' };
     if (id === 'noRule') return { id, label, state: f.rules ? 'missed' : 'done', detail: f.rules ? `文件里还有${f.rules}条横线（段落上下边框）` : '文件里没有横线' };
     if (id === 'noUnderline') return { id, label, state: f.underlines ? 'missed' : 'done', detail: f.underlines ? `文件里还有${f.underlines}处下划线` : '文件里没有下划线' };
     // 铺满：程序量不出空白占多少，只能确认页数和字号

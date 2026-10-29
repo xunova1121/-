@@ -17,7 +17,7 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
   }
   const validation = await inspectDocument(out.blob, target, { info: out.info, requiredText, signal, requirements });
   // 读回实际字号、横线、下划线：回答只能说文件里真的有的（见 styleCheck.js）
-  if (out.ext === 'docx') validation.styleFacts = await measureDocx(out.blob);
+  if (['docx','pptx','xlsx'].includes(out.ext)) validation.styleFacts = await measureDocx(out.blob);
   const effectiveStyle = validation.format === 'pptx' ? out.info?.style : validation.format === 'xlsx' ? out.info?.sheetStyle : null;
   if (design?.style && effectiveStyle) {
     const conflict = design.style !== effectiveStyle;
@@ -123,7 +123,7 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
   checkedPath = await saveReport();
   if (validation.wordCount) notes.push(`实际文件字数${validation.wordCount.count}，要求${validation.wordCount.min}至${validation.wordCount.max}；${validation.wordCount.scope}；${validation.wordCount.passed ? '在范围内' : '不在范围内，须修改'}`);
   const facts = validation.styleFacts;
-  if (facts) notes.push(`读回实际：标题${facts.title}磅、正文${facts.body}磅；横线${facts.rules}条、下划线${facts.underlines}处`);
+  if (facts) notes.push(`读回实际：标题${facts.title}磅、正文${facts.body}磅；横线${facts.rules == null ? '未自动量取' : facts.rules + '条'}、下划线${facts.underlines}处`);
   notes.push(qualitySummary(validation), `检查报告：${checkedPath}`);
   return { ...saved, validation, notes, blob: out.blob };
 }

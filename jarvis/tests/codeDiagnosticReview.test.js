@@ -51,3 +51,9 @@ it('有实际仓库写入时，不得把未推送分支链接冒充成果；正�
   expect(r.checkAnswer(corrected)).toEqual([]);
   expect(r.checkAnswer('文件在服务器工作副本：[index.html](index.html)。')).toEqual([]);
 });
+
+it('明确检查lint/test并报告结果，无修复要求时，真实红色测试不重复标成检查未完成',()=>{
+ const r=make('用code_run分别检查lint和test，保持现有文件及测试原样，报告真实退出码和通过失败数量。');
+ expect(reviewOutcome(r.report(),{answer:'测试已运行，8项中6项通过、2项失败，尚未修复。'}).notice).toBe('');
+ expect(reviewOutcome(make('检查测试后修复代码').report(),{answer:'测试已运行，有2项失败。'}).notice).toContain('隔离运行检查');
+});

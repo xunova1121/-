@@ -320,7 +320,7 @@ function tableRules(ws, { headers, first, last, grid, kind }) {
  * @param {{ theme: object, kind?: string }} o  kind：settlement 结算 / ledger 台账 / budget 预算 / analysis 分析 / general（documentDesign.js 判断）
  * @returns {Promise<{ blob: Blob, info: { sheets: number, formulas: number, formulaIssues: object[], layout: string, duplicatesRemoved: number, duplicatesKept: number } }>}
  */
-export async function makeXlsx(content, { theme, kind = 'general', sheetStyle = '' }) {
+export async function makeXlsx(content, { theme, kind = 'general', sheetStyle = '', typography = {} }) {
   const mod = await import('exceljs');
   const ExcelJS = mod.default ?? mod;
   const wb = new ExcelJS.Workbook();
@@ -329,7 +329,9 @@ export async function makeXlsx(content, { theme, kind = 'general', sheetStyle = 
   wb.calcProperties.fullCalcOnLoad = true; // Excel / WPS 打开时重新计算全部公式
   const C = theme.colors;
   const official = Boolean(theme.official);
-  const T = spreadsheetTokens(sheetStyle, theme, kind);
+  const T = { ...spreadsheetTokens(sheetStyle, theme, kind) };
+  if (typography.body?.size) T.bodySize = typography.body.size;
+  if (typography.title?.size) { T.titleSize = typography.title.size; T.headSize = typography.title.size; }
   const { headFill, headFont, zebra, titleFill, titleFont } = T;
   const border = { style: 'thin', color: { argb: 'FFBFC7D1' } };
   const borders = T.rulesOnly ? { bottom: { style: 'hair', color: { argb: 'FFE0E6ED' } } } : { top: border, left: border, bottom: border, right: border };
@@ -385,6 +387,7 @@ export async function makeXlsx(content, { theme, kind = 'general', sheetStyle = 
       cell.value = text;
       cells.set(`A${r}`, { value: text });
       cell.font = { name: FONT, ...font };
+      if (typography.body?.size && font.size !== T.titleSize) cell.font = { ...cell.font, size: typography.body.size };
       if (fill) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } };
       cell.alignment = { vertical: 'middle', horizontal: align, wrapText: true, indent };
       row.height = Math.max(height, linesFor(text, fullW) * (font.size + 5) + 6);
@@ -497,6 +500,7 @@ export async function makeXlsx(content, { theme, kind = 'general', sheetStyle = 
       c.xl.value = { formula: c.formula, result: v };
     }
   }
+  if (Object.keys(typography).length) for (const sheet of wb.worksheets) sheet.eachRow(row => { let max = 0; row.eachCell(cell => { max = Math.max(max, cell.font?.size || 0); }); if (max) row.height = Math.max(row.height || 0, max * 1.5 + 6); });
   const buf = await wb.xlsx.writeBuffer();
   return { blob: new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), info: { sheets: sheets.length, formulas, formulaIssues: checkFormulas(checked), layout: sheetLayout(checked), duplicatesRemoved, duplicatesKept, sheetStyle: T.style } };
 }
