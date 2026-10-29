@@ -38,6 +38,7 @@
 2026-10-29 用户要求“一起发版”，Claude 已手动触发一次（含 Claude 的架构图新路线 + Codex 1.0.319 之后的 23 个提交）。结果看 GitHub Actions；以后的发布按上面“统一发布”。
 
 ## 协调记录
+- 2026-10-29 Codex WebGL批（用户确认开始）：先用临时计时完成原smoke前置后20次采样，保留原失败行、P50/P95/最大值；只按证据改render/stage.js恢复调度及无效resize，画质/N/像素上限和300ms/1500ms门槛保持。拟在jarvis-unit.yml增加手动只测WebGL选项（contents:read、无发布job），原单测入口保持，不动jarvis-desktop发版工作流。完成后交Claude审再接P7；所有提交[skip ci]。
 （要动对方名下文件时在这里写：日期、谁、改哪个文件、为什么）
 - 2026-10-29 Codex P2已完成编辑与Docker测试：虚构项目真实红→绿/原测试与main不变、真实npm包离线安装、运行中取消及输出上限通过。全量2030、最终91定向、三构建及其余界面通过；smoke 173/174，旧P1 ef78099独立对照也173/174（同一WebGL恢复项）。未改/放宽GL门禁，保留为发版阻塞；只[skip ci]保存，不发版。详见《代码智能体-P2验收与后续计划-20261029.md》，P7/续做索引/旧执行器共享目录及真实模型验收待用户下一批确认。
 - 2026-10-29 Codex P2收尾显示：reviewOutcome.js只在工具名表增加code_edit/write/run中文名，不动收尾提示、partial判断或Claude已修话术；部署说明补可选代码沙箱配置，保留原PrivateTmp防护。

@@ -7,10 +7,16 @@ on:
       - 'jarvis/tests/**'
       - '.github/workflows/jarvis-unit.yml'
   workflow_dispatch:
+    inputs:
+      webgl_only:
+        description: '只验证WebGL恢复，不打包、不发布'
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   unit:
+    if: inputs.webgl_only != true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -25,3 +31,38 @@ jobs:
           cache-dependency-path: jarvis/package-lock.json
       - run: npm ci --no-audit --no-fund
       - run: npm test
+  webgl:
+    if: github.event_name == 'workflow_dispatch' && inputs.webgl_only == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: 原始smoke和连续20次恢复（保留两份退出码，不因前者失败丢失诊断）
+        run: |
+          mkdir -p "$RUNNER_TEMP/webgl/smoke"
+          node server/server.mjs > "$RUNNER_TEMP/webgl/gateway.log" 2>&1 &
+          WEBGL_SERVER_PID=$!
+          trap 'kill "$WEBGL_SERVER_PID" 2>/dev/null || true' EXIT
+          SMOKE_RESULT=0
+          node e2e/smoke.mjs "$RUNNER_TEMP/webgl/smoke" > "$RUNNER_TEMP/webgl/smoke.log" 2>&1 || SMOKE_RESULT=$?
+          RECOVERY_RESULT=0
+          node e2e/webgl-recovery.mjs "$RUNNER_TEMP/webgl/recovery" > "$RUNNER_TEMP/webgl/recovery.log" 2>&1 || RECOVERY_RESULT=$?
+          cat "$RUNNER_TEMP/webgl/smoke.log"
+          cat "$RUNNER_TEMP/webgl/recovery.log"
+          test "$SMOKE_RESULT" -eq 0 && test "$RECOVERY_RESULT" -eq 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: webgl-recovery-${{ github.run_id }}
+          path: ${{ runner.temp }}/webgl
