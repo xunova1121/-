@@ -172,3 +172,12 @@ describe('评审模型', () => {
     expect(judgeConfig({ provider: 'deepseek', models: { deepseek: 'v4' } }).provider).toBe('deepseek');
   });
 });
+
+describe('上一轮报告读不到也不白跑（第二轮实测：路径不对，最后一步报错退出）', () => {
+  it('源码里读上一轮报告有兜底', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(new URL('../evals/joint.mjs', import.meta.url), 'utf8');
+    expect(src).toMatch(/readOld\('previous'\)/);
+    expect(src).toMatch(/这次不做逐题对比/);
+  });
+});

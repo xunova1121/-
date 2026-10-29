@@ -159,8 +159,14 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     process.removeListener('SIGTERM', stop);
     report.conditions.finishedAt = bj();
     report.summary = jointSummary(report.results);
-    const previous = arg('previous') ? JSON.parse(await fs.readFile(arg('previous'), 'utf8')) : null;
-    const baseline = arg('baseline') ? JSON.parse(await fs.readFile(arg('baseline'), 'utf8')) : null;
+    // 上一轮报告读不到（路径写错等）只提示，不能让 30 题白跑（第二轮实测：路径不对，整个评测在最后一步报错退出）
+    const readOld = async (name) => {
+      if (!arg(name)) return null;
+      try { return JSON.parse(await fs.readFile(arg(name), 'utf8')); }
+      catch (error) { console.error(`读不到 --${name} 指定的报告（${error.code || error.message}），这次不做逐题对比`); return null; }
+    };
+    const previous = await readOld('previous');
+    const baseline = await readOld('baseline');
     if (previous || baseline) report.comparison = compareRounds(report.results, previous, baseline);
     await save();
   }
@@ -170,7 +176,7 @@ export async function main(args = process.argv.slice(2), env = process.env) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
-    console.error(error.code === 'EVAL_CONFIG' ? error.message : '评测没跑完；请检查服务器登录和连接，私有报告里有已完成的部分。');
+    console.error(error.code === 'EVAL_CONFIG' ? error.message : `评测没跑完（${String(error.code || error.message).slice(0, 120)}）；私有报告里有已完成的部分。`);
     process.exitCode = 1;
   });
 }
