@@ -83,3 +83,4 @@
 - 2026-10-29 Claude：表达改造动了 Codex 名下的 `src/agent/answerRequirements.js`（加 deferralCount 与健康回答转介话术检查、answerConstraints 返回 care）和 `src/agent/executionReview.js`（guardsAnswer 加 rules.care 一项），以及 `src/app/turn.js` / `turnEvents.js`（保存失败步骤）；原有逻辑和测试未改。
 
 - 2026-10-29 Codex合批候选本地进度：项目/网页/Office字号/旧DOC代码与专用门禁已写，101项最终本地专项和三构建通过，完整2144项首轮2项旧公网跨域超时；自动审批容量错误持续阻断后续真实Git/HTTP、Docker/浏览器命令。未发布，未经Claude互审，详细缺口和严格发布顺序见《项目与网页验收合批开发-20261029》。原架构图路线、持仓、写作角色和一分钟结尾提示未改。
+- 2026-10-29 用户指令改为“未完成交给Claude”：Codex停止继续开发，形成`docs/交接给Claude-项目网页合批未完成-20261029.md`及含本地未推提交的私有交接包。功能ef551fc、记录8fc1190均未推；不能要求Claude只fetch就能拿到。用户原授权“完成后发版、30题发布后”保留，不重复索要批次确认。
