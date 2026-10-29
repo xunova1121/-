@@ -60,6 +60,7 @@ import { canFallback, needsComputer, computerTaskKind } from '../llm/router.js';
 import { compactToolResults } from './turnContext.js';
 import { requirementsTool } from './taskRequirements.js';
 import * as holdings from './holdings.js';
+import { recentFailures } from './failedSteps.js';
 import { createImageSight } from './imageSight.js';
 
 export const STABLE_PROMPT = `你是“未央”，用户的个人智能体。实际运行位置与能力以下方环境和本轮工具为准。
@@ -85,6 +86,7 @@ export const STABLE_PROMPT = `你是“未央”，用户的个人智能体。�
 ## 回答的样子
 - 结论放第一行。简单问题2–5 条短要点或几句话，复杂任务按需要展开；不例行加免责声明或追问继续。
 - 像靠谱的熟人说话：中文口语、短句、语气真诚，不打官腔；专业词第一次出现顺手用一句白话解释。同一个限制或提醒整段只说一次。
+- 第一句答用户最想知道的；对方没问但需要知道的（风险、更好的做法、要他决定的事）主动补一句；需要用户做事或拍板时，结尾写清下一步。自己出错先认，再说原因和怎么改。
 - 核对日期、对象，找到匹配原文就给结论附链接；找不到才说明查了哪里、还缺什么，不用反复说“待确认”。助手旧回答和摘要不是独立证据。
 - 聊天回答按下面“回答的样子”来写；写文档的内容不受这条限制。
 
@@ -168,6 +170,9 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
   if (ctx.episodes?.length) parts.push(`## 相关的过往对话\n${ctx.episodes.map((e) => `- ${day(e.ts)}${e.sessionTitle ? `「${e.sessionTitle}」` : ''}：${e.summary}`).join('\n')}`);
   if (past.length && !light) parts.push(`## 过往对话里的相关原话（需要更多细节时用 read_conversation 读全文）\n${past.map((p) => `- ${day(p.ts)}「${p.title}」（id: ${p.sessionId}）\n  用户：${p.user.slice(0, 160)}${p.reply ? `\n  未央：${p.reply.replace(/\s+/g, ' ').slice(0, 240)}` : ''}`).join('\n')}`);
   if (held.length) parts.push(holdings.holdingsBlock(held));
+  // 上一轮有步骤失败：带上报错原话（用户问“为啥失败”时答得出具体原因）
+  const failed = recentFailures(currentSession?.messages?.length ? currentSession.messages : history);
+  if (failed) parts.push(failed);
   if (periodText) parts.push(periodText);
   if (recentS.length) parts.push(`## 最近的其他对话（用户说“接着上次 / 刚才那个”时参考）\n${recentS.map((s) => `- ${day(s.updatedAt)}「${s.title}」（id: ${s.id}，${s.messages.length} 条）最后：${String([...s.messages].reverse().find((m) => m.role === 'user')?.content ?? '').slice(0, 60)}`).join('\n')}`);
   if (open.length) parts.push(`## 之前对话里说好以后再做的事（只在当前请求相关时参考；用户没要求就不要转回旧任务；用户说不用了就不再提）\n${open.map((o) => `- ${o.text}${o.sessionTitle ? `（来自「${o.sessionTitle}」，${day(o.ts)}）` : ''}`).join('\n')}`);
@@ -432,7 +437,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     const request = makeRequest(cur, acceptVisible, () => primaryActivity?.());
     // 测量实际发送的提示与工具说明，动态规则和短说明均计入字符数。
     // 用的哪个模型：中途换了备用的，也照实写
-    const responseNote = responseGuidance(currentRequest, history, { light, hasImages: images.length > 0, visibleText: String(convo.filter(m => m.role === 'user').at(-1)?.content || '').slice(0, 1800) });
+    const responseNote = responseGuidance(currentRequest, history, { light, model: cur?.model || model, hasImages: images.length > 0, visibleText: String(convo.filter(m => m.role === 'user').at(-1)?.content || '').slice(0, 1800) });
     const usingNote = modelNote && (cur.model !== model ? `${modelNote}\n（原定的 ${model} 出错了，这一轮实际换成了 ${cur.model}。）` : modelNote);
     const measuredSystem = questionProfile ? [BASIC_ANSWER_PROMPT, [ctx.dynamic, usingNote, responseNote, imagePreferenceNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : light ? [LIGHT_PROMPT, [ctx.dynamic, usingNote, responseNote, imagePreferenceNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, usingNote, dialoguePolicy(review.report().request), responseNote, imagePreferenceNote, capabilities, computerNote, requirementContext, toolHint, singleDocumentTask(review.report().request) && '单份文档由文档引擎内部规划和检查；如需外层计划只列一次，不用update_plan逐节重复同步。有效产物回执可直接交付，不重复查找、读回或重做。', review.contractNote(), creativeWithoutLookup(currentRequest) && CREATIVE_NOTE, voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
     const measuredTools = closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list();

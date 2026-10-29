@@ -17,6 +17,7 @@ import { createHash } from 'node:crypto';
 import { createDocumentReviewer } from '../src/llm/documentReviewer.js';
 import { checkpointEvent, checkpointNeedsReview, checkpointRecoveryText, isReadOnlyTool } from '../shared/taskCheckpoint.js';
 import { evidence } from '../src/agent/evidenceStore.js';
+import { failedStep } from '../src/agent/failedSteps.js';
 /**
  * 服务器上的任务执行器：手机 / 电脑把任务交过来，服务器自己从头做到尾。
  * 发任务的那台设备关掉、断网都不影响；它再连上来时，按序号补发漏掉的进度，做完的结果存在对话里。
@@ -319,6 +320,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
           if (e.type === 'task_review') task.review = e.review;
           if (e.type === 'text') { if (task.firstTextAt == null && String(e.delta ?? '').trim()) task.firstTextAt = now(); shown += e.delta; }
           if (e.type === 'tool_start' && e.name !== 'update_plan') usedTools.push(e.name);
+          // 失败的步骤连同报错原话记下来存进这条回答：用户下一句问“为啥失败”时还能看到（见 agent.js 的“上一轮失败的步骤”）
+          if (e.type === 'tool_end' && e.ok === false) task.failedSteps = [...(task.failedSteps || []), failedStep(e)].slice(-6);
           if (e.type === 'text' || e.type === 'tool_end') saveDraft();
           record(task, e);
         }
@@ -334,7 +337,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
 
   async function finish(task, session, { text = '', error = '', errorType = '', stopped = false, shown = '', usedTools = [], toolCalls = 0 }) {
     const timing = task.timing.finish();
-    const extra = { timing, ...(task.review?.outcome && { review: { outcome: task.review.outcome, issueCount: task.review.warnings?.length || 0 } }), ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(task.files.size && { files: [...task.files].slice(-12) }) };
+    const extra = { ...(task.failedSteps?.length && { failures: task.failedSteps }), timing, ...(task.review?.outcome && { review: { outcome: task.review.outcome, issueCount: task.review.warnings?.length || 0 } }), ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(task.files.size && { files: [...task.files].slice(-12) }) };
     clearTimeout(task.draftTimer);
     clearTimeout(task.checkpointTimer); task.checkpointTimer = null; // 下面一起写最终的检查点
     evidence.flush().catch(() => {});

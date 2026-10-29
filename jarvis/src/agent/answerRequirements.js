@@ -5,14 +5,22 @@ export function answerConstraints(request = '') {
   const noTime = /(?:不要|别提|不提|不写|不包含|不涉及|不带)(?:任何|具体的?)?(?:时间|日期)/.test(unquoted);
   const literals = [...value.matchAll(/(?:不要|不得|禁止)(?:出现|使用|写|包含|提到)?\s*[“"「]([^”"」]{1,40})[”"」]/g)].map(match => match[1]).slice(0, 8);
   const todayNews = /今天|今日/.test(unquoted) && /新闻|资讯/.test(unquoted);
-  return { noTime, literals, todayNews };
+  const care = CARE_TOPIC.test(unquoted);
+  return { noTime, literals, todayNews, care };
 }
+
+const CARE_TOPIC = /产检|孕检|体检|化验|检查报告|检查单|报告单|超声|心超|胎儿|孕周|糖耐|血常规|(?:宠物|猫|狗).{0,8}(?:检查|报告|化验)/;
+/** “交给医生 / 以医生为准”这类转介话术：健康回答里说一次就够（用户 2026-10-29 反馈产检解读里重复三遍） */
+const DEFERRAL = /(?:请|建议|让|交给|由|找|问)[^。；\n]{0,10}(?:医生|医师|专科)|(?:医生|医师)[^。；\n]{0,8}(?:评估|判断|决定|为准|随访)|以[^。；\n]{0,10}为准/g;
+export const deferralCount = (text) => (String(text).match(DEFERRAL) || []).length;
 
 export function answerConstraintIssues(request, answer, now = Date.now()) {
   const rules = answerConstraints(request);
   const text = String(answer);
   const issues = [];
   if (rules.noTime && /时间|日期|今天|明天|后天|上午|下午|晚上|今晚|周[一二三四五六日天末]|星期[一二三四五六日天]|\d{1,2}[:：]\d{2}|\d{1,2}月\d{1,2}日/.test(text)) issues.push('用户要求不提时间或日期，正文仍有相关表述；只重写这段内容，不增加新安排');
+  if ((rules.care || CARE_TOPIC.test(text.slice(0, 800))) && deferralCount(text) >= 3)
+    issues.push(`“请医生评估 / 以医生为准”这类提醒出现了${deferralCount(text)}次；整段只在最后“下一步”里说一次，其余删掉。按 一句话整体情况（回应担心）→ 两三条好消息 → 要留意的那项（白话加比方，常不常见）→ 具体下一步 重写，内容和数字不变`);
   if (rules.literals.some(word => text.includes(word))) issues.push('正文出现了用户明确禁止输出的引号内文字；移除这些文字后重写，不复述禁用词');
   if (rules.todayNews) {
     const day = new Date(now).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });

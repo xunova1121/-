@@ -1,6 +1,7 @@
 /** 一轮事件转换为原气泡、进度和状态；后台任务仍只更新自身气泡。 */
 import { MOBILE } from '../config.js';
 import { savePending } from '../core/pendingTask.js';
+import { failedStep } from '../agent/failedSteps.js';
 import { toolLabel, summarizeArgs, searchBrand } from '../ui/transcript.js';
 import { now, storage, toast, markActivity } from './env.js';
 
@@ -102,7 +103,11 @@ export function createTurnEvents(app) {
           if (e.ok) doneSteps.push(toolLabel(e.name));
           savePending(storage, turn.session.id, { ts: Date.now(), steps: doneSteps, files: [...turn.files] });
         }
-        if (!e.ok) app.hud.think(`✕ ${toolLabel(e.name)} 失败`, 'bad');
+        if (!e.ok) {
+          app.hud.think(`✕ ${toolLabel(e.name)} 失败`, 'bad');
+          // 报错原话随这条回答保存，下一句问“为啥失败”时还看得到（见 failedSteps.js）
+          turn.failedSteps = [...(turn.failedSteps || []), failedStep(e)].slice(-6);
+        }
         if (/remember|forget|save_skill/.test(e.name)) app.panels.refreshMind();
       } else if (e.type === 'server_tool') {
         st.serverCard = Object.assign(bubble.toolCard('web_search', { query: `${searchBrand(model)}自带联网搜索` }), { t0: now() });

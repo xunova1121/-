@@ -52,3 +52,4 @@
 - 云端提醒：已做（服务器按时执行、重启恢复、防重复、修改 / 暂停、北京时间、手机取通知）；App 被彻底关掉时没有即时推送；华为真机未验。
 - 历史记忆与统计：持仓链路已做；歌曲等成果统计沿用 Codex 的成果索引（workLedger），旧记录只能说“至少”。
 - 架构图收尾：需要用户服务器上的真实模型实测，等用户更新后反馈。
+- 2026-10-29 Claude：表达改造动了 Codex 名下的 `src/agent/answerRequirements.js`（加 deferralCount 与健康回答转介话术检查、answerConstraints 返回 care）和 `src/agent/executionReview.js`（guardsAnswer 加 rules.care 一项），以及 `src/app/turn.js` / `turnEvents.js`（保存失败步骤）；原有逻辑和测试未改。

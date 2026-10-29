@@ -232,7 +232,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   };
   const guardsAnswer = () => {
     const rules = answerConstraints(request);
-    return visualEvidence.active() || rules.noTime || rules.literals.length > 0 || rules.todayNews || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
+    return visualEvidence.active() || rules.noTime || rules.literals.length > 0 || rules.todayNews || rules.care || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
   };
   return { newsCandidates: () => [...newsLinks.values()], toolBlock, noteVisual: visualEvidence.note, record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked, checkAnswer, guardsAnswer };
 }

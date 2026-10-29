@@ -439,3 +439,16 @@ describe('服务器上的确认', () => {
     expect(serverApproves(null, '安装')).toBe(false);
   });
 });
+
+describe('失败的步骤随回答存进对话（下一句问“为啥失败”时看得到）', () => {
+  it('工具报错时，这条回答带 failures：工具名 + 报错原话', async () => {
+    const adapter = scripted([{ tools: [{ id: 'c1', name: 'create_diagram', args: {} }] }, { text: '图没画成。' }]);
+    const failing = { name: 'create_diagram', description: '画图', input_schema: { type: 'object', properties: {} }, run: async () => { throw Object.assign(new Error('分栏层需2～4个节点'), { code: 'DIAGRAM_SECTION', kind: 'input' }); } };
+    const runner = createTaskRunner({ getConfig: mockCfg, makeAdapter: () => ({ adapter, model: 'm' }), makeTools: () => [failing] });
+    const { id, sessionId } = await runner.start({ text: '做个架构图' });
+    await until(() => ['done', 'error'].includes(runner.get(id).status));
+    const reply = (await sessions.get(sessionId)).messages.at(-1);
+    expect(reply.failures?.[0]).toMatchObject({ tool: 'create_diagram' });
+    expect(reply.failures[0].error).toContain('分栏层需2～4个节点');
+  });
+});

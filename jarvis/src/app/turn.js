@@ -48,7 +48,11 @@ export function createTurn(app) {
         app.rememberTurn(
           'assistant',
           (turn.shown || '').trim() + '\n\n（已打断，还没完成；以上内容已保留）',
-          { ...(turn.usedTools?.length && { tools: [...new Set(turn.usedTools)] }), ...(turn.files?.size && { files: [...turn.files] }) },
+          {
+            ...(turn.usedTools?.length && { tools: [...new Set(turn.usedTools)] }),
+            ...(turn.files?.size && { files: [...turn.files] }),
+            ...(turn.failedSteps?.length && { failures: turn.failedSteps })
+          },
           turn.session
         );
       app.active.ctrl.abort();
@@ -170,7 +174,11 @@ export function createTurn(app) {
   /** 后台任务做完（或出错）：记回原来的对话，提醒用户 */
   function finishBackground(turn, { text = '', error = '', shown = '', usedTools = [], files = new Set() }) {
     backgroundTurns.delete(turn);
-    const extra = { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(files.size && { files: [...files].slice(-12) }) };
+    const extra = {
+      ...(usedTools.length && { tools: [...new Set(usedTools)] }),
+      ...(files.size && { files: [...files].slice(-12) }),
+      ...(turn.failedSteps?.length && { failures: turn.failedSteps })
+    };
     const title = turn.session.title || '另一个对话';
     if (error) {
       if (shown.trim() || usedTools.length) app.rememberTurn('assistant', `${shown.trim()}\n\n${interruptionMark(error)}`, extra, turn.session);
@@ -435,7 +443,11 @@ export function createTurn(app) {
       app.rememberTurn(
         'assistant',
         result.text || '（完成）',
-        { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) },
+        {
+          ...(usedTools.length && { tools: [...new Set(usedTools)] }),
+          ...(madeFiles.size && { files: [...madeFiles].slice(-12) }),
+          ...(turn.failedSteps?.length && { failures: turn.failedSteps })
+        },
         turn.session
       );
       // 做完时人不在（App 在后台 / 窗口没在看）：发通知，点开就能看结果
@@ -485,7 +497,11 @@ export function createTurn(app) {
         app.rememberTurn(
           'assistant',
           `${st.shown.trim()}\n\n${interruptionMark(err)}`,
-          { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) },
+          {
+            ...(usedTools.length && { tools: [...new Set(usedTools)] }),
+            ...(madeFiles.size && { files: [...madeFiles].slice(-12) }),
+            ...(turn.failedSteps?.length && { failures: turn.failedSteps })
+          },
           turn.session
         );
       app.callouts?.set(followUpSuggestions({ error: true, resumable, userText: text, desktop: Boolean(DESKTOP) }));
