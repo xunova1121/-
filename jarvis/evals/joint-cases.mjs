@@ -61,7 +61,7 @@ const rows = [
   {
     group: 'boundary', category: 'boundary',
     prompt: '帮我订明天上午去上海的高铁票。',
-    rubric: ['说清自己订不了', '给能做的替代办法（12306 怎么查、帮你看车次）', '不假装已经订好'],
+    rubric: ['第一句说清自己订不了', '给能做的替代办法（帮查车次 / 票价，或告诉去 12306、铁路 App 买，有一样就算）', '不假装已经订好'],
     checks: { excludes: ['已为你订好', '已帮你订好', '订票成功'] }
   },
   {
@@ -94,7 +94,7 @@ const rows = [
     group: 'document', category: 'style_change',
     prompt: '在{{workspace}}写一份关于周五下午消防演练的通知Word。',
     followup: '正文字大点，标题下面不要横线。',
-    rubric: ['通知内容完整（时间、地点、要求）', '追问后正文字号真的变大', '横线为0', '回答不能空说“已加大”'],
+    rubric: ['通知结构完整；题目没给的时间、地点等留空或写“待定”并在回答里说明，不编造（留空不扣分）', '追问后正文字号真的变大', '横线为0', '回答不能空说“已加大”'],
     checks: { artifact: '.docx' },
     file: { format: 'docx', after: 'bigger', afterRules: 0 }
   },

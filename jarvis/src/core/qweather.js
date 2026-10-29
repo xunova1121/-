@@ -76,7 +76,7 @@ export async function lookupQWeatherCity({ key, host, query, fetchImpl = (...a) 
   if (!res.ok) throw Object.assign(new Error(`和风天气返回 ${res.status}`), { status: res.status });
   const j = await res.json();
   if (j?.code && String(j.code) !== '200') return [];
-  return (j.location ?? []).map((c) => ({ name: String(c.name || '').slice(0, 80), latitude: num(c.lat), longitude: num(c.lon), region: [c.adm2 !== c.name ? c.adm2 : '', c.adm1, c.country].filter(Boolean).join(' · ').slice(0, 120) })).filter((c) => c.name && c.latitude !== null && c.longitude !== null).slice(0, 8);
+  return (j.location ?? []).map((c) => ({ name: String(c.name || '').slice(0, 80), latitude: num(c.lat), longitude: num(c.lon), ...(/^https:\/\/www\.qweather\.com\//.test(c.fxLink || '') && { link: String(c.fxLink).slice(0, 300) }), region: [c.adm2 !== c.name ? c.adm2 : '', c.adm1, c.country].filter(Boolean).join(' · ').slice(0, 120) })).filter((c) => c.name && c.latitude !== null && c.longitude !== null).slice(0, 8);
 }
 
 /** 空气质量：新版（indexes）和旧版（now.aqi）两种返回都认 */
@@ -132,7 +132,7 @@ export function parseQWeather(bundle, now = Date.now()) {
 }
 
 /** 给模型看的文字版（对话里问天气时） */
-export function formatQWeather(placeName, data, days = 3) {
+export function formatQWeather(placeName, data, days = 3, link = '') {
   const x = data.extra ?? {};
   const lines = [`地点：${placeName}`];
   lines.push(`实况（${data.at.replace('T', ' ')}）：${data.text}，${Math.round(data.temp)}°C${x.feels !== null ? `（体感 ${Math.round(x.feels)}°C）` : ''}${x.humidity !== null ? `，湿度 ${x.humidity}%` : ''}${x.wind ? `，${x.wind}` : ''}${x.pressure !== null ? `，气压 ${x.pressure} hPa` : ''}${x.vis !== null ? `，能见度 ${x.vis} km` : ''}${x.precip ? `，降水 ${x.precip} mm` : ''}`);
@@ -145,5 +145,7 @@ export function formatQWeather(placeName, data, days = 3) {
   data.days.slice(0, days).forEach((d, i) => lines.push(`${NAMES[i] ?? d.date}（${d.date}）：${d.text}，${d.low}～${d.high}°C${d.wind ? `，${d.wind}` : ''}${d.uv !== null ? `，紫外线 ${d.uv}` : ''}${d.sunrise ? `，日出 ${d.sunrise} 日落 ${d.sunset}` : ''}`));
   if (x.indices?.length) lines.push(`生活指数：${x.indices.map((i) => `${i.name} ${i.category}`).join('；')}`);
   lines.push('来源：和风天气（qweather.com）');
+  // 这个城市在和风天气网站上的预报页（查城市时接口给的 fxLink）：回答引用来源时给这个，用户点开能看到同一份预报
+  if (link) lines.push(`本次数据链接（引用来源时给这个，不要只给首页）：${link}`);
   return lines.join('\n');
 }

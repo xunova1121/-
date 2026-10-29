@@ -444,7 +444,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     const releaseSafePartial = () => {
       if (!guardedAnswer || !held) return;
       review.checkAnswer(held, now());
-      if (!review.report().answerIssues.length && !review.report().calculationIssue && !review.report().visualIssue) releaseHeld();
+      if (!review.report().answerIssues.some((issue) => !SOFT_ANSWER_RULES.has(rewriteRule(issue))) && !review.report().calculationIssue && !review.report().visualIssue) releaseHeld();
     };
     const acceptVisible = fragment => {
       const { text, hint } = stripper.push(fragment);
@@ -557,7 +557,10 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         review.checkAnswer(held, now());
       }
       if (review.report().visualIssue) held = '本轮没有足够的识别依据确认截图细节，需要重新核对原图；不能把未确认的识别结果当结论。';
-      if (review.report().answerIssues.length) held = safeNewsPartial(requirementText, held, now()) || newsCandidateLinks(requirementText, review.newsCandidates()) || '本轮未能生成符合当前要求的答复，请重新生成。';
+      // 只有“出现了用户禁止的内容 / 时间、非今日新闻”这类硬性违规才不展示原回答；“找医生说多了”这类写法问题改不好也照常给，
+      // 不能把整段回答换成“请重新生成”（第二轮 30 题实测：产检解读整段被吞）
+      const blocking = review.report().answerIssues.filter((issue) => !SOFT_ANSWER_RULES.has(rewriteRule(issue)));
+      if (blocking.length) held = safeNewsPartial(requirementText, held, now()) || newsCandidateLinks(requirementText, review.newsCandidates()) || '本轮未能生成符合当前要求的答复，请重新生成。';
       if (review.report().styleIssues.length) held = held.trimEnd() + '\n\n' + review.styleCorrection();
       if (review.report().calculation === 'failed') held = '关键数值校验失败，请人工复核。';
       else if (review.report().calculationIssue && ACK_ONLY.test(held.trim())) held = '关键数值尚未完成工具校验，请人工复核。';
@@ -666,6 +669,8 @@ export function callPurpose(convo = [], closing = false) {
   if (last?.role === 'user' && text.startsWith('（以下是系统自动核对')) return 'finish_check';
   return 'answer';
 }
+/** 写法类核对（改不好也照常展示回答） */
+const SOFT_ANSWER_RULES = new Set(['care_deferral']);
 /** 回答核对问题 → 规则名 */
 export function rewriteRule(issue = '') {
   const t = String(issue);

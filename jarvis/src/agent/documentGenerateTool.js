@@ -158,6 +158,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         content,
         requirements: taskRules,
         quick,
+        kind: design.kind,
         llm: source || ctx.documentContentReview ? null : ctx.reasonLlm ?? ctx.llm ?? null,
         signal,
         onProgress: (t) => progress?.(t)
@@ -257,7 +258,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       if (ctx.documentContentReview && finalContent !== content) {
         ctx.documentContentReview.business = 'needs_recheck';
       }
-      const r = await deliverDocument(ctx, out, target, { progress, signal, checkpoint, plan, issues: lint(format, finalContent), generatorReview: looked, requirements: goal || requirements, preservation, design: sheetDesign || design });
+      const r = await deliverDocument(ctx, out, target, { progress, signal, checkpoint, plan, issues: lint(format, finalContent, { kind: design.kind }), generatorReview: looked, requirements: goal || requirements, preservation, design: sheetDesign || design });
       const notes = [
         `主题：${out.theme.name}`,
         ...(design.label ? [`设计：${STYLE_NAMES[out.info?.style] || design.label}（${out.info?.style && out.info.style !== design.style ? '公文主题固定稳重商务，与请求风格冲突；未按请求风格生成' : design.reason}）`] : []),
@@ -281,8 +282,11 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
             ? `看图检查了 ${looked.pages} 页，修正了 ${looked.changed} 处${looked.problems.length ? `（${looked.problems.slice(0, 3).join('；')}）` : ''}`
             : `看图检查了 ${looked.pages} 页${looked.problems.length ? `，发现的问题没能自动改：${looked.problems.slice(0, 3).join('；')}` : '，没发现明显问题'}`
         );
-      const left = [...lint(format, finalContent), ...built(out)];
+      const left = [...lint(format, finalContent, { kind: design.kind }), ...built(out)];
       if (left.length) notes.push(`还需要注意：${left.map((x) => x.text).join('；')}`);
+      // 用户指定了 PPT 字号又排不下：不能偷偷缩字，也别只报“可能溢出”就交差——精简那几页的字再生成一次（第二轮 30 题：24 磅第 3 页溢出）
+      const overflow = format === 'pptx' && typography.body?.size && (r.validation.issues || []).some((i) => /放不下/.test(i.text));
+      if (overflow) notes.push(`用户指定了正文 ${typography.body.size} 磅，不能靠缩小字号解决溢出：把检查提示放不下的那几页文字精简（每条一句短话，必要时少写一两条，页数不变），用同一路径再生成一次；精简后还放不下再照实告诉用户`);
       if (out.info?.toc) notes.push('已加目录（Word 打开时如提示更新域，点“是”即可填上页码；WPS 里右键目录 →“更新目录”）');
       if (out.info?.duplicatesRemoved) notes.push(`表格里有 ${out.info.duplicatesRemoved} 行和别的行重复，已自动去掉`);
       if (out.info?.duplicatesKept) notes.push(`表格里有 ${out.info.duplicatesKept} 行和别的行重复，但表里有公式没有自动删，请从原文里删掉重复行后重新生成`);

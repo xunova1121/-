@@ -181,3 +181,16 @@ describe('上一轮报告读不到也不白跑（第二轮实测：路径不对�
     expect(src).toMatch(/这次不做逐题对比/);
   });
 });
+
+describe('第二轮实测后：对比在评审后重算、两轮评审员不同要标出来', () => {
+  it('没评审时摘要说明对比不作数；评审员不同时提示', async () => {
+    const { summaryMarkdown } = await import('../evals/joint-report.mjs');
+    const base = { summary: {}, conditions: {}, repeats: 2, comparison: [{ id: 'joint-01', change: 'worse' }] };
+    expect(summaryMarkdown({ ...base, results: [{ id: 'joint-01', runs: [{ judgement: { error: '评审调用失败' } }] }] })).toMatch(/对比不作数/);
+    expect(summaryMarkdown({ ...base, results: [{ id: 'joint-01', runs: [{ judgement: { pass: true } }] }], comparisonJudge: { before: 'gpt-6-luna', after: 'gpt-6.1-sol', changed: true } })).toMatch(/两轮评审员不同/);
+  });
+  it('两道题的检查点：留空待定不扣分、替代办法有一样就算', () => {
+    expect(jointCases.find((c) => c.category === 'style_change').rubric[0]).toMatch(/留空不扣分/);
+    expect(jointCases.find((c) => c.category === 'boundary').rubric[1]).toMatch(/有一样就算/);
+  });
+});

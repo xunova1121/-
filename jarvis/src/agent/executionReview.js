@@ -215,7 +215,8 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
         ? 'tool_checked'
         : 'not_checked',
       contract: taskContract(request),
-      artifacts: [...artifacts.values()],
+      // 同一轮里后来又生成了同格式、检查无错的新文件：旧文件的检查错误不再算“未解决”（第二轮 30 题：改排版失败的中间版挂着错误，最终版没问题，结尾却写“部分完成”）
+      artifacts: [...artifacts.values()].filter((item) => !(item.errors > 0 && [...artifacts.values()].some((later) => later.at > item.at && later.format === item.format && !later.errors && later.readback === 'passed'))),
       failures: [...latest.values()].filter(unresolved).map((receipt) => receipt.tool),
       diagnosticRepositoryTest: !repositoryChanged && codeFailures.length > 0 && codeFailures.every(receipt => receipt.diagnosticTest),
       pendingReadback: pending,

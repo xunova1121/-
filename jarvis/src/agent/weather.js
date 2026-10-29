@@ -21,7 +21,7 @@ const DAY = ['今天', '明天', '后天'];
 const round = (v) => (typeof v === 'number' ? Math.round(v) : v);
 
 /** Open-Meteo 的两个返回结果 → 中文说明 */
-export function formatOpenMeteo(place, fc, days = 3) {
+export function formatOpenMeteo(place, fc, days = 3, dataUrl = '') {
   const c = fc.current ?? {};
   const where = [place.name, place.admin1, place.country].filter((x, i, a) => x && a.indexOf(x) === i).join('，');
   const lines = [`地点：${where}`];
@@ -32,11 +32,13 @@ export function formatOpenMeteo(place, fc, days = 3) {
     lines.push(`${DAY[i] ?? d.time[i]}（${d.time[i]}）：${wmoText(d.weather_code?.[i])}，${round(d.temperature_2m_min?.[i])}～${round(d.temperature_2m_max?.[i])}°C${rain != null ? `，降水概率 ${rain}%` : ''}`);
   }
   lines.push('来源：Open-Meteo（open-meteo.com）');
+  // 本次实际取数的链接：回答引用来源时给这个，不给官网首页（第二轮 30 题：只给首页，对不上当天数据）
+  if (dataUrl) lines.push(`本次数据链接（引用来源时给这个，不要只给首页）：${dataUrl}`);
   return lines.join('\n');
 }
 
 /** wttr.in 的 j1 格式 → 中文说明 */
-export function formatWttr(placeName, j, days = 3) {
+export function formatWttr(placeName, j, days = 3, dataUrl = '') {
   const c = j.current_condition?.[0] ?? {};
   const desc = (x) => x?.lang_zh?.[0]?.value || x?.weatherDesc?.[0]?.value || '';
   const area = j.nearest_area?.[0];
@@ -48,6 +50,7 @@ export function formatWttr(placeName, j, days = 3) {
     lines.push(`${DAY[i] ?? w.date}（${w.date}）：${desc(noon)}，${w.mintempC}～${w.maxtempC}°C，降水概率 ${rain}%`);
   });
   lines.push('来源：wttr.in');
+  if (dataUrl) lines.push(`本次数据链接（引用来源时给这个，不要只给首页）：${dataUrl}`);
   return lines.join('\n');
 }
 
@@ -68,20 +71,20 @@ export async function getWeather(place, { get, days = 3, signal, retrieval, qwea
       const city = (await lookupQWeatherCity({ ...qweather, query: name, fetchImpl, signal }))[0];
       if (!city) throw new Error(`没找到地点“${name}”`);
       const data = parseQWeather(await fetchQWeather({ ...qweather, latitude: city.latitude, longitude: city.longitude, fetchImpl, signal }));
-      return formatQWeather([city.name, city.region].filter(Boolean).join('，'), data, days);
+      return formatQWeather([city.name, city.region].filter(Boolean).join('，'), data, days, city.link);
     } catch (e) { throwControl(e, signal); firstErr = e; }
   }
   try {
     const geo = await json(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=zh&format=json`);
     const p = geo.results?.[0];
     if (!p) throw new Error(`没找到地点“${name}”`);
-    const fc = await json(`https://api.open-meteo.com/v1/forecast?latitude=${p.latitude}&longitude=${p.longitude}`
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${p.latitude}&longitude=${p.longitude}`
       + '&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,precipitation'
-      + `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=${Math.min(7, Math.max(1, days))}`);
-    return formatOpenMeteo(p, fc, days);
+      + `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=${Math.min(7, Math.max(1, days))}`;
+    return formatOpenMeteo(p, await json(url), days, url);
   } catch (e) { throwControl(e, signal); firstErr = e; }
   try {
-    return formatWttr(name, await json(`https://wttr.in/${encodeURIComponent(name)}?format=j1&lang=zh`), days);
+    return formatWttr(name, await json(`https://wttr.in/${encodeURIComponent(name)}?format=j1&lang=zh`), days, `https://wttr.in/${encodeURIComponent(name)}?lang=zh`);
   } catch (e) {
     throwControl(e, signal);
     throw Object.assign(new Error('天气服务访问失败（' + firstErr?.message + '；' + e.message + '），可以改用web_search查询'), { code: e.code || 'WEATHER_FAILED', kind: errorKind(e) || 'api', status: e.status, cause: e });

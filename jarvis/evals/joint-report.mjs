@@ -189,7 +189,11 @@ export function summaryMarkdown(report) {
   if (report.comparison) {
     const worse = report.comparison.filter((r) => r.change === 'worse');
     const better = report.comparison.filter((r) => r.change === 'better');
-    lines.push(`## 和上一轮比`, `- 变好 ${better.length} 题：${better.map((r) => r.id).join('、') || '无'}`, `- **变差 ${worse.length} 题：${worse.map((r) => r.id).join('、') || '无'}**（变差的要逐个说明原因）`, '');
+    const judged = report.results.some((r) => r.runs.some((x) => x.judgement && !x.judgement.error));
+    lines.push(`## 和上一轮比`);
+    if (!judged) lines.push('- **这一轮还没评审，下面的对比不作数**（先运行 joint-judge.mjs，它会重算对比）');
+    if (report.comparisonJudge?.changed) lines.push(`- 注意：两轮评审员不同（上轮 ${report.comparisonJudge.before}，这轮 ${report.comparisonJudge.after}），分数变化有一部分是换了评审员`);
+    lines.push(`- 变好 ${better.length} 题：${better.map((r) => r.id).join('、') || '无'}`, `- **变差 ${worse.length} 题：${worse.map((r) => r.id).join('、') || '无'}**（变差的要逐个说明原因）`, '');
   }
   if (report.calibration) {
     const k = report.calibration;

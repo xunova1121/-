@@ -13,7 +13,7 @@ import { createAdapter } from '../src/llm/config.js';
 import { routeFor } from '../src/llm/router.js';
 import { createHelperLlm } from '../src/llm/helper.js';
 import { judgePrompt, parseJudgement, rubricVersion } from './joint-rubric.mjs';
-import { stability, jointSummary } from './joint-report.mjs';
+import { stability, jointSummary, compareRounds } from './joint-report.mjs';
 
 const lineCfg = (cfg, provider, model) => ({ ...cfg, provider, models: { ...cfg.models, [provider]: model }, routing: { enabled: false }, abilities: {}, pinModel: true });
 /** 不能拿来评文字的模型：语音、画图、视频、向量、识字等（第二轮实测：选中了语音识别 fun-asr，每题 400） */
@@ -89,6 +89,15 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     await fs.writeFile(file, JSON.stringify(report, null, 2), { mode: 0o600 });
   }
   report.summary = jointSummary(report.results);
+  // 逐题对比要用评审后的结果重算；上一轮报告的路径在跑题时记下了，也可以 --previous= 指定
+  const readJson = async (p) => { try { return p ? JSON.parse(await fs.readFile(p, 'utf8')) : null; } catch { return null; } };
+  const previous = await readJson(args.find((a) => a.startsWith('--previous='))?.slice(11) || report.compareWith?.previous);
+  const baseline = await readJson(args.find((a) => a.startsWith('--baseline='))?.slice(11) || report.compareWith?.baseline);
+  if (previous || baseline) {
+    report.comparison = compareRounds(report.results, previous, baseline);
+    // 两轮评审员不同：分数变化有一部分是换了评审员，不全是未央变了
+    report.comparisonJudge = { before: previous?.judge?.model ?? null, after: model, changed: Boolean(previous?.judge?.model && previous.judge.model !== model) };
+  }
   await fs.writeFile(file, JSON.stringify(report, null, 2), { mode: 0o600 });
   console.log(`评审完成（${model}${report.judge.sameAsAnswerModel ? '，和答题模型相同，分数可能偏高' : ''}）。下一步：node evals/joint-calibrate.mjs sample ${file}`);
 }

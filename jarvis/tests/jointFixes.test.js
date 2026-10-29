@@ -93,3 +93,44 @@ describe('评审员不能选中语音 / 画图模型（第二轮实测：选中 
     expect(judgeConfig(cfg, '', 'gpt-6-luna').models.custom).toBe('gpt-6.1-sol');
   });
 });
+
+describe('第二轮 30 题：告示不误报“这一节没有内容”；被新版取代的旧文件错误不算未解决', () => {
+  it('告示里写成小标题的一行不算空节，普通文档照查', async () => {
+    const { lint } = await import('../src/agent/selfCheck.js');
+    const md = '# 王家园门面房招租\n\n## 120平方\n\n## 价格面议\n\n## 联系电话：13800000000';
+    expect(lint('docx', md, { kind: 'poster' }).filter((i) => /没有内容/.test(i.text))).toEqual([]);
+    expect(lint('docx', md).filter((i) => /没有内容/.test(i.text)).length).toBe(3);
+  });
+  it('后来同格式、无错的新文件读回通过：旧文件的错误不进报告', () => {
+    const review = createExecutionReview('字再小一点');
+    review.artifact({ path: 'a/招租_排版.docx', validation: { format: 'docx', readback: 'passed', errors: 2 } }, 1);
+    expect(review.report().artifacts.some((a) => a.errors > 0)).toBe(true);
+    review.artifact({ path: 'a/招租.docx', validation: { format: 'docx', readback: 'passed', errors: 0 } }, 2);
+    expect(review.report().artifacts.some((a) => a.errors > 0)).toBe(false);
+  });
+});
+
+describe('天气来源给本次取数的链接（第二轮 30 题：只给 Open-Meteo 首页）', () => {
+  it('Open-Meteo 结果带上实际请求的链接', async () => {
+    const { getWeather } = await import('../src/agent/weather.js');
+    const get = async (url) => new Response(JSON.stringify(url.includes('geocoding') ? { results: [{ name: '南京', latitude: 32.06, longitude: 118.78, country: '中国' }] } : { current: {}, daily: { time: ['2026-10-30'], weather_code: [0], temperature_2m_min: [12], temperature_2m_max: [22], precipitation_probability_max: [0] } }));
+    const text = await getWeather('南京', { get });
+    expect(text).toMatch(/本次数据链接.*https:\/\/api\.open-meteo\.com\/v1\/forecast\?latitude=32\.06&longitude=118\.78/);
+  });
+});
+
+describe('和风天气：来源给这个城市的预报页（接口返回的 fxLink）', () => {
+  it('查城市带回链接，天气文字里给出', async () => {
+    const { lookupQWeatherCity, formatQWeather } = await import('../src/core/qweather.js');
+    const fetchImpl = async () => new Response(JSON.stringify({ code: '200', location: [{ name: '南京', lat: '32.04', lon: '118.76', adm1: '江苏省', adm2: '南京', country: '中国', fxLink: 'https://www.qweather.com/weather/nanjing-101190101.html' }] }));
+    const [city] = await lookupQWeatherCity({ key: 'k', host: 'h', query: '南京', fetchImpl });
+    expect(city.link).toBe('https://www.qweather.com/weather/nanjing-101190101.html');
+    const text = formatQWeather('南京', { at: '2026-10-30T09:00', text: '晴', temp: 18, extra: {}, days: [] }, 3, city.link);
+    expect(text).toContain('本次数据链接（引用来源时给这个，不要只给首页）：https://www.qweather.com/weather/nanjing-101190101.html');
+  });
+  it('不是和风天气域名的链接不收', async () => {
+    const { lookupQWeatherCity } = await import('../src/core/qweather.js');
+    const fetchImpl = async () => new Response(JSON.stringify({ code: '200', location: [{ name: '南京', lat: '32', lon: '118', fxLink: 'https://evil.example/x' }] }));
+    expect((await lookupQWeatherCity({ key: 'k', host: 'h', query: '南京', fetchImpl }))[0].link).toBeUndefined();
+  });
+});

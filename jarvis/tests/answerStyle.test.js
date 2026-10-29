@@ -91,3 +91,24 @@ describe('替用户在外面办事：先说清办不了（第一轮 30 题：“
     expect(answerStyle('帮我订明天上午去上海的高铁票。').note).toMatch(/第一句就说清/);
   });
 });
+
+describe('“找医生”说多了、重写一次还没改好：照常给回答，不能换成“请重新生成”（第二轮 30 题实测：产检解读整段被吞）', () => {
+  it('两稿都重复：用户看到的是回答本身', async () => {
+    const repetitive = '这份报告显示心脏结构未见明显异常，提示三尖瓣轻度反流。建议把报告交给产科医生评估是否需要复查。三尖瓣位于右心房和右心室之间，请让产科医生结合完整影像判断。具体随访安排以医生评估为准。';
+    let calls = 0;
+    const adapter = { async stream({ onText }) { calls++; onText?.(repetitive); return { text: repetitive, toolCalls: [], stop: 'end_turn' }; } };
+    const r = await runAgent({ adapter, model: 'x', history: [], userText: '帮我看看这份产检报告，三尖瓣轻度反流要紧吗', context: { dynamic: '' }, tools: [], emit: () => {} });
+    expect(calls).toBe(2);
+    expect(r.text).toContain('三尖瓣轻度反流');
+    expect(r.text).not.toContain('请重新生成');
+  });
+});
+
+describe('决策题：第一句给结论、最后说何时反选（第二轮 30 题：第一句是“已用工具核对”，结论在句末）', () => {
+  it('决策场景说明里写清这两条', async () => {
+    const { answerStyle } = await import('../src/agent/answerStyle.js');
+    const note = answerStyle('两个方案：A一次投入20万，每月省1万；B每月租金8千，用两年，选哪个？').note;
+    expect(note).toMatch(/第一句就说选哪个/);
+    expect(note).toMatch(/反过来选/);
+  });
+});

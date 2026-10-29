@@ -167,6 +167,8 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     };
     const previous = await readOld('previous');
     const baseline = await readOld('baseline');
+    // 记下对比用的报告路径：评审完 joint-judge.mjs 会按评审结果重算对比（第二轮实测：评审前算的对比全是“变差”）
+    report.compareWith = { previous: previous ? arg('previous') : null, baseline: baseline ? arg('baseline') : null };
     if (previous || baseline) report.comparison = compareRounds(report.results, previous, baseline);
     await save();
   }

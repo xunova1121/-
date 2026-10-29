@@ -354,7 +354,8 @@ export function createTools(ctx) {
         const s = await scheduler.upsert({ title, prompt, unattended, ...scheduler.parseWhen(when) });
         ctx.onSchedulesChanged?.();
         if (s.duplicate) return `已经有一模一样的定时任务「${s.title}」（${scheduler.describe(s)}，id ${s.id}），没有重复创建。`;
-        return `已创建定时任务「${s.title}」（id ${s.id}）：${scheduler.describe(s)}，下一次在 ${whenText(s.nextRun)}（北京时间）。${scheduleHostNote(ctx)}`;
+        // 回答要转述具体钟点（第二轮 30 题：只说“10 分钟后提醒你”，用户不知道是几点）
+        return `已创建定时任务「${s.title}」（id ${s.id}）：${scheduler.describe(s)}，下一次在 ${whenText(s.nextRun)}（北京时间）。回答里写出这个具体时间（如“${whenText(s.nextRun)}提醒你”），不要只说“几分钟后”。${scheduleHostNote(ctx)}`;
       }
     },
     {

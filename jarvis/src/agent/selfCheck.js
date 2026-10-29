@@ -25,7 +25,7 @@ const DOC_FORMATS = ['docx', 'pdf', 'html', 'md'];
  * @param {string} content  Markdown / 表格
  * @returns {Array<{ level: 'error'|'warn', text: string }>}
  */
-export function lint(format, content) {
+export function lint(format, content, { kind = '' } = {}) {
   const issues = [];
   const add = (level, text) => issues.push({ level, text });
   const md = String(content ?? '');
@@ -68,7 +68,8 @@ export function lint(format, content) {
       if (prevLevel && b.level > prevLevel + 1) add('warn', `标题跳级：“${plain(b.inlines)}”从 ${'#'.repeat(prevLevel)} 直接到了 ${'#'.repeat(b.level)}`);
       prevLevel = b.level;
       const next = blocks[i + 1];
-      if (b.level > 1 && (!next || (next.type === 'heading' && next.level <= b.level))) add('error', `“${plain(b.inlines)}”这一节没有内容`);
+      // 单页告示本来就一行一条（“面积 120 平方”“价格面议”写成小标题也照样排成一行），不算“这一节没有内容”
+      if (kind !== 'poster' && b.level > 1 && (!next || (next.type === 'heading' && next.level <= b.level))) add('error', `“${plain(b.inlines)}”这一节没有内容`);
     }
     if (b.type === 'table') {
       const n = b.header.length;
@@ -259,8 +260,8 @@ export function capped(llm, signal, ms = REVIEW_CAP_MS) {
  * 生成前后的自查流程（create_document 用）
  * @returns {Promise<{ content: string, issues: object[], problems: string[], changed: number, checked: boolean }>}
  */
-export async function selfCheck({ format, content, requirements = '', llm = null, signal, onProgress, quick = false }) {
-  const issues = [...lint(format, content), ...coverageIssues(format, requirements, content)];
+export async function selfCheck({ format, content, requirements = '', llm = null, signal, onProgress, quick = false, kind = '' }) {
+  const issues = [...lint(format, content, { kind }), ...coverageIssues(format, requirements, content)];
   const hard = issues.some((x) => x.level === 'error');
   // quick：短文件、或同一个文件已经自查过一遍——规则检查没查出硬伤就不再请模型（省十几秒）
   const needModel = llm && DOC_FORMATS.concat('pptx').includes(format) && (hard || (requirements && !quick));
@@ -268,7 +269,7 @@ export async function selfCheck({ format, content, requirements = '', llm = null
   onProgress?.('对照要求自查…');
   try {
     const r = await reviewWithModel({ format, content, requirements, issues, llm: capped(llm, signal), signal });
-    const after = r.changed ? [...lint(format, r.content), ...coverageIssues(format, requirements, r.content)] : issues;
+    const after = r.changed ? [...lint(format, r.content, { kind }), ...coverageIssues(format, requirements, r.content)] : issues;
     return { content: r.content, issues: after, problems: r.problems, changed: r.changed, checked: true };
   } catch (e) {
     throwControl(e, signal);
