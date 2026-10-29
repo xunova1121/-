@@ -1,3 +1,4 @@
+import { codeWorkBlock, CODE_TASK_CORE } from './codeDevelopment.js';
 import { createDiagramRecovery } from './diagramRecovery.js';
 import { runArchitectureDirector } from './architectureDirector.js';
 import { asksDocumentStyles } from './documentStyleQuery.js';
@@ -219,7 +220,7 @@ export function trimComputerScreenshots(messages,keep=2) {
   for(const m of shots.slice(0,Math.max(0,shots.length-keep))){delete m.images;m.content=`${m.content}\n（旧界面截图已从模型输入移除；请以最新截图为准。）`;}
 }
 
-async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false, describeImages = null, visionLabel = '看图模型', readImageText = null, modelNote = '', hedgeMs = 0 }) {
+async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, maxTotalSteps = null, codeWork = null, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false, describeImages = null, visionLabel = '看图模型', readImageText = null, modelNote = '', hedgeMs = 0 }) {
   const workStartedAt = Date.now();
   const workAnswer = await answerWorkHistory(requirementText, sessionId, { signal, now: now(), onStart: () => emit({ type: 'tool_start', id: 'work-history', name: 'list_work_records', args: {} }) });
   if (workAnswer) {
@@ -239,7 +240,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   // 环境完全没有产物/计算核验能力时，直接说明未验收，不空转两轮模型。
   const canReview = availableTools.some(tool => /^(?:create_document|write_long_document|edit_office_document|read_file|write_file|run_javascript|run_python|computer_run|computer_read_file|verify_numbers|create_diagram|export_diagram|generate_image|sing_song|generate_video|code_read|code_edit|code_write|code_run)$/.test(tool.name));
   const review = createExecutionReview(requirementText, { visual: images.length > 0 || history.some(message => message.images?.length) });
-  const retrieval = createRetrievalBudget(lookupDeadline ? '普通查询' : images.length ? `逐项核验 ${requirementText}` : requirementText, { now, timeBudgetMs });
+  const retrieval = createRetrievalBudget(codeWork?.enabled ? '代码开发' : lookupDeadline ? '普通查询' : images.length ? `逐项核验 ${requirementText}` : requirementText, { now, timeBudgetMs });
   let modelAttempts = 0;
   let nativeSearchCalls = 0;
   let closingTurns = 0;
@@ -247,6 +248,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   emit({ type: 'state', value: 'processing' });
   const { ctx, record, requirementContext, archive } = await prepareAgentContext({ userText, priorMessages: history, context, sessionId, summary, light: light || Boolean(questionProfile), requirements, depth, requirementText, emit, buildContext });
   ctx.dynamic = (ctx.dynamic || '') + await workHistoryBlock(requirementText, sessionId, { signal });
+  if (codeWork?.enabled) ctx.dynamic = (ctx.dynamic || '') + '\n' + codeWorkBlock(codeWork, await packs.get('code-development'));
   const convo = [...history.map((m) => ({ ...m })), { role: 'user', content: userText, ...(images.length && { images }) }];
   if (images.length || IMAGE_RECHECK.test(requirementText) || /OCR|读数|数值|重新看|看错|识图|截图/i.test(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n' + IMAGE_READING_RULES + '\n图片核对：用户纠正读数或要求OCR时，先用inspect_image读取工作区原图（需要时指定region），不要复述旧识别结果；密集多列用regions最多4个物理分区一次复核，保留列行对应。用户提供数字只能标作用户纠正，不能直接改口称独立看清；不确定必须具体到字符，已看清的部分照常给出。成功回执只能证明本次执行，不能证明数字正确；来源冲突明确报告。没有原图或能力时说明缺失，不声称已重新识别。';
   if (/架构图|流程图|关系图|原图|旧图|先前.*图|SVG|画图|改图|生成图片/i.test(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n' + DIAGRAM_PLANNING + '\n图形任务：先明确读者、主结论及主次关系，再选主题和结构。分层架构一律create_diagram生成同一.diagram.json设计稿，SVG/PNG/PDF/PPT共用坐标与换行；换格式用export_diagram，不让普通PPT工具重新画。多页汇报里插入架构图也先生成同稿图片再引用。PPT展示版是同图，不冒充可编辑；原生可编辑版须实际渲染对比通过。Image2只做创意图片/视觉素材，不承担精确文字连线。已有图片修改必须传真实原图referencePaths。用户说先前那张时核对确切路径版本，不凭名称或时间替换；多候选无法区分需简短追问。SVG可inspect_image，转PNG可render_diagram。不把展示当验收、源图改了旧验收失效，失败只修指定问题再核。';
@@ -285,7 +287,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   const own = [...(oneFile ? [] : [plan.tool]), review.tool, executionTool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: availableTools })] : []), ...(lookupDeadline && lookupControl?.release ? [moreTimeTool] : [])].filter((t) => !tools.some((x) => x.name === t.name));
   // 工具按需加载：工具多时只带常用的完整说明，其余列名字、用 tool_search 加载（见 toolLoader.js）
   // 普通问答、查资料：做文档的工具先只列名字（用到时按名字调用或 tool_search 加载）
-  let loader = createToolLoader(light ? [] : questionProfile ? tools : [...tools, ...own], { defer: isQuickLookup(requirementText, images) ? DOCUMENT_TOOLS : null });
+  let loader = createToolLoader(light ? [] : questionProfile ? tools : [...tools, ...own], { defer: isQuickLookup(requirementText, images) ? DOCUMENT_TOOLS : null, ...(codeWork?.enabled && { core: CODE_TASK_CORE }) });
   const loadGUI=()=>{if(availableTools.some(t=>t.name==='computer_look'))for(const name of ['computer_look','computer_click','computer_type','computer_key','computer_scroll','computer_drag'])loader.get(name);};
   if(!light&&(computerTask==='gui'||computerTaskKind(requirementText,{history})==='gui'))loadGUI();
   let outputRepairs = 0;
@@ -303,7 +305,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   // 步数上限：到了 maxSteps 时，只要还在推进（最近没有大量失败）就自动接着做，不停下来问用户；
   // 最多做到 HARD_CAP 倍，防止原地打转一直消耗额度
   let limit = maxSteps;
-  const hardCap = maxSteps * HARD_CAP;
+  const hardCap = Number.isInteger(maxTotalSteps) && maxTotalSteps > 0 ? Math.min(maxTotalSteps, maxSteps * HARD_CAP) : maxSteps * HARD_CAP;
+  limit = Math.min(limit, hardCap);
   const recent = []; // 最近工具调用的成败
   const diagramRecovery = createDiagramRecovery();
   const seen = new Map(); // 同样的调用（工具 + 参数）做过几次

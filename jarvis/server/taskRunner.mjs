@@ -1,3 +1,4 @@
+import { codeTaskPolicy, CODE_TASK_MS } from './codeTaskPolicy.mjs';
 import { editImage } from '../src/llm/imageEdit.js';
 import { renderSvg } from './svgRender.mjs';
 import { compareDiagramPpt } from './diagramCompare.mjs';
@@ -43,7 +44,7 @@ import { createAdapter } from '../src/llm/config.js';
 import { generateImage } from '../src/llm/images.js';
 import { generateVideo } from '../src/llm/videos.js';
 import { providerById, isPrivateHost } from '../shared/providers.js';
-import { routeFor, fallbackRoutes, classifyTask, effortFor, isSmallTalk, visionRoute } from '../src/llm/router.js';
+import { routeFor, fallbackRoutes, effortFor, isSmallTalk, visionRoute } from '../src/llm/router.js';
 import { providerLabel, modelNote } from '../src/llm/modelLibrary.js';
 import { INTERRUPTED_MARK, interruptionMark, errorKind } from '../src/core/suggest.js';
 import { uid } from '../src/agent/store.js';
@@ -115,7 +116,7 @@ export function serverApproves(ask, text) {
   return false;
 }
 
-export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now, skillRunner = null, codeRepos = null }) {
+export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now, skillRunner = null, codeRepos = null, projectBaseDir, codeMaxSteps = 80, codeTaskMs = CODE_TASK_MS }) {
   const tasks = new Map();
   const waiting = [];
   let running = 0;
@@ -234,7 +235,24 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const cfg = withoutCodeCredentials(await getConfig());
     // 记忆按意思找：用能力表“记忆向量”那一项（服务器没有跨域限制）；没有就只按关键字
     memory.configureMemory({ llm: helper(cfg, 'write'), embedder: createEmbedder(cfg, { direct: true }) });
-    const kind = classifyTask(task.text, { images: task.images.length });
+    const policy = codeTaskPolicy({ text: task.text, images: task.images.length, hasRepos: Boolean(codeRepos && !task.evaluationId), resume: task.resumeFrom, maxSteps, codeMaxSteps });
+    const kind = policy.kind;
+    task.codeDeadline = policy.enabled ? setTimeout(() => { task.codeTimeout = true; task.ctrl.abort(Object.assign(new Error('代码任务达到总时限，保留工作副本，可继续'), { code: 'CODE_TASK_TIMEOUT', kind: 'timeout' })); }, Math.max(1, Math.min(20 * 60_000, Number(codeTaskMs) || CODE_TASK_MS))) : null;
+
+    const codeWork = { enabled: policy.enabled, workspaces: [] };
+    if (policy.enabled) {
+      task.checkpoint.codeTaskId = task.resumeFrom?.codeTaskId || task.resumeFrom?.taskId || task.id;
+      await saveCheckpoint(task, true);
+      if (codeRepos.workspaces) {
+        try {
+          const found = await codeRepos.workspaces(session.id, { signal: task.ctrl.signal });
+          codeWork.workspaces = found.items; codeWork.truncated = found.truncated;
+        } catch (error) {
+          if (task.ctrl.signal.aborted) throw error;
+          codeWork.indexError = /^[A-Z_]{1,60}$/.test(error.code || '') ? error.code : 'CODE_INDEX_UNAVAILABLE';
+        }
+      }
+    }
     const route = routeFor(cfg, kind);
     const { adapter, model, problem } = makeAdapter(route.cfg);
     if (problem) return finish(task, session, { error: `服务器上的模型还没配置好：${problem}` });
@@ -264,9 +282,9 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       currentSessionId: () => session.id,
       scheduleHost: 'server'
     }).filter((t) => !SERVER_BLOCKED.has(t.name)), task.evaluationId);
-    const projectTool = projectExecutionTool({ image: process.env.JARVIS_CODE_SANDBOX_IMAGE });
+    const projectTool = projectExecutionTool({ image: process.env.JARVIS_CODE_SANDBOX_IMAGE, baseDir: projectBaseDir });
     if (projectTool) tools.push(projectTool);
-    if (codeRepos && !task.evaluationId) tools.push(...createCodeTools({ repos: codeRepos, sessionId: session.id, taskId: task.id, editing: codeRepos.writable === true }));
+    if (codeRepos && !task.evaluationId) tools.push(...createCodeTools({ repos: codeRepos, sessionId: session.id, taskId: task.checkpoint.codeTaskId || task.id, editing: codeRepos.writable === true }));
     // 装了带脚本的技能：给模型“运行技能命令”的工具（在服务器的隔离 Docker 里跑，见 skillRunner.mjs；没装运行器时会照实说怎么装）
     if (skillRunner && !task.evaluationId && (await skillPacks.enabled().catch(() => [])).some(needsRunner)) {
       tools.push(skillRunnerTool({
@@ -298,7 +316,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     arm();
     try {
       const r = await runAgent({
-        adapter, model, fallbacks, maxSteps, ...sight(cfg), hedgeMs: cfg.hedgeBackup === false ? 0 : HEDGE_MS, modelNote: modelNote(cfg, { provider: route.cfg.provider, model }),
+        adapter, model, fallbacks, maxSteps: policy.maxSteps, maxTotalSteps: policy.maxTotalSteps, codeWork, ...sight(cfg), hedgeMs: cfg.hedgeBackup === false ? 0 : HEDGE_MS, modelNote: modelNote(cfg, { provider: route.cfg.provider, model }),
         history: unsummarized(history, session.summary).map(({ role, content }) => ({ role, content })),
         userText: task.resumeFrom ? task.text+'\n\n'+checkpointRecoveryText(task.resumeFrom) : task.text, requirementText: task.text, images: task.images,
         // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
@@ -331,14 +349,16 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       });
       return finish(task, session, { text: r.text, usedTools, toolCalls: r.toolCalls ?? 0 });
     } catch (err) {
-      const stopped = task.ctrl.signal.aborted && !task.idle;
-      return finish(task, session, { error: stopped ? '' : task.idle ? '连续 10 分钟没有进展，已中断' : String(err?.message || err), errorType: task.idle ? 'timeout' : errorKind(err), stopped, shown, usedTools });
+      const stopped = task.ctrl.signal.aborted && !task.idle && !task.codeTimeout;
+      return finish(task, session, { error: stopped ? '' : task.codeTimeout ? '代码任务达到总时限，工作副本已保留，发送继续可接着处理' : task.idle ? '连续 10 分钟没有进展，已中断' : String(err?.message || err), errorType: task.idle || task.codeTimeout ? 'timeout' : errorKind(err), stopped, shown, usedTools });
     } finally {
       clearTimeout(idle);
+      clearTimeout(task.codeDeadline);
     }
   }
 
   async function finish(task, session, { text = '', error = '', errorType = '', stopped = false, shown = '', usedTools = [], toolCalls = 0 }) {
+    clearTimeout(task.codeDeadline);
     const timing = task.timing.finish();
     const extra = { ...(task.failedSteps?.length && { failures: task.failedSteps }), timing, ...(task.review?.outcome && { review: { outcome: task.review.outcome, issueCount: task.review.warnings?.length || 0 } }), ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(task.files.size && { files: [...task.files].slice(-12) }) };
     clearTimeout(task.draftTimer);
@@ -430,7 +450,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         const busy=[...tasks.values()].find(t=>t.sessionId===id&&['queued','running'].includes(t.status));
         if(targetTaskId&&busy?.id!==targetTaskId)throw Object.assign(new Error('原任务已结束或中断，补充未执行；请作为新任务发送'),{status:409});
         const previous=session.taskCheckpoint;
-        const incomplete=previous&&['running','queued','interrupted','needs_review','error'].includes(previous.status);
+        const incomplete=previous&&(['running','queued','interrupted','needs_review','error'].includes(previous.status) || previous.status==='stopped'&&previous.codeTaskId&&/^(继续|恢复|接着)/.test(text));
         if(!busy&&incomplete){
           const key=previous.taskId||createHash('sha256').update(JSON.stringify([previous.text,previous.createdAt])).digest('hex');
           const archive=session.recoveryCheckpoints||[];const {evidence:_,...kept}=previous; // 旧版检查点里带着网页正文：归档时去掉，只留最近 5 次

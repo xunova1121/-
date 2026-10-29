@@ -52,13 +52,13 @@ function score(tool, query) {
  * @param {Array<{ name: string, description: string }>} tools
  * @param {{ limit?: number }} [o]
  */
-export function createToolLoader(tools, { limit = LIMIT, defer = null } = {}) {
+export function createToolLoader(tools, { limit = LIMIT, defer = null, core = CORE } = {}) {
   const all = new Map(tools.map((t) => [t.name, t]));
   const deferredMode = tools.length > limit;
   // 用户自己连的 MCP 服务是特意要用的：工具不多（≤ MCP_CORE 个）时也常驻
   const mcp = tools.filter((t) => t.name.startsWith('mcp_'));
   // defer：这一轮多半用不上的常驻工具也先只列名字（普通问答不带做文档的长说明，每步少发几千字）；直接按名字调用照样能用
-  const keep = (t) => (CORE.has(t.name) && !defer?.has(t.name)) || (mcp.length <= MCP_CORE && t.name.startsWith('mcp_'));
+  const keep = (t) => (core.has(t.name) && !defer?.has(t.name)) || (mcp.length <= MCP_CORE && t.name.startsWith('mcp_'));
   const active = new Set(deferredMode ? tools.filter(keep).map((t) => t.name) : tools.map((t) => t.name));
   const deferred = () => tools.filter((t) => !active.has(t.name));
 

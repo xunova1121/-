@@ -1,3 +1,4 @@
+import { CODE_DEVELOPMENT_SKILL } from './codeDevelopment.js';
 /**
  * 技能面板里的“推荐技能”：
  *   builtin  内置（离线一键安装），面向中文办公场景
@@ -6,6 +7,7 @@
 const md = (name, description, body) => `---\nname: ${name}\ndescription: ${description}\n---\n\n${body.trim()}\n`;
 
 export const BUILTIN_SKILLS = [
+  CODE_DEVELOPMENT_SKILL,
   {
     title: '周报 / 月报',
     text: md('weekly-report', '把零散的工作记录整理成结构清晰的周报或月报，并生成 Word 文档。用户说“写周报 / 月报 / 工作总结”时使用。', `

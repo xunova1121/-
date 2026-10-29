@@ -110,7 +110,7 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
   const codeRepos = createCodeRepos({ baseDir: path.join(dataDir, 'repos'), getConfig: loadConfig, hosting: codeHosting, editing: true, sandbox, ...(codeGit && { git: codeGit }) });
   // 技能脚本运行器：技能里的 Python / Node 命令在隔离的 Docker 里跑（没装 Docker 或镜像时照实告诉模型怎么装）
   const skillRunner = createSkillRunner({ image: process.env.JARVIS_SKILL_RUNNER_IMAGE || SKILL_RUNNER_IMAGE, baseDir: path.join(dataDir, 'skill-runner') });
-  const runner = injected ?? createTaskRunner({ getConfig: async () => withoutCodeCredentials(loadConfig()), maxRunning, skillRunner, codeRepos });
+  const runner = injected ?? createTaskRunner({ getConfig: async () => withoutCodeCredentials(loadConfig()), maxRunning, skillRunner, codeRepos, projectBaseDir: path.join(dataDir, 'project-jobs') });
   // 定时任务 / 提醒：服务器自己按时执行（手机关着也做），见 serverSchedules.mjs；测试里不自动开始计时
   const schedules = createServerSchedules({ runner });
   if (autoSchedules) schedules.start();
