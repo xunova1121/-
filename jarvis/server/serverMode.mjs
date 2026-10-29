@@ -1,5 +1,8 @@
 import { listWorkRecords, removeWorkRecord, renameWorkRecord } from '../src/agent/workLedger.js';
 import { createSearchTest } from './searchTest.mjs';
+import { createGitHubHost, withoutCodeCredentials } from './gitHosting.mjs';
+import { createCodeRepos } from './codeRepos.mjs';
+import { createCodeRepoRoutes } from './codeRepoRoutes.mjs';
 /**
  * 服务器模式（部署在自己的云服务器上）：任务交给服务器做，手机 / 电脑只负责发任务、看进度、取结果。
  *
@@ -63,11 +66,15 @@ export const tokenFor = (password) => createHash('sha256').update(`jarvis-server
 
 /** 模型设置里的密钥只给看后 4 位 */
 export function maskConfig(cfg) {
+  cfg = withoutCodeCredentials(cfg);
   const mask = (v) => (v ? `••••${String(v).slice(-4)}` : '');
   return { ...cfg, keys: Object.fromEntries(Object.entries(cfg.keys ?? {}).map(([k, v]) => [k, mask(v)])), tavilyKey: mask(cfg.tavilyKey), bochaKey: mask(cfg.bochaKey), deepseekSearchKey: mask(cfg.deepseekSearchKey), falKey: mask(cfg.falKey), qweatherKey: mask(cfg.qweatherKey) };
 }
 /** 保存时：密钥没改（还是 •••• 或留空）就沿用原来的 */
 export function mergeConfig(old, next) {
+  // GitHub凭据只在专用仓库设置接口更新，模型面板的旧快照不能清空或覆盖。
+  const { codeRepos: ignored, ...modelSettings } = next;
+  next = modelSettings;
   const keep = (n, o) => (!n || String(n).startsWith('••••') ? o ?? '' : n);
   const keys = { ...(old.keys ?? {}) };
   for (const [k, v] of Object.entries(next.keys ?? {})) keys[k] = keep(v, old.keys?.[k]);
@@ -82,7 +89,7 @@ export function mergeConfig(old, next) {
 /**
  * @param {{ dataDir: string, password: string, maxRunning?: number, runner?: object }} o
  */
-export function createServerMode({ dataDir, password, maxRunning = 1, runner: injected = null, appDir = APP_DIR, updateUnit = UPDATE_UNIT, makeModelAdapter, autoSchedules = false } = {}) {
+export function createServerMode({ dataDir, password, maxRunning = 1, runner: injected = null, appDir = APP_DIR, updateUnit = UPDATE_UNIT, makeModelAdapter, autoSchedules = false, codeHosting = createGitHubHost(), codeGit } = {}) {
   if (!password || String(password).length < 8) throw new Error('服务器模式需要设置 JARVIS_PASSWORD（至少 8 位）');
   const store = createFileStore(path.join(dataDir, 'store'));
   useBackend(store);
@@ -92,10 +99,15 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
   const loadConfig = () => {
     try { return { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(configFile, 'utf8')) }; } catch { return { ...DEFAULT_CONFIG }; }
   };
-  const saveConfig = (cfg) => { fs.writeFileSync(`${configFile}.tmp`, JSON.stringify(cfg, null, 2), { mode: 0o600 }); fs.renameSync(`${configFile}.tmp`, configFile); };
+  const saveConfig = (cfg) => {
+    const fd = fs.openSync(`${configFile}.tmp`, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, 0o600);
+    try { fs.fchmodSync(fd, 0o600); fs.writeFileSync(fd, JSON.stringify(cfg, null, 2)); } finally { fs.closeSync(fd); }
+    fs.renameSync(`${configFile}.tmp`, configFile);
+  };
+  const codeRepos = createCodeRepos({ baseDir: path.join(dataDir, 'repos'), getConfig: loadConfig, hosting: codeHosting, ...(codeGit && { git: codeGit }) });
   // 技能脚本运行器：技能里的 Python / Node 命令在隔离的 Docker 里跑（没装 Docker 或镜像时照实告诉模型怎么装）
   const skillRunner = createSkillRunner({ image: process.env.JARVIS_SKILL_RUNNER_IMAGE || SKILL_RUNNER_IMAGE, baseDir: path.join(dataDir, 'skill-runner') });
-  const runner = injected ?? createTaskRunner({ getConfig: async () => loadConfig(), maxRunning, skillRunner });
+  const runner = injected ?? createTaskRunner({ getConfig: async () => withoutCodeCredentials(loadConfig()), maxRunning, skillRunner, codeRepos });
   // 定时任务 / 提醒：服务器自己按时执行（手机关着也做），见 serverSchedules.mjs；测试里不自动开始计时
   const schedules = createServerSchedules({ runner });
   if (autoSchedules) schedules.start();
@@ -128,7 +140,8 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     try { return JSON.parse((await readBody(req, limit)).toString('utf8') || '{}'); } catch(e) { if(e.status===413)throw e;throw Object.assign(new Error('JSON 格式错误'), { status: 400 }); }
   };
 
-  const searchTest = createSearchTest({ getConfig: loadConfig, readJson, json });
+  const searchTest = createSearchTest({ getConfig: () => withoutCodeCredentials(loadConfig()), readJson, json });
+  const codeRoutes = createCodeRepoRoutes({ getConfig: loadConfig, saveConfig, hosting: codeHosting, repos: codeRepos, readJson, json });
 
   function login(req, res, body) {
     const ip = String(req.headers['x-real-ip'] || req.socket.remoteAddress || '');
@@ -167,12 +180,16 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
   async function handle(req, res, pathname) {
     const url = new URL(req.url, 'http://x');
     if (pathname === '/api/server/login' && req.method === 'POST') { login(req, res, await readJson(req)); return true; }
+    if (pathname === '/api/server/code-repos') {
+      if (!authorized(req)) { json(res, 401, { error: '服务器登录已失效' }); return true; }
+      return codeRoutes(req, res, pathname);
+    }
     if (pathname === '/api/server/status' && req.method === 'GET') { json(res, 200, { ok: true, features:{evaluationMemoryIsolation:true,taskRequestIds:true,taskNotes:true,taskCheckpoints:true,pcModelBridge:true,skillSync:true}, running: runner.running, tasks: runner.list().filter((t) => t.status === 'running' || t.status === 'queued') }); return true; }
     if(pathname==='/api/server/pc-model'&&req.method==='POST'){
       if(!authorized(req)){json(res,401,{error:'服务器登录已失效'});return true;}
       if(activePCModels>=2){json(res,429,{error:'PC模型请求繁忙，请稍后重试'});return true;}
       activePCModels++;
-      try{const body=await readJson(req,UPLOAD_LIMIT);await streamPCModel(req,res,body,{cfg:loadConfig(),makeAdapter:makeModelAdapter});}
+      try{const body=await readJson(req,UPLOAD_LIMIT);await streamPCModel(req,res,body,{cfg:withoutCodeCredentials(loadConfig()),makeAdapter:makeModelAdapter});}
       finally{activePCModels--;}
       return true;
     }
@@ -186,7 +203,7 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     }
     // 记忆向量现在的情况（模型页“记忆向量”那一行显示）；还有没算向量的记忆就在后台补
     if (pathname === '/api/server/memory-status' && req.method === 'GET') {
-      const embedder = createEmbedder(loadConfig(), { direct: true });
+      const embedder = createEmbedder(withoutCodeCredentials(loadConfig()), { direct: true });
       if (embedder) setEmbedder(embedder);
       const status = embedder ? await vectorStatus() : { model: null, total: 0, embedded: 0, lastError: null };
       if (embedder && status.embedded < status.total) backfillVectors().catch(() => {});
@@ -238,7 +255,7 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       const cancel = () => controller.abort();
       res.once('close', cancel);
       activeCatalogs++;
-      try { json(res, 200, await serverModelCatalog(loadConfig(), provider, controller.signal)); }
+      try { json(res, 200, await serverModelCatalog(withoutCodeCredentials(loadConfig()), provider, controller.signal)); }
       catch (error) {
         if (error.name === 'AbortError' || error.code === 'RETRIEVAL_BUDGET') throw error;
         // 服务商的401不是未央登录失效，避免手机把访问令牌误判为过期。

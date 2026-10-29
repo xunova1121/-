@@ -18,6 +18,8 @@ import { createDocumentReviewer } from '../src/llm/documentReviewer.js';
 import { checkpointEvent, checkpointNeedsReview, checkpointRecoveryText, isReadOnlyTool } from '../shared/taskCheckpoint.js';
 import { evidence } from '../src/agent/evidenceStore.js';
 import { failedStep } from '../src/agent/failedSteps.js';
+import { createCodeTools } from './codeTools.mjs';
+import { withoutCodeCredentials } from './gitHosting.mjs';
 /**
  * 服务器上的任务执行器：手机 / 电脑把任务交过来，服务器自己从头做到尾。
  * 发任务的那台设备关掉、断网都不影响；它再连上来时，按序号补发漏掉的进度，做完的结果存在对话里。
@@ -113,7 +115,7 @@ export function serverApproves(ask, text) {
   return false;
 }
 
-export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now, skillRunner = null }) {
+export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now, skillRunner = null, codeRepos = null }) {
   const tasks = new Map();
   const waiting = [];
   let running = 0;
@@ -229,7 +231,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     console.log(`[任务] ${task.id} 开始：${task.text.slice(0, 40).replace(/\s+/g, ' ')}`);
     record(task, { type: 'task_state', status: 'running' });
     const session = await sessions.get(task.sessionId);
-    const cfg = await getConfig();
+    const cfg = withoutCodeCredentials(await getConfig());
     // 记忆按意思找：用能力表“记忆向量”那一项（服务器没有跨域限制）；没有就只按关键字
     memory.configureMemory({ llm: helper(cfg, 'write'), embedder: createEmbedder(cfg, { direct: true }) });
     const kind = classifyTask(task.text, { images: task.images.length });
@@ -264,6 +266,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     }).filter((t) => !SERVER_BLOCKED.has(t.name)), task.evaluationId);
     const projectTool = projectExecutionTool({ image: process.env.JARVIS_CODE_SANDBOX_IMAGE });
     if (projectTool) tools.push(projectTool);
+    if (codeRepos && !task.evaluationId) tools.push(...createCodeTools({ repos: codeRepos, sessionId: session.id, taskId: task.id }));
     // 装了带脚本的技能：给模型“运行技能命令”的工具（在服务器的隔离 Docker 里跑，见 skillRunner.mjs；没装运行器时会照实说怎么装）
     if (skillRunner && !task.evaluationId && (await skillPacks.enabled().catch(() => [])).some(needsRunner)) {
       tools.push(skillRunnerTool({
@@ -377,7 +380,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
 
   /** 做完以后在后台：把这轮对话交给记忆整理（以后的对话能想起来），太长的对话把较早部分并进前情提要 */
   async function afterTask(task, text) {
-    const cfg = await getConfig();
+    const cfg = withoutCodeCredentials(await getConfig());
     const llm = helper(cfg, 'write');
     if (!task.evaluationId && cfg.autoMemory !== false) {
       memory.configureMemory({ llm, embedder: createEmbedder(cfg, { direct: true }) });

@@ -4,6 +4,7 @@
  */
 import { loadServerSettings, saveServerSettings, createServerClient, normalizeUrl } from '../core/serverClient.js';
 import { listLocal } from '../agent/sessions.js';
+import { initCodeReposPanel } from './codeReposPanel.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -13,6 +14,7 @@ const $ = (s) => document.querySelector(s);
 export function initServerPanel({ getLlmConfig, toast, reload = () => location.reload(), onConfigSaved = () => {}, onImported = () => {}, onOpenModels }) {
   const on = $('#server-on');
   if (!on) return;
+  initCodeReposPanel();
   const status = $('#server-status');
   const cfg = loadServerSettings();
   $('#server-url').value = cfg.url;

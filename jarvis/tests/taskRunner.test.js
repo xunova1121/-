@@ -55,6 +55,29 @@ function scripted(steps, { delay = 0 } = {}) {
 }
 
 describe('服务器任务执行器', () => {
+  it('代码只读工具绑定真实任务；GitHub凭据不进入适配器、工具上下文、事件或对话', async () => {
+    const secret = 'ghp_' + 'TestPrivateOnly'.repeat(3);
+    const seen = [], scopes = [];
+    const repos = { async clone(args, scope, execution) { scopes.push(scope); expect(execution.signal).toBeTruthy(); return { workspace_id: 'a'.repeat(24), readOnly: true }; } };
+    let step = 0;
+    const adapter = { async stream(input) {
+      seen.push(JSON.stringify(input));
+      if (step++ === 0) return { text: '', toolCalls: [{ id: 'search', name: 'tool_search', args: { query: 'repo_clone' } }], stop: 'tool_use' };
+      if (step === 2) return { text: '', toolCalls: [{ id: 'clone', name: 'repo_clone', args: {} }], stop: 'tool_use' };
+      input.onText?.('已创建独立只读工作副本，主线未改。');
+      return { text: '已创建独立只读工作副本，主线未改。', toolCalls: [], stop: 'end_turn' };
+    } };
+    const runner = createTaskRunner({ getConfig: async () => ({ ...DEFAULT_CONFIG, provider: 'mock', codeRepos: { token: secret, repository: 'demo/sandbox', verifiedAt: 'test' } }), codeRepos: repos,
+      makeAdapter: cfg => { expect(JSON.stringify(cfg)).not.toContain(secret); expect(cfg.codeRepos).toBeUndefined(); return { adapter, model: 'm' }; } });
+    const task = await runner.start({ text: '连接代码仓库并读取，不修改代码' });
+    await until(() => ['done', 'error'].includes(runner.get(task.id).status));
+    expect(runner.get(task.id).status).toBe('done');
+    expect(scopes).toEqual([{ sessionId: task.sessionId, taskId: task.id }]);
+    expect(seen.join('')).not.toContain(secret);
+    expect(JSON.stringify(runner.events(task.id))).not.toContain(secret);
+    expect(JSON.stringify(await sessions.get(task.sessionId))).not.toContain(secret);
+  });
+
   it('真实执行路径的耗时随任务、最终事件和回答持久化，首字不计空白', async () => {
     let time = 100;
     const adapter = { async stream({onText}) { time=150;onText(' ');time=200;onText('实际回答');time=250;return {text:'实际回答',toolCalls:[],stop:'end_turn'}; } };

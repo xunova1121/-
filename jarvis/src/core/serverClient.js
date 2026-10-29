@@ -182,6 +182,9 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     listSessions: () => req('/api/sessions'),
     /** 服务器上的技能和技能运行器状态 */
     listSchedules: () => req('/api/server/schedules'),
+    codeRepository: () => req('/api/server/code-repos'),
+    connectCodeRepository: (value) => req('/api/server/code-repos', { method: 'PUT', body: value, timeout: 45000 }),
+    disconnectCodeRepository: () => req('/api/server/code-repos', { method: 'DELETE' }),
     addSchedule: (o) => req('/api/server/schedules', { method: 'POST', body: o }),
     patchSchedule: (id, patch) => req(`/api/server/schedules/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }),
     removeSchedule: (id) => req(`/api/server/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' }),
