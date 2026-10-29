@@ -113,7 +113,7 @@ export function describeHolding(h) {
 /** 放进上下文的持仓段：只在问到股票时带上（见 agent.js） */
 export function holdingsBlock(items = []) {
   if (!items.length) return '';
-  return `## 用户的持仓（用户亲口说过的成交和更正，存在持仓记录里，长对话压缩后也以此为准；你推荐过的股票和推荐价不是持仓也不是成本）\n${items.map((h) => `- ${describeHolding(h)}`).join('\n')}\n算盈亏：先用 get_stock_kline 取最新收盘（和日期），再用 holding_profit 算，不要心算；没取到行情就说没有，不拿旧价格当今天。用户说买了 / 卖了 / 成本不对时用 record_holding 记下。`;
+  return `## 用户的持仓（用户亲口说过的成交和更正，存在持仓记录里，长对话压缩后也以此为准；你推荐过的股票和推荐价不是持仓也不是成本）\n${items.map((h) => `- ${describeHolding(h)}`).join('\n')}\n算盈亏：先用 get_stock_kline（adjustment=none）取回执里的 latestClose / previousClose / priceDate，再调 holding_profit（price=latestClose，prevClose=previousClose，priceDate），不要心算；latestClose 为 null 就是还没有已收盘的价格，没取到行情就说没有，不拿旧价格当今天。用户说买了 / 卖了 / 成本不对时用 record_holding 记下。`;
 }
 
 export const STOCK_TOPIC = /股票|持仓|证券|股价|行情|盈亏|赚了|亏了|收益|涨停|跌停|K线|A股|买入|卖出|买了|卖了|成本|仓位/i;
