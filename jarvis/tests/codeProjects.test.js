@@ -131,3 +131,46 @@ it('建仓外部写入前已持久登记；重启后不重复POST，未知对话
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
+it('本地已提交但提交号没记下（服务重启）：再确认时沿用原提交推送，不重复提交、不卡死；别的提交不冒认', async () => {
+  const f = await codeRepoFixture({ 'README.md': 'fixture\n' }),
+    cfg = { ...f.cfg, codeAccount: { login: 'demo', token: 'x'.repeat(32), verifiedAt: 'fixture' } };
+  const raw = createGitRunner(),
+    commands = [];
+  const git = (args, init) => {
+    commands.push(args);
+    return raw(['-c', 'protocol.file.allow=always', ...args.map((v) => (/^https:\/\/github.com\/demo\/[a-z-]+\.git$/.test(v) ? 'file://' + f.source : v))], init);
+  };
+  const o = {
+    dataDir: f.directory,
+    getConfig: () => cfg,
+    saveConfig: (v) => Object.assign(cfg, v),
+    legacyRepos: f.repos,
+    git,
+    hosting: { repository: async (c) => ({ repository: c.repository, defaultBranch: 'main' }) },
+    github: { account: async () => ({ login: 'demo' }), create: async (_, r) => ({ repository: 'demo/' + r.name, private: true, defaultBranch: 'main' }), ensureBranch: async () => {} },
+    onBind: async () => {}
+  };
+  try {
+    const p = createCodeProjects(o),
+      made = await p.execute((await p.prepare({ name: 'restart-project', title: '重启' }, 'owner')).id, 'owner'),
+      id = made.workspace.workspace_id,
+      repos = await p.reposFor('owner');
+    await repos.write(id, 'owner', { path: 'index.html', content: '<title>A</title>' });
+    const save = await p.prepareSave({ workspace_id: id, message: 'Add page' }, 'owner');
+    // 模拟：提交已经做完，但还没来得及把提交号写进确认记录就重启了
+    const lost = await repos.commit(id, 'owner', { digest: save.digest, message: save.message });
+    const again = createCodeProjects(o),
+      pushed = await again.execute(save.id, 'owner');
+    expect(pushed.commit).toBe(lost.commit);
+    expect(f.command(f.source, 'rev-parse', pushed.branch)).toBe(lost.commit);
+    expect(commands.filter((a) => a.includes('commit')).length).toBe(1);
+    // 说明不同的提交（不是这次确认产生的）不能冒认
+    await repos.write(id, 'owner', { path: 'b.html', content: '<title>B</title>' });
+    const other = await again.prepareSave({ workspace_id: id, message: 'Add b' }, 'owner');
+    await repos.commit(id, 'owner', { digest: other.digest, message: 'Something else' });
+    await expect(again.execute(other.id, 'owner')).rejects.toMatchObject({ code: 'CODE_APPROVAL_STALE' });
+    expect(f.command(f.source, 'rev-parse', 'main')).toBe(f.original);
+  } finally {
+    await f.close();
+  }
+}, 30000);

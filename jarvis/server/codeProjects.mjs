@@ -201,7 +201,7 @@ export function createCodeProjects({
       }
       const repos = await reposFor(sessionId);
       if (!request.commit) {
-        const committed = await repos.commit(request.workspaceId, sessionId, { digest: request.digest, message: request.message });
+        const committed = await repos.commit(request.workspaceId, sessionId, { digest: request.digest, message: request.message, head: request.head, files: request.files });
         request = await patchRequest(id, { commit: committed.commit, status: 'committed' });
       }
       const pushed = await repos.push(request.workspaceId, sessionId, { commit: request.commit });
