@@ -10,6 +10,7 @@ import { createArchitectureRevisionTool } from './architectureRevision.js';
 import { communicationPreferenceSupported } from './communicationPreferences.js';
 import { createWorkRecordsTool } from './workLedger.js';
 import { readGovernmentGuide } from './governmentGuide.js';
+import { readPageCandidates, enoughPageContent } from './pageCandidates.js';
 import { formatPageResult } from './pageLinks.js';
 import { createDocumentTools } from './documentTools.js';
 import { searchRequest, screenSearchHits } from './retrievalQuality.js';
@@ -607,13 +608,23 @@ export function createTools(ctx) {
     {
       name: 'fetch_url',
       description: '读取网页或PDF正文，附页面栏目和附件链接；链接指向的内容需继续读取。',
-      input_schema: S({ url: str('http(s) 地址') }, ['url']),
-      run: async ({ url }, { signal, progress, retrieval, sessionId, requestText } = {}) => {
+      input_schema: S({ url: str('http(s) 地址'), urls: { type: 'array', maxItems: 2, items: { type: 'string' }, description: '可选：同一问题的另外至多两个备选页面，并发读取、取得正文即停止；用户要求逐页核对时不要使用备选模式' } }, ['url']),
+      run: async ({ url, urls = [] }, { signal, progress, retrieval, sessionId, requestText } = {}) => {
         if (!/^https?:\/\//i.test(url)) throw new Error('只支持 http(s) 地址');
-        retrieval?.consume('read');
+        const candidates = [...new Set([url, ...urls])].slice(0, 3);
+        if (candidates.some(address => typeof address !== 'string' || !/^https?:\/\//i.test(address))) throw new Error('候选页面只支持 http(s) 地址');
+        const read = async (address, activeSignal) => {
+          retrieval?.consume('read');
+          return readPage(address, { signal: activeSignal, progress, consume: kind => retrieval?.consume(kind) });
+        };
         let text;
         try {
-          text = await readPage(url, { signal, progress, consume: kind => retrieval?.consume(kind) });
+          if (candidates.length > 1) {
+            const found = await readPageCandidates(candidates, { read, signal, accept: content => enoughPageContent(content, requestText) });
+            if (!found) throw new Error('候选页面没有足够正文，请换来源；导航标题不能当作已核实材料');
+            url = found.url;
+            text = found.text;
+          } else text = await read(url, signal);
         } catch (error) {
           throwControl(error, signal);
           if (error.code === 'PRIVATE_NETWORK_BLOCKED') throw error;
@@ -622,9 +633,9 @@ export function createTools(ctx) {
           });
           return '原网页读取失败：' + error.message + '\n以下只是聚合搜索线索，未取得原站正文，不能声称已核实：\n' + JSON.stringify(hints);
         }
-        const guide = await readGovernmentGuide({ text, url, requestText, signal, read: async address => {
+        const guide = await readGovernmentGuide({ text, url, requestText, signal, read: async (address, activeSignal) => {
           retrieval?.consume('read');
-          return readPage(address, { signal, progress, consume: kind => retrieval?.consume(kind) });
+          return readPage(address, { signal: activeSignal, progress, consume: kind => retrieval?.consume(kind) });
         } });
         // 存一份原文片段：之后要细节用 read_evidence 取，不用重新联网
         const sid = sessionId ?? ctx.currentSessionId?.();

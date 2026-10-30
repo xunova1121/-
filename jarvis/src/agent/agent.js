@@ -579,6 +579,9 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       }
       // 纯计算已经做过有界纠正，不再叠一轮同样的收尾核验；文件/代码/记忆任务仍走原验收。
       const acceptance = review.report();
+      // 单页Word/单张图片已有真实验收及交付链接，只同步回执已证明的行政步骤，不再为勾计划调用模型。
+      const completedSteps = review.completeDelivery(plan.steps, stepText);
+      if (completedSteps) await plan.tool.run({ steps: completedSteps });
       if (guardedAnswer && (acceptance.calculationIssue || acceptance.visualIssue) && !acceptance.contract.formats.length && !acceptance.contract.coding && !acceptance.contract.remembering && !acceptance.contract.askingMemory && !acceptance.sourceRequirement && !unfinished(plan.steps).length) break;
       // 收尾核对：写代码的任务最多提醒两次；文档等其他任务只提醒一次，文件验过能用就交付，不反复核实
       // 普通问题也算数时照样提醒用计算工具核对（核一下几秒；不然回答末尾挂“数值计算尚未核对”）

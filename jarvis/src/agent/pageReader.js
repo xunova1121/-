@@ -77,7 +77,9 @@ export function createPageReader(options = {}) {
     return boundedPage(text);
   }
 
-  return async function read(url, { signal, progress, consume } = {}) {
+  return (url, options = {}) => withWebDeadline(signal => read(url, { ...options, signal }), { signal: options.signal, timeoutMs: 8000 });
+
+  async function read(url, { signal, progress, consume } = {}) {
     if (signal?.aborted) throw Object.assign(new Error('已停止读取网页'), { name: 'AbortError' });
     const hit = cache.get(url);
     if (hit && now() - hit.at < CACHE_MS) return hit.text;
@@ -95,7 +97,7 @@ export function createPageReader(options = {}) {
         try {
           progress?.('正在使用DeepSeek Fetch读取原文');
           triedDeepseek = true;
-          text = await deepseek.read(url, { signal, consume });
+          text = await withWebDeadline(activeSignal => deepseek.read(url, { signal: activeSignal, consume }), { signal, timeoutMs: 2500 });
         } catch (error) {
           throwControl(error, signal);
           if (error.code === 'PRIVATE_NETWORK_BLOCKED') throw error;
@@ -105,7 +107,8 @@ export function createPageReader(options = {}) {
       }
       if (!text) {
         if (triedDeepseek) consume?.('read');
-        text = await withWebDeadline((readSignal) => retryRead((activeSignal) => direct(url, activeSignal), { signal: readSignal, timeoutMs: 20000, beforeAttempt: attempt => { if (attempt) consume?.('read'); } }), { signal, timeoutMs: 20000 });
+        const directMs = tavilyKey ? 4000 : 8000;
+        text = await withWebDeadline((readSignal) => retryRead((activeSignal) => direct(url, activeSignal), { signal: readSignal, timeoutMs: directMs, beforeAttempt: attempt => { if (attempt) consume?.('read'); } }), { signal, timeoutMs: directMs });
       }
     } catch (e) {
       throwControl(e, signal);
@@ -124,6 +127,7 @@ export function createPageReader(options = {}) {
         if (err) err = Object.assign(new Error(err.message + '；Tavily 代读也失败：' + e.message), { cause: err, kind: err.kind, status: err.status, code: err.code, name: err.name });
       }
     }
+    throwControl(err, signal);
     if (err) {
       failures.set(url, { at: now(), message: err.message, type: { kind: err.kind, code: err.code, status: err.status, name: err.name } });
       if (failures.size > 60) failures.delete(failures.keys().next().value);

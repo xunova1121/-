@@ -8,6 +8,7 @@ import { isReadOnlyTool } from '../../shared/taskCheckpoint.js';
 import { creativeWithoutLookup } from '../core/imageFollowup.js';
 import { answerConstraints, answerConstraintIssues, concreteSourceRequirement, sourceCandidates, sourceAnswerIssue } from './answerRequirements.js';
 import { styleRequests, styleIssues, styleNote } from './styleCheck.js';
+import { completedDeliverySteps } from './deliveryCompletion.js';
 
 /** 核实文件内容的工具：同一文件验过可用后只再放行一次 */
 export const VERIFY_TOOLS = /^(?:read_file|computer_read_file|check_document)$/;
@@ -278,5 +279,6 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   const styleCorrection = () => (styleProblems.length ? '（读回文件核对：' + styleNote(request, lastDocument()).replace(/^用户要的调整，读回文件的实际结果：/, '').replace(/。回答照这个说$/, '') + '。）' : '');
   const repositoryText = text => repositoryChanged ? correctRepositoryLinks(text, [...new Set([...files.values()].map(file => file.workspaceId).filter(Boolean))]) : text;
   const repositoryStream = () => repositoryChanged ? repositoryTextStream(repositoryText) : { push: fragment => fragment };
-  return { repositoryStream, repositoryText, styleCorrection, newsCandidates: () => [...newsLinks.values()], toolBlock, noteVisual: visualEvidence.note, record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked, checkAnswer, guardsAnswer };
+  const completeDelivery = (steps, answer) => completedDeliverySteps({ report: report(), guidance: guidance(), receipts, steps, answer });
+  return { completeDelivery, repositoryStream, repositoryText, styleCorrection, newsCandidates: () => [...newsLinks.values()], toolBlock, noteVisual: visualEvidence.note, record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked, checkAnswer, guardsAnswer };
 }

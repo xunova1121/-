@@ -1,6 +1,7 @@
 import { LINK_MARKER } from './pageLinks.js';
 import { concreteSourceRequirement, channelKinds } from './answerRequirements.js';
 import { throwControl } from '../core/networkRequest.js';
+import { readPageCandidates } from './pageCandidates.js';
 
 /** 申请渠道任务遇到导航页，最多顺读两个同站指南；不把链接标题当已读正文。 */
 export async function readGovernmentGuide({ text, url, requestText, read, signal }) {
@@ -21,14 +22,11 @@ export async function readGovernmentGuide({ text, url, requestText, read, signal
     } catch { /* 忽略无效导航，不猜测网址。 */ }
     if (candidates.length === 2) break;
   }
-  for (const address of candidates) {
-    signal?.throwIfAborted();
-    try {
-      const content = await read(address);
-      if (channelKinds(String(content).split(LINK_MARKER)[0]).length) return { url: address, text: content };
-    } catch (error) {
-      throwControl(error, signal);
-    }
+  try {
+    return await readPageCandidates(candidates, { signal, read, accept: content => channelKinds(String(content).split(LINK_MARKER)[0]).length > 0 });
+  } catch (error) {
+    throwControl(error, signal);
+    if (error.code === 'PRIVATE_NETWORK_BLOCKED') throw error;
+    return null;
   }
-  return null;
 }

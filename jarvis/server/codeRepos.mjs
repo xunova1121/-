@@ -7,9 +7,10 @@ import { codeError, createGitRunner, gitRetry, repositoryName } from './codeGit.
 import { createGitHubHost } from './gitHosting.mjs';
 import { allowedCodePath, readCodeFile, codeLines, searchCode } from './codeRepoFiles.mjs';
 import { writeCodeFile } from './codeRepoWrite.mjs';
+import { withCodeNetworkDeadline } from './codeNetworkDeadline.mjs';
 
 /** 仅GitHub只读。最多8仓库缓存/32工作副本；不自动删用户工作，索引不保存代码正文或凭据。 */
-export function createCodeRepos({ baseDir, getConfig, git = createGitRunner(), hosting = createGitHubHost(), editing = false, sandbox = null, browser = null }) {
+export function createCodeRepos({ baseDir, getConfig, git = createGitRunner(), hosting = createGitHubHost(), editing = false, sandbox = null, browser = null, networkTimeoutMs = 60000 }) {
   const root = path.resolve(baseDir),
     indexPath = path.join(root, 'index.json');
   const busy = new Map();
@@ -127,51 +128,59 @@ export function createCodeRepos({ baseDir, getConfig, git = createGitRunner(), h
       const cache = path.join(root, connection.repository.replace('/', '__'));
       if (caches.length >= 8 && !caches.includes(path.basename(cache))) throw codeError('CODE_REPO_CAPACITY', '仓库缓存已达8个，请先核对保留的工作');
       await directory(cache);
-      context.retrieval?.consume('fetch');
-      const meta = await hosting.repository(connection, { signal });
-      const bare = path.join(cache, 'bare.git');
-      if (!(await fs.stat(bare).catch(() => null))) {
-        const staged = path.join(cache, 'clone.pending');
-        await gitRetry(async () => {
-          await fs.rm(staged, { recursive: true, force: true });
-          context.retrieval?.consume('fetch');
-          try {
+      const { meta, bare } = await withCodeNetworkDeadline(async networkSignal => {
+        const network = { ...context, signal: networkSignal };
+        network.retrieval?.consume('fetch');
+        const meta = await hosting.repository(connection, { signal: networkSignal });
+        networkSignal.throwIfAborted();
+        const bare = path.join(cache, 'bare.git');
+        if (!(await fs.stat(bare).catch(() => null))) {
+          const staged = path.join(cache, 'clone.pending-' + randomUUID());
+          await gitRetry(async () => {
+            await fs.rm(staged, { recursive: true, force: true });
+            network.retrieval?.consume('fetch');
+            try {
+              await run(
+                [
+                  'clone',
+                  '--bare',
+                  '--quiet',
+                  '--depth',
+                  '1',
+                  '--single-branch',
+                  '--branch',
+                  meta.defaultBranch,
+                  '--',
+                  'https://github.com/' + connection.repository + '.git',
+                  staged
+                ],
+                cache,
+                network,
+                connection
+              );
+              networkSignal.throwIfAborted();
+              await fs.rename(staged, bare);
+            } catch (error) {
+              await fs.rm(staged, { recursive: true, force: true });
+              throw error;
+            }
+          }, networkSignal);
+        } else {
+          await directory(bare);
+          await gitRetry(async () => {
+            network.retrieval?.consume('fetch');
             await run(
-              [
-                'clone',
-                '--bare',
-                '--quiet',
-                '--depth',
-                '1',
-                '--single-branch',
-                '--branch',
-                meta.defaultBranch,
-                '--',
-                'https://github.com/' + connection.repository + '.git',
-                staged
-              ],
-              cache,
-              context,
+              ['fetch', '--quiet', '--depth', '1', '--no-tags', 'origin', '+refs/heads/' + meta.defaultBranch + ':refs/heads/' + meta.defaultBranch],
+              bare,
+              network,
               connection
             );
-            await fs.rename(staged, bare);
-          } catch (error) {
-            await fs.rm(staged, { recursive: true, force: true });
-            throw error;
-          }
-        }, signal);
-      } else {
-        await directory(bare);
-        await gitRetry(async () => {
-          context.retrieval?.consume('fetch');
-          await run(
-            ['fetch', '--quiet', '--depth', '1', '--no-tags', 'origin', '+refs/heads/' + meta.defaultBranch + ':refs/heads/' + meta.defaultBranch],
-            bare,
-            context,
-            connection
-          );
-        }, signal);
-      }
+          }, networkSignal);
+        }
+        networkSignal.throwIfAborted();
+        return { meta, bare };
+      }, { signal, timeoutMs: networkTimeoutMs });
+      signal.throwIfAborted();
       const row = {
         id,
         repository: connection.repository,
