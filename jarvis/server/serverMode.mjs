@@ -1,3 +1,4 @@
+import { publicDataHosts } from '../src/agent/publicJson.js';
 import { createCodeProjects } from './codeProjects.mjs';
 import { codeProjectRoutes } from './codeProjectRoutes.mjs';
 import { createCodeBrowser } from './codeBrowser.mjs';
@@ -79,6 +80,7 @@ export function mergeConfig(old, next) {
   // GitHub凭据只在专用仓库设置接口更新，模型面板的旧快照不能清空或覆盖。
   const { codeRepos: ignored, codeAccount: ignoredAccount, ...modelSettings } = next;
   next = modelSettings;
+  if (Object.hasOwn(next, 'publicDataHosts')) next = { ...next, publicDataHosts: publicDataHosts(next.publicDataHosts) };
   const keep = (n, o) => (!n || String(n).startsWith('••••') ? o ?? '' : n);
   const keys = { ...(old.keys ?? {}) };
   for (const [k, v] of Object.entries(next.keys ?? {})) keys[k] = keep(v, old.keys?.[k]);

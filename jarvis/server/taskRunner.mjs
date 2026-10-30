@@ -1,3 +1,4 @@
+import { createLookupModel } from '../src/agent/lookupModels.js';
 import { convertLegacyDoc } from './officeRender.mjs';
 import { codeProjectTools } from './codeProjectTools.mjs';
 import { codeFollowup, codeTaskPolicy, CODE_TASK_MS } from './codeTaskPolicy.mjs';
@@ -95,7 +96,7 @@ export async function publicFetch(url, init = {}, fetchImpl = globalThis.fetch, 
     requestSignal.throwIfAborted();
     // 域名也要查一下解析到哪：指向 127.0.0.1 这类内网地址的域名同样不许访问
     const addrs = /^https?:$/.test(u.protocol) && !isPrivateHost(u.hostname) ? await lookup(u.hostname.replace(/^\[|\]$/g, '')).catch(() => []) : null;
-    if (!addrs || addrs.some((a) => isPrivateHost(a.address))) throw Object.assign(new Error('只允许访问公网 http(s) 地址'), { code: 'PRIVATE_NETWORK_BLOCKED', kind: 'api', status: 403 });
+    if (!addrs?.length || addrs.some((a) => isPrivateHost(a.address))) throw Object.assign(new Error('只允许访问公网 http(s) 地址'), { code: 'PRIVATE_NETWORK_BLOCKED', kind: 'api', status: 403 });
     const res = await fetchImpl(u, { ...init, headers, redirect: 'manual', signal: requestSignal });
     const loc = res.headers.get('location');
     if (!(res.status >= 300 && res.status < 400 && loc)) return res;
@@ -274,7 +275,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       ...deepseekSearchOptions(cfg),
       // 评测不读用户保存的文档偏好（字号、风格），结果才能复现
       ...(task.evaluationId && { documentStylePreferences: async () => '' }),
-      tavilyKey: cfg.tavilyKey, qweather: qweatherConfig(cfg), bochaKey: cfg.bochaKey, falKey: cfg.falKey, searchRegion: cfg.searchRegion || 'auto',
+      publicDataHosts: cfg.publicDataHosts, tavilyKey: cfg.tavilyKey, qweather: qweatherConfig(cfg), bochaKey: cfg.bochaKey, falKey: cfg.falKey, searchRegion: cfg.searchRegion || 'auto',
       fetchViaGateway: (url, init) => publicFetch(url, init), // 不填搜索密钥也能联网搜索、读网页
       llm: helper(cfg, 'write', task), reasonLlm: helper(cfg, 'reason', task),
       documentReviewer: createDocumentReviewer(cfg, (selected) => helper({ ...selected, routing: { enabled: false } }, 'write', task, 'document_review')),
@@ -332,7 +333,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     arm();
     try {
       const r = await runAgent({
-        adapter, model, fallbacks, maxSteps: policy.maxSteps, maxTotalSteps: policy.maxTotalSteps, codeWork, ...sight(cfg, task), hedgeMs: cfg.hedgeBackup === false ? 0 : HEDGE_MS, modelNote: modelNote(cfg, { provider: route.cfg.provider, model }),
+        adapter, model, fallbacks, lookupModel: createLookupModel(cfg, makeAdapter), maxSteps: policy.maxSteps, maxTotalSteps: policy.maxTotalSteps, codeWork, ...sight(cfg, task), hedgeMs: cfg.hedgeBackup === false ? 0 : HEDGE_MS, modelNote: modelNote(cfg, { provider: route.cfg.provider, model }),
         history: unsummarized(history, session.summary).map(({ role, content }) => ({ role, content })),
         userText: task.resumeFrom ? task.text+'\n\n'+checkpointRecoveryText(task.resumeFrom) : task.text, requirementText: task.text, images: task.images,
         // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省

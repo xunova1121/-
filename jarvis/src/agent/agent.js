@@ -1,3 +1,7 @@
+import { answerConstraintIssues as lookupAnswerIssues } from './answerRequirements.js';
+import { lookupComplaint, todayNewsIntent, NEWS_LOOKUP_NOTE, WEB_LOOKUP_NOTE } from './newsIntent.js';
+import { createLookupDelivery } from './lookupDelivery.js';
+import { lookupPhase } from './lookupModels.js';
 import { codeWorkBlock, CODE_TASK_CORE } from './codeDevelopment.js';
 import { createDiagramRecovery } from './diagramRecovery.js';
 import { runArchitectureDirector } from './architectureDirector.js';
@@ -240,7 +244,7 @@ export function trimComputerScreenshots(messages,keep=2) {
   for(const m of shots.slice(0,Math.max(0,shots.length-keep))){delete m.images;m.content=`${m.content}\n（旧界面截图已从模型输入移除；请以最新截图为准。）`;}
 }
 
-async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, maxTotalSteps = null, codeWork = null, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, isolated = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false, describeImages = null, visionLabel = '看图模型', readImageText = null, modelNote = '', hedgeMs = 0 }) {
+async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, maxTotalSteps = null, codeWork = null, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, isolated = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false, describeImages = null, visionLabel = '看图模型', readImageText = null, modelNote = '', hedgeMs = 0, lookupModel = null, retrievalText = null }) {
   const workStartedAt = Date.now();
   const workAnswer = await answerWorkHistory(requirementText, sessionId, { signal, now: now(), onStart: () => emit({ type: 'tool_start', id: 'work-history', name: 'list_work_records', args: {} }) });
   if (workAnswer) {
@@ -248,7 +252,9 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     emit({ type: 'text', delta: workAnswer.text });
     return { text: workAnswer.text, toolCalls: 1 };
   }
-  if (light && needsActionTools(userText, history)) light = false;
+  let complaint = !images.length && lookupComplaint(userText);
+  if (complaint) light = true;
+  if (!complaint && light && needsActionTools(userText, history)) light = false;
   // 普通请求不给严格架构流水线的工具：用户 2026-10-29 实测画普通架构图时模型调了 5 次 prepare_architecture_evidence，
   // 每轮还要多带这几个工具的长说明。明说逐条核对、或之前已有架构底稿 / 任务路径时照常提供
   const pipelineContext = strictArchitecture(requirementText) || history.slice(-8).some((m) => /architecturePath|jobPath|文档检查\/架构(?:底稿|任务)/.test(String(m.content || '')));
@@ -260,13 +266,18 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   // 环境完全没有产物/计算核验能力时，直接说明未验收，不空转两轮模型。
   const canReview = availableTools.some(tool => /^(?:create_document|write_long_document|edit_office_document|read_file|write_file|run_javascript|run_python|computer_run|computer_read_file|verify_numbers|create_diagram|export_diagram|generate_image|sing_song|generate_video|code_read|code_edit|code_write|code_run)$/.test(tool.name));
   const review = createExecutionReview(requirementText, { visual: images.length > 0 || history.some(message => message.images?.length) });
-  const retrieval = createRetrievalBudget(codeWork?.enabled ? '代码开发' : lookupDeadline ? '普通查询' : images.length ? `逐项核验 ${requirementText}` : requirementText, { now, timeBudgetMs });
+  const retrieval = createRetrievalBudget(codeWork?.enabled ? '代码开发' : images.length ? `逐项核验 ${requirementText}` : retrievalText ?? requirementText, { now, timeBudgetMs });
+  let lookupDelivery = createLookupDelivery(requirementText, now);
+  const recordReceipt = review.record;
+  review.record = receipt => { if (!codeWork?.enabled && !images.length && !complaint && (isQuickLookup(requirementText, images) || todayNewsIntent(requirementText))) lookupDelivery.record(receipt); return recordReceipt(receipt); };
   let modelAttempts = 0;
   let nativeSearchCalls = 0;
   let closingTurns = 0;
   let retrievalStopped = false;
   emit({ type: 'state', value: 'processing' });
   const { ctx, record, requirementContext, archive } = await prepareAgentContext({ userText, priorMessages: history, context, sessionId, summary, light: light || Boolean(questionProfile), requirements, depth, requirementText, emit, buildContext, isolated });
+  if (complaint) ctx.dynamic = (ctx.dynamic || '') + '\n用户当前是在询问状态或抱怨，不是要求重新搜索。根据已有任务状态简短回答；没有正在执行的任务就不假称还在查。本条仅问状态时不要调用联网工具；之后明确追加新查询则按新要求处理。';
+  else if (!light && !questionProfile) ctx.dynamic = (ctx.dynamic || '') + '\n' + WEB_LOOKUP_NOTE + (todayNewsIntent(requirementText) ? '\n' + NEWS_LOOKUP_NOTE : '');
   ctx.dynamic = (ctx.dynamic || '') + await workHistoryBlock(requirementText, sessionId, { signal });
   if (codeWork?.enabled) ctx.dynamic = (ctx.dynamic || '') + '\n' + codeWorkBlock(codeWork, await packs.get('code-development'));
   const convo = [...history.map((m) => ({ ...m })), { role: 'user', content: userText, ...(images.length && { images }) }];
@@ -337,6 +348,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   const backups = [...fallbacks];
   let reminded = 0; // 上次中途提醒时调用了几次工具
   let currentRequest = userText;
+  let lookupFinal = false, lookupJudged = false;
 
   // 用户在干活时插的话（inbox，界面往里放）：每一步开始前取出来交给模型，不打断手上的事
   const takeInbox = () => {
@@ -348,6 +360,9 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     seen.clear(); // 用户追加了新指令，同样参数可能是新的明确要求
     if (availableTools.some(t => t.name === 'computer_search') && said.some(needsComputer)) computerNote = COMPUTER_NOTE;
     review.revise(said.join('\n'));
+    lookupDelivery = createLookupDelivery(review.report().request, now);
+    lookupFinal = false; lookupJudged = false;
+    complaint = !images.length && lookupComplaint(said.at(-1));
     if (!singleDocumentTask(said.join('\n')) && !own.some(tool => tool.name === plan.tool.name)) {
       own.push(plan.tool);
       loader = createToolLoader([...tools, ...own]);
@@ -388,12 +403,13 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     }
   }
   // 明显要查实时信息的短问题：先按原话搜一次，结果随问题交给模型，一轮答完（见 preSearch.js）；问赛程比分的先查比分接口
+  const newsArgs = depth === 0 && !codeWork?.enabled && todayNewsIntent(requirementText) && loader.get('get_today_news') ? { limit: 12 } : null;
   const sportsArgs = depth === 0 && loader.get('get_sports_scores') ? sportsPreCall(requirementText) : null;
-  if (depth === 0 && !light && !images.length && (sportsArgs || wantsPreSearch(requirementText)) && !creativeWithoutLookup(requirementText) && (sportsArgs || loader.get('web_search'))) {
+  if (depth === 0 && !light && !images.length && (newsArgs || sportsArgs || wantsPreSearch(requirementText)) && !creativeWithoutLookup(requirementText) && (newsArgs || sportsArgs || loader.get('web_search'))) {
     const found = await preSearch({
       text: requirementText,
       signal,
-      ...(sportsArgs ? { call: { name: 'get_sports_scores', args: sportsArgs }, timeoutMs: PRE_SPORTS_MS } : {}),
+      ...(newsArgs ? { call: { name: 'get_today_news', args: newsArgs }, timeoutMs: 9000 } : sportsArgs ? { call: { name: 'get_sports_scores', args: sportsArgs }, timeoutMs: PRE_SPORTS_MS } : {}),
       run: async (calls, s) => {
         const results = await executeToolCalls(calls, { loader, emit, seen, diagramRecovery, executionScope, closing: false, retrieval, approve, signal: s, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch: true });
         for (const r of results) retrieval.end(r.ok);
@@ -410,7 +426,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     if (lookupDeadline && lookupControl?.released?.()) { lookupDeadline = false; infoPrompt = false; }
     takeInbox();
     const revision = conversationFocus(currentRequest, history);
-    const allowWebSearch = !questionProfile && !creativeWithoutLookup(currentRequest) && !revision.revision;
+    const allowWebSearch = !lookupFinal && !complaint && !questionProfile && !creativeWithoutLookup(currentRequest) && !revision.revision;
     const quickAttempts = review.report().sourceRequirement ? Math.max(5, QUICK_MODEL_ATTEMPTS) : QUICK_MODEL_ATTEMPTS;
     if (!retrieval.reason && lookupDeadline && lookupControl && (lookupControl.retrievalRemaining() <= 0 || retrieval.active && modelAttempts >= quickAttempts)) {
       retrieval.close('已停止新增检索，正在整理已有资料');
@@ -429,7 +445,10 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     let held = '';
     const repositoryStream = review.repositoryStream();
     const guardedAnswer = review.guardsAnswer();
-    const holding = Boolean(checkedText) || guardedAnswer;
+    const lookupEnabled = Boolean(lookupModel) && (infoPrompt || todayNewsIntent(requirementText)) && !light && !images.length && !codeWork?.enabled;
+    const phase = lookupPhase({ enabled: lookupEnabled, step, closing, preFound, messages: convo, final: lookupFinal });
+    const holding = Boolean(checkedText) || guardedAnswer || lookupEnabled && !phase && !lookupJudged;
+    const requestCurrent = phase ? lookupModel : cur;
     const showText = (text) => {
       request.clearSearchTimer();
       stepText += text;
@@ -461,20 +480,20 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       stripper = new EmotionTagStripper();
       emit({ type: 'retry', attempt, resume: Boolean(stepText.trim()) });
     } });
-    const request = makeRequest(cur, acceptVisible, () => primaryActivity?.());
+    const request = makeRequest(requestCurrent, acceptVisible, () => primaryActivity?.());
     // 测量实际发送的提示与工具说明，动态规则和短说明均计入字符数。
     // 用的哪个模型：中途换了备用的，也照实写
-    const responseNote = responseGuidance(currentRequest, history, { light, model: cur?.model || model, hasImages: images.length > 0, visibleText: String(convo.filter(m => m.role === 'user').at(-1)?.content || '').slice(0, 1800) });
-    const usingNote = modelNote && (cur.model !== model ? `${modelNote}\n（原定的 ${model} 出错了，这一轮实际换成了 ${cur.model}。）` : modelNote);
+    const responseNote = responseGuidance(currentRequest, history, { light, model: requestCurrent?.model || model, hasImages: images.length > 0, visibleText: String(convo.filter(m => m.role === 'user').at(-1)?.content || '').slice(0, 1800) });
+    const usingNote = phase ? `本次${phase === 'lookup_plan' ? '检索规划' : '资料取舍与回答'}使用已配置推理模型 ${requestCurrent.model}。` : modelNote && (cur.model !== model ? `${modelNote}\n（原定的 ${model} 出错了，这一轮实际换成了 ${cur.model}。）` : modelNote);
     const measuredSystem = questionProfile ? [BASIC_ANSWER_PROMPT, [ctx.dynamic, usingNote, responseNote, imagePreferenceNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : light ? [LIGHT_PROMPT, [ctx.dynamic, usingNote, responseNote, imagePreferenceNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, usingNote, dialoguePolicy(review.report().request), responseNote, imagePreferenceNote, capabilities, computerNote, requirementContext, toolHint, singleDocumentTask(review.report().request) && '单份文档由文档引擎内部规划和检查；如需外层计划只列一次，不用update_plan逐节重复同步。有效产物回执可直接交付，不重复查找、读回或重做。', review.contractNote(), creativeWithoutLookup(currentRequest) && CREATIVE_NOTE, voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
-    const measuredTools = closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list();
+    const measuredTools = lookupFinal ? [] : closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list();
     const requestTools = measuredTools.filter((tool) => allowWebSearch || !WEB_TOOLS.has(tool.name) && tool.name !== 'delegate_task').map(conciseTool);
-    emit({ type: 'diagnostic', phase: 'model_start', model: cur.model, protocol: cur.adapter.kind, closing, purpose: callPurpose(convo, closing), ...measureModelInput({ system: measuredSystem, messages: convo, tools: requestTools }), inputChars: convo.reduce((sum, item) => sum + String(item.content || '').length, 0) });
+    emit({ type: 'diagnostic', phase: 'model_start', model: requestCurrent.model, protocol: requestCurrent.adapter.kind, closing, purpose: phase || callPurpose(convo, closing), ...measureModelInput({ system: measuredSystem, messages: convo, tools: requestTools }), inputChars: convo.reduce((sum, item) => sum + String(item.content || '').length, 0) });
     try {
     modelAttempts++;
     const input = { system: measuredSystem, messages: convo, tools: requestTools };
     // 主模型 hedgeMs 内没反应：同时问备用模型，谁先有反应用谁（写文件的任务前面本来就要等很久，不这样做）
-    if (hedgeMs > 0 && backups.length && !holding && !makingFile) {
+    if (!phase && hedgeMs > 0 && backups.length && !holding && !makingFile) {
       const next = backups[0];
       const { result } = await runHedged({
         primary: request,
@@ -522,6 +541,12 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         continue; // 本次不完整的原生搜索协议不再续传；下一轮关闭搜索、仅整理已有资料
       }
       // 自动重试也没救回来：这一步还没输出文字的话换备用模型接着做（已经输出了一半就不换，免得前后两截）
+      if (phase && !stepText.trim() && canFallback(e)) {
+        lookupModel = null;
+        emit({ type: 'fallback', from: requestCurrent.model, to: cur.model, reason: '推理线路不可用，恢复主模型' });
+        step--;
+        continue;
+      }
       if (backups.length && !stepText.trim() && canFallback(e)) {
         const next = backups.shift();
         emit({ type: 'fallback', from: cur.model, to: next.model, reason: String(e.message || e).slice(0, 80) });
@@ -540,6 +565,13 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       if (rest.text) { if (holding) held += rest.text; else { const visible = repositoryStream.push(rest.text); if (visible) showText(visible); } }
     }
     if (!holding) { const tail = repositoryStream.push('', true); if (tail) showText(tail); }
+    if (lookupEnabled && !phase && !lookupJudged && !r.toolCalls.length && r.stop !== 'pause_turn' && lookupDelivery.hasResults && (!review.report().sourceRequirement || review.report().candidateSources.length) && !review.report().contract.calculation && held.trim()) {
+      // 中间主模型若直接写了答案，最多转交推理档一次作最终取舍；不额外做一次规划，也不先展示未审的两份答案。
+      convo.push({ role: 'assistant', content: held, toolCalls: [], raw: r.raw });
+      convo.push({ role: 'user', content: '（系统最终取舍：依据本轮真实工具资料核对上段候选回答，给用户一份最终答复，不回应检查。保留具体内容和真实来源，冲突与未核实部分说明，不再搜索或调用工具。）' });
+      lookupFinal = true; lookupJudged = true;
+      continue;
+    }
     if (guardedAnswer && !r.toolCalls.length && r.stop !== 'pause_turn') {
       const issues = review.checkAnswer(held, now());
       const canCheckNumbers = availableTools.some(tool => /^(?:verify_numbers|run_javascript|run_python)$/.test(tool.name));
@@ -561,10 +593,14 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       // 只有“出现了用户禁止的内容 / 时间、非今日新闻”这类硬性违规才不展示原回答；“找医生说多了”这类写法问题改不好也照常给，
       // 不能把整段回答换成“请重新生成”（第二轮 30 题实测：产检解读整段被吞）
       const blocking = review.report().answerIssues.filter((issue) => !SOFT_ANSWER_RULES.has(rewriteRule(issue)));
-      if (blocking.length) held = safeNewsPartial(requirementText, held, now()) || newsCandidateLinks(requirementText, review.newsCandidates()) || '本轮未能生成符合当前要求的答复，请重新生成。';
+      if (blocking.length) held = safeNewsPartial(requirementText, held, now()) || (lookupDelivery.hasResults ? lookupDelivery.text() : '') || newsCandidateLinks(requirementText, review.newsCandidates()) || '本轮未能生成符合当前要求的答复，请重新生成。';
       if (review.report().styleIssues.length) held = held.trimEnd() + '\n\n' + review.styleCorrection();
       if (review.report().calculation === 'failed') held = '关键数值校验失败，请人工复核。';
       else if (review.report().calculationIssue && ACK_ONLY.test(held.trim())) held = '关键数值尚未完成工具校验，请人工复核。';
+    }
+    if (!r.toolCalls.length && holding) {
+      const substitute = lookupDelivery.substitute(held);
+      if (substitute && !lookupAnswerIssues(requirementText, substitute, now()).length) held = substitute;
     }
     if (!guardedAnswer || !r.toolCalls.length) releaseHeld();
     finalText += stepText;
@@ -601,7 +637,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     // 执行一次工具调用：开始 / 结束事件照常发出，返回结果，按调用顺序写回对话
     // 模型又用先搜过的词搜一次：直接给上次的结果，不再白搜（也不会被“相同搜索词”拦下报错）
     const reused = new Map(r.toolCalls.filter((c) => reusesPreSearch(c, preFound)).map((c) => [c, { c, ok: true, output: preFound.output, outImages: [] }]));
-    const ran = await executeToolCalls(r.toolCalls.filter((c) => !reused.has(c)), { loader, emit, seen, diagramRecovery, executionScope, closing, retrieval, approve, signal, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch });
+    const ran = await executeToolCalls(r.toolCalls.filter((c) => !reused.has(c)), { loader, emit, seen, diagramRecovery, executionScope, closing: closing || lookupFinal, retrieval, approve, signal, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch });
     const results = r.toolCalls.map((c) => reused.get(c) ?? ran.find((x) => x.c === c)).filter(Boolean);
     for (const { c, ok, output, outImages } of results) {
       toolCount++;
@@ -634,12 +670,12 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       if (!stuck && limit < hardCap) limit = Math.min(hardCap, limit + maxSteps);
     }
   }
-  return finishAgentRun({ step, limit, retrievalStopped, retrieval, stuck, review, nativeSearchCalls, light, signal, quiet, toolCount, lastToolOk, failCount, userText, finalText, emit, lookupDeadline, autoExtend: Boolean(lookupControl?.release) && depth === 0 });
+  return finishAgentRun({ step, limit, retrievalStopped, retrieval, stuck, review, nativeSearchCalls, light, signal, quiet, toolCount, lastToolOk, failCount, userText, finalText, emit, lookupFallback: lookupDelivery.text(), lookupDeadline, autoExtend: Boolean(lookupControl?.release) && depth === 0 });
 }
 
 /** 保留旧导出的深度研究预算；普通查询默认预算见 retrievalBudget.js。 */
 export const TIME_BUDGET_MS = 8 * 60e3;
-const WEB_TOOLS = new Set(['get_weather', 'get_stock_kline', 'get_sports_scores', 'web_search', 'fetch_url', 'fact_check', 'deep_research']);
+const WEB_TOOLS = new Set(['get_today_news', 'fetch_json', 'get_weather', 'get_stock_kline', 'get_sports_scores', 'web_search', 'fetch_url', 'fact_check', 'deep_research']);
 
 /** 可以同时执行的只读工具（不改文件、不操作电脑、不需要用户确认） */
 /** 比较两段回答是不是同一段：去掉空白和 Markdown 符号 */
@@ -655,7 +691,7 @@ function repeats(before, after) {
 /** 只回了一句“收到 / 好的” */
 const ACK_ONLY = /^(?:收到|好的|好|明白|了解|OK|ok|嗯)[。！!.]?$/;
 
-export const PARALLEL_SAFE = new Set(['get_stock_kline', 'get_sports_scores', 'review_task', 'check_search_terms', 'web_search', 'fetch_url', 'read_evidence', 'read_file', 'list_files', 'find_files', 'search_in_files', 'kb_search', 'recall', 'search_conversations', 'list_my_messages', 'read_conversation', 'get_weather', 'get_current_time', 'verify_numbers', 'read_skill_file', 'computer_read_file', 'computer_list_dir']);
+export const PARALLEL_SAFE = new Set(['get_today_news', 'fetch_json', 'get_stock_kline', 'get_sports_scores', 'review_task', 'check_search_terms', 'web_search', 'fetch_url', 'read_evidence', 'read_file', 'list_files', 'find_files', 'search_in_files', 'kb_search', 'recall', 'search_conversations', 'list_my_messages', 'read_conversation', 'get_weather', 'get_current_time', 'verify_numbers', 'read_skill_file', 'computer_read_file', 'computer_list_dir']);
 const CODE_FILE = /\.(m?js|ts|py|html?)$/i;
 /** 回答结尾是“我现在开始 / 接下来生成 / 马上做 / 稍等”这类预告（说了要做但还没做） */
 /** “需要的话我可以接着做 PPT”这类询问不算（那是在问用户） */

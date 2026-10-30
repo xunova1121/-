@@ -261,6 +261,19 @@ export function createServer({
   }
 
   async function handleFetch(req, res, target) {
+    if (new URL(req.url, 'http://x').searchParams.get('publicJson') === '1') {
+      const controller = new AbortController();
+      res.once('close', () => controller.abort());
+      try {
+        const { readPublicJson } = await import('../src/agent/publicJson.js');
+        const { publicFetch } = await import('./taskRunner.mjs');
+        const domains = [new URL(target).hostname];
+        const value = await readPublicJson(target, { domains, get: publicFetch, signal: controller.signal });
+        return json(res, 200, value.data);
+      } catch (error) {
+        return json(res, error.status || (error.code === 'WEB_BODY_LIMIT' ? 413 : error.name === 'TimeoutError' ? 504 : 400), { error: error.message, code: error.code });
+      }
+    }
     let url;
     try { url = new URL(target); } catch { return json(res, 400, { error: '地址无效' }); }
     // 每一跳重定向都重新检查，防止公网地址跳转到内网

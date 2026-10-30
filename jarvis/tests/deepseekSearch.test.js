@@ -250,8 +250,8 @@ describe('服务商出错熔断与预算报错写清楚', () => {
     const { createRetrievalBudget } = await import('../src/agent/retrievalBudget.js');
     const budget = createRetrievalBudget('今天有什么新闻');
     budget.begin();
-    for (let i = 0; i < 6; i++) budget.consume('search');
-    expect(() => budget.consume('search')).toThrow('普通查询的搜索（search）预算已用完（6次）');
-    expect(() => budget.consume('read')).toThrow('普通查询的搜索（search）预算已用完（6次），这次读网页没有执行');
+    for (let i = 0; i < 12; i++) budget.consume('search');
+    expect(() => budget.consume('search')).toThrow('普通查询的搜索（search）预算已用完（12次）');
+    expect(() => budget.consume('read')).toThrow('普通查询的搜索（search）预算已用完（12次），这次读网页没有执行');
   });
 });

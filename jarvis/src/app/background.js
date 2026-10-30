@@ -1,3 +1,4 @@
+import { createLookupModel } from '../agent/lookupModels.js';
 /**
  * 后台的事：自动整理记忆、长对话压缩、回到电脑前主动问好、操作习惯学习（桌面版）、定时任务、系统通知。
  */
@@ -229,6 +230,7 @@ export function createBackground(app) {
               runAgent({
                 adapter,
                 model,
+                lookupModel: createLookupModel(app.llmConfig, (cfg) => createAdapter(cfg, { gateway: app.gateway })),
                 history: [],
                 sessionId: sess.id,
                 signal,

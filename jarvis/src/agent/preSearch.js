@@ -54,6 +54,7 @@ export async function preSearch({ run, text, signal, timeoutMs = PRE_SEARCH_MS, 
 
 /** 搜到的结果附在用户这句话后面（写明是系统先搜的，不是用户说的） */
 export function preSearchNote({ query, output, tool }) {
+  if (tool === 'get_today_news') return `（系统已先查get_today_news，以下是实际读取的当天汇总页条目。直接整理简报并标来源和发布时间，未打开报道原文的标待核实；明确要求原文核实时再fetch_url，不重新搜索同一批。缺栏目/数量如实说明。）\n${output}`;
   if (tool === 'get_sports_scores') return `（系统已先查了赛程和比分（get_sports_scores），结果如下。按它回答：按赛事列出时间和比分，写明哪些赛事没查到、哪些项目不在查询范围；不在范围的用户又问到了再用 web_search 补。）\n${output}`;
   return `（系统已先按这句话联网搜索了一次，搜索词“${query}”，结果如下。够用就直接回答，注明来源链接和日期；不够或对不上再用 web_search / fetch_url 补查。）\n${output}`;
 }
@@ -62,7 +63,7 @@ const norm = (q) => String(q ?? '').toLowerCase().replace(/[\s，。！？、；
 /** 模型这次的 web_search 调用是不是和先搜的一模一样（同一个搜索词、没有别的词） */
 export function reusesPreSearch(call, found) {
   // 赛程比分：参数和先查的一样就直接用先查的结果
-  if (found?.tool === 'get_sports_scores') return call?.name === 'get_sports_scores' && JSON.stringify(call.args ?? {}) === JSON.stringify(found.args ?? {});
+  if (found?.tool === 'get_sports_scores' || found?.tool === 'get_today_news') return call?.name === found.tool && JSON.stringify(call.args ?? {}) === JSON.stringify(found.args ?? {});
   if (!found || call?.name !== 'web_search') return false;
   const extra = Array.isArray(call.args?.queries) ? call.args.queries.filter((q) => norm(q) && norm(q) !== norm(found.query)) : [];
   return !extra.length && norm(call.args?.query || call.args?.queries?.[0]) === norm(found.query);

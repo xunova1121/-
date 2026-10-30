@@ -97,9 +97,9 @@ describe('工具：读过的网页按编号取回，不重新联网', () => {
 describe('预算', () => {
   it('某一类用完就整轮收尾；剩余次数在发请求前可查', () => {
     const b = createRetrievalBudget('查结局');
-    expect(b.left).toBe(6);
-    b.begin(); b.begin(); expect(b.left).toBe(4);
-    for (let i = 0; i < 4; i++) b.consume('read');
+    expect(b.left).toBe(12);
+    b.begin(); b.begin(); expect(b.left).toBe(12);
+    for (let i = 0; i < 10; i++) b.consume('read');
     expect(() => b.consume('read')).toThrow(expect.objectContaining({ code: 'RETRIEVAL_BUDGET' }));
     expect(b.reason).toContain('read');
     expect(b.left).toBe(0);

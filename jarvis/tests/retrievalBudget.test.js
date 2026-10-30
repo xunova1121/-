@@ -13,9 +13,9 @@ describe('查询预算', () => {
       now = 46_000; expect(deep.reason).toBe(''); now = 480_000; expect(deep.reason).toContain('时间预算');
     }
   });
-  it('不同链接仍共享6次预算；连续失败3次提前结束，成功则清零失败数', () => {
+  it('不同链接仍共享22次兜底预算；连续失败3次提前结束，成功则清零失败数', () => {
     const b = createRetrievalBudget('查结局');
-    for (let i=0;i<6;i++) { expect(b.begin()).toBe(true); b.end(true); }
+    for (let i=0;i<22;i++) { expect(b.begin()).toBe(true); b.end(true); }
     expect(b.begin()).toBe(false);
     const failed = createRetrievalBudget('查结局');
     failed.begin(); failed.end(false); failed.begin(); failed.end(true);

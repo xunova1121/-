@@ -21,9 +21,15 @@ export async function finishAgentRun({
   userText,
   finalText,
   emit,
+  lookupFallback = '',
   lookupDeadline = false,
   autoExtend = false
 }) {
+  if (lookupFallback && (!finalText.trim() || finalText.trim().length < 200 && /没有可靠结果|没有确切结果|未能生成符合|未找到可靠|只找到候选|无法提供|没有查到/.test(finalText))) {
+    const delta = (finalText.trim() ? '\n\n' : '') + lookupFallback;
+    finalText += delta;
+    emit({ type: 'text', delta });
+  }
   // 普通问题一分钟内一个字都没答出来：不交白卷，交回去自动多查一会儿（见 lookupDeadline.js）
   if (autoExtend && lookupDeadline && (retrievalStopped || retrieval.reason) && !finalText.trim() && !signal?.aborted) return { text: '', steps: step + 1, toolCalls: toolCount, needsMoreTime: true };
   // 普通问题查到时限或次数上限：不说“检索已停止”，先给已有的，再问要不要再查

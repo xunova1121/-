@@ -24,7 +24,7 @@ it('证据逐页持久化，再继续相同请求不重搜重读；过期或不�
  search.mockClear();await factCheck({...args(),search,read,evidence:cp.evidence.map(x=>({...x,savedAt:Date.now()-11*60_000}))});expect(search).toHaveBeenCalledTimes(2);
 });
 it('内部请求跨工具共享资源上限；预算耗尽不调用提取模型',async()=>{
- const b=createRetrievalBudget('查价格');for(let i=0;i<6;i++)b.consume('search');
+ const b=createRetrievalBudget('查价格');for(let i=0;i<12;i++)b.consume('search');
  const search=vi.fn(async()=>hits),model=vi.fn(llm);
  await expect(factCheck({...args(),search,llm:model,consume:k=>b.consume(k)})).rejects.toMatchObject({code:'RETRIEVAL_BUDGET'});
  expect(search).not.toHaveBeenCalled();expect(model).not.toHaveBeenCalled();

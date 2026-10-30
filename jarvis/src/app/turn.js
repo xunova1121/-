@@ -1,3 +1,5 @@
+import { createLookupModel } from '../agent/lookupModels.js';
+import { createAdapter as lookupAdapter } from '../llm/config.js';
 /**
  * 一轮对话：发消息（本机做 / 交给服务器做 / 团队分工）、显示进度和工具卡片、朗读、出错恢复；
  * 干活时插话、打断、切到别的对话后转到后台接着做。
@@ -344,6 +346,7 @@ export function createTurn(app) {
         effort,
         adapter,
         model,
+        lookupModel: remotePC ? null : createLookupModel(app.llmConfig, (cfg) => lookupAdapter(cfg, { gateway: app.gateway })),
         history: llmHistory,
         userText: team ? userText : await app.expandSlash(userText),
         signal: ctrl.signal,

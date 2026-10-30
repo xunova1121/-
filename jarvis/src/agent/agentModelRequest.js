@@ -69,6 +69,11 @@ export function createModelRequest({ current, effort, signal, lookupDeadline, lo
             if (meta?.serverTool) {
               emit({ type: 'server_tool', name: meta.serverTool });
               if (/search/.test(meta.serverTool)) {
+                // 请求前已传剩余maxWebSearches；真实搜索事件还须记账，下一轮不能重新获得完整额度。
+                try { retrieval.consume('search'); } catch (error) {
+                  if (error.code !== 'RETRIEVAL_BUDGET') throw error;
+                  stopSearch(); return;
+                }
                 onNativeSearch();
                 if (!retrieval.begin()) stopSearch();
                 else if (Number.isFinite(retrieval.remaining)) {

@@ -1,3 +1,4 @@
+import { lookupComplaint } from './newsIntent.js';
 import { isResponseRevision } from '../core/responseRevision.js';
 import { createLookupWindow } from './lookupWindow.js';
 import { needsComputer } from '../llm/router.js';
@@ -5,7 +6,7 @@ import { followsImage } from '../core/imageFollowup.js';
 import { creativeWithoutLookup } from '../core/imageFollowup.js';
 /** 普通信息查询的总时限：包含上下文、模型等待/重试、检索和收尾；不是只计网页耗时。 */
 export const LOOKUP_TOTAL_MS = 60_000;
-export const COMPLEX = /深度|深入|全面|详细|长篇|长文|\d+\s*[千万元]?\s*字|调研|研究报告|生成|制作|创作|画|设计|样式|效果图|界面|网页|网站|PPT|Word|Excel|文档|报告|方案|论文|查原文|核实原文|核对原文|逐条核[实验对]|逐项|逐一|交叉核[验对]|多来源核[验对]|(?:写|生成|制作|编制|导出|保存为|整理成).{0,16}(?:报告|文档|论文|PPT|Word|Excel|文件)|代码|编程|开发|安装|部署/i;
+export const COMPLEX = /深度|深入|全面|详细|长篇|长文|\d+\s*[千万元]?\s*字|调研|研究报告|生成|制作|创作|画|设计|样式|效果图|界面|网页|网站|PPT|Word|Excel|文档|报告|方案|论文|查原文|核实原文|核对原文|原文核实|逐条核[实验对]|逐项|逐一|交叉核[验对]|多来源核[验对]|(?:写|生成|制作|编制|导出|保存为|整理成).{0,16}(?:报告|文档|论文|PPT|Word|Excel|文件)|代码|编程|开发|安装|部署/i;
 /** 要她自己动脑的（描述、发散、想象、出主意、讲讲……）：不是查资料，不套普通查询的 60 秒时限 */
 const THINKING = /OCR|识图|读数|重新看|描述|描写|发散|想象|联想|脑暴|头脑风暴|构思|创意|灵感|点子|故事|编[个一段首]|作诗|写诗|诗歌|歌词|唱|讲讲|说说|聊聊|展开|思考|想法|出主意|主意|建议|怎么看|看法|观点|推理|推演|讨论|规划|计划|这[个张幅]图|图里|图中|照片里|画面/;
 export function isQuickLookup(text = '', images = []) {
@@ -16,7 +17,7 @@ export function isQuickLookup(text = '', images = []) {
 export function lookupRequirement(text, history = []) {
   const continuation = value => /^(?:继续|恢复|接着)(?:[：:，,。\s]|$)/.test(String(value || '').trim());
   if (!continuation(text) || COMPLEX.test(String(text))) return text;
-  return [...history].reverse().find(m => m.role === 'user' && !continuation(m.content))?.content || text;
+  return [...history].reverse().find(m => m.role === 'user' && !continuation(m.content) && !lookupComplaint(m.content))?.content || text;
 }
 /** 这些工具是在“做东西”（画图、唱歌、写文件）：一旦调用，说明不是普通查询，解除 60 秒时限 */
 const MAKING_TOOLS = new Set(['generate_image', 'sing_song', 'create_document', 'write_file', 'plan_architecture', 'create_diagram', 'export_diagram', 'render_diagram', 'inspect_image', 'read_image_text']);
@@ -34,7 +35,7 @@ export function moreTimeRequest(text, history = []) {
   const lastReply = [...history].reverse().find((m) => m.role === 'assistant');
   if (!MORE.test(value) && !(YES.test(value) && String(lastReply?.content || '').includes(MORE_TIME_ASK))) return null;
   const i = history.lastIndexOf(lastReply);
-  const asked = history.slice(0, i < 0 ? history.length : i).reverse().find((m) => m.role === 'user' && !MORE.test(String(m.content).trim()) && !YES.test(String(m.content).trim()));
+  const asked = history.slice(0, i < 0 ? history.length : i).reverse().find((m) => m.role === 'user' && !lookupComplaint(m.content) && !MORE.test(String(m.content).trim()) && !YES.test(String(m.content).trim()));
   return asked ? String(asked.content) : null;
 }
 const abortError = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
@@ -45,7 +46,7 @@ export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_
   const again = moreTimeRequest(options.userText, options.history);
   if (again) {
     const task = `${again}（上次一分钟内没查完，用户要求再查一会儿：全面一些，多看几个来源、读原文核实；上次已经查到的不用重复，直接补充和更正）`;
-    return run({ ...options, userText: `${options.userText}\n\n${task}`, requirementText: task, timeBudgetMs: options.timeBudgetMs ?? MORE_TIME_MS });
+    return run({ ...options, userText: `${options.userText}\n\n${task}`, requirementText: task, retrievalText: again, timeBudgetMs: options.timeBudgetMs ?? MORE_TIME_MS });
   }
   const text = lookupRequirement(options.requirementText ?? options.userText, options.history);
   if(text !== (options.requirementText ?? options.userText)) options = { ...options, requirementText: text };
@@ -97,7 +98,7 @@ export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_
     closed = true; release();
     options.emit?.({ type: 'tool_progress', text: '一分钟内没查到能核实的结果，再多查一会儿…' });
     const task = `${text}（一分钟内没查到能核实的结果，自动再查一会儿：多看几个来源、读原文核实；查不到就如实说没查到）`;
-    return run({ ...options, userText: `${options.userText}\n\n${task}`, requirementText: task, timeBudgetMs: options.timeBudgetMs ?? MORE_TIME_MS });
+    return run({ ...options, userText: `${options.userText}\n\n${task}`, requirementText: task, retrievalText: text, timeBudgetMs: options.timeBudgetMs ?? MORE_TIME_MS });
   };
   try {
     const result = await Promise.race([waiting, Promise.resolve().then(() => {

@@ -1,3 +1,4 @@
+import { lookupComplaint } from '../agent/newsIntent.js';
 import { isResponseRevision } from '../core/responseRevision.js';
 import { serverRepositoryIntent } from './repositoryIntent.js';
 /**
@@ -76,6 +77,7 @@ const EVERYDAY_CHAT = /^(?:我(?:今天|现在)?(?:心情(?:有点)?不好|有�
 /** 简单寒暄（“你好”“在吗？”“你好，在吗”“你好，简单打个招呼”）：几段都是寒暄词、总共不长 */
 export const isSmallTalk = (text) => {
   const t = String(text || '').trim();
+  if (lookupComplaint(t)) return true;
   if (!t || [...t].length > 20) return false;
   const parts = t.split(/[，,。.！!？?~～、；;\s]+/).filter(Boolean);
   return parts.length > 0 && parts.length <= 3 && parts.every((p) => SMALL_TALK_WORD.test(p) || EVERYDAY_CHAT.test(p));

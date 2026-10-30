@@ -1,3 +1,5 @@
+import { createTodayNewsTool } from './todayNews.js';
+import { createPublicJsonTool } from './publicJson.js';
 import { legacyDocumentTool } from './legacyDocumentTool.js';
 import { parseFile as parseOfficeFile } from './docs.js';
 import {createArchitectureWorkflowTool} from './architectureWorkflow.js';
@@ -135,6 +137,8 @@ export function createTools(ctx) {
     createRenderDiagramTool(ctx),
     createStockKlineTool(ctx),
     createSportsScoresTool(ctx),
+    createTodayNewsTool(ctx),
+    createPublicJsonTool(ctx),
     ...createHoldingTools(),
     queryGuardTool(),
     {

@@ -1,9 +1,10 @@
+import { todayNewsIntent } from './newsIntent.js';
 import { createQueryLedger } from './retrievalQuality.js';
 /** 普通问题快查；报告、多项核验和明确的深度研究保留较长预算。预算从首次联网开始。 */
 export const QUICK_RETRIEVAL_MS = 45_000;
 export const DEEP_RETRIEVAL_MS = 8 * 60_000;
 export const VERIFICATION_MS = 3 * 60_000;
-export const strictVerification = text => /逐[项一条].{0,12}(?:核[实验对]|查证|查原文)|(?:核[实验对]|查证).{0,12}逐[项一条]|查原文|核实原文|核对原文/.test(String(text));
+export const strictVerification = text => /逐[项一条].{0,12}(?:核[实验对]|查证|查原文)|(?:核[实验对]|查证).{0,12}逐[项一条]|查原文|核实原文|核对原文|原文核实|打开.{0,8}原文.{0,8}(?:核实|核对)/.test(String(text));
 export function extensiveRetrieval(text = '') {
   return strictVerification(text) || /深度|深入|全面|调研|研究报告|逐项|逐一|多来源|交叉核[验对]|报告|方案|文档|论文|PPT|Word|Excel|代码|编程|开发|文件|保存|对比|比较|这几|这些|每场|多场|清单|架构图|流程图|示意图|拓扑图|画图|海报|research|report|document|code|diagram/i.test(String(text));
 }
@@ -11,13 +12,17 @@ export function extensiveRetrieval(text = '') {
 const KIND_LABEL = { search: '搜索', read: '读网页', model: '模型调用' };
 export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs } = {}) {
   const resources = { search: 0, read: 0, model: 0 };
+  const news = todayNewsIntent(text);
+  // 次数只是防失控兜底；检索仍从首次联网起共用45秒，不按工具种类另开时钟。
+  const limits = { search: 12, read: news ? 8 : 10, model: 3 };
+  const totalLimit = limits.search + limits.read;
   let strict = strictVerification(text);
   let extensive = extensiveRetrieval(text), started = null, calls = 0, failed = 0, reason = '';
   const duration = () => timeBudgetMs ?? (strict ? VERIFICATION_MS : extensive ? DEEP_RETRIEVAL_MS : QUICK_RETRIEVAL_MS);
   const check = () => {
     if (!reason && started !== null) {
       if (duration() > 0 && now() - started >= duration()) reason = '本轮联网检索已达到时间预算';
-      else if (!extensive && calls >= 6) reason = '普通查询已达到 6 次联网检索预算';
+      else if (!extensive && calls >= totalLimit) reason = `普通查询已达到 ${totalLimit} 次联网检索兜底预算`;
       else if (!extensive && failed >= 3) reason = '连续 3 次联网检索没有取得有效资料';
     }
     return reason;
@@ -28,7 +33,7 @@ export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs } = {
     consume(kind) {
       // 整轮已收尾时，写清是哪一类先用完、这次哪一步没执行（用户 2026-10-29：读网页却报“search 调用已达到预算”，看不懂）
       if (reason || started !== null && duration()>0 && now()-started>=duration()) throw Object.assign(new Error(`${reason || '本轮联网检索已达到时间预算'}，这次${KIND_LABEL[kind] || kind}没有执行`), {code:'RETRIEVAL_BUDGET'});
-      const limit = (strict ? { search:20, read:16 } : !extensive ? { search:6, read:4, model:3 } : {})[kind];
+      const limit = (strict ? { search:20, read:16 } : !extensive ? limits : {})[kind];
       // 某一类用完：整轮检索就此收尾（主循环下一步会让模型直接用已有资料回答，而不是换个工具接着查）
       if (limit && resources[kind] >= limit) { reason ||= `${strict ? '逐项核验' : '普通查询'}的${KIND_LABEL[kind] || kind}（${kind}）预算已用完（${limit}次）`; throw Object.assign(new Error(reason), { code:'RETRIEVAL_BUDGET' }); }
       if (kind in resources) resources[kind]++;
@@ -41,7 +46,7 @@ export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs } = {
     get extensive() { return extensive; },
     get reason() { return check(); },
     /** 还能联网几次（发请求前用：模型自带的联网搜索按这个限次数，不等搜完再扣） */
-    get left() { return check() ? 0 : extensive ? Infinity : Math.max(0, 6 - calls); },
+    get left() { return check() ? 0 : extensive ? Infinity : Math.max(0, Math.min(limits.search - resources.search, totalLimit - calls)); },
     get remaining() { return started === null || duration() <= 0 ? Infinity : Math.max(0, duration() - (now() - started)); },
     get note() { return `（系统提示：${check() || '联网检索已停止'}。${extensive ? '不要再调用联网工具；可以继续读写文件、生成文档和运行验证。' : '不要再调用工具，不要继续联网搜索。'}现在用已经取得的资料回答，区分已核实和未核实，列出已有来源；没有确切结果就如实说还没有确切结果，不要编造，也不要把检索失败说成问题没有答案。）`; }
   };

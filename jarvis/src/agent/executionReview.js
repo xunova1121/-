@@ -33,6 +33,10 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   let calculationIssue = '';
   let styleProblems = [];
   const candidateSources = new Set();
+  const newsOriginals = new Set(); // 只存本轮最多24个实际新闻URL，不存正文。
+  const newsRead = new Set();
+  let selectedNews = new Set();
+  const newsOriginalIssue = () => /打开.{0,8}原文|核实原文|原文核实|查原文|核对原文/.test(request) && newsOriginals.size && (selectedNews.size ? [...selectedNews].some(url => !newsRead.has(url)) : !newsRead.size) ? '用户要求打开报道原文核实，目前只取得汇总页条目；请并发读取选用报道的原文，未读部分保留具体内容并标待核实，不能称核实完成' : '';
   const newsLinks = new Map(); // 仅本轮最多8条候选标题/网址，不保存摘要。
   const revise = (text) => {
     const previous = taskContract(request);
@@ -48,6 +52,9 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     calculationIssue = '';
     candidateSources.clear();
     newsLinks.clear();
+    newsOriginals.clear();
+    newsRead.clear();
+    selectedNews.clear();
     // 仅简单查询明确转创作时替换目标；文档“改成两页”等仍须保留原交付要求。
     if (/^(?:取消|不用|别做|停止)/.test(String(text).trim()) || replaceLookup) {
       request = '用户最新修正：' + String(text).slice(0, 3900);
@@ -56,6 +63,15 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     }
   };
   const record = ({ name: toolName, args = {}, ok, validation, output = '', code = '' }) => {
+    let dataRetrieved;
+    if (ok && toolName === 'get_today_news') {
+      try {
+        const value = JSON.parse(output);
+        dataRetrieved = value.kind === 'today_news' && value.items?.length > 0;
+        for (const item of (value.items || []).slice(0, 24)) if (newsOriginals.size < 24 && /^https:\/\//.test(item.url)) newsOriginals.add(item.url);
+      } catch { dataRetrieved = false; }
+    }
+    if (ok && toolName === 'fetch_url' && newsOriginals.has(args.url) && !/^原网页读取失败/.test(String(output))) newsRead.add(args.url);
     if (ok && toolName === 'web_search' && answerConstraints(request).todayNews) {
       for (const item of newsCandidates(output)) {
         if (newsLinks.size < 8) newsLinks.set(item.url, item);
@@ -78,6 +94,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     receipts.push({
       tool: toolName,
       ok: Boolean(ok),
+      ...(dataRetrieved !== undefined && { dataRetrieved }),
       ...(repository || {}),
       ...(media && { media }),
       ...(['NOT_APPROVED', 'TASK_SCOPE_AFTER_DENIAL'].includes(code) && { code }),
@@ -194,12 +211,12 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
         (format) => ![...artifacts.values()].some((item) => item.format === format && item.readback === 'passed' && !item.errors)
       ),
       request,
-      retrievalReceipts: receipts.filter((receipt) => receipt.version === version && receipt.ok && /^(?:web_search|fetch_url|fact_check|deep_research|get_weather|get_stock_kline|get_sports_scores|read_evidence)$/.test(receipt.tool)).length,
+      retrievalReceipts: receipts.filter((receipt) => receipt.version === version && receipt.ok && receipt.dataRetrieved !== false && /^(?:get_today_news|fetch_json|web_search|fetch_url|fact_check|deep_research|get_weather|get_stock_kline|get_sports_scores|read_evidence)$/.test(receipt.tool)).length,
       version,
       calls: sequence,
       answerIssues: [...answerIssues],
       styleIssues: [...styleProblems],
-      sourceIssue,
+      sourceIssue: sourceIssue || newsOriginalIssue(),
       visualIssue,
       visualReceipts: visualEvidence.snapshot(),
       calculationIssue,
@@ -259,6 +276,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   // 最后生成 / 修改的那份 Office 文件（核对“字大点、不要横线”这类改动用）
   const lastDocument = () => [...artifacts.values()].filter((item) => /^(?:docx|pptx|xlsx)$/.test(item.format)).sort((a, b) => a.at - b.at).at(-1) ?? null;
   const checkAnswer = (text, now) => {
+    selectedNews = new Set((String(text).match(/https?:\/\/[^\s)）\]，。]+/g) || []).filter(url => newsOriginals.has(url)));
     answerIssues = answerConstraintIssues(request, text, now);
     if (repositoryChanged) {
       const issue = repositoryDeliveryIssue(text, [...new Set([...files.values()].map(file => file.workspaceId).filter(Boolean))]);
@@ -266,7 +284,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     }
     styleProblems = styleIssues(request, text, lastDocument());
     visualIssue = visualEvidence.issue(text);
-    sourceIssue = sourceAnswerIssue(request, text, [...candidateSources]);
+    sourceIssue = sourceAnswerIssue(request, text, [...candidateSources]) || newsOriginalIssue();
     const result = report();
     calculationIssue = result.calculation === 'failed' ? '关键verify_numbers校验失败，修正输入重算；不能核验时必须明确校验失败、请人工复核' : result.contract.calculation && result.calculation === 'not_checked' ? '关键计算尚无工具校验，请先调用verify_numbers核对，不能用心算冒充工具结果' : '';
     return [...answerIssues, ...styleProblems, ...(visualIssue ? [visualIssue] : []), ...(sourceIssue ? [sourceIssue] : []), ...(calculationIssue ? [calculationIssue] : [])];

@@ -79,6 +79,8 @@ export function createToolbox(app) {
         metrics: app.metrics,
         ...deepseekSearchOptions(app.llmConfig),
         tavilyKey: app.llmConfig.tavilyKey,
+        publicDataHosts: app.llmConfig.publicDataHosts,
+        publicJsonAvailable: Boolean(app.gateway && !app.gateway.cors),
         qweather: qweatherConfig(app.llmConfig),
         falKey: app.llmConfig.falKey,
         bochaKey: app.llmConfig.bochaKey,
