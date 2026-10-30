@@ -110,7 +110,14 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       let typography = format === 'docx' ? await documentTypography(ctx, goal, signal) : ['pptx','xlsx'].includes(format) ? officeTypography(rawRequestText || goal, { body: bodySize, title: titleSize }) : {};
       if (format === 'docx' && (bodySize !== undefined || titleSize !== undefined)) { const supplied = officeTypography('', { body: bodySize, title: titleSize }); for (const role of ['body','title']) typography[role] = { ...supplied[role], ...typography[role] }; }
       const source = format === 'docx' ? await formattingSource({ request: rawRequestText || goal, sessionId, sourceId, sourcePath, signal }) : null;
-      if (source?.kind === 'docx') return formatDocumentFile(ctx, source, { path, theme, kind, cover, toc, template, requirements, typography }, execution);
+      if (source?.kind === 'docx') {
+        // 按原文件重新排版时也要换算“大点 / 小点 / 不要横线”（第三轮 30 题：这条路先走了，正文 16→16、横线没管）
+        const restyleAsks = styleRequests(rawRequestText || goal);
+        let restyled = typography;
+        if (restyleAsks.some((a) => a.id === 'bigger' || a.id === 'smaller'))
+          ({ typography: restyled } = relativeTypography(typography, restyleAsks, { kind: kind || '', previous: await lastStyle(sessionId, executionScope), format, request: rawRequestText || goal, explicit: typographyFromText(rawRequestText || goal) }));
+        return formatDocumentFile(ctx, source, { path, theme, kind, cover, toc, template, requirements, typography: restyled, noRules: restyleAsks.some((a) => a.id === 'noRule') }, execution);
+      }
       // 排版时绕过模型提供的正文和改写审稿，确定性沿用已绑定的用户原文。
       if (source) content = source.content;
       const designOptions = { format, title, content, requirements, style, kind };

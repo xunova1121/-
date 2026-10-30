@@ -73,7 +73,9 @@ export function scheduleCleaner(api, remove, before) {
     const list = await api('/api/server/schedules');
     const created = (list || []).filter((s) => !before.has(s.id));
     for (const s of created) if (/喝水/.test(`${s.title || ''}${s.prompt || ''}`)) await remove(s.id);
-    return created.map((s) => ({ title: String(s.title || '').slice(0, 60), kind: s.kind ?? null, at: s.at ?? null, time: s.time ?? null, nextRun: s.nextRun ?? s.next ?? null, enabled: s.enabled ?? null }));
+    // 时间给北京时间的文字，不给毫秒数（第三轮实测：评审员自己换算时区算错 8 小时，把对的判成“说做到没做到”）
+    const beijing = (t) => (Number.isFinite(t) ? new Date(t).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) + '（北京时间）' : null);
+    return created.map((s) => ({ title: String(s.title || '').slice(0, 60), kind: s.kind ?? null, time: s.time ?? null, at: beijing(s.at), nextRun: beijing(s.nextRun ?? s.next), enabled: s.enabled ?? null }));
   };
 }
 

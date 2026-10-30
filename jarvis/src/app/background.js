@@ -120,7 +120,10 @@ export function createBackground(app) {
     const b = app.transcript.add('agent', text);
     b.el.classList.add('proactive');
     b.done(`主动问候 · ${reason === 'face' ? '看到你回来了' : '你回到电脑前'}`);
-    app.rememberTurn('assistant', text, { proactive: true });
+    // 问候里提了没做完的事：记下提的是哪件（用户回“不用了”就当场划掉），并计一次，问够两次不再问
+    const offered = open[0] && text.includes(open[0].text.slice(0, 8)) ? open[0] : null;
+    if (offered) agentMemory.noteOpenOffered([offered]).catch(() => {});
+    app.rememberTurn('assistant', text, { proactive: true, ...(offered && { openItem: { episodeId: offered.episodeId, text: offered.text } }) });
     app.director.onEmotion('亲和');
     wp({ say: text, emotion: '亲和' });
     app.hud.think(`◆ 主动问候（离开 ${Math.round(awayMs / 60000)} 分钟）`);

@@ -134,3 +134,48 @@ describe('和风天气：来源给这个城市的预报页（接口返回的 fxL
     expect((await lookupQWeatherCity({ key: 'k', host: 'h', query: '南京', fetchImpl }))[0].link).toBeUndefined();
   });
 });
+
+describe('第三轮 30 题：今日新闻保住标了今天的条目；重排原文件也去横线', () => {
+  it('“时间：央视……10月30日”这种写法也认，前一天的那条去掉', async () => {
+    const { safeNewsPartial } = await import('../src/agent/newsDelivery.js');
+    const now = Date.parse('2026-10-30T02:00:00Z');
+    const answer = '1. **公报**\n**时间：**央视《新闻直播间》10月30日01:00节目\n**原文：**[央视](https://tv.cctv.cn/a)\n2. **发布会预告**\n**时间：**新华社10月29日17:43发布\n**原文：**[新华社](http://www.news.cn/b)\n3. **海南自贸港**\n**时间：**央视10月30日06:00\n**原文：**[央视](https://tv.cctv.cn/c)';
+    const kept = safeNewsPartial('查询今天中国国内三条重要新闻，分别写时间、要点和原文链接。', answer, now);
+    expect(kept).toContain('公报');
+    expect(kept).toContain('海南自贸港');
+    expect(kept).not.toContain('发布会预告');
+  });
+  it('去掉段落上下边框（横线），文字不动', async () => {
+    const { withoutParagraphRules } = await import('../src/agent/documentFileFormat.js');
+    const { makeDocx } = await import('../src/agent/docxWriter.js');
+    const { THEMES } = await import('../src/agent/themes.js');
+    const { measureDocx } = await import('../src/agent/styleCheck.js');
+    const { blob } = await makeDocx({ title: '工作说明', content: '# 工作说明\n\n## 一、背景\n\n正文内容。\n\n---\n\n## 二、安排\n\n正文内容。', theme: THEMES.business, kind: 'report' });
+    expect((await measureDocx(blob)).rules).toBeGreaterThan(0);
+    const after = await measureDocx(await withoutParagraphRules(blob));
+    expect(after.rules).toBe(0);
+    expect(after.body).toBe((await measureDocx(blob)).body);
+  });
+});
+
+describe('“上次说好的事”：问过两次没接就不再问；回“不用了”当场划掉（用户 2026-10-30：老问供销社）', () => {
+  it('问够两次后不再出现在待办里；划掉的不再出现', async () => {
+    const memory = await import('../src/agent/memory.js');
+    const ep = await memory.addEpisode({ summary: '查资料', turns: 2, session: { id: 's-open-1', title: '供销社' }, open: ['查询江苏供销合作总社的详细简介', '整理周报'] });
+    const find = async (text) => (await memory.openItems({ k: 20 })).find((o) => o.episodeId === ep.id && o.text === text);
+    const item = await find('查询江苏供销合作总社的详细简介');
+    expect(item).toBeTruthy();
+    await memory.noteOpenOffered([item]);
+    expect(await find(item.text)).toBeTruthy();
+    await memory.noteOpenOffered([item]);
+    expect(await find(item.text)).toBeUndefined();
+    const other = await find('整理周报');
+    await memory.resolveOpen([other]);
+    expect(await find('整理周报')).toBeUndefined();
+  });
+  it('认得“不用了 / 不做了 / 算了 / 别问了”，正常回答不误判', async () => {
+    const { DECLINE_OPEN } = await import('../src/agent/memory.js');
+    for (const t of ['不用了', '不做了', '算了', '别问了', '先不用']) expect(DECLINE_OPEN.test(t)).toBe(true);
+    for (const t of ['好的，接着做', '要', '帮我查一下']) expect(DECLINE_OPEN.test(t)).toBe(false);
+  });
+});

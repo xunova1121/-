@@ -370,12 +370,26 @@ export function ruleOpen(userLines) {
  * 之前对话里还没做完的事（最新的在前）
  * @returns {Promise<Array<{ episodeId, sessionId, sessionTitle, text, ts }>>}
  */
+/** 主动问候最多问几次：问过这么多次用户都没接，就不再问（用户 2026-10-30：老问供销社那件事，说了不做也没用） */
+export const OPEN_OFFER_LIMIT = 2;
 export async function openItems({ exclude = null, days = 14, k = 4, at = now() } = {}) {
   const eps = (await episodes.all()).filter((e) => e.open?.length && e.sessionId !== exclude && at - e.ts <= days * DAY).filter(safe((e) => e.summary));
   return eps.sort((a, b) => b.ts - a.ts)
-    .flatMap((e) => e.open.filter((text) => !injectionReason(text)).map((text) => ({ episodeId: e.id, sessionId: e.sessionId ?? null, sessionTitle: e.sessionTitle ?? '', text, ts: e.ts })))
+    .flatMap((e) => e.open.filter((text) => !injectionReason(text) && (e.openOffered?.[text] || 0) < OPEN_OFFER_LIMIT).map((text) => ({ episodeId: e.id, sessionId: e.sessionId ?? null, sessionTitle: e.sessionTitle ?? '', text, ts: e.ts })))
     .slice(0, k);
 }
+
+/** 主动问候里提了这件事：记一次（问够 OPEN_OFFER_LIMIT 次就不再提） */
+export async function noteOpenOffered(items) {
+  for (const o of items) {
+    const e = await episodes.get(o.episodeId);
+    if (!e) continue;
+    await episodes.put({ ...e, openOffered: { ...(e.openOffered || {}), [o.text]: (e.openOffered?.[o.text] || 0) + 1 } });
+  }
+}
+
+/** 用户对“要接着做吗”回了“不用 / 不做了 / 算了 / 别问了”：当场划掉，不等后台整理（服务器模式下整理在服务器上，手机本地的一直划不掉） */
+export const DECLINE_OPEN = /^(?:不用了?|不做了?|不要了?|不需要了?|算了|别问了?|不了|先不用|取消|不管它|那个不用)/;
 
 /** 标记为已完成（从所在的对话摘要里移除） */
 export async function resolveOpen(items) {

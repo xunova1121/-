@@ -8,7 +8,8 @@ export function safeNewsPartial(request, answer, now = Date.now()) {
   const blocks = String(answer).slice(0, 24000).split(/\n(?=(?:#{1,3}\s|(?:\*\*)?\d+[.、．]))/).slice(0, 16);
   const valid = blocks.filter(block => {
     if (!/https?:\/\/[^\s)]+/.test(block) || answerConstraintIssues(request, block, now).length) return false;
-    const stamps = [...block.matchAll(/(?:发布时间|报道时间)[*：:\s]{0,10}(?:(\d{4})[年/-])?(\d{1,2})[月/-](\d{1,2})日?/g)];
+    // “时间：央视《新闻直播间》10月30日01:00节目”这种写法也认（第三轮 30 题：只认“发布时间”，三条一条没保住，退回成候选链接）
+    const stamps = [...block.matchAll(/(?:发布时间|报道时间|时间)[*：:\s]{0,10}[^\d\n]{0,24}?(?:(\d{4})[年/-])?(\d{1,2})[月/-](\d{1,2})日?/g)];
     return stamps.length && stamps.every(match => (!match[1] || +match[1] === year) && +match[2] === month && +match[3] === day);
   }).slice(0, 3);
   return valid.length ? '只保留以下带今日发布时间标注的部分内容；本轮尚未完成全部原文核实。\n\n' + valid.join('\n\n') : '';
