@@ -37,7 +37,7 @@ function icon(kind) {
 }
 
 /** 手机欢迎页复用原天气与输入入口，不新增模型调用或图片持久化。 */
-export function createHome({ weather, fill, openPanel }) {
+export function createHome({ weather, fill, openPanel, configureWeather }) {
   const root = element('div', undefined, 'welcome wy-home home-reference');
   const hero = element('section', undefined, 'home-hero');
   const copy = element('div', undefined, 'home-hero-copy');
@@ -80,7 +80,7 @@ export function createHome({ weather, fill, openPanel }) {
     }, 2400);
   };
 
-  const weatherUI = createHomeWeather({ client: weather });
+  const weatherUI = createHomeWeather({ client: weather, onConfigure: configureWeather });
   root.append(weatherUI.root, hero);
   const head = element('div', undefined, 'home-suggestions-head');
   head.append(element('span', '未央为你准备了'));

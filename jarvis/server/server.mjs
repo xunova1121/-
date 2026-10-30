@@ -42,7 +42,7 @@ import { attachQwenGateway } from './qwenRealtime.mjs';
 
 const CORS_PATHS = /^\/api\/(health|local\/metrics|llm\/.+|tts\/edge|voice\/qwen\/voices)$/;
 /** 服务器模式里允许跨域调用的接口（手机 App、电脑版连自己的服务器） */
-const SERVER_CORS = /^\/api\/(health|server\/.+|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?|work-records(\/[^/]+)?|voice\/qwen\/voices)$/;
+const SERVER_CORS = /^\/api\/(health|server\/.+|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?|work-records(\/[^/]+)?|weather(\/cities)?|voice\/qwen\/voices)$/;
 export const EXTRA_UPSTREAMS = { tavily: 'https://api.tavily.com', bocha: 'https://api.bochaai.com', elevenlabs: 'https://api.elevenlabs.io', fal: 'https://queue.fal.run' };
 // 读取网页时用常见浏览器的请求头：不少网站（包括搜索引擎）会拒绝或降级陌生的客户端
 const FETCH_HEADERS = {
@@ -67,7 +67,7 @@ export function createServer({
   serverMode = null // createServerMode() 的结果：部署在云服务器上、任务交给服务器做（见 serverMode.mjs）
 } = {}) {
   const subscribers = new Set();
-  const weather=createWeatherProxy({qweather:()=>serverMode?.qweather?.()||null});
+  const weather=createWeatherProxy({qweather:()=>serverMode?.qweather?.()||null,configurationPlace:serverMode?'云服务器':'本机'});
   const voiceCatalog = createQwenVoiceCatalog();
   let activeChats = 0;
 

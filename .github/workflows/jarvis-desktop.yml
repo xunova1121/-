@@ -270,6 +270,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/jarvis-e2e"
           node e2e/mobile-ui.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/weather-card.mjs "$RUNNER_TEMP/jarvis-e2e/weather-card"
+          node e2e/weather-server.mjs "$RUNNER_TEMP/jarvis-e2e/weather-server"
           node e2e/server-mobile.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/conversation-flow.mjs
           node e2e/qwen-voices.mjs "$RUNNER_TEMP/jarvis-e2e"

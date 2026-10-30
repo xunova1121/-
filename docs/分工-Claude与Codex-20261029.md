@@ -38,6 +38,8 @@
 2026-10-29 用户要求“一起发版”，Claude 已手动触发一次（含 Claude 的架构图新路线 + Codex 1.0.319 之后的 23 个提交）。结果看 GitHub Actions；以后的发布按上面“统一发布”。
 
 ## 协调记录
+- 2026-10-30 Codex：接续已授权延迟第一批3/4/5/6。pageReader总8秒、候选/政务子页有界并发；codeRepos仅网络clone/fetch含重试总60秒、缓存只fetch；router短日常对话正向白名单，保留needsActionTools和中途升级；agent.js/executionReview仅在真实单文件读回且无待处理质量问题时减少重复收尾，不改MORE_TIME_ASK、硬约束/视觉/业务审查或已有门槛。可能接入tools.js的fetch_url候选入参和信号透传，其余Claude工具不动；不做第二批/PPT并发，不发版，提交[skip ci]。
+- 2026-10-30 用户反馈天气仍Open-Meteo且位置只有附近，优先修复。确认手机版view固定本机直连/本机Key，未使用app.server；serverKeysPanel把新填云Key另复制本机也不能恢复已有云Key。拟补鉴权云天气通道、按运行位置隔离缓存、区县地名解析（QWeather坐标查询+安卓系统地名）、明确来源提示；只在server.mjs扩天气CORS、serverClient加只读天气方法，不动Claude模型/表达/架构/提醒主体。延迟优化3/4/5/6已授权仍保留，天气反馈处理后继续；本轮[skip ci]保存，不自动发版。
 - 2026-10-30 天气版1.0.339已正式发布（13:10:05北京，8f130b0）。只读CI先通过原71+新95，再完整发布四job全部成功；实际下载包、APK版本/旧证书及Windows/服务器更新校验值已核对。337/338未发布且保留失败记录。详见《首页天气设计与Claude同步-20261030》；Claude新增对话延迟6项需求仅同步未开发，不混到本版成果。
 - 2026-10-30 天气#338新增短屏门禁发现CI高度仍超出；实测本地卡片38.3px、页面462px/可用460px，仅靠2px容差。此次明确短屏文字行高/按钮内边距并收紧短屏区块空白，新增字体尺寸记录及失败截图；在原jarvis-unit增加仅workflow_dispatch/contents:read的weather_only入口，同Ubuntu22/Chromium/Noto字体先验证原71项及增强天气专项，不含发布，不改原release门禁。
 - 2026-10-30 天气发布#337被原mobile-theme320短屏门禁拦住，未发布；仅修天气CSS窄屏宽度/短屏高度，并给新weather-card增加原尺寸约束，原mobile-theme不改。原71/71、新63/63、mobile-ui88/88通过后重新完整打包。已同步Claude d9f30a6延迟需求文档，但不在本批改模型/工具链。

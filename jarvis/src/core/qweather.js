@@ -76,7 +76,7 @@ export async function lookupQWeatherCity({ key, host, query, fetchImpl = (...a) 
   if (!res.ok) throw Object.assign(new Error(`和风天气返回 ${res.status}`), { status: res.status });
   const j = await res.json();
   if (j?.code && String(j.code) !== '200') return [];
-  return (j.location ?? []).map((c) => ({ name: String(c.name || '').slice(0, 80), latitude: num(c.lat), longitude: num(c.lon), ...(/^https:\/\/www\.qweather\.com\//.test(c.fxLink || '') && { link: String(c.fxLink).slice(0, 300) }), region: [c.adm2 !== c.name ? c.adm2 : '', c.adm1, c.country].filter(Boolean).join(' · ').slice(0, 120) })).filter((c) => c.name && c.latitude !== null && c.longitude !== null).slice(0, 8);
+  return (j.location ?? []).map((c) => ({ name: String(c.name || '').slice(0, 80), latitude: num(c.lat), longitude: num(c.lon), ...(c.adm2 && c.adm2 !== c.name ? { city: String(c.adm2).slice(0, 60), district: String(c.name || '').slice(0, 60) } : {}), ...(/^https:\/\/www\.qweather\.com\//.test(c.fxLink || '') && { link: String(c.fxLink).slice(0, 300) }), region: [c.adm2 !== c.name ? c.adm2 : '', c.adm1, c.country].filter(Boolean).join(' · ').slice(0, 120) })).filter((c) => c.name && c.latitude !== null && c.longitude !== null).slice(0, 8);
 }
 
 /** 空气质量：新版（indexes）和旧版（now.aqi）两种返回都认 */

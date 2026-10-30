@@ -507,3 +507,6 @@
     display: none;
   }
 }
+
+#homepage-weather-dialog .weather-provider-note { font-size:12px;line-height:1.8;color:var(--wc-muted);margin:12px 0 6px; }
+#homepage-weather-dialog .weather-configure { padding:8px 12px;border:1px solid var(--wc-line);border-radius:10px;background:var(--wc-panel);color:var(--wc-ink);font-size:12px; }

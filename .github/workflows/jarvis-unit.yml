@@ -161,7 +161,8 @@ jobs:
   weather:
     if: github.event_name == 'workflow_dispatch' && inputs.weather_only == true
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 增加全量单测和原smoke/standalone顺序验收；不改任何测试内部阈值。
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: jarvis
@@ -179,13 +180,30 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends fonts-wqy-microhei fonts-noto-cjk
       - name: 天气数据与显示守护
-        run: npx vitest run tests/homepageWeather.test.js tests/qweather.test.js tests/weatherPresentation.test.js
+        run: npx vitest run tests/homepageWeather.test.js tests/qweather.test.js tests/weatherPresentation.test.js tests/homeWeatherRouting.test.js
+      - name: 同源码全量检查（只读，不打包发版）
+        run: |
+          npm run lint
+          npm test
+      - name: 原浏览器与独立版门禁（不放宽阈值）
+        run: |
+          npm run build
+          mkdir -p "$RUNNER_TEMP/weather-check/smoke"
+          node server/server.mjs > "$RUNNER_TEMP/weather-check/gateway.log" 2>&1 &
+          WEATHER_SERVER_PID=$!
+          trap 'kill "$WEATHER_SERVER_PID" 2>/dev/null || true' EXIT
+          node e2e/smoke.mjs "$RUNNER_TEMP/weather-check/smoke"
+          kill "$WEATHER_SERVER_PID"
+          wait "$WEATHER_SERVER_PID" || true
+          npm run build:standalone
+          node e2e/standalone.mjs "$RUNNER_TEMP/weather-check"
       - name: 构建实际手机版
         run: npm run build:mobile
       - name: 原主题门禁与多字体天气专项
         run: |
           node e2e/mobile-theme.mjs "$RUNNER_TEMP/weather-check/theme"
           node e2e/weather-card.mjs "$RUNNER_TEMP/weather-check/weather"
+          node e2e/weather-server.mjs "$RUNNER_TEMP/weather-check/server"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

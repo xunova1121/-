@@ -1,7 +1,6 @@
-import { loadConfig, saveConfig } from '../llm/config.js';
 /**
  * 其他服务的 Key：博查搜索、fal.ai（唱歌）、Tavily 搜索、和风天气，跟着模型页当前位置（本机 / 云服务器）存。
- * 和风天气另在本机留一份：首页天气在手机上直接查（不经服务器），对话里问天气用当前位置那一份。
+ * 首页与对话天气都使用当前运行位置：云端Key仅留服务器，不再复制到手机本机。
  * 以前本机的在“联网搜索”“按次收费”两块里、服务器的单独一块，现在都在这里。
  * 只显示末四位；留空保存就保留原值（服务器本来就只回掩码）。
  */
@@ -35,10 +34,7 @@ export function serverKeysPanel({ cfg, workspace, node }) {
     save.disabled = true;
     try {
       await workspace.patch((value) => ({ ...value, ...next }));
-      if (workspace.scope === 'server' && (next.qweatherKey || 'qweatherHost' in next)) {
-        const local = loadConfig();
-        saveConfig({ ...local, ...(next.qweatherKey && { qweatherKey: next.qweatherKey }), ...('qweatherHost' in next && { qweatherHost: next.qweatherHost }) });
-      }
+      if (next.qweatherKey || 'qweatherHost' in next) globalThis.dispatchEvent(new Event('jarvis:weather-config-changed'));
       result.textContent = `已保存到${where}`;
     } catch (error) {
       result.textContent = error.message;

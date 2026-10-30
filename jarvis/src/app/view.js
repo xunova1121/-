@@ -4,9 +4,8 @@
  */
 import { STANDALONE, MOBILE } from '../config.js';
 import { displayName, loadConfig } from '../llm/config.js';
-import { qweatherConfig } from '../core/qweather.js';
+import { createHomepageWeather } from './homeWeather.js';
 import { resolveTheme, toggled, THEMES } from '../core/theme.js';
-import { createWeatherClient } from '../core/weather.js';
 import { createHome } from '../ui/home.js';
 import { initPalette } from '../ui/palette.js';
 import * as habits from '../agent/habits.js';
@@ -31,8 +30,9 @@ export function createView(app) {
     return h < 5 ? '夜深了' : h < 11 ? '早上好' : h < 13 ? '中午好' : h < 18 ? '下午好' : '晚上好';
   }
   let homeView;
-  // 填了和风天气 Key 就用和风（设置 → 其他服务的 Key）
-  const homeWeather = createWeatherClient({ direct: MOBILE || STANDALONE, qweather: () => qweatherConfig(loadConfig()) });
+  // 天气与当前运行位置一致：云Key留服务器，不能因App是手机就忽略云端配置。
+  const homeWeather = createHomepageWeather({ getServer: () => app.server, getConfig: loadConfig, direct: MOBILE || STANDALONE });
+  addEventListener('jarvis:weather-config-changed', () => homeWeather.refresh({ force: true }));
   function renderWelcome() {
     if (document.querySelector('#transcript .msg')) return;
     if (COMPACT) {
@@ -40,6 +40,10 @@ export function createView(app) {
       document.querySelector('#transcript .wy-home')?.remove();
       homeView = createHome({
         weather: homeWeather,
+        configureWeather: () => {
+          app.modelWorkspace?.show(app.server ? 'server' : 'local');
+          toast('在服务商与 Key 的“其他服务的 Key”中设置和风 Key 和 API Host');
+        },
         send: app.send,
         fill: (text) => {
           $('#prompt').value = text;

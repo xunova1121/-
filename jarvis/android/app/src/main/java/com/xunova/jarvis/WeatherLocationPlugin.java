@@ -47,10 +47,22 @@ public class WeatherLocationPlugin extends Plugin {
     }
     private void finish(Location location){
         final PluginCall call=pending;if(call==null)return;clean();
-        // 系统地理编码只用于城市名称；离线或无结果仍以附近显示真实坐标天气。
-        timeout=()->resolve(call,location,"附近");handler.postDelayed(timeout,2500);
-        new Thread(()->{String name="附近";try{List<Address> rows=new Geocoder(getContext(),Locale.SIMPLIFIED_CHINESE).getFromLocation(location.getLatitude(),location.getLongitude(),1);if(rows!=null&&!rows.isEmpty()){Address a=rows.get(0);String city=a.getLocality();if(city==null)city=a.getSubAdminArea();if(city==null)city=a.getAdminArea();if(city!=null&&!city.trim().isEmpty())name=city;}}catch(Exception ignored){}final String cityName=name;handler.post(()->resolve(call,location,cityName));},"weather-city").start();
+        // 系统地理编码保留真实区县；无结果时交给和风坐标解析，不猜测行政区。
+        timeout=()->resolve(call,location,"当前位置","","");handler.postDelayed(timeout,2500);
+        new Thread(()->{
+            String city="", district="";
+            try {
+                List<Address> rows=new Geocoder(getContext(),Locale.SIMPLIFIED_CHINESE).getFromLocation(location.getLatitude(),location.getLongitude(),1);
+                if(rows!=null&&!rows.isEmpty()){
+                    Address address=rows.get(0);
+                    city=WeatherPlaceName.city(address.getLocality(),address.getSubAdminArea(),address.getAdminArea());
+                    district=WeatherPlaceName.district(city,address.getSubLocality(),address.getSubAdminArea());
+                }
+            } catch(Exception ignored) { /* 联网解析另由和风GeoAPI补齐，不伪造区名。 */ }
+            final String resolvedCity=city, resolvedDistrict=district;
+            handler.post(()->resolve(call,location,WeatherPlaceName.label(resolvedCity,resolvedDistrict),resolvedCity,resolvedDistrict));
+        },"weather-city").start();
     }
-    private void resolve(PluginCall call,Location p,String city){if(pending!=call)return;pending=null;clean();JSObject result=new JSObject();result.put("name",city);result.put("latitude",Math.round(p.getLatitude()*100.0)/100.0);result.put("longitude",Math.round(p.getLongitude()*100.0)/100.0);call.resolve(result);}
+    private void resolve(PluginCall call,Location p,String place,String city,String district){if(pending!=call)return;pending=null;clean();JSObject result=new JSObject();result.put("name",place);result.put("city",city);result.put("district",district);result.put("latitude",Math.round(p.getLatitude()*100.0)/100.0);result.put("longitude",Math.round(p.getLongitude()*100.0)/100.0);call.resolve(result);}
     @Override protected void handleOnDestroy(){fail("定位已取消");super.handleOnDestroy();}
 }

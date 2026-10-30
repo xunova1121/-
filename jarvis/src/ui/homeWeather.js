@@ -22,7 +22,7 @@ export async function locateWeatherCity() {
   if (globalThis.Capacitor?.isNativePlatform?.()) {
     const { registerPlugin } = await import('@capacitor/core');
     const p = await registerPlugin('WeatherLocation').locate();
-    return { name: p.name || '附近', latitude: p.latitude, longitude: p.longitude, source: 'location' };
+    return { name: p.name === '附近' ? '当前位置' : p.name || '当前位置', ...(p.city && {city:p.city}), ...(p.district && {district:p.district}), latitude: p.latitude, longitude: p.longitude, source: 'location' };
   }
   if (!navigator.geolocation) throw new Error('当前环境不支持定位，请手动选城市');
   const p = await new Promise((resolve, reject) =>
@@ -33,12 +33,12 @@ export async function locateWeatherCity() {
   const lat = p.coords.latitude,
     lon = p.coords.longitude,
     city = POPULAR_CITIES.find((c) => Math.hypot(c.latitude - lat, (c.longitude - lon) * Math.cos((lat * Math.PI) / 180)) < 0.3);
-  return { name: city?.name || '附近', latitude: Math.round(lat * 100) / 100, longitude: Math.round(lon * 100) / 100, source: 'location' };
+  return { name: city?.name || '当前位置', latitude: Math.round(lat * 100) / 100, longitude: Math.round(lon * 100) / 100, source: 'location' };
 }
 
 let sessionLocation;
 const locateOnce = () => (sessionLocation ??= locateWeatherCity());
-export function createHomeWeather({ client, onAdvice, locate = locateOnce } = {}) {
+export function createHomeWeather({ client, onAdvice, onConfigure, locate = locateOnce } = {}) {
   const root = node('section', undefined, 'home-weather');
   root.id = 'homepage-weather';
   root.setAttribute('aria-label', '日期与天气');
@@ -51,7 +51,7 @@ export function createHomeWeather({ client, onAdvice, locate = locateOnce } = {}
   dialog.id = 'homepage-weather-dialog';
   dialog.setAttribute('aria-labelledby', 'weather-dialog-title');
   dialog.innerHTML =
-    '<header><h2 id="weather-dialog-title">选择城市</h2><button type="button" class="weather-close" aria-label="关闭天气">×</button></header><div class="weather-city-view"><p class="weather-privacy">选择城市即可查看天气；使用定位时只查询约公里级位置，不持续定位。</p><form class="weather-search"><input aria-label="搜索天气城市" placeholder="输入城市名，如杭州" maxlength="80"><button type="submit">搜索</button></form><button type="button" class="weather-locate">⌖ 使用当前位置</button><p class="weather-message" role="status"></p><div class="weather-city-results"></div><button type="button" class="weather-clear">关闭首页天气</button><p class="weather-attribution">城市检索数据：<a href="https://www.geonames.org/" target="_blank" rel="noopener noreferrer">GeoNames</a></p></div><div class="weather-detail-view" hidden><div class="weather-current"></div><div class="weather-alerts"></div><p class="weather-detail-advice"></p><section class="weather-metrics-section"><h3>天气详情</h3><div class="weather-extra"></div></section><section class="weather-hours-section"><h3>逐小时预报 <small>左右滑动查看</small></h3><div class="weather-hours"></div></section><section class="weather-days-section"><h3 class="weather-days-heading">未来天气</h3><div class="weather-days"></div></section><section class="weather-life-section"><h3>生活建议 <small>和风生活指数</small></h3><div class="weather-indices"></div></section><p class="weather-updated"></p><div class="weather-detail-actions"><button type="button" class="weather-change">切换城市</button><button type="button" class="weather-refresh">刷新天气</button></div><p class="weather-attribution weather-source">天气数据：<a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a> · 预报仅供出行参考</p></div>';
+    '<header><h2 id="weather-dialog-title">选择城市</h2><button type="button" class="weather-close" aria-label="关闭天气">×</button></header><div class="weather-city-view"><p class="weather-privacy">选择城市即可查看天气；使用定位时只查询约公里级位置，不持续定位。</p><form class="weather-search"><input aria-label="搜索天气城市" placeholder="输入城市名，如杭州" maxlength="80"><button type="submit">搜索</button></form><button type="button" class="weather-locate">⌖ 使用当前位置</button><p class="weather-message" role="status"></p><div class="weather-city-results"></div><button type="button" class="weather-clear">关闭首页天气</button><p class="weather-attribution">城市检索数据：<a href="https://www.geonames.org/" target="_blank" rel="noopener noreferrer">GeoNames</a></p></div><div class="weather-detail-view" hidden><div class="weather-current"></div><p class="weather-provider-note" hidden></p><button type="button" class="weather-configure" hidden>设置和风天气</button><div class="weather-alerts"></div><p class="weather-detail-advice"></p><section class="weather-metrics-section"><h3>天气详情</h3><div class="weather-extra"></div></section><section class="weather-hours-section"><h3>逐小时预报 <small>左右滑动查看</small></h3><div class="weather-hours"></div></section><section class="weather-days-section"><h3 class="weather-days-heading">未来天气</h3><div class="weather-days"></div></section><section class="weather-life-section"><h3>生活建议 <small>和风生活指数</small></h3><div class="weather-indices"></div></section><p class="weather-updated"></p><div class="weather-detail-actions"><button type="button" class="weather-change">切换城市</button><button type="button" class="weather-refresh">刷新天气</button></div><p class="weather-attribution weather-source">天气数据：<a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a> · 预报仅供出行参考</p></div>';
   document.body.append(dialog);
   const $ = (s) => dialog.querySelector(s),
     results = $('.weather-city-results');
@@ -88,6 +88,7 @@ export function createHomeWeather({ client, onAdvice, locate = locateOnce } = {}
   root.querySelector('.home-weather-location').onclick = () => open('city');
   root.querySelector('.home-weather-details').onclick = () => open(client.state.city ? 'detail' : 'city');
   $('.weather-close').onclick = () => dialog.close();
+  $('.weather-configure').onclick = () => { dialog.close(); onConfigure?.(); };
   $('.weather-change').onclick = () => open('city');
   $('.weather-clear').onclick = () => {
     client.clear();
@@ -150,14 +151,19 @@ export function createHomeWeather({ client, onAdvice, locate = locateOnce } = {}
   const unsubscribe = client.subscribe((state) => {
     const { city, data, status, stale, error } = state,
       kind = weatherKind(data?.code);
-    root.querySelector('.home-city b').textContent = city ? city.name.replace(/市$/, '') : '选择城市';
+    root.querySelector('.home-city b').textContent = city ? (city.district || city.name).replace(/市$/, '') : '选择城市';
+    root.querySelector('.home-city b').title = city?.name || '';
+    const locationNote = city?.source === 'location' && !city.district ? (state.locationError || '当前为粗略定位，区县名称暂未解析；可重新定位或手动选择区县。') : '';
+    $('.weather-provider-note').hidden = !data?.providerNote && !locationNote;
+    $('.weather-provider-note').textContent = [data?.providerNote, locationNote].filter(Boolean).join('。');
+    $('.weather-configure').hidden = !data?.providerNote || !onConfigure;
     root.querySelector('.home-weather-temp').textContent = data ? degrees(data.temp) : '—';
     root.querySelector('.home-weather-condition').textContent = weatherOverview(data, { stale });
     root.querySelector('.home-weather-details').setAttribute('aria-label', city ? `查看${city.name}天气详情${data ? '，' + degrees(data.temp) : ''}` : '查看天气详情');
     root.querySelector('.home-weather-location').setAttribute('aria-label', city ? `切换天气位置，当前${city.name}` : '切换天气位置');
     root.querySelector('.home-weather-icon').innerHTML = weatherSVG(data ? kind.icon : 'cloud', data && !data.isDay);
     root.querySelector('.home-weather-summary').textContent = data
-      ? `${stale ? '缓存 · ' : ''}${weatherTravelAdvice(data, { stale })}`
+      ? `${stale ? '缓存 · ' : ''}${data.providerNote ? '基础天气 · 和风尚未配置完整' : weatherTravelAdvice(data, { stale })}`
       : status === 'loading'
         ? '正在看看天气…'
         : error
@@ -166,7 +172,7 @@ export function createHomeWeather({ client, onAdvice, locate = locateOnce } = {}
     const advice = weatherTravelAdvice(data, { stale });
     onAdvice?.(advice);
     renderWeatherDetails(dialog, { city, data, status, stale, error, advice }, weatherSVG);
-    $('.weather-updated').textContent = data ? `${stale ? '缓存数据 · ' : ''}资料时间 ${data.at.replace('T', ' ')}${error ? ' · 暂未更新' : ''}` : error;
+    $('.weather-updated').textContent = data ? `${stale ? '缓存数据 · ' : ''}资料时间 ${data.at.replace('T', ' ')}${error ? ' · ' + error : ''}` : error;
   });
   let autoCancelled = false;
   // 只在第一次打开首页时定位一次；之后用记住的城市，不再每次打开都弹定位确认。要更新位置点“使用当前位置”。
