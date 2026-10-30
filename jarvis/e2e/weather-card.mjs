@@ -45,7 +45,7 @@ try {
     [390, 'night'],
     [412, 'day']
   ]) {
-    const ctx = await browser.newContext({ viewport: { width, height: 844 }, isMobile: true, hasTouch: true });
+    const ctx = await browser.newContext({ viewport: { width, height: width === 320 ? 640 : 844 }, isMobile: true, hasTouch: true });
     await ctx.addInitScript((theme) => {
       localStorage.setItem('jarvis.settings.v1', JSON.stringify({ theme, speechOutput: false }));
       localStorage.setItem('jarvis.weather.locationAsked.v1', '1');
@@ -124,6 +124,25 @@ try {
     );
     const label = `${width}-${theme}`;
     check(label + '-home-no-overflow', await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    check(
+      label + '-weather-right-aligned',
+      await page.evaluate(() => {
+        const detail = document.querySelector('.home-weather-details').getBoundingClientRect();
+        const location = document.querySelector('.home-weather-location').getBoundingClientRect();
+        return detail.left >= innerWidth / 2 - 12 && detail.right <= location.left && location.right <= innerWidth - 16;
+      })
+    );
+    if (width === 320)
+      check(
+        label + '-short-home-complete',
+        await page.evaluate(() => {
+          const transcript = document.querySelector('#transcript');
+          const files = document.querySelector('.home-files').getBoundingClientRect();
+          const input = document.querySelector('#inputbar').getBoundingClientRect();
+          return transcript.scrollHeight <= transcript.clientHeight + 2 && files.bottom <= input.top;
+        })
+      );
+
     check(label + '-range-visible', (await page.locator('.home-weather-condition').textContent()).includes('14° / 22°'));
     if (width === 390) await page.screenshot({ path: output + '/' + label + '-home.png' });
     await page.locator('.home-weather-location').click();

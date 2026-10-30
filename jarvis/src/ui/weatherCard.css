@@ -441,7 +441,9 @@
   }
   #homepage-weather .home-city {
     padding-left: 6px;
-    max-width: 62vw;
+    box-sizing: border-box;
+    width: calc(50vw - 2px);
+    max-width: calc(50vw - 2px);
   }
   #homepage-weather .home-weather-details {
     gap: 5px;
@@ -468,6 +470,25 @@
   }
 }
 @media (max-height: 680px) {
+  /* 短屏恢复紧凑高度，不让天气挤掉文件入口；详细数据仍在弹窗。 */
+  #homepage-weather {
+    min-height: 36px;
+    gap: 0 8px;
+  }
+  #homepage-weather .home-city {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  #homepage-weather .home-weather-details {
+    min-height: 32px;
+  }
+  #homepage-weather .home-weather-location {
+    min-height: 32px;
+    height: 32px;
+  }
+  #homepage-weather .home-weather-place {
+    gap: 1px;
+  }
   #homepage-weather .home-weather-bottom {
     display: none;
   }
