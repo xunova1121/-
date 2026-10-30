@@ -51,6 +51,7 @@ export function createTurn(app) {
           {
             ...(turn.usedTools?.length && { tools: [...new Set(turn.usedTools)] }),
             ...(turn.files?.size && { files: [...turn.files] }),
+            ...(turn.sports && { sports: turn.sports }),
             ...(turn.failedSteps?.length && { failures: turn.failedSteps })
           },
           turn.session
@@ -181,6 +182,7 @@ export function createTurn(app) {
   function finishBackground(turn, { text = '', error = '', shown = '', usedTools = [], files = new Set() }) {
     backgroundTurns.delete(turn);
     const extra = {
+      ...(turn.sports && { sports: turn.sports }),
       ...(usedTools.length && { tools: [...new Set(usedTools)] }),
       ...(files.size && { files: [...files].slice(-12) }),
       ...(turn.failedSteps?.length && { failures: turn.failedSteps })
@@ -450,6 +452,7 @@ export function createTurn(app) {
         'assistant',
         result.text || '（完成）',
         {
+          ...(turn.sports && { sports: turn.sports }),
           ...(usedTools.length && { tools: [...new Set(usedTools)] }),
           ...(madeFiles.size && { files: [...madeFiles].slice(-12) }),
           ...(turn.failedSteps?.length && { failures: turn.failedSteps })
@@ -506,6 +509,7 @@ export function createTurn(app) {
           {
             ...(usedTools.length && { tools: [...new Set(usedTools)] }),
             ...(madeFiles.size && { files: [...madeFiles].slice(-12) }),
+            ...(turn.sports && { sports: turn.sports }),
             ...(turn.failedSteps?.length && { failures: turn.failedSteps })
           },
           turn.session

@@ -41,6 +41,7 @@ export function createRemoteTask(app) {
         emit: (e) => {
           if (app.active !== turn) return;
           if (e.type === 'text') bubble.append(e.delta);
+          else if (e.type === 'sports_scores') bubble.sports?.(e.value);
           else if (e.type === 'plan') bubble.plan?.(e.steps);
           else if (e.type === 'tool_start' && e.name !== 'update_plan') {
             cards.set(e.id, bubble.toolCard(e.name, e.args));

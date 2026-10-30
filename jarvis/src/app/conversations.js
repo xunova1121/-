@@ -13,9 +13,10 @@ import * as ws from '../agent/workspace.js';
 import * as agentMemory from '../agent/memory.js';
 import * as sessionsApi from '../agent/sessions.js';
 import { $, DESKTOP, COMPACT, toast } from './env.js';
+import { sportsCardRefresh } from './sportsCards.js';
 
 export function createConversations(app) {
-  const transcript = new Transcript($('#transcript'), { progress: COMPACT });
+  const transcript = new Transcript($('#transcript'), { progress: COMPACT, refreshSports: sportsCardRefresh(app) });
   // 当前会话；app.history 就是它的消息列表（换对话只改 app.session）
   app.session = sessionsApi.create();
   /** 记一条消息：默认记进当前会话；后台任务记进它自己的会话（切到别的对话后仍然记对地方） */
@@ -118,6 +119,7 @@ export function createConversations(app) {
         else {
           const b = transcript.add('agent', '', m.ts);
           b.append(m.content);
+          if (m.sports) b.sports(m.sports);
           for (const f of m.files || []) b.fileLink(f, openInWorkspace);
           b.done(m.tools?.length ? `用了：${m.tools.map(toolLabel).join('、')}` : '', { fold: i !== lastAgent });
         }

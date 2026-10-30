@@ -4,6 +4,7 @@
  */
 import { imageButton, previewWorkspaceImage, showImagePreview } from './imagePreview.js';
 import { PROCESS_FILE } from './workspaceCatalog.js';
+import { createSportsCard } from './sportsCard.js';
 import './mobileImprovements.css';
 import { parseMarkdown, inline, toPlainText } from '../core/markdown.js';
 import { stripEmotionTags } from '../../shared/emotionTag.js';
@@ -282,10 +283,11 @@ const hhmm = (ts) => new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit',
 
 export class Transcript {
   /** @param {HTMLElement} root  @param {{ progress?: boolean }} [o] progress：工具调用合并成一张“工作进展”卡片（手机） */
-  constructor(root, { progress = false } = {}) {
+  constructor(root, { progress = false, refreshSports } = {}) {
     this.root = root;
     this.interimEl = null;
     this.progress = progress;
+    this.refreshSports = refreshSports;
     this.follow = true;
     root.addEventListener('scroll', () => {
       this.follow = root.scrollHeight - root.scrollTop - root.clientHeight < 140;
@@ -373,6 +375,7 @@ export class Transcript {
     };
     const stopPaint = () => { if (frame) { cancelFrame(frame); paint(); } tail = null; }; // 还没刷出来的字先刷上，再交给排版
     let files = null; // 生成的文件按钮
+    let sports = null;
     const self = this;
     // —— 连续的工具步骤收进一个分组（电脑）：执行中只占几行高、自动滚到最新一步；结束后折叠成“执行了 N 步”
     let group = null;
@@ -691,6 +694,13 @@ export class Transcript {
         box.className = 'sources';
         box.append('参考：', ...[...new Set(names)].map((n) => Object.assign(document.createElement('span'), { textContent: n })));
         el.insertBefore(box, el.children[1]);
+      },
+      sports(value) {
+        if (value?.version !== 1 || !Array.isArray(value.events)) return;
+        const next = createSportsCard(value, self.refreshSports);
+        if (sports) sports.replaceWith(next); else el.insertBefore(next, cur);
+        sports = next;
+        self.#scroll();
       },
       done(meta, { onFeedback, fold = false } = {}) {
         if (mascot) {

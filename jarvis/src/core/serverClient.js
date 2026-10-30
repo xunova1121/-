@@ -166,6 +166,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     getConfig: () => req('/api/server/config'),
     weather: (city, signal) => req('/api/weather?' + new URLSearchParams({ latitude: String(city.latitude), longitude: String(city.longitude) }), { signal, timeout: 15000 }),
     weatherCities: (query, signal) => req('/api/weather/cities?' + new URLSearchParams({ q: String(query).slice(0, 80) }), { signal, timeout: 8000 }),
+    sportsScores: (query, signal) => req('/api/sports/scores?' + new URLSearchParams(query), { signal, timeout: 20000 }),
     listDocumentStyles: () => req('/api/server/document-styles'),
     memoryStatus: () => req('/api/server/memory-status'),
     deleteDocumentStyle: id => req(`/api/server/document-styles/${encodeURIComponent(id)}`, { method: 'DELETE' }),

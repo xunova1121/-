@@ -9,6 +9,11 @@ export function createTurnEvents(app) {
   /** 这一轮的进度事件 → 界面：文字、工具卡片、模型切换、团队分工……（切到别的对话后只记进这一轮的气泡） */
   function turnEvents(turn, st, { bubble, speech, cards, doneSteps, model }) {
     return (e) => {
+      if (e.type === 'sports_scores') {
+        turn.sports = e.value;
+        bubble.sports?.(e.value);
+        return;
+      }
       if (e.type === 'tool_start' && e.name !== 'update_plan') {
         turn.steps++;
         turn.status = toolLabel(e.name);

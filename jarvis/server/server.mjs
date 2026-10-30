@@ -39,10 +39,11 @@ import { createOllama } from './ollama.mjs';
 import { edgeSpeak } from './edgeTts.mjs';
 import { createWeatherProxy } from './weather.mjs';
 import { attachQwenGateway } from './qwenRealtime.mjs';
+import { refreshSports } from './sports.mjs';
 
 const CORS_PATHS = /^\/api\/(health|local\/metrics|llm\/.+|tts\/edge|voice\/qwen\/voices)$/;
 /** 服务器模式里允许跨域调用的接口（手机 App、电脑版连自己的服务器） */
-const SERVER_CORS = /^\/api\/(health|server\/.+|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?|work-records(\/[^/]+)?|weather(\/cities)?|voice\/qwen\/voices)$/;
+const SERVER_CORS = /^\/api\/(health|server\/.+|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?|work-records(\/[^/]+)?|weather(\/cities)?|sports\/scores|voice\/qwen\/voices)$/;
 export const EXTRA_UPSTREAMS = { tavily: 'https://api.tavily.com', bocha: 'https://api.bochaai.com', elevenlabs: 'https://api.elevenlabs.io', fal: 'https://queue.fal.run' };
 // 读取网页时用常见浏览器的请求头：不少网站（包括搜索引擎）会拒绝或降级陌生的客户端
 const FETCH_HEADERS = {
@@ -354,6 +355,14 @@ export function createServer({
       if (pathname.startsWith('/api/ollama/')) return await handleOllama(req, res, pathname);
       if (pathname === '/api/fetch' && req.method === 'GET') return await handleFetch(req, res, new URL(req.url, 'http://x').searchParams.get('url'));
       if ((pathname === '/api/weather'||pathname === '/api/weather/cities')&&req.method==='GET') return json(res,200,await weather(pathname,new URL(req.url,'http://x').searchParams,req.headers));
+      if (pathname === '/api/sports/scores' && req.method === 'GET') {
+        const { publicFetch } = await import('./taskRunner.mjs');
+        const ctrl = new AbortController();
+        const cancel = () => ctrl.abort();
+        res.once('close', cancel);
+        try { return json(res, 200, await refreshSports(new URL(req.url, 'http://x').searchParams, { get: publicFetch, signal: ctrl.signal })); }
+        finally { res.off('close', cancel); }
+      }
       if (pathname.startsWith('/api/')) return json(res, 404, { error: 'not found' });
       if (req.method !== 'GET' && req.method !== 'HEAD') return json(res, 405, { error: 'method not allowed' });
       return serveStatic(req, res);

@@ -279,6 +279,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       llm: helper(cfg, 'write', task), reasonLlm: helper(cfg, 'reason', task),
       documentReviewer: createDocumentReviewer(cfg, (selected) => helper({ ...selected, routing: { enabled: false } }, 'write', task, 'document_review')),
       onFileChanged: (p) => { if (!/^skills\//.test(p)) { task.files.add(p); record(task, { type: 'file', path: p }); } },
+      onSportsScores: (value) => { task.sports = value; record(task, { type: 'sports_scores', value }); },
       // 画图、做视频：用服务器上的模型设置；生成的文件照常存进工作区，手机按文件下载后显示在对话里
       imageGen: (o) => generateImage(cfg, { ...o, download: publicFetch }),
       imageEdit: (o) => editImage(cfg, { ...o, download: publicFetch }),
@@ -320,7 +321,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         if (task.status !== 'running' || (!shown.trim() && !usedTools.length)) return;
         editSession(task.sessionId, async (s) => {
           if (!s || task.status !== 'running') return;
-          const draft = { role: 'assistant', content: `${shown.trim()}\n\n${DRAFT_MARK}`, ts: now(), draftOf: task.id, ...(usedTools.length && { tools: [...new Set(usedTools)] }) };
+          const draft = { role: 'assistant', content: `${shown.trim()}\n\n${DRAFT_MARK}`, ts: now(), draftOf: task.id, ...(task.sports && { sports: task.sports }), ...(usedTools.length && { tools: [...new Set(usedTools)] }) };
           const i = s.messages.findIndex((m) => m.draftOf === task.id);
           if (i >= 0) s.messages[i] = draft; else s.messages.push(draft);
           await sessions.save(s);
@@ -376,7 +377,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   async function finish(task, session, { text = '', error = '', errorType = '', stopped = false, shown = '', usedTools = [], toolCalls = 0 }) {
     clearTimeout(task.codeDeadline);
     const timing = task.timing.finish();
-    const extra = { ...(task.failedSteps?.length && { failures: task.failedSteps }), timing, ...(task.review?.outcome && { review: { outcome: task.review.outcome, issueCount: task.review.warnings?.length || 0 } }), ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(task.files.size && { files: [...task.files].slice(-12) }) };
+    const extra = { ...(task.sports && { sports: task.sports }), ...(task.failedSteps?.length && { failures: task.failedSteps }), timing, ...(task.review?.outcome && { review: { outcome: task.review.outcome, issueCount: task.review.warnings?.length || 0 } }), ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(task.files.size && { files: [...task.files].slice(-12) }) };
     clearTimeout(task.draftTimer);
     clearTimeout(task.checkpointTimer); task.checkpointTimer = null; // 下面一起写最终的检查点
     evidence.flush().catch(() => {});

@@ -23,8 +23,8 @@ export const clearZhibo8Cache = () => {
 };
 
 /** 取直播吧的比分列表 */
-export async function fetchZhibo8({ get, signal }) {
-  if (cached && Date.now() - cached.at < CACHE_MS) return cached.list;
+export async function fetchZhibo8({ get, signal, refresh = false }) {
+  if (!refresh && cached && Date.now() - cached.at < CACHE_MS) return cached.list;
   const data = await withWebDeadline(
     async (s) => {
       const response = await get(ZHIBO8_URL, { signal: s });
@@ -48,6 +48,7 @@ export function normalizeZhibo8(m) {
     id: String(m.id ?? ''),
     sport: String(m.type || 'other'),
     leagueId: String(m.leagueid ?? ''),
+    jingcai: m.is_jingcai === true || String(m.is_jingcai) === '1',
     date: String(m.sdate || String(m.start || '').slice(0, 10)),
     time: String(m.time || String(m.start || '').slice(11, 16)),
     home,
@@ -90,9 +91,9 @@ export function zhibo8Result(list, { from, to, today, sports = null, team = '', 
   const quiet = shown.filter(e => SPECIAL.has(e.state)).length;
   const unknown = shown.filter(e => !STATE[e.state]).length;
   const order = Object.keys(SPORT);
-  shown.sort((a, b) => window && window.period !== 'all' ? beijingTimestamp(a.date, a.time) - beijingTimestamp(b.date, b.time) : a.date.localeCompare(b.date) || order.indexOf(a.sport) - order.indexOf(b.sport) || a.leagueId.localeCompare(b.leagueId) || a.time.localeCompare(b.time));
+  shown.sort((a, b) => (window?.period === 'around' ? Number(b.state === '2') - Number(a.state === '2') : 0) || (window && window.period !== 'all' ? beijingTimestamp(a.date, a.time) - beijingTimestamp(b.date, b.time) : a.date.localeCompare(b.date) || order.indexOf(a.sport) - order.indexOf(b.sport) || a.leagueId.localeCompare(b.leagueId) || a.time.localeCompare(b.time)));
   const lines = [`北京时间 ${from}（${weekday(from)}）${to !== from ? ` 至 ${to}（${weekday(to)}）` : ''}的赛程和比分，来源直播吧（zhibo8.com），查询于北京时间 ${clock}。时间都是北京时间，前面是主队。`];
-  lines.push(`本来源本次筛选共${shown.length}场，延期/取消/待定和未知状态也保留明细；不代表所有联赛完整覆盖。`);
+  lines.push(`本来源本次筛选共${shown.length}场，${window?.period === 'around' ? '本窗口只显示进行中和未开赛' : '延期/取消/待定和未知状态也保留明细'}；不代表所有联赛完整覆盖。`);
   if (window?.label) lines.push('时间筛选：' + window.label + '；不代表全天完整赛程。');
   if (!shown.length) lines.push('\n这段时间列表里没有符合条件的比赛。');
   let day = '';
@@ -122,5 +123,7 @@ export function zhibo8Result(list, { from, to, today, sports = null, team = '', 
   if (days.some((d) => d > today)) lines.push('明天及以后的比赛这里只排进了少数几场，不全；用户要完整赛程时用 web_search 补。');
   if (!covered) lines.push(`列表只覆盖大约昨天到明天，${days.filter((d) => !have.has(d)).join('、')} 没有数据。`);
   lines.push('进行中的比分会变；比分以这里为准，未开赛的不要编比分。');
-  return { covered, text: lines.join('\n'), count: shown.length };
+  lines.push('本列表未提供可核实的竞彩场次编号、停售时间及赔率；只展示普通赛程，不把赛事ID或is_jingcai标记编成竞彩编号。');
+  const events = shown.map(e => ({ ...e, time: beijingTimestamp(e.date, e.time), state: ({ '1': 'pre', '2': 'in', '3': 'post' })[e.state] || 'unknown', status: e.state === '2' ? `进行中 ${e.period}`.trim() : STATE[e.state] || '状态未知' }));
+  return { covered, text: lines.join('\n'), count: shown.length, events };
 }
