@@ -37,6 +37,7 @@ import * as packs from './skillPacks.js';
 import { isImageName, prepareImage } from './images.js';
 import * as scheduler from './scheduler.js';
 import * as sessions from './sessions.js';
+import { createConversationTrashTools } from './conversationTrashTools.js';
 import { createSearch } from './webSearch.js';
 import { getWeather } from './weather.js';
 import { createPageReader } from './pageReader.js';
@@ -652,6 +653,8 @@ export function createTools(ctx) {
       run: async () => JSON.stringify(await ctx.metrics())
     }
   ];
+  // 说一句话删某段时间的对话（先列清单、用户确认才删，进回收站留 7 天）
+  tools.push(...createConversationTrashTools());
 
   const engine = createSearch(ctx);
   if (engine) {

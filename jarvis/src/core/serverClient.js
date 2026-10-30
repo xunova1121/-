@@ -208,6 +208,9 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     getSession: (id) => req(`/api/sessions/${encodeURIComponent(id)}`).catch((e) => { if (e.status === 404) return null; throw e; }),
     patchSession: (id, patch) => req(`/api/sessions/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }),
     deleteSession: (id) => req(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    trashSession: (id) => req(`/api/sessions/${encodeURIComponent(id)}/trash`, { method: 'POST' }),
+    restoreSession: (id) => req(`/api/sessions/${encodeURIComponent(id)}/restore`, { method: 'POST' }),
+    listTrash: () => req('/api/sessions/trash'),
     importSession: (session) => req('/api/sessions/import', { method: 'POST', body: session }),
     truncateSession: (id, keep) => req(`/api/sessions/${encodeURIComponent(id)}/truncate`, { method: 'POST', body: { keep } }),
     appendSession: (id, messages) => req(`/api/sessions/${encodeURIComponent(id)}/append`, { method: 'POST', body: { messages } }),
@@ -393,6 +396,10 @@ export function remoteSessions(client, { storage = globalThis.localStorage } = {
     rename: (id, title) => client.patchSession(id, { title }).then((r) => { if (cache.sessions[id]) cache.sessions[id].title = title; listing = null; return r; }),
     setPinned: (id, pinned) => client.patchSession(id, { pinned }).then((r) => { listing = null; return r; }),
     remove: (id) => client.deleteSession(id).then((r) => { delete cache.sessions[id]; cache.list = cache.list?.filter((x) => x.id !== id) ?? null; persist(); listing = null; return r; }),
+    // 回收站：删的先留 7 天（服务器上），副本里同样去掉
+    trash: (id) => client.trashSession(id).then((r) => { delete cache.sessions[id]; cache.list = cache.list?.filter((x) => x.id !== id) ?? null; persist(); listing = null; return r; }),
+    restore: (id) => client.restoreSession(id).then((r) => { listing = null; return r; }),
+    listTrash: () => client.listTrash(),
     searchContent: (q) => client.searchSessions(q),
     async search(query) {
       const q = String(query || '').trim().toLowerCase();

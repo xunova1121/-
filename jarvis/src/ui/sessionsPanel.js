@@ -19,7 +19,22 @@ export function initSessionsPanel({ getCurrentId, onOpen, onNew, onDeleted, sett
   let query = '';
   let timer = 0;
 
+  /** 回收站：删掉的对话，7 天内能恢复 */
+  async function refreshTrash() {
+    const items = await sessions.listTrash().catch(() => []);
+    $('#session-trash-count').textContent = items.length ? `（${items.length}）` : '';
+    const day = (t) => new Date(t).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+    $('#session-trash-list').replaceChildren(...(items.length ? items.map((x) => {
+      const back = el('button', { type: 'button', className: 'x-btn', textContent: '恢复', title: '恢复这段对话' });
+      back.addEventListener('click', async () => { back.disabled = true; await sessions.restore(x.id).catch(() => null); refresh(); });
+      return el('div', { className: 'session' },
+        el('div', { className: 'session-main' }, el('span', { className: 'session-title', textContent: x.title }), el('span', { className: 'session-snippet', textContent: `${x.count} 条 · ${day(x.trashedAt)} 删除 · ${day(x.expiresAt)} 后彻底删除` })),
+        el('div', { className: 'session-actions' }, back));
+    }) : [el('p', { className: 'empty', textContent: '回收站是空的。' })]));
+  }
+
   async function refresh() {
+    refreshTrash();
     const list = await sessions.search(query).catch(() => []);
     const total = query ? (await sessions.list()).length : list.length;
     $('#session-count').textContent = `${total} 段`;
@@ -68,7 +83,8 @@ export function initSessionsPanel({ getCurrentId, onOpen, onNew, onDeleted, sett
         btn('⇩', '导出为 Markdown', () => saveFile(new Blob([sessions.toMarkdown(s)], { type: 'text/markdown' }), `${s.title}.md`)),
         btn('✕', '删除', async (b) => {
           if (b.dataset.c !== '1') { b.dataset.c = '1'; b.textContent = '确认'; b.classList.add('danger'); setTimeout(() => { b.dataset.c = ''; b.textContent = '✕'; b.classList.remove('danger'); }, 3000); return; }
-          await sessions.remove(s.id);
+          // 先放回收站，7 天内能恢复（见 sessions.trash）
+          await sessions.trash(s.id);
           onDeleted(s.id);
           refresh();
         })));

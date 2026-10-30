@@ -72,6 +72,84 @@ export function remove(id) {
   return remote ? remote.remove(id) : Promise.all([sessions.delete(id), dropSessionWork(id)]);
 }
 
+// ---------------------------------------------------------------- 回收站（用户 2026-10-30：说一句话删某段时间的对话，删的先留 7 天能找回）
+// 放在已有的 kv 表里（不加新表：本机数据库版本不动）：目录一条 + 每段对话一条存档
+const kv = collection('kv');
+const TRASH_INDEX = 'session-trash';
+const trashKey = (id) => 'session-trash:' + id;
+export const TRASH_DAYS = 7;
+const DAY = 86400000;
+const trashIndex = async () => (await kv.get(TRASH_INDEX))?.items ?? [];
+
+/** 一段对话的时间范围（第一条到最后一条消息；没有时间就用创建 / 更新时间） */
+export function sessionSpan(s) {
+  const ts = (s.messages || []).map((m) => m.ts).filter(Number.isFinite);
+  return { from: ts.length ? Math.min(...ts) : s.createdAt ?? s.updatedAt, to: ts.length ? Math.max(...ts) : s.updatedAt ?? s.createdAt };
+}
+
+/**
+ * 找某个时间段里说过话的对话（任何一条消息落在段内就算；评测会话、当前这段不算）
+ * @param {{ from: number, to: number, query?: string, exclude?: string|null }} o 毫秒时间戳，含头含尾
+ */
+export async function findByTime({ from, to, query = '', exclude = null }) {
+  const q = String(query || '').trim().toLowerCase();
+  const all = remote ? await Promise.all((await remote.list()).map((x) => remote.get(x.id).catch(() => null))) : await sessions.all();
+  return all
+    .filter((s) => s && !s.evaluationId && s.id !== exclude)
+    .filter((s) => {
+      const ts = (s.messages || []).map((m) => m.ts).filter(Number.isFinite);
+      const hits = ts.length ? ts.some((t) => t >= from && t <= to) : (s.updatedAt >= from && s.updatedAt <= to);
+      if (!hits) return false;
+      return !q || String(s.title || '').toLowerCase().includes(q) || (s.messages || []).some((m) => String(m.content || '').toLowerCase().includes(q));
+    })
+    .sort((a, b) => sessionSpan(a).from - sessionSpan(b).from);
+}
+
+/** 删到回收站：TRASH_DAYS 天内能恢复，之后才真正删掉（连同证据和成果记录） */
+export async function trash(id, at = Date.now()) {
+  if (remote?.trash) return remote.trash(id);
+  const s = await sessions.get(id);
+  if (!s) return null;
+  await kv.put({ id: trashKey(id), session: s, trashedAt: at });
+  const span = sessionSpan(s);
+  await kv.put({ id: TRASH_INDEX, items: [...(await trashIndex()).filter((x) => x.id !== id), { id, title: s.title, count: s.messages.length, from: span.from, to: span.to, trashedAt: at }] });
+  await sessions.delete(id);
+  await purgeTrash(at);
+  return { id, title: s.title };
+}
+
+/** 回收站里的对话（新删的在前） */
+export async function listTrash(at = Date.now()) {
+  if (remote?.listTrash) return remote.listTrash();
+  await purgeTrash(at);
+  return [...(await trashIndex())].sort((a, b) => b.trashedAt - a.trashedAt).map((x) => ({ ...x, expiresAt: x.trashedAt + TRASH_DAYS * DAY }));
+}
+
+/** 从回收站恢复 */
+export async function restore(id) {
+  if (remote?.restore) return remote.restore(id);
+  const rec = await kv.get(trashKey(id));
+  if (!rec?.session) return null;
+  await sessions.put(rec.session);
+  await kv.delete(trashKey(id));
+  await kv.put({ id: TRASH_INDEX, items: (await trashIndex()).filter((x) => x.id !== id) });
+  return { id, title: rec.session.title };
+}
+
+/** 超过 TRASH_DAYS 天的真正删掉 */
+export async function purgeTrash(at = Date.now()) {
+  if (remote) return;
+  const items = await trashIndex();
+  const old = items.filter((x) => at - x.trashedAt >= TRASH_DAYS * DAY);
+  if (!old.length) return;
+  for (const x of old) {
+    await kv.delete(trashKey(x.id));
+    evidence.drop(x.id).catch(() => {});
+    await dropSessionWork(x.id).catch(() => {});
+  }
+  await kv.put({ id: TRASH_INDEX, items: items.filter((x) => !old.includes(x)) });
+}
+
 /** 按标题和内容搜索；返回带命中片段的会话 */
 export async function search(query) {
   if (remote) return remote.search(query);

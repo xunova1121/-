@@ -237,3 +237,17 @@ describe('服务器上的定时任务接口', () => {
     expect((await api('/api/server/schedules/nope', { method: 'PATCH', body: JSON.stringify({ enabled: true }) })).status).toBe(404);
   });
 });
+
+describe('服务器模式：对话回收站（删的先留 7 天）', () => {
+  it('删到回收站 → 列表里没了、回收站里有 → 恢复回来', async () => {
+    const one = { id: 'ctrash1', title: '要删的对话', titleSet: true, createdAt: 1, updatedAt: 2, messages: [{ role: 'user', content: '你好', ts: 1 }, { role: 'assistant', content: '好', ts: 2 }] };
+    await api('/api/sessions/import', { method: 'POST', body: JSON.stringify(one) });
+    expect((await api('/api/sessions/ctrash1/trash', { method: 'POST' })).status).toBe(200);
+    expect((await api('/api/sessions/ctrash1')).status).toBe(404);
+    const trash = await (await api('/api/sessions/trash')).json();
+    expect(trash.some((x) => x.id === 'ctrash1' && x.title === '要删的对话')).toBe(true);
+    expect((await api('/api/sessions/ctrash1/restore', { method: 'POST' })).status).toBe(200);
+    expect((await (await api('/api/sessions/ctrash1')).json()).messages).toHaveLength(2);
+    expect((await api('/api/sessions/nope/restore', { method: 'POST' })).status).toBe(404);
+  });
+});

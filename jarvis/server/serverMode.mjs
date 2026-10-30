@@ -402,6 +402,14 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       json(res, 200, (await sessions.list()).map(({ messages, requirements, taskCheckpoint, taskReceipts, recoveryCheckpoints, ...s }) => ({ ...s, count: messages.length, taskId: busy.get(s.id) ?? null })));
       return true;
     }
+    // 回收站：删到回收站 / 看回收站 / 恢复（7 天后真正删掉，见 sessions.js）
+    if (pathname === '/api/sessions/trash' && req.method === 'GET') { json(res, 200, await sessions.listTrash()); return true; }
+    const trashed = pathname.match(/^\/api\/sessions\/([\w-]+)\/(trash|restore)$/);
+    if (trashed && req.method === 'POST') {
+      const r = trashed[2] === 'trash' ? await sessions.trash(trashed[1]) : await sessions.restore(trashed[1]);
+      r ? json(res, 200, r) : json(res, 404, { error: '找不到这个对话' });
+      return true;
+    }
     const s = pathname.match(/^\/api\/sessions\/([\w-]+)$/);
     if (s) {
       if (req.method === 'GET') {
