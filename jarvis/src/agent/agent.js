@@ -275,9 +275,11 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   let closingTurns = 0;
   let retrievalStopped = false;
   emit({ type: 'state', value: 'processing' });
-  const { ctx, record, requirementContext, archive } = await prepareAgentContext({ userText, priorMessages: history, context, sessionId, summary, light: light || Boolean(questionProfile), requirements, depth, requirementText, emit, buildContext, isolated });
+  const { ctx: preparedContext, record, requirementContext, archive } = await prepareAgentContext({ userText, priorMessages: history, context, sessionId, summary, light: light || Boolean(questionProfile), requirements, depth, requirementText, emit, buildContext, isolated });
+  // 动态规则只属于本轮，不能修改调用方复用的上下文，让新闻规则污染后面的写作。
+  const ctx = { ...preparedContext };
   if (complaint) ctx.dynamic = (ctx.dynamic || '') + '\n用户当前是在询问状态或抱怨，不是要求重新搜索。根据已有任务状态简短回答；没有正在执行的任务就不假称还在查。本条仅问状态时不要调用联网工具；之后明确追加新查询则按新要求处理。';
-  else if (!light && !questionProfile) ctx.dynamic = (ctx.dynamic || '') + '\n' + WEB_LOOKUP_NOTE + (todayNewsIntent(requirementText) ? '\n' + NEWS_LOOKUP_NOTE : '');
+  else if (!light && !questionProfile && !codeWork?.enabled && !images.length && (isQuickLookup(requirementText, images) || todayNewsIntent(requirementText) || /深度调研|查资料|联网查询|逐项核验/.test(requirementText))) ctx.dynamic = (ctx.dynamic || '') + '\n' + WEB_LOOKUP_NOTE + (todayNewsIntent(requirementText) ? '\n' + NEWS_LOOKUP_NOTE : '');
   ctx.dynamic = (ctx.dynamic || '') + await workHistoryBlock(requirementText, sessionId, { signal });
   if (codeWork?.enabled) ctx.dynamic = (ctx.dynamic || '') + '\n' + codeWorkBlock(codeWork, await packs.get('code-development'));
   const convo = [...history.map((m) => ({ ...m })), { role: 'user', content: userText, ...(images.length && { images }) }];

@@ -24,7 +24,9 @@ globalThis.fetch = async (address, init) => {
   const today = new Date(Date.now() + 28800000).toISOString().slice(0, 10);
   const yesterday = new Date(Date.now() - 86400000 + 28800000).toISOString().slice(0, 10);
   const html = fs.readFileSync('tests/fixtures/news/' + id + '.html', 'utf8').replaceAll('2026-10-29', yesterday).replaceAll('20261029', yesterday.replaceAll('-', '')).replaceAll('2026-10-30', today).replaceAll('20261030', today.replaceAll('-', '')).replaceAll('2026/10-30', today.replaceAll('-', '/').replace(/\/(\d{2})$/, '-$1')).replaceAll('10-30 ', today.slice(5) + ' ');
-  return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+  // 虚构条目统一当日零点发布，避免清晨/跨天打包时测试数据落到未来；生产日期校验不放宽。
+  const timed = html.replace(/\b(?:09:15:00|08:20|09:30|10:30)\b/g, '00:00');
+  return new Response(timed, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 };
 const runner = createTaskRunner({ getConfig: async () => ({ ...DEFAULT_CONFIG, provider: 'mock' }), makeAdapter: () => ({ model: 'fixture', adapter: { kind: 'fixture', stream: async ({ messages, onText }) => {
   models++; stats();

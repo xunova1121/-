@@ -100,3 +100,5 @@
 - 2026-10-30 Codex按用户本轮UI反馈：已fetch并FF合入Claude最新3030f1e；仅整理项目入口和模型设置重复布局。桌面沿用Claude侧栏代码项目，手机增同名抽屉入口，撤输入框项目按钮；模型底部旧高级表单移到模型中心的“本机连接与选项”弹窗，独有连接测试/离线模型/两个开关保留，模型配置与服务器隔离、既有路由不改。涉及index.html、app/codeProjects/modelWorkspace、新app/modelLocalOptions、ui/modelLibrary/codeProjects与专用样式、原e2e导航适配；不动Claude任务插话/删除确认/评测/文档及架构业务。仅[skip ci]保存，本轮未另行授权自动发布。
 
 - 2026-10-30 Codex（用户已确认开发后发版）：新闻专用工具先行，合并通用联网升级。tools/toolLoader/agent只接工具、预算与阶段模型，taskRunner仅透传公开数据域名和推理线路；toolbox/turn/background接本机同配置，模型中心新增独立公开数据域名折叠设置。不改Claude表达、写作角色、架构、持仓、提醒调度与MORE_TIME_ASK。旧预算数字断言按用户确认的新规则更新且保留保护测试；新增测试接CI，保存提交及合并[skip ci]，全部通过后按本轮授权发布。
+
+- 2026-10-30 Codex发布前原smoke在callout悬停稳定性卡住：calloutLayout随光核每帧改按钮坐标，低帧率下没有连续稳定帧。仅缓存相同容器/按钮高度/水平锚点与取整半径下的按钮布局；show/尺寸/高度变化重排，光核与连线继续浮动，hover/pick及原测试不改。作为本批发布门禁修复，需原smoke完整验证；不改WebGL阈值或舞台渲染。

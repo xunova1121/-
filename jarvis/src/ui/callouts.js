@@ -74,6 +74,7 @@ export function initCallouts({ root, getAnchor, onPick, onHover, reducedMotion =
   let raf = 0;
   let lastOrb = null;
   let lastLayoutKey = '';
+  let boxesKey = '', fixedBoxes = null;
 
   function hover(slot, on) {
     slot.g.classList.toggle('hot', on);
@@ -121,6 +122,7 @@ export function initCallouts({ root, getAnchor, onPick, onHover, reducedMotion =
 
   function show() {
     shown = true;
+    boxesKey = ''; lastLayoutKey = '';
     root.classList.remove('cl-retract');
     // 重新触发“长出来”的动画
     root.classList.remove('cl-in');
@@ -150,7 +152,13 @@ export function initCallouts({ root, getAnchor, onPick, onHover, reducedMotion =
     root.classList.toggle('cl-hidden', tooSmall);
     if (tooSmall) return;
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-    const { mode, boxes } = calloutLayout({ width, height, orb });
+    // 光核和线头继续浮动，按钮保持稳定，避免低帧率下鼠标永远追着移动目标。
+    const nextBoxesKey = JSON.stringify([width, height, Math.round(orb.x), Math.round(orb.r), ...heights]);
+    if (boxesKey !== nextBoxesKey) {
+      boxesKey = nextBoxesKey;
+      fixedBoxes = calloutLayout({ width, height, orb });
+    }
+    const { mode, boxes } = fixedBoxes;
     root.dataset.clMode = mode;
     for (const s of slots) {
       const b = boxes[s.i];

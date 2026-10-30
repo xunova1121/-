@@ -118,3 +118,12 @@ it('抱怨后的明确继续/再查仍继承真正的新闻问题，不把抱怨
   const {lookupRequirement,moreTimeRequest}=await import('../src/agent/lookupDeadline.js');const history=[{role:'user',content:'今日新闻'},{role:'assistant',content:'本轮部分完成'},{role:'user',content:'发个新闻那么慢'},{role:'assistant',content:'没有重新搜索。'}];
   expect(lookupRequirement('继续',history)).toBe('今日新闻');expect(moreTimeRequest('再查',history)).toBe('今日新闻');
 });
+it('纯写作不注入联网收尾规则，避免把文章再次写成核实说明',async()=>{
+  const adapter={stream:async({system})=>{expect(system.join('\n')).not.toContain('查几个方面或几个对象时');return result('这是正文。');}};
+  const answer=await runAgent({adapter,model:'fixture',context,history:[],userText:'写一篇工作心得',quiet:true,emit(){},tools:[]});expect(answer.text).toContain('正文');
+});
+it('检索与状态动态规则只留本轮，不回写调用方共用上下文',async()=>{
+  const shared={dynamic:'调用方背景'};const adapter={stream:async()=>result('简短回答')};
+  for(const userText of ['查询公开服务','你在干嘛','写一篇工作心得'])await runAgent({adapter,model:'fixture',context:shared,history:[],userText,quiet:true,emit(){},tools:[]});
+  expect(shared.dynamic).toBe('调用方背景');
+});
