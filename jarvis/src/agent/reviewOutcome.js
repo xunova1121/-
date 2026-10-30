@@ -43,7 +43,9 @@ export function reviewOutcome(report, { interrupted = false, nativeSearchCalls =
   }
   const failures = report.failures?.filter(tool => tool !== 'code_run' || !explainedRepositoryFailure(report, answer));
   if (failures?.length) warnings.push(`这些操作没成功：${[...new Set(failures)].map((tool) => TOOL_NAMES[tool] || tool).join('、')}，相关结果仍需核对。`);
-  if (requiresSources(report.request) && !report.retrievalReceipts && !nativeSearchCalls) {
+  // 回答是在反问缺的信息（“你想查哪个城市？”）：还没开始查，不算查询失败
+  const askingBack = String(answer || '').trim().length <= 120 && /[？?]\s*$/.test(String(answer || '').trim());
+  if (requiresSources(report.request) && !report.retrievalReceipts && !nativeSearchCalls && !askingBack) {
     warnings.push('尚未取得可核查的联网资料，不能当作查询成功。');
     partial = true;
   }

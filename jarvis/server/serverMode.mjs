@@ -399,7 +399,8 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     }
     if (pathname === '/api/sessions' && req.method === 'GET') {
       const busy = new Map(runner.list().filter((x) => x.status === 'running' || x.status === 'queued').map((x) => [x.sessionId, x.id]));
-      json(res, 200, (await sessions.list()).map(({ messages, requirements, taskCheckpoint, taskReceipts, recoveryCheckpoints, ...s }) => ({ ...s, count: messages.length, taskId: busy.get(s.id) ?? null })));
+      // 评测会话不进对话列表（不然手机会把最近一段评测当成“当前对话”打开）
+      json(res, 200, (await sessions.list()).filter((x) => !x.evaluationId).map(({ messages, requirements, taskCheckpoint, taskReceipts, recoveryCheckpoints, ...s }) => ({ ...s, count: messages.length, taskId: busy.get(s.id) ?? null })));
       return true;
     }
     // 回收站：删到回收站 / 看回收站 / 恢复（7 天后真正删掉，见 sessions.js）

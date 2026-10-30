@@ -250,4 +250,13 @@ describe('服务器模式：对话回收站（删的先留 7 天）', () => {
     expect((await (await api('/api/sessions/ctrash1')).json()).messages).toHaveLength(2);
     expect((await api('/api/sessions/nope/restore', { method: 'POST' })).status).toBe(404);
   });
+  it('评测会话不进对话列表（用户 2026-10-30：手机打开了最近一段评测，未央说不知道他是谁）', async () => {
+    const { id, sessionId } = await (await api('/api/tasks', { method: 'POST', body: JSON.stringify({ text: '评测题', evaluationId: 'run-x' }) })).json();
+    const t0 = Date.now();
+    let state;
+    while (['queued', 'running'].includes((state = await (await api(`/api/tasks/${id}`)).json()).status)) { if (Date.now() - t0 > 10000) throw new Error('超时：' + state.status); await new Promise((r) => setTimeout(r, 50)); }
+    expect((await api(`/api/sessions/${sessionId}`)).status).toBe(200);
+    const list = await (await api('/api/sessions')).json();
+    expect(list.some((x) => x.id === sessionId)).toBe(false);
+  }, 20000);
 });

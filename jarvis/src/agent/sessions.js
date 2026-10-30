@@ -49,7 +49,7 @@ export const listLocal = async () => (await sessions.all()).sort((a, b) => b.upd
 
 export async function list() {
   if (remote) return remote.list();
-  return (await sessions.all()).sort((a, b) => (b.pinned - a.pinned) || (b.updatedAt - a.updatedAt));
+  return (await sessions.all()).filter((s) => !s.evaluationId).sort((a, b) => (b.pinned - a.pinned) || (b.updatedAt - a.updatedAt));
 }
 
 export async function rename(id, title) {

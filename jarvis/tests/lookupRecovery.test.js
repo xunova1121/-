@@ -179,6 +179,11 @@ describe('交付状态不冒充语义通过', () => {
     expect(outcome.notice).toContain('不能当作查询成功');
     expect(outcome.notice).not.toMatch(/review_task|交付回执核对|不要重复操作/);
   });
+  it('回答只是反问缺的信息（哪个城市）时不挂“部分完成”', () => {
+    const report = createExecutionReview('今天天气').report();
+    expect(reviewOutcome(report, { answer: '你想查哪个城市的天气？' }).notice || '').not.toContain('不能当作查询成功');
+    expect(reviewOutcome(report, { answer: '今天晴，最高 20 度。' }).notice).toContain('不能当作查询成功');
+  });
   it('记录过搜索线索不代表答案正确，只标待复核', () => {
     const review = createExecutionReview('今天国内新闻');
     review.record({ name: 'web_search', ok: true });

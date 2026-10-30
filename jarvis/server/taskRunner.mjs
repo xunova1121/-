@@ -472,7 +472,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
           session.recoveryCheckpoints=[...archive.filter(x=>x.key!==key).map(({evidence,...record})=>record),{key,...kept}].slice(-5);
         }
         session.messages.push({role:'user',content:text,ts:now()});session.updatedAt=now();
-        const task=busy||{id:uid('t'),sessionId:id,evaluationId:evaluationScope,text,status:'queued',seq:0,events:[],listeners:new Set(),files:new Set(),inbox:[],notes:[],images,voice:Boolean(voice),ctrl:new AbortController(),createdAt:now(),checkpoint:{text,notes:[],steps:[],inFlight:[],files:[],status:'queued',createdAt:now()}};
+        // 只有评测程序明确带了 evaluationId 的才按评测隔离；用户本人在评测会话里发的话照常读记忆（用户 2026-10-30：误进评测会话后“不知道我是谁”）
+        const task=busy||{id:uid('t'),sessionId:id,evaluationId:evaluationId?evaluationScope:null,text,status:'queued',seq:0,events:[],listeners:new Set(),files:new Set(),inbox:[],notes:[],images,voice:Boolean(voice),ctrl:new AbortController(),createdAt:now(),checkpoint:{text,notes:[],steps:[],inFlight:[],files:[],status:'queued',createdAt:now()}};
         if (!busy && codeFollowup(text) && (previous?.codeTaskId || codeTaskPolicy({ text: previous?.text || '', hasRepos: Boolean(codeRepos && !evaluationScope) }).enabled)) {
           task.checkpoint.codeTaskId = previous.codeTaskId || previous.taskId;
         }

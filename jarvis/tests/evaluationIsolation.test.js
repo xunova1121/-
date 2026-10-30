@@ -63,3 +63,31 @@ it('评测真实任务不写正式记忆/任务日志，也不进入其他对话
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+it('用户本人在评测会话里发的话不按评测隔离（用户 2026-10-30：误进评测会话后“不知道我是谁”）', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-eval-user-'));
+  useBackend(createFileStore(directory));
+  const adapter = { kind: 'mock', async stream({ onText }) { onText?.('好的。'); return { text: '好的。', toolCalls: [], stop: 'end_turn' }; } };
+  const runner = createTaskRunner({ getConfig: async () => ({ ...DEFAULT_CONFIG, provider: 'mock', autoMemory: false }), makeAdapter: () => ({ adapter, model: 'test' }), makeTools: () => [] });
+  const finish = async (id) => {
+    const deadline = Date.now() + 5000;
+    while (['queued', 'running'].includes(runner.get(id).status)) {
+      if (Date.now() > deadline) throw new Error('测试任务未收尾');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  };
+  try {
+    const evalTask = await runner.start({ text: '评测题', evaluationId: 'run-y' });
+    await finish(evalTask.id);
+    expect(runner.get(evalTask.id).evaluationId).toBe('run-y');
+    const mine = await runner.start({ sessionId: evalTask.sessionId, text: '我是谁' });
+    await finish(mine.id);
+    expect(runner.get(mine.id).evaluationId).toBeNull();
+    expect(await sessions.list()).toEqual([]); // 评测会话本身仍不进本机列表
+  } finally {
+    for (const task of runner.list()) runner.stop(task.id);
+    await runner.settled();
+    useBackend(null);
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
