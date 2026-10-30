@@ -1,5 +1,5 @@
 import { answerConstraintIssues as lookupAnswerIssues } from './answerRequirements.js';
-import { lookupComplaint, todayNewsIntent, NEWS_LOOKUP_NOTE, WEB_LOOKUP_NOTE } from './newsIntent.js';
+import { lookupComplaint, todayNewsIntent, sportsNewsIntent, SPORTS_NEWS_NOTE, NEWS_LOOKUP_NOTE, WEB_LOOKUP_NOTE } from './newsIntent.js';
 import { createLookupDelivery } from './lookupDelivery.js';
 import { lookupPhase } from './lookupModels.js';
 import { codeWorkBlock, CODE_TASK_CORE } from './codeDevelopment.js';
@@ -253,6 +253,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     return { text: workAnswer.text, toolCalls: 1 };
   }
   let complaint = !images.length && lookupComplaint(userText);
+  let sportsNewsOnly = !images.length && !codeWork?.enabled && sportsNewsIntent(requirementText);
+  if (sportsNewsOnly) light = false;
   if (complaint) light = true;
   if (!complaint && light && needsActionTools(userText, history)) light = false;
   // 普通请求不给严格架构流水线的工具：用户 2026-10-29 实测画普通架构图时模型调了 5 次 prepare_architecture_evidence，
@@ -262,6 +264,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   const availableTools = tools;
   let questionProfile = light ? null : questionToolProfile(requirementText, { images, history });
   tools = toolsForQuestion(tools, questionProfile);
+  if (sportsNewsOnly) tools = tools.filter(tool => !['get_sports_scores', 'get_today_news'].includes(tool.name));
   const capabilities = capabilityBlock(availableTools);
   // 环境完全没有产物/计算核验能力时，直接说明未验收，不空转两轮模型。
   const canReview = availableTools.some(tool => /^(?:create_document|write_long_document|edit_office_document|read_file|write_file|run_javascript|run_python|computer_run|computer_read_file|verify_numbers|create_diagram|export_diagram|generate_image|sing_song|generate_video|code_read|code_edit|code_write|code_run)$/.test(tool.name));
@@ -269,7 +272,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   const retrieval = createRetrievalBudget(codeWork?.enabled ? '代码开发' : images.length ? `逐项核验 ${requirementText}` : retrievalText ?? requirementText, { now, timeBudgetMs });
   let lookupDelivery = createLookupDelivery(requirementText, now);
   const recordReceipt = review.record;
-  review.record = receipt => { if (!codeWork?.enabled && !images.length && !complaint && (isQuickLookup(requirementText, images) || todayNewsIntent(requirementText))) lookupDelivery.record(receipt); return recordReceipt(receipt); };
+  review.record = receipt => { if (!codeWork?.enabled && !images.length && !complaint && (isQuickLookup(requirementText, images) || todayNewsIntent(requirementText) || sportsNewsOnly)) lookupDelivery.record(receipt); return recordReceipt(receipt); };
   let modelAttempts = 0;
   let nativeSearchCalls = 0;
   let closingTurns = 0;
@@ -317,7 +320,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   // 画一张图也算单件交付：不给外层任务清单（实测一张架构图列清单、改清单用了 5 轮模型）
   const oneFile = (singleDocumentTask(requirementText) && String(requirementText).length <= 150 && !/方案|调研|研究|论文/.test(requirementText)) || (!pipelineContext && /架构图|流程图|示意图|拓扑图|关系图/.test(requirementText) && String(requirementText).length <= 300);
   const executionScope = {};
-  const own = [...(oneFile ? [] : [plan.tool]), review.tool, executionTool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: availableTools })] : []), ...(lookupDeadline && lookupControl?.release ? [moreTimeTool] : [])].filter((t) => !tools.some((x) => x.name === t.name));
+  const own = [...(oneFile ? [] : [plan.tool]), review.tool, executionTool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: sportsNewsOnly ? tools : availableTools })] : []), ...(lookupDeadline && lookupControl?.release ? [moreTimeTool] : [])].filter((t) => !tools.some((x) => x.name === t.name));
   // 工具按需加载：工具多时只带常用的完整说明，其余列名字、用 tool_search 加载（见 toolLoader.js）
   // 普通问答、查资料：做文档的工具先只列名字（用到时按名字调用或 tool_search 加载）
   // “字大点 / 不要横线”这类短句是在改刚做的文件：做文档的工具要常驻（第一轮 30 题实测：被当成普通问答，先搜工具、再找文件、先试改文字失败，一道题 15 次调用）
@@ -375,6 +378,12 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     onTaskUpdate?.(said.join("\n"));
     if (COMPLEX.test(said.join("\n")) || creativeWithoutLookup(currentRequest) || computerNote) { infoPrompt = false; lookupDeadline = false; }
     if (light) { light=false; tools=availableTools; loader=createToolLoader([...tools,...own]); toolHint=loader.hint(); }
+    const nextSportsNews = !images.length && !codeWork?.enabled && sportsNewsIntent(currentRequest);
+    if (sportsNewsOnly || nextSportsNews) {
+      sportsNewsOnly = nextSportsNews;
+      tools = availableTools.filter(tool => !sportsNewsOnly || !['get_sports_scores', 'get_today_news'].includes(tool.name));
+      loader = createToolLoader([...tools, ...own]); toolHint = loader.hint();
+    }
     if(said.some(s=>computerTaskKind(s)==='gui')){loadGUI();toolHint=loader.hint();}
     retrieval.upgrade(said.join("\n"));
     const note = interjection(said);
@@ -485,7 +494,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     const request = makeRequest(requestCurrent, acceptVisible, () => primaryActivity?.());
     // 测量实际发送的提示与工具说明，动态规则和短说明均计入字符数。
     // 用的哪个模型：中途换了备用的，也照实写
-    const responseNote = responseGuidance(currentRequest, history, { light, model: requestCurrent?.model || model, hasImages: images.length > 0, visibleText: String(convo.filter(m => m.role === 'user').at(-1)?.content || '').slice(0, 1800) });
+    const responseNote = [sportsNewsOnly && SPORTS_NEWS_NOTE, responseGuidance(currentRequest, history, { light, model: requestCurrent?.model || model, hasImages: images.length > 0, visibleText: String(convo.filter(m => m.role === 'user').at(-1)?.content || '').slice(0, 1800) })].filter(Boolean).join('\n');
     const usingNote = phase ? `本次${phase === 'lookup_plan' ? '检索规划' : '资料取舍与回答'}使用已配置推理模型 ${requestCurrent.model}。` : modelNote && (cur.model !== model ? `${modelNote}\n（原定的 ${model} 出错了，这一轮实际换成了 ${cur.model}。）` : modelNote);
     const measuredSystem = questionProfile ? [BASIC_ANSWER_PROMPT, [ctx.dynamic, usingNote, responseNote, imagePreferenceNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : light ? [LIGHT_PROMPT, [ctx.dynamic, usingNote, responseNote, imagePreferenceNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, usingNote, dialoguePolicy(review.report().request), responseNote, imagePreferenceNote, capabilities, computerNote, requirementContext, toolHint, singleDocumentTask(review.report().request) && '单份文档由文档引擎内部规划和检查；如需外层计划只列一次，不用update_plan逐节重复同步。有效产物回执可直接交付，不重复查找、读回或重做。', review.contractNote(), creativeWithoutLookup(currentRequest) && CREATIVE_NOTE, voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
     const measuredTools = lookupFinal ? [] : closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list();

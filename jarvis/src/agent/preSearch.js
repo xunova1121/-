@@ -3,6 +3,7 @@
  * 就按原话搜一次，结果和问题一起交给模型。模型通常一轮就能答完，省掉“先决定去搜 → 等搜索 → 再答”的一整轮。
  * 搜得慢（超过 PRE_SEARCH_MS）或没搜到就算了，照旧让模型自己搜。天气走 get_weather，不在这里搜。
  */
+import { sportsNewsIntent, lookupComplaint } from './newsIntent.js';
 // 要有具体的实时话题（光有“最近”“今天”不算：“我最近好累”不用搜），并且是在问或要查
 const TOPIC = /比分|赛程|赛果|战报|对阵|开球|比赛|直播|新闻|热搜|头条|股价|收盘|开盘|涨跌|行情|大盘|汇率|油价|金价|币价|价格|多少钱|上映|票房|开奖|航班|列车|车次|限行|放假|调休|发布会/;
 const ASKING = /[？?]|什么|哪|几|多少|吗|呢|怎么样|如何|查|搜|有没有|是否/;
@@ -16,7 +17,7 @@ export const PRE_SPORTS_MS = 15000;
 /** 这个问题值不值得先搜一次 */
 export function wantsPreSearch(text) {
   const t = String(text ?? '').trim();
-  return t.length >= 4 && t.length <= 120 && TOPIC.test(t) && ASKING.test(t) && !WEATHER.test(t) && !MAKING.test(t) && !/https?:\/\//.test(t);
+  return t.length >= 4 && t.length <= 120 && !lookupComplaint(t) && (sportsNewsIntent(t) || TOPIC.test(t) && ASKING.test(t)) && !WEATHER.test(t) && !MAKING.test(t) && !/https?:\/\//.test(t);
 }
 
 /** 原话 → 搜索词：去掉“帮我查一下”“告诉我”这类客气话和结尾的问号 */

@@ -4,6 +4,7 @@ import { withWebDeadline } from './retrievalBudget.js';
 import { errorKind } from '../core/suggest.js';
 import { fetchZhibo8, zhibo8Result } from './sportsZhibo8.js';
 import { sportsSnapshot } from './sportsSnapshot.js';
+import { sportsNewsIntent } from './newsIntent.js';
 /**
  * 赛程和赛果：按北京时间的某一天，把各联赛的比赛（没开打的给开球时间，打完的给比分）一次查齐。
  * 不走搜索引擎（搜索摘要零散、经常漏场次），直接读比分接口（不用密钥），手机、电脑、服务器都能用：
@@ -367,7 +368,10 @@ export function createSportsScoresTool(ctx = {}) {
       },
       additionalProperties: false
     },
-    run: (args, { signal, retrieval, progress, requestText = '', rawRequestText = '' } = {}) => getSportsScores({ ...args, ...inferSportsWindow(requestText || rawRequestText) }, { get, signal, retrieval, progress, onScores: ctx.onSportsScores })
+    run: async (args, { signal, retrieval, progress, requestText = '', rawRequestText = '' } = {}) => {
+      if (sportsNewsIntent(requestText || rawRequestText)) throw Object.assign(new Error('用户要体育新闻资讯，不是比分赛程；请用web_search查报道，不能用比分替代。'), { code: 'SPORTS_NEWS_NOT_SCORES' });
+      return getSportsScores({ ...args, ...inferSportsWindow(requestText || rawRequestText) }, { get, signal, retrieval, progress, onScores: ctx.onSportsScores });
+    }
   };
 }
 
@@ -378,6 +382,7 @@ export function createSportsScoresTool(ctx = {}) {
  */
 export function sportsPreCall(text, now = Date.now()) {
   const t = String(text ?? '').trim();
+  if (sportsNewsIntent(t)) return null;
   if (t.length < 4 || t.length > 120) return null;
   if (!/赛程|赛果|比分|对阵|战报|开球|比赛|赛事|球赛|踢球|输赢|谁赢|现在有什么球/.test(t)) return null;
   if (!/[？?]|什么|哪|几|吗|呢|查|有没有|怎么样|多少|安排|列|看|足彩赛程|竞彩足球赛程|前后/.test(t)) return null;
