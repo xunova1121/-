@@ -20,10 +20,16 @@ export function parseBeijing(text, { end = false } = {}) {
 }
 const when = (t) => new Date(t).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 /** 用户这句话是不是在确认删除（只认明确的说法，“嗯”“好”不算） */
-export const CONFIRM_DELETE = /确认删除|确定删除|确认删|确定删|删吧|删掉吧|全删了|可以删(?:了|除)?|就删这些/;
+// 刚问完“确认删除这 N 段吗？”，只回一个“确认 / 确定 / 删 / 是的”也算（用户 2026-10-30 实测：回“确认”被拒）
+export const CONFIRM_DELETE = /确认删除|确定删除|确认删|确定删|删吧|删掉吧|全删了|可以删(?:了|除)?|就删这些|直接删|^\s*(?:确认|确定|删|删除|删了|删掉|是的?|对)[。.!！吧啊]*\s*$/;
+
+/**
+ * 对话 → { key, ids, at }：上一次列给用户看的清单。
+ * 放在模块里而不是每套工具里：服务器每条消息都新建一套工具，放在里面下一句“确认”就找不到清单了（用户 2026-10-30 实测：确认三次都被拒）
+ */
+const listed = new Map();
 
 export function createConversationTrashTools() {
-  const listed = new Map(); // 对话 → { key, ids, at }：上一次列给用户看的清单
   const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
   const range = (from, to) => {
     const a = parseBeijing(from), b = parseBeijing(to || from, { end: true });

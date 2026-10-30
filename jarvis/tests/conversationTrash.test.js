@@ -24,6 +24,8 @@ describe('时间按北京时间', () => {
   it('只认明确的确认说法', () => {
     for (const t of ['确认删除', '确定删吧', '可以删了']) expect(CONFIRM_DELETE.test(t)).toBe(true);
     for (const t of ['嗯', '好', '先别删']) expect(CONFIRM_DELETE.test(t)).toBe(false);
+    for (const t of ['确认', '确定。', '直接删除就行', '是的', '删']) expect(CONFIRM_DELETE.test(t)).toBe(true);
+    for (const t of ['确认一下时间', '先确认清单', '删之前问我']) expect(CONFIRM_DELETE.test(t)).toBe(false);
   });
 });
 
@@ -59,6 +61,16 @@ describe('删对话：两步确认、进回收站、能恢复', () => {
     expect(await tool(tools, 'restore_conversations').run({ ids: [a.id] })).toMatch(/已恢复 1 段/);
     expect((await sessions.get(a.id)).messages.length).toBe(2);
     expect((await sessions.listTrash()).map((x) => x.id)).toEqual([b.id]);
+  });
+  it('服务器每条消息新建一套工具：上一句列的清单，下一句回“确认”照样能删（用户 2026-10-30 实测确认三次都被拒）', async () => {
+    const s1 = await make('今天一', '2026-10-27 09:00');
+    const s2 = await make('今天二', '2026-10-27 10:00');
+    const first = tool(createConversationTrashTools(), 'delete_conversations');
+    expect(await first.run({ from: '2026-10-27', to: '2026-10-27' }, { sessionId: 'phone', rawRequestText: '删除今天的所有对话' })).toMatch(/找到 2 段/);
+    const next = tool(createConversationTrashTools(), 'delete_conversations');
+    expect(await next.run({ from: '2026-10-27', to: '2026-10-27', confirm: true }, { sessionId: 'phone', rawRequestText: '确认' })).toMatch(/已删除 2 段对话/);
+    expect(await sessions.get(s1.id)).toBeFalsy();
+    expect(await sessions.get(s2.id)).toBeFalsy();
   });
   it('没先列清单就带 confirm：不删', async () => {
     const s = await make('孤立', '2026-10-20 09:00');
