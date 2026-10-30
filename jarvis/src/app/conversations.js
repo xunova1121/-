@@ -22,7 +22,8 @@ export function createConversations(app) {
   function rememberTurn(role, content, extra = {}, target = app.session) {
     // 回的是主动问候里“要接着做吗”，而且说了不用：把那件事划掉
     const asked = target.messages.at(-1);
-    if (role === 'user' && asked?.proactive && asked.openItem && agentMemory.DECLINE_OPEN.test(String(content).trim())) agentMemory.resolveOpen([asked.openItem]).catch(() => {});
+    if (role === 'user' && asked?.proactive && asked.openItem && agentMemory.DECLINE_OPEN.test(String(content).trim()))
+      agentMemory.resolveOpen([asked.openItem]).catch(() => {});
     target.messages.push({ role, content, ts: Date.now(), ...extra });
     target.updatedAt = Date.now();
     persistSession(target);
