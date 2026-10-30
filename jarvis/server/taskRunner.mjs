@@ -276,6 +276,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       // 评测不读用户保存的文档偏好（字号、风格），结果才能复现
       ...(task.evaluationId && { documentStylePreferences: async () => '' }),
       publicDataHosts: cfg.publicDataHosts, tavilyKey: cfg.tavilyKey, qweather: qweatherConfig(cfg), bochaKey: cfg.bochaKey, falKey: cfg.falKey, searchRegion: cfg.searchRegion || 'auto',
+      fetchPublicJson: (url, init) => publicFetch(url, init),
       fetchViaGateway: (url, init) => publicFetch(url, init), // 不填搜索密钥也能联网搜索、读网页
       llm: helper(cfg, 'write', task), reasonLlm: helper(cfg, 'reason', task),
       documentReviewer: createDocumentReviewer(cfg, (selected) => helper({ ...selected, routing: { enabled: false } }, 'write', task, 'document_review')),

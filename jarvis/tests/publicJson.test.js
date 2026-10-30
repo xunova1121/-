@@ -35,3 +35,18 @@ it('8秒含正文读取，停止取消流；未发请求前预算失败即停止
 it('缺少可做DNS校验的本机网关时不借原生网络绕过公网检查',async()=>{
   const get=vi.fn();await expect(createPublicJsonTool({publicJsonAvailable:false,fetchImpl:get}).run({url:'https://api.github.com/repos/example/demo'})).rejects.toMatchObject({code:'PUBLIC_JSON_GATEWAY_REQUIRED'});expect(get).not.toHaveBeenCalled();
 });
+it('普通key及常见鉴权查询参数也不能夹带；匿名JSON网关不复用任何带Key的服务商代理',async()=>{
+  const {publicJsonGatewayFetch}=await import('../src/core/publicJsonGateway.js');
+  const get=vi.fn();for(const key of ['key','api_key','x-api-key','client_secret','app_secret','auth','jwt','signature'])await expect(readPublicJson('https://data.example.com/a?'+key+'=dummy',{domains,get})).rejects.toMatchObject({code:'PUBLIC_JSON_CREDENTIALS'});expect(get).not.toHaveBeenCalled();
+  const requests=[];const send=async(...args)=>{requests.push(args);return new Response('{}');};const signal=new AbortController().signal;
+  for(const host of ['api.deepseek.com/v1/tools/fetch','api.tavily.com/extract','api.bochaai.com/api','queue.fal.run/test'])await publicJsonGatewayFetch('https://'+host,{signal,headers:{Authorization:'must-not-forward',Cookie:'must-not-forward'}},send);
+  expect(requests).toHaveLength(4);for(const [url,init]of requests){expect(url.startsWith('/api/fetch?')).toBe(true);expect(url).toContain('publicJson=1');expect(init).toEqual({method:'GET',credentials:'omit',signal});expect(url).not.toContain('/api/llm/');}
+});
+it('实际工具优先独立匿名通道，原DeepSeek/图片/音色代理不参与JSON读取',async()=>{
+  const {publicJsonGatewayFetch}=await import('../src/core/publicJsonGateway.js');const legacy=vi.fn(()=>{throw Error('不得走鉴权代理');});const calls=[];
+  const tool=createPublicJsonTool({publicDataHosts:['api.deepseek.com'],fetchViaGateway:legacy,fetchPublicJson:(url,init)=>publicJsonGatewayFetch(url,init,async(...args)=>{calls.push(args);return new Response('{"count":18}');})});
+  const result=JSON.parse(await tool.run({url:'https://api.deepseek.com/v1/tools/public'}));expect(result.data.count).toBe(18);expect(legacy).not.toHaveBeenCalled();expect(calls[0][0]).toContain('/api/fetch?');expect(calls[0][1].headers).toBeUndefined();
+});
+it('只有旧通用代理时失败关闭，不借可能带Key的通道代读',async()=>{
+  const legacy=vi.fn();await expect(createPublicJsonTool({fetchViaGateway:legacy}).run({url:'https://api.github.com/repos/example/demo'})).rejects.toMatchObject({code:'PUBLIC_JSON_GATEWAY_REQUIRED'});expect(legacy).not.toHaveBeenCalled();
+});

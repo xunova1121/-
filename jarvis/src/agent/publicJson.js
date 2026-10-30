@@ -16,7 +16,7 @@ export function publicJsonUrl(value, domains) {
   let url;
   try { url = new URL(value); } catch { throw Object.assign(new Error('公开数据接口地址无效'), { code: 'PUBLIC_JSON_URL', kind: 'input' }); }
   if (url.protocol !== 'https:' || url.username || url.password || url.port && url.port !== '443' || isPrivateHost(url.hostname) || url.href.length > 2000 || !publicDataHosts(domains).includes(url.hostname)) throw Object.assign(new Error('仅允许可信域名清单内的公网HTTPS接口；不允许凭据、非标准端口或内网地址'), { code: 'PUBLIC_JSON_BLOCKED', kind: 'input' });
-  if ([...url.searchParams.keys()].some(key => /^(?:api[-_]?key|access[-_]?token|token|password|passwd|secret|authorization|cookie|signature)$/i.test(key))) throw Object.assign(new Error('公开数据接口不能携带密钥或登录凭据'), { code: 'PUBLIC_JSON_CREDENTIALS', kind: 'input' });
+  if ([...url.searchParams.keys()].some(key => /^(?:(?:x[-_]?)?api[-_]?key|key|access[-_]?token|token|password|passwd|(?:app[-_]?|client[-_]?)?secret|authorization|auth|cookie|signature|sig|jwt|bearer)$/i.test(key))) throw Object.assign(new Error('公开数据接口不能携带密钥或登录凭据'), { code: 'PUBLIC_JSON_CREDENTIALS', kind: 'input' });
   url.hash = '';
   return url.href;
 }
@@ -38,8 +38,8 @@ export function createPublicJsonTool(ctx = {}) {
     description: '只读可信域名内的免费公开JSON数据接口。只允许HTTPS GET，不带登录、Cookie、密钥或自定义鉴权，禁止内网与重定向。8秒/200KB上限，返回过长会明确截断；必须按接口实际日期和单位解释，不凭字段名猜口径。可信域名须由用户在模型中心设置，不能由工具更改。',
     input_schema: { type: 'object', properties: { url: { type: 'string', maxLength: 2000 } }, required: ['url'], additionalProperties: false },
     run: async ({ url }, { signal, retrieval } = {}) => {
-      if (ctx.publicJsonAvailable === false) throw Object.assign(new Error('公开数据工具需要本机网关或服务器模式进行公网地址校验，请切换服务器模式'), { code: 'PUBLIC_JSON_GATEWAY_REQUIRED', kind: 'api' });
-      const result = await readPublicJson(url, { domains: ctx.publicDataHosts, get: ctx.fetchViaGateway || ctx.fetchImpl, signal, consume: kind => retrieval?.consume(kind) });
+      if (ctx.publicJsonAvailable === false || !ctx.fetchPublicJson && !ctx.fetchImpl) throw Object.assign(new Error('公开数据工具需要本机网关或服务器模式进行公网地址校验，请切换服务器模式'), { code: 'PUBLIC_JSON_GATEWAY_REQUIRED', kind: 'api' });
+      const result = await readPublicJson(url, { domains: ctx.publicDataHosts, get: ctx.fetchPublicJson || ctx.fetchImpl, signal, consume: kind => retrieval?.consume(kind) });
       const text = JSON.stringify(result.data);
       return JSON.stringify({ kind: 'public_json', url: result.url, fetchedAt: new Date(ctx.now?.() ?? Date.now()).toISOString(), truncated: text.length > 16000, ...(text.length > 16000 ? { preview: text.slice(0, 16000), note: 'JSON预览已截断，不是完整结构；请用接口分页或字段过滤，不补猜后半段' } : { data: result.data }) });
     }

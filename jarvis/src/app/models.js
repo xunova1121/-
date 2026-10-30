@@ -1,3 +1,4 @@
+import { publicJsonGatewayFetch } from '../core/publicJsonGateway.js';
 import { createHelperLlm } from '../llm/helper.js';
 /**
  * 模型与网关：连本机网关、模型名显示、服务器模式的连接和模型同步、给内部环节用的辅助模型、记忆引擎配置。
@@ -120,13 +121,16 @@ export function createModels(app) {
                 ? fetch(`/api/llm/tavily/${url.slice('https://api.tavily.com/'.length)}`, init)
                 : url.startsWith('https://api.bochaai.com/')
                   ? fetch(`/api/llm/bocha/${url.slice('https://api.bochaai.com/'.length)}`, init)
-                  : fetch(`/api/fetch?url=${encodeURIComponent(url)}${init?.redirect === 'error' ? '&publicJson=1' : ''}`, {
+                  : fetch(`/api/fetch?url=${encodeURIComponent(url)}`, {
                       signal: init?.signal,
                       credentials: 'omit'
                     })
       : globalThis.__jarvisNativeFetch
         ? nativeWebFetch(globalThis.__jarvisNativeFetch)
         : null;
+
+  // 公开JSON独立入口，不能复用会注入模型/搜索Key的旧代理。
+  const fetchPublicJson = () => (app.gateway && !app.gateway.cors ? publicJsonGatewayFetch : null);
 
   // 服务器模式（设置 → 服务器模式）：任务交给自己的云服务器做，对话也存在服务器上
   const SERVER_LABEL_KEY = 'jarvis.serverModelLabel';
@@ -245,6 +249,7 @@ export function createModels(app) {
     updateModelLabels,
     metrics,
     fetchViaGateway,
+    fetchPublicJson,
     pushConfigToServer,
     refreshServerModel,
     helperLlm,
