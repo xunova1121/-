@@ -20,7 +20,25 @@ export async function prepareCodeWork({ text, images, sessionId, taskId, checkpo
       indexError = /^[A-Z_]{1,60}$/.test(error.code || '') ? error.code : 'CODE_INDEX_UNAVAILABLE';
     }
   }
-  const policy = codeTaskPolicy({ ...options, hasRepos: connected, hasWorkspaces: following && found.items.length > 0 });
+  // 本对话没有副本：看看别的对话里有没有（用户 2026-10-30：换了对话就找不到原来的副本，还要用户报编号）。
+  // 说“继续/接着改”且别处只有一份时直接接过来；多份就列给模型，让用户按时间和改动挑
+  let elsewhere = [];
+  let adopted = '';
+  if (connected && !indexError && !found.items.length && repos.elsewhere) {
+    elsewhere = (await repos.elsewhere(sessionId, { signal }).catch((error) => {
+      if (signal?.aborted || error.name === 'AbortError') throw error;
+      return { items: [] };
+    })).items;
+    if (following && elsewhere.length === 1 && repos.adopt) {
+      const taken = await repos.adopt(elsewhere[0].workspace_id, sessionId, { signal }).catch(() => null);
+      if (taken) {
+        adopted = taken.workspace_id;
+        Object.assign(found, await repos.workspaces(sessionId, { signal }));
+        elsewhere = [];
+      }
+    }
+  }
+  const policy = codeTaskPolicy({ ...options, hasRepos: connected, hasWorkspaces: following && (found.items.length > 0 || elsewhere.length > 0) });
   const originalTask = previous?.codeTaskId || previous?.taskId;
   const only = !found.truncated && found.items.length === 1 ? found.items[0] : null;
   const selected = found.items.find((item) => item.task_id === originalTask) || (!originalTask || !only?.task_id ? only : null);
@@ -41,6 +59,6 @@ export async function prepareCodeWork({ text, images, sessionId, taskId, checkpo
     policy,
     codeTaskId,
     scopedRepos,
-    codeWork: { enabled: policy.enabled, workspaces: found.items, truncated: found.truncated, ...(indexError && { indexError }), continuing: following }
+    codeWork: { enabled: policy.enabled, workspaces: found.items, truncated: found.truncated, ...(indexError && { indexError }), ...(elsewhere.length && { elsewhere }), ...(adopted && { adopted }), continuing: following }
   };
 }

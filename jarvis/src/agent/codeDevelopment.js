@@ -1,5 +1,6 @@
 export const CODE_TASK_CORE = new Set([
   'repo_clone',
+  'repo_adopt',
   'repo_status',
   'repo_diff',
   'code_search',
@@ -49,6 +50,14 @@ export function codeWorkBlock(mode, skill) {
         records.map((item) => `${item.workspace_id}（${item.repository}，${item.branch}）`).join('；') +
         '。先status/diff检查实际状态，不从旧摘要猜内容。'
       : mode.continuing ? '本轮续做尚未核到原工作副本；不能新建/克隆副本替代，不搜索电脑目录。应明确报告服务器会话索引的缺口，保留原文件。' : '本轮没有可恢复的工作副本编号，先repo_clone。',
+    mode.adopted ? '本对话原来没有副本，已自动把其他对话里唯一的这份接过来（' + mode.adopted + '），直接接着用。' : '',
+    !records.length && (mode.elsewhere || []).length
+      ? '其他对话里有这些工作副本（用户要接着改之前的仓库时用repo_adopt接过来再status/diff；多份时把对话时间、分支、改过的文件列给用户选，不要求用户报编号；用户给了编号就直接repo_adopt）：' +
+        mode.elsewhere
+          .filter((item) => /^[a-f0-9]{24}$/.test(item.workspace_id))
+          .map((item) => `${item.workspace_id}（${item.repository}，${item.branch}${item.createdAt ? '，' + new Date(item.createdAt + 8 * 3600000).toISOString().slice(0, 16).replace('T', ' ') + ' 北京时间建' : ''}，${item.changedCount ? `未提交改动${item.changedCount}个文件：${item.changedFiles.join('、')}` : '没有未提交改动'}）`)
+          .join('；')
+      : '',
     mode.truncated ? '仅展示最近8个副本；未列出的旧副本仍保留，不代表被删除。' : '',
     mode.indexError ? '工作副本索引暂不可用（' + mode.indexError + '），不得把它说成没有旧修改。' : '',
     skill?.enabled ? '## 已启用的代码开发技能（code-development）\n' + String(skill.body || '').slice(0, 6000) : ''

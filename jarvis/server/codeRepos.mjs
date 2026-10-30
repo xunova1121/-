@@ -75,7 +75,10 @@ export function createCodeRepos({ baseDir, getConfig, git = createGitRunner(), h
   const run = (args, cwd, execution, connection) => git(args, { cwd, signal: execution.signal, token: connection.token || '' });
   const resolve = async (id, sessionId) => {
     if (!/^[a-f0-9]{24}$/.test(id || '')) throw codeError('CODE_WORKTREE', '需要repo_clone返回的工作副本编号');
-    const row = (await load()).find((item) => item.id === id && item.sessionId === sessionId);
+    const rows = await load();
+    const row = rows.find((item) => item.id === id && item.sessionId === sessionId);
+    // 在别的对话里：说清楚可以接过来，不让模型以为编号错了（用户 2026-10-30：新对话里报“当前对话没有这个工作副本”）
+    if (!row && rows.some((item) => item.id === id)) throw codeError('CODE_WORKTREE', '这个工作副本在另一段对话里；用户要接着用时先repo_adopt接到本对话，不新建副本');
     if (!row) throw codeError('CODE_WORKTREE', '当前对话没有这个工作副本');
     const connection = await config(row.repository);
     const cwd = location(row);
@@ -113,9 +116,10 @@ export function createCodeRepos({ baseDir, getConfig, git = createGitRunner(), h
         .update(JSON.stringify([connection.repository, scope.sessionId, scope.taskId]))
         .digest('hex')
         .slice(0, 24);
-      const old = rows.find((item) => item.id === id);
+      // 接过来的副本编号是在原对话里算的：同一对话同一任务也认作原副本，不另开一份
+      const old = rows.find((item) => item.id === id) || rows.find((item) => item.sessionId === scope.sessionId && item.taskId === scope.taskId && item.repository === connection.repository);
       if (old) {
-        const current = await resolve(id, scope.sessionId);
+        const current = await resolve(old.id, scope.sessionId);
         return snapshot(old, current.cwd, context, connection);
       }
       if (rows.length >= 32) throw codeError('CODE_REPO_CAPACITY', '工作副本已达32个，未自动删除或覆盖原工作');
@@ -243,6 +247,45 @@ export function createCodeRepos({ baseDir, getConfig, git = createGitRunner(), h
         items.push({ ...await snapshot(row, current.cwd, execution, connection), task_id: row.taskId });
       }
       return { items, truncated: rows.length > 8 };
+    },
+    /**
+     * 其他对话里的副本（同一已连接仓库，最近8个）：新对话里说“接着改那个仓库”时用。
+     * 服务器只有用户本人用，按对话分开只是怕两段对话同时改同一份；接过来（adopt）后仍只归一段对话。
+     */
+    async elsewhere(sessionId, execution = {}) {
+      execution.signal?.throwIfAborted();
+      const connection = await config();
+      const rows = (await load()).filter((row) => row.sessionId !== sessionId && row.repository === connection.repository);
+      const items = [];
+      for (const row of rows.slice(-8)) {
+        execution.signal?.throwIfAborted();
+        const cwd = location(row);
+        if ((await fs.realpath(cwd).catch(() => '')) !== cwd) continue; // 目录没了的不列
+        const view = await snapshot(row, cwd, execution, connection).catch(() => null);
+        if (!view) continue;
+        const changed = (await run(['status', '--porcelain=v1', '-z', '--untracked-files=all'], cwd, execution, connection)).stdout
+          .split('\0')
+          .filter((line) => line.length > 3 && !/^R|^C/.test(line))
+          .map((line) => line.slice(3))
+          .filter(allowedCodePath);
+        items.push({ ...view, task_id: row.taskId, session_id: row.sessionId, createdAt: row.createdAt ?? null, changedFiles: changed.slice(0, 12), changedCount: changed.length });
+      }
+      return { items, truncated: rows.length > 8 };
+    },
+    /** 把别的对话里的副本接到本对话（只改归属，不动文件和分支）；正在被操作时不接 */
+    async adopt(id, sessionId, execution = {}) {
+      execution.signal?.throwIfAborted();
+      if (!/^[a-f0-9]{24}$/.test(id || '')) throw codeError('CODE_WORKTREE', '需要工作副本编号');
+      const connection = await config();
+      const row = (await load()).find((item) => item.id === id);
+      if (!row) throw codeError('CODE_WORKTREE', '服务器上没有这个工作副本');
+      if (row.repository !== connection.repository) throw codeError('CODE_REPO_NOT_ALLOWED', '这个副本属于另一个仓库，请先在设置里切换仓库');
+      if (row.sessionId !== sessionId) {
+        if (operations.has(id)) throw codeError('CODE_REPO_BUSY', '这个工作副本正在被另一段对话使用，请等那边做完');
+        await save({ ...row, sessionId, adoptedFrom: row.sessionId, adoptedAt: Date.now() });
+      }
+      const current = await resolve(id, sessionId);
+      return { ...(await snapshot(current.row, current.cwd, execution, current.connection)), task_id: current.row.taskId, adopted: row.sessionId !== sessionId };
     },
     writable: editing,
     runConfigured: Boolean(editing && sandbox?.configured),

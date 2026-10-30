@@ -114,3 +114,19 @@ export function createCodeTools({ repos, sessionId, taskId, editing = false, sav
   );
   return tools;
 }
+
+/**
+ * 把其他对话里的工作副本接到本对话（用户 2026-10-30：换了对话就找不到原副本，还要用户报编号）。
+ * 单独一个工具，不改上面那套代码工具的清单；只读服务器不需要（自动接过来在 codeWorkContext.mjs）。
+ */
+export function createRepoAdoptTool({ repos, sessionId }) {
+  return {
+    name: 'repo_adopt',
+    description: '把其他对话里的GitHub工作副本接到本对话接着用（只改归属，不动文件、不新建副本）。用户说接着改之前的仓库/给了编号时用；有多份时先列给用户选。',
+    input_schema: { type: 'object', properties: { workspace_id: { type: 'string', description: '要接过来的工作副本编号' } }, required: ['workspace_id'], additionalProperties: false },
+    run: async (args, execution = {}) => {
+      execution.signal?.throwIfAborted();
+      return JSON.stringify(await repos.adopt(args.workspace_id, sessionId, execution));
+    }
+  };
+}

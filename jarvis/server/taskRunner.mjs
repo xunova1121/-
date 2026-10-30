@@ -22,7 +22,7 @@ import { createDocumentReviewer } from '../src/llm/documentReviewer.js';
 import { checkpointEvent, checkpointNeedsReview, checkpointRecoveryText, isReadOnlyTool } from '../shared/taskCheckpoint.js';
 import { evidence } from '../src/agent/evidenceStore.js';
 import { failedStep } from '../src/agent/failedSteps.js';
-import { createCodeTools } from './codeTools.mjs';
+import { createCodeTools, createRepoAdoptTool } from './codeTools.mjs';
 import { withoutCodeCredentials } from './gitHosting.mjs';
 /**
  * 服务器上的任务执行器：手机 / 电脑把任务交过来，服务器自己从头做到尾。
@@ -298,6 +298,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const projectTool = projectExecutionTool({ image: process.env.JARVIS_CODE_SANDBOX_IMAGE, baseDir: projectBaseDir });
     if (projectTool) tools.push(projectTool);
     if (taskRepos && !task.evaluationId) tools.push(...createCodeTools({ repos: scopedRepos, sessionId: session.id, taskId: task.checkpoint.codeTaskId || task.id, editing: taskRepos.writable === true, enableBrowser: true, saveBrowserArtifact: async (p, data, type) => { await ws.write(p, new Blob([data], { type })); task.files.add(p); record(task, { type: 'file', path: p }); } }));
+    if (taskRepos?.adopt && taskRepos.writable === true && !task.evaluationId) tools.push(createRepoAdoptTool({ repos: taskRepos, sessionId: session.id })); // 别的对话里的副本接过来接着改
     if (codeProjects && !task.evaluationId) tools.push(...codeProjectTools(codeProjects, session.id));
     // 装了带脚本的技能：给模型“运行技能命令”的工具（在服务器的隔离 Docker 里跑，见 skillRunner.mjs；没装运行器时会照实说怎么装）
     if (skillRunner && !task.evaluationId && (await skillPacks.enabled().catch(() => [])).some(needsRunner)) {

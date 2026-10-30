@@ -114,3 +114,34 @@ it('真实任务执行器：已完成的商城任务继续保留原taskId，不�
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+it('新对话说“继续”：本对话没副本、别的对话只有一份就自动接过来；多份列给模型让用户挑（用户 2026-10-30）', async () => {
+  const { codeWorkBlock } = await import('../src/agent/codeDevelopment.js');
+  const other = { workspace_id: id, task_id: 'original', repository: 'demo/repo', branch: 'weiyang/task-' + id, session_id: 'old', createdAt: Date.UTC(2026, 9, 29, 6, 0), changedFiles: ['src/cart.js'], changedCount: 1 };
+  const adopted = [];
+  let mine = [];
+  const repos = {
+    connected: async () => true,
+    workspaces: async () => ({ items: mine }),
+    elsewhere: async () => ({ items: mine.length ? [] : [other] }),
+    adopt: async (wid, session) => { adopted.push([wid, session]); mine = [{ ...other, session_id: undefined }]; return { workspace_id: wid, adopted: true }; },
+    clone: async () => ({ workspace_id: id })
+  };
+  const base = { text: '继续改那个仓库的购物车', images: 0, sessionId: 'fresh', taskId: 'new', checkpoint: {}, maxSteps: 28, codeMaxSteps: 80 };
+  const one = await prepareCodeWork({ ...base, repos });
+  expect(adopted).toEqual([[id, 'fresh']]);
+  expect(one.policy.enabled).toBe(true);
+  expect(one.codeWork).toMatchObject({ adopted: id });
+  expect(one.codeWork.workspaces).toHaveLength(1);
+  expect(codeWorkBlock(one.codeWork)).toContain('已自动把其他对话里唯一的这份接过来');
+
+  const two = [other, { ...other, workspace_id: 'b'.repeat(24), changedFiles: [], changedCount: 0 }];
+  const many = await prepareCodeWork({ ...base, sessionId: 'fresh2', repos: { ...repos, workspaces: async () => ({ items: [] }), elsewhere: async () => ({ items: two }), adopt: async () => { throw new Error('多份不能自动接'); } } });
+  expect(many.policy.enabled).toBe(true);
+  const block = codeWorkBlock(many.codeWork);
+  expect(block).toContain('repo_adopt');
+  expect(block).toContain(id);
+  expect(block).toContain('2026-10-29 14:00 北京时间建');
+  expect(block).toContain('未提交改动1个文件：src/cart.js');
+  expect(block).toContain('不要求用户报编号');
+});
