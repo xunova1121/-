@@ -171,3 +171,40 @@ describe('普通画图不给严格流水线工具和任务清单', () => {
     expect(await names('接着改', [{ role: 'assistant', content: '底稿 architecturePath: 文档检查/架构底稿/x.json' }])).toContain('plan_architecture');
   });
 });
+
+// 用户 2026-10-30 实测：按汇报文档画架构图，卡片标签给了空串、平台分组名超长，整张图在排版前被拦下（前后三次）
+describe('空卡片标签、超长分组名：任何模式都先整理，不整张拦下', async () => {
+  const { tidyLabels } = await import('../src/agent/diagramRepair.js');
+  const { layoutDiagram } = await import('../src/agent/diagramModel.js');
+  const longGroup = '长江流域重点水域禁捕退捕智慧监管与综合执法协同指挥一体化平台建设项目省级统一支撑底座及配套运维保障体系';
+  const raw = {
+    title: '总体架构',
+    layers: [
+      { title: '业务应用层', group: longGroup, nodes: [{ id: 'a', title: '执法监管', icon: 'shield-check', badge: '' }, { id: 'b', title: '渔政巡查', icon: 'map-pin', badge: '  ' }] },
+      { title: '数据层', group: longGroup, nodes: [{ id: 'c', title: '数据中台', badge: '汇聚交通、公安、渔政、气象、水文、视频监控、无人机巡查与群众举报等多源数据' }, { id: 'd', title: '视频资源' }] }
+    ]
+  };
+  it('原样排版会被拦；整理后能排，并记下调整', () => {
+    expect(() => layoutDiagram(raw)).toThrow();
+    const { input, notes } = tidyLabels(raw);
+    expect(() => layoutDiagram(input)).not.toThrow();
+    expect(input.layers[0].nodes.map((n) => n.badge)).toEqual([undefined, undefined]);
+    expect([...input.layers[1].nodes[0].badge].length).toBe(28);
+    expect(input.layers[0].group).toBe(input.layers[1].group); // 同名分组截法相同，仍是同一组
+    expect([...input.layers[0].group].length).toBe(48);
+    expect(notes.join('；')).toMatch(/分组名.*已截短/);
+    expect(notes.join('；')).toMatch(/卡片标签超过28字，已截短/);
+    // 标题、说明、节点不动
+    expect(input.layers.flatMap((l) => l.nodes.map((n) => [n.id, n.title]))).toEqual(raw.layers.flatMap((l) => l.nodes.map((n) => [n.id, n.title])));
+  });
+  it('报错写清上限和当前字数，不再只说“为空或过长”', async () => {
+    const { cardFields } = await import('../src/agent/diagramCards.js');
+    expect(() => cardFields({ badge: '一'.repeat(30) })).toThrow('卡片标签最多28字，当前30字');
+    expect(() => cardFields({ badge: '' })).toThrow('卡片标签不能为空');
+  });
+  it('create_diagram 普通请求同样不拦', async () => {
+    const tool = createDiagramTool({}, { requireArchitecture: 'strict' });
+    const done = await tool.run({ path: '图/汇报总体架构.svg', ...raw }, { rawRequestText: '根据汇报文档画总体架构图' }).catch((e) => e);
+    expect(String(done?.message ?? '')).not.toMatch(/卡片标签|平台分组名称/);
+  });
+});

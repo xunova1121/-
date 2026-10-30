@@ -7,7 +7,7 @@ import * as workspace from './workspace.js';
 import { checkSources } from './diagramSources.js';
 import { DIAGRAM_PLANNING, planDiagramContent, strictArchitecture } from './diagramPlanning.js';
 import { layoutDiagram } from './diagramModel.js';
-import { layoutWithRepair } from './diagramRepair.js';
+import { layoutWithRepair, tidyLabels } from './diagramRepair.js';
 import { diagramScene } from './diagramScene.js';
 import { deliverDiagram, diagramFormats, diagramDigest } from './diagramExport.js';
 
@@ -177,7 +177,11 @@ export function createDiagramTool(ctx, { requireArchitecture = false } = {}) {
       // 普通画图：版式参数不合规则时程序就地调整（层类型、箭头文字、分组），不让模型反复重填；严格模式和架构底稿照原规则
       let repairNotes = [];
       let model;
-      if (strict || architecture || projected) model = layoutDiagram(input);
+      if (strict || architecture || projected) {
+        // 严格模式也先整理空标签、超长分组名这类纯格式问题（不碰内容和关系），免得整张图在排版前被拦
+        ({ input, notes: repairNotes } = tidyLabels(input));
+        model = layoutDiagram(input);
+      }
       else ({ model, input, notes: repairNotes } = layoutWithRepair(input, { architecture: !['workflow', 'dataflow', 'general'].includes(input.diagramType) }));
       if (input.draft) model.monochrome = true;
       progress?.('正在核对材料和图形结构…');

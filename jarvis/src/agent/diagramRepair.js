@@ -102,11 +102,43 @@ function repairLayer(layer, notes) {
 }
 
 /**
+ * 纯格式整理，严格模式（按文档逐条核对 / 架构底稿）也做：只动可选的装饰字段，不碰标题、说明、节点和关系。
+ * 用户 2026-10-30 实测：按汇报文档画架构图，卡片标签给了空串、平台分组名超长，整张图在排版前就被拦下，前后三次。
+ *   - 卡片标签（badge）空的去掉（本来可不填），超过28字截短
+ *   - 平台分组名（group）空的去掉，超过48字截短（同名分组截法相同，仍算同一组）
+ * @returns {{ input: object, notes: string[] }}
+ */
+export function tidyLabels(input) {
+  const notes = [];
+  if (!Array.isArray(input?.layers)) return { input, notes };
+  const layers = input.layers.map((layer) => {
+    if (!layer || typeof layer !== 'object') return layer;
+    const next = { ...layer };
+    if (next.group !== undefined && (typeof next.group !== 'string' || !next.group.trim())) delete next.group;
+    else if (next.group !== undefined && chars(next.group.trim()).length > 48) {
+      notes.push(`平台分组名“${cut(next.group, 12)}”超过48字，已截短`);
+      next.group = cut(next.group.trim(), 48);
+    }
+    if (Array.isArray(next.nodes))
+      next.nodes = next.nodes.map((node) => {
+        if (!node || typeof node !== 'object' || node.badge === undefined) return node;
+        const { badge, ...rest } = node;
+        if (typeof badge !== 'string' || !badge.trim()) return rest;
+        if (chars(badge.trim()).length <= 28) return node;
+        notes.push(`「${cut(node.title, 12)}」卡片标签超过28字，已截短`);
+        return { ...rest, badge: cut(badge.trim(), 28) };
+      });
+    return next;
+  });
+  return { input: { ...input, layers }, notes: [...new Set(notes)] };
+}
+
+/**
  * 版式调整（不碰内容）
  * @returns {{ input: object, notes: string[] }}
  */
-export function repairDiagramInput(input) {
-  const notes = [];
+export function repairDiagramInput(raw) {
+  const { input, notes } = tidyLabels(raw);
   if (!Array.isArray(input.layers)) return { input, notes };
   let layers = input.layers.flatMap((layer) => repairLayer(layer, notes));
   if (layers.length > 8) {

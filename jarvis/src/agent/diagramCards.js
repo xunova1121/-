@@ -6,7 +6,9 @@ export const DIAGRAM_ICONS = Object.keys(DIAGRAM_ICON_ASSETS);
 export const DIAGRAM_ACCENTS = { orange: '#bd6200', blue: '#007fc4', green: '#00856b' };
 const invalid = (message) => Object.assign(new Error(message), { code: 'DIAGRAM_CARD', kind: 'input' });
 const field = (value, max, label) => {
-  if (typeof value !== 'string' || !value.trim() || [...value].length > max) throw invalid(label + '为空或过长');
+  // 写清上限和当前字数，模型一次就能改对（以前只说“为空或过长”，模型自己猜成8字反复重试）
+  if (typeof value !== 'string' || !value.trim()) throw invalid(`${label}不能为空（不需要就不填这个字段）`);
+  if ([...value].length > max) throw invalid(`${label}最多${max}字，当前${[...value].length}字`);
   return value.trim();
 };
 export function cardFields(node) {
