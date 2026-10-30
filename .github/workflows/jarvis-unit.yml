@@ -20,11 +20,15 @@ on:
         description: '技能构建与Archify真实出图验收，不打包、不发布'
         type: boolean
         default: false
+      weather_only:
+        description: '天气原主题门禁与多字体短屏专项，不打包、不发布'
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   unit:
-    if: inputs.webgl_only != true && inputs.p7_only != true && inputs.skill_only != true
+    if: inputs.webgl_only != true && inputs.p7_only != true && inputs.skill_only != true && inputs.weather_only != true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -153,3 +157,38 @@ jobs:
         with:
           name: webgl-recovery-${{ github.run_id }}
           path: ${{ runner.temp }}/webgl
+
+  weather:
+    if: github.event_name == 'workflow_dispatch' && inputs.weather_only == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - name: 与完整验证相同的浏览器和字体
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fonts-wqy-microhei fonts-noto-cjk
+      - name: 天气数据与显示守护
+        run: npx vitest run tests/homepageWeather.test.js tests/qweather.test.js tests/weatherPresentation.test.js
+      - name: 构建实际手机版
+        run: npm run build:mobile
+      - name: 原主题门禁与多字体天气专项
+        run: |
+          node e2e/mobile-theme.mjs "$RUNNER_TEMP/weather-check/theme"
+          node e2e/weather-card.mjs "$RUNNER_TEMP/weather-check/weather"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: weather-check
+          path: ${{ runner.temp }}/weather-check
+          if-no-files-found: error

@@ -472,7 +472,7 @@
 @media (max-height: 680px) {
   /* 短屏恢复紧凑高度，不让天气挤掉文件入口；详细数据仍在弹窗。 */
   #homepage-weather {
-    min-height: 36px;
+    min-height: 34px;
     gap: 0 8px;
   }
   #homepage-weather .home-city {
@@ -481,6 +481,8 @@
   }
   #homepage-weather .home-weather-details {
     min-height: 32px;
+    padding-top: 0;
+    padding-bottom: 0;
   }
   #homepage-weather .home-weather-location {
     min-height: 32px;
@@ -488,6 +490,18 @@
   }
   #homepage-weather .home-weather-place {
     gap: 1px;
+  }
+  #homepage-weather .home-city b {
+    line-height: 14px;
+  }
+  #homepage-weather .home-weather-condition {
+    line-height: 11px;
+  }
+  #homepage-weather .home-date {
+    line-height: 16px;
+  }
+  :root body.compact.companion-edition .welcome.home-reference:has(#homepage-weather) {
+    row-gap: 8px;
   }
   #homepage-weather .home-weather-bottom {
     display: none;

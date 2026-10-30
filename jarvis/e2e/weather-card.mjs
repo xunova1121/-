@@ -34,13 +34,16 @@ await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const checks = [];
-const check = (label, value) => {
-  checks.push({ label, ok: value });
-  assert.equal(value, true, label);
+let activePage;
+const check = (label, value, detail) => {
+  checks.push({ label, ok: value, ...(detail ? { detail } : {}) });
+  assert.equal(value, true, detail ? `${label}: ${JSON.stringify(detail)}` : label);
 };
 try {
-  for (const [width, theme] of [
+  for (const [width, theme, fontFamily] of [
     [320, 'day'],
+    [320, 'day', 'DejaVu Sans'],
+    [320, 'day', 'Liberation Sans'],
     [390, 'day'],
     [390, 'night'],
     [412, 'day']
@@ -114,6 +117,7 @@ try {
     });
     const page = await ctx.newPage(),
       errors = [];
+    activePage = page;
     page.on('pageerror', (e) => errors.push(e.message));
     await page.goto(base);
     await page.waitForFunction(
@@ -122,7 +126,15 @@ try {
         document.querySelector('#homepage-weather .home-weather-temp')?.textContent === '21°' &&
         document.querySelector('#app-splash')?.hidden !== false
     );
-    const label = `${width}-${theme}`;
+    if (fontFamily)
+      await page.addStyleTag({
+        content: `:root body.compact.companion-edition { --font-ui: '${fontFamily}', 'Noto Sans CJK SC', sans-serif; font-family: var(--font-ui); }`
+      });
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
+    const label = `${width}-${theme}${fontFamily ? '-' + fontFamily.replace(/ /g, '-') : ''}`;
     check(label + '-home-no-overflow', await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     check(
       label + '-weather-right-aligned',
@@ -132,17 +144,28 @@ try {
         return detail.left >= innerWidth / 2 - 12 && detail.right <= location.left && location.right <= innerWidth - 16;
       })
     );
-    if (width === 320)
-      check(
-        label + '-short-home-complete',
-        await page.evaluate(() => {
-          const transcript = document.querySelector('#transcript');
-          const files = document.querySelector('.home-files').getBoundingClientRect();
-          const input = document.querySelector('#inputbar').getBoundingClientRect();
-          return transcript.scrollHeight <= transcript.clientHeight + 2 && files.bottom <= input.top;
-        })
-      );
-
+    if (width === 320) {
+      const layout = await page.evaluate(() => {
+        const transcript = document.querySelector('#transcript');
+        const rect = (selector) => {
+          const r = document.querySelector(selector).getBoundingClientRect();
+          return { top: r.top, bottom: r.bottom, height: r.height };
+        };
+        return {
+          scroll: transcript.scrollHeight,
+          client: transcript.clientHeight,
+          home: rect('.home-reference'),
+          weather: rect('.home-weather'),
+          hero: rect('.home-hero'),
+          suggestions: rect('.home-suggestions'),
+          files: rect('.home-files'),
+          input: rect('#inputbar'),
+          viewport: innerHeight,
+          font: getComputedStyle(document.body).fontFamily
+        };
+      });
+      check(label + '-short-home-complete', layout.scroll <= layout.client + 2 && layout.files.bottom <= layout.input.top, layout);
+    }
     check(label + '-range-visible', (await page.locator('.home-weather-condition').textContent()).includes('14° / 22°'));
     if (width === 390) await page.screenshot({ path: output + '/' + label + '-home.png' });
     await page.locator('.home-weather-location').click();
@@ -182,6 +205,7 @@ try {
     await ctx.close();
   }
 } finally {
+  if (checks.some((item) => !item.ok) && activePage && !activePage.isClosed()) await activePage.screenshot({ path: output + '/failure.png' });
   await fs.writeFile(output + '/summary.json', JSON.stringify(checks, null, 2));
   await browser.close();
   await new Promise((resolve) => server.close(resolve));
