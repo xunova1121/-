@@ -14,7 +14,7 @@ import { collectRequirements } from '../agent/taskRequirements.js';
 import { preApproved } from '../agent/commandSafety.js';
 import * as ws from '../agent/workspace.js';
 import * as agentMemory from '../agent/memory.js';
-import { STATUS_ASK, STOP_ASK, turnStatus } from '../core/interject.js';
+import { STATUS_ASK, STOP_ASK, separateRequest, turnStatus } from '../core/interject.js';
 import { SentenceChunker } from '../core/sentenceChunker.js';
 import { followUpSuggestions, interruptionMark } from '../core/suggest.js';
 import { savePending, clearPending } from '../core/pendingTask.js';
@@ -138,6 +138,12 @@ export function createTurn(app) {
       return;
     }
     app.rememberTurn('user', text, thumbs.length ? { thumbs } : {}, turn.session);
+    // 明说是另一件事：不塞进正在做的任务（以前会和手上的要求混在一起核对、一起回答），做完手上这件再单独做
+    if (separateRequest(text)) {
+      (turn.later ||= []).push(text);
+      reply('收到，这是另一件事。手上这件做完马上单独做它，不会混在一起。');
+      return;
+    }
     if (!turn.remote) {
       turn.inbox.push(text);
       if (MOBILE) {
@@ -512,12 +518,17 @@ export function createTurn(app) {
       app.endControl();
       // 回答写完的一瞬间又收到的话（没来得及交给模型）：接着当一句新话处理
       const left = turn.inbox.splice(0);
-      if (left.length && turn.remote) {
-        app.prompt.value += (app.prompt.value.trim() ? '\n' : '') + left.join('\n');
+      const later = turn.later?.splice(0) ?? []; // 干活时说的“另一件事”
+      const canSend = !ctrl.signal.aborted && !turn.background && app.session === turn.session;
+      const putBack = (texts, words) => {
+        app.prompt.value += (app.prompt.value.trim() ? '\n' : '') + texts.join('\n');
         app.autosize();
-        toast('未送达的补充已放回输入框，没有另开任务');
-      } else if (left.length && !ctrl.signal.aborted && !turn.background && app.session === turn.session)
-        setTimeout(() => send(left.join('\n'), { echo: false }), 0);
+        toast(words);
+      };
+      if (left.length && turn.remote) putBack(left, '未送达的补充已放回输入框，没有另开任务');
+      const next = [...(turn.remote ? [] : left), ...later];
+      if (next.length && canSend && !(left.length && turn.remote)) setTimeout(() => send(next.join('\n'), { echo: false }), 0);
+      else if (later.length) putBack(later, '刚才说的另一件事放在输入框里了，发送就接着做');
     }
   }
 

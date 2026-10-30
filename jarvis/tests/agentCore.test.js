@@ -169,6 +169,14 @@ describe('干活时插话不打断', () => {
     expect(turnStatus({ t0: 0, steps: 0, status: '' }, 8_000)).toBe('还在做，已经 8 秒');
   });
 
+  it('认出明说是“另一件事”的话：排到手上这件做完后单独做；补充和修改不算（用户 2026-10-30）', async () => {
+    const { separateRequest } = await import('../src/core/interject.js');
+    for (const t of ['另外帮我查下明天天气', '还有件事，下午三点提醒我开会', '换个话题，今天油价多少', '顺便问一下，社保怎么交', '跟这个无关，帮我写个请假条', '对了，问一下医保报销比例'])
+      expect(separateRequest(t), t).toBe(true);
+    for (const t of ['字再大一点', '再加一页总结', '另外把标题也改了，这份要红头', '顺便把上面的表格也改一下', '另外', '还有，第二页删掉', '对了，标题用黑体', '好了吗'])
+      expect(separateRequest(t), t).toBe(false);
+  });
+
   it('干活中途收到的话：下一步开始前交给模型（附在工具结果后面），任务接着做，不重新开始', async () => {
     const inbox = [];
     const seen = [];

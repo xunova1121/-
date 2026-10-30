@@ -341,7 +341,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   // 用户在干活时插的话（inbox，界面往里放）：每一步开始前取出来交给模型，不打断手上的事
   const takeInbox = () => {
     const said = inbox?.splice(0) ?? [];
-    if (said.length) currentRequest = said.join('\n');
+    // 补充接在原要求后面，不顶掉原要求（以前换成插的那句，联网、回答长短等判断全跟着这句走，手上的活儿被打乱）
+    if (said.length) currentRequest = `${currentRequest}\n${said.join('\n')}`;
     if (!said.length) return false;
     diagramRecovery.reset();
     seen.clear(); // 用户追加了新指令，同样参数可能是新的明确要求

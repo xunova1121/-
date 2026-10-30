@@ -19,6 +19,8 @@ export function initWorkbench({showPanel,newSession,openSession,getSession,getRu
  const secondaryLinks=[['连接应用','⌘','skills'],['记忆空间','♧','mind'],['知识库','▤','knowledge'],['实验室','⚗','settings']];
  function link([label,icon,panel],parent){const b=button(label,icon,()=>{showPanel(panel);document.body.classList.toggle('wb-connections',label==='连接应用');},parent);b.dataset.destination=label==='连接应用'?'connections':panel;}
  primaryLinks.forEach(item=>link(item,nav));
+ // 代码项目：PC 上输入框旁的“项目”小按钮不显眼（用户 2026-10-30：电脑端找不到 Git 项目管理和连接），侧栏放一个同样的入口
+ button('代码项目','⌥',()=>{closePanel();document.querySelector('#project-chip')?.click();},nav).dataset.destination='code-projects';
  const secondary=node('div',null,'wb-nav-secondary');secondary.setAttribute('aria-label','资料与工具');nav.append(secondary);secondaryLinks.forEach(item=>link(item,secondary));
  const recent=node('section',null,'wb-recent'),recentHead=node('div',null,'wb-recent-head'),search=node('button','⌕');search.title='搜索全部对话';search.onclick=()=>showPanel('sessions');recentHead.append(node('span','最近对话'),search);const history=node('div',null,'wb-history-list');history.tabIndex=0;history.setAttribute('aria-label','最近对话列表');const more=node('button','查看更多','wb-recent-more');more.type='button';more.hidden=true;more.onclick=()=>showPanel('sessions');recent.append(recentHead,history,more);rail.append(recent);
  const bottom=node('button','⚙  设置与模型','wb-bottom');bottom.onclick=()=>showPanel('models');rail.append(bottom);

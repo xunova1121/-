@@ -91,11 +91,11 @@ body.workbench{background:#fff;color:#24272e;font-family:'Microsoft YaHei','Sego
  .companion-edition.workbench .wb-mark.wy-brand{width:52px;height:56px}
  .companion-edition.workbench .wb-mark.wy-brand .wy-mascot{--mascot-size:60px}
  .workbench .wb-brand small{font-size:8px}
- .workbench .wb-nav button{min-height:34px;padding:6px 10px}
+ .workbench .wb-nav button{min-height:30px;padding:4px 10px}
  .workbench .wb-nav .wb-new{min-height:38px;margin-bottom:2px}
  .workbench .wb-nav-secondary{margin-top:5px;padding-top:5px}
  .workbench .wb-nav-secondary button{min-height:30px;padding:5px 4px}
- .workbench .wb-recent{min-height:210px;margin-top:12px}
+ .workbench .wb-recent{min-height:180px;margin-top:6px}
  .workbench .wb-bottom{padding:7px 8px;min-height:32px}
 }
 /* 完全隐藏滚动条，包括悬停状态；滚轮、触控板和键盘滚动保持可用。 */
