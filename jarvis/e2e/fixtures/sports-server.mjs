@@ -7,8 +7,8 @@ import { createServerMode } from '../../server/serverMode.mjs';
 import { createTaskRunner } from '../../server/taskRunner.mjs';
 import { DEFAULT_CONFIG } from '../../src/llm/config.js';
 const data = process.env.JARVIS_DATA;
-let modelCalls = 0, upstreamCalls = 0;
-const stats = () => fs.writeFileSync(path.join(data, 'fixture-stats.json'), JSON.stringify({ modelCalls, upstreamCalls }));
+let modelCalls = 0, upstreamCalls = 0, scoreRevision = 0;
+const stats = () => fs.writeFileSync(path.join(data, 'fixture-stats.json'), JSON.stringify({ modelCalls, upstreamCalls, scoreRevision }));
 const actualLookup = dns.lookup.bind(dns);
 dns.lookup = (host, opts) => ['bifen4pc.qiumibao.com', 'site.api.espn.com'].includes(host) ? Promise.resolve([{ address: '93.184.216.34', family: 4 }]) : actualLookup(host, opts);
 const actualFetch = globalThis.fetch;
@@ -22,9 +22,12 @@ globalThis.fetch = async (url, init) => {
   if (fs.existsSync(path.join(data, 'fail-all'))) throw TypeError('fixture offline');
   const now = Date.now();
   if (host === 'site.api.espn.com') return Response.json({ events: [] });
+  // 只有比分源刷新才更新模拟比分，不能用含ESPN补充请求的总次数取模：
+  // 跨午夜会增加补充请求，取模后新旧比分可能相等，误报刷新未执行。
+  scoreRevision++; stats();
   const match = (id, delta, state, period) => {
     const beijing = new Date(now + delta * 60000 + 28800000).toISOString();
-    return { id, type: 'football', leagueid: 'synthetic', sdate: beijing.slice(0, 10), time: beijing.slice(11, 16), state, period_cn: period, home_team: id === 'live' ? '江城星光' : '云港竞技', visit_team: id === 'live' ? '海湾联队' : '山川青年', home_score: String(upstreamCalls % 4), visit_score: '0' };
+    return { id, type: 'football', leagueid: 'synthetic', sdate: beijing.slice(0, 10), time: beijing.slice(11, 16), state, period_cn: period, home_team: id === 'live' ? '江城星光' : '云港竞技', visit_team: id === 'live' ? '海湾联队' : '山川青年', home_score: String(scoreRevision), visit_score: '0' };
   };
   // 日期覆盖锚点只用于证明原列表包含前后日；本窗口必须把这些远处场次滤掉。
   return Response.json({ list: [match('next', 30, '1', ''), match('live', -60, '2', '中场'), match('finished', -90, '3', '完场'), match('anchor-before', -1500, '3', '完场'), match('anchor-after', 1500, '1', '')] });

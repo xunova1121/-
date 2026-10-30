@@ -6,6 +6,8 @@
 
 ## Claude 负责（判断多、牵扯面广的 4 项）
 
+<!-- 2026-10-30 Codex 发布门禁接缝：345赛程卡刷新失败已本地同点复现。仅修sports-server虚构上游的比分序列；总请求计数含ESPN，取模4会让真实刷新后的比分恰好相同。改为直播吧独立递增，保留原刷新变化/无模型调用/历史/失败保留断言和30秒上限，不动生产赛程逻辑。 -->
+
 | 事项 | 要做到什么 | 主要文件（Claude 名下） |
 |---|---|---|
 | 1. 架构图收尾 | 普通请求用真实模型稳定出图、分层合理、关系准确、接近参考图质量；可编辑 PPT 一致交付。2026-10-29 已改为直接 `create_diagram`，用真实招标文件出图成功，但**真实模型自己填的效果还没验收** | `diagramPlanning.js`、`diagramTool.js`、`diagramModel.js`、`diagramSections.js`、`diagramScene.js`、`architectureDirector.js`（只改入口）、`tests/architectureRouting.test.js` |

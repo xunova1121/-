@@ -59,6 +59,7 @@ try {
     await card.getByRole('button', { name: '刷新', exact: true }).click();
     await page.waitForFunction(old => document.querySelector('.sports-card .sports-match-score')?.textContent !== old && !document.querySelector('.sports-card-refresh')?.disabled, scoreBefore);
     const after = JSON.parse(await fs.readFile(path.join(data, 'fixture-stats.json')));
+    check(`${width}-refresh-uses-new-primary-snapshot`, after.scoreRevision > before.scoreRevision);
     check(`${width}-refresh-fetches-without-model`, after.upstreamCalls > before.upstreamCalls && after.modelCalls === before.modelCalls);
     if (width === 390) {
       await page.reload(); await page.waitForFunction(() => document.querySelector('.sports-card'));
