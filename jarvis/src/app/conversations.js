@@ -20,10 +20,12 @@ export function createConversations(app) {
   app.session = sessionsApi.create();
   /** 记一条消息：默认记进当前会话；后台任务记进它自己的会话（切到别的对话后仍然记对地方） */
   function rememberTurn(role, content, extra = {}, target = app.session) {
-    // 回的是主动问候里“要接着做吗”，而且说了不用：把那件事划掉
-    const asked = target.messages.at(-1);
-    if (role === 'user' && asked?.proactive && asked.openItem && agentMemory.DECLINE_OPEN.test(String(content).trim()))
-      agentMemory.resolveOpen([asked.openItem]).catch(() => {});
+    // 回的是主动问候里“要接着做吗”，而且说了不用：把那件事划掉（往前看几条：隔了一两句再抱怨“为啥一直问”也算）
+    const asked = target.messages
+      .slice(-6)
+      .reverse()
+      .find((m) => m.role === 'assistant' && m.proactive && m.openItem);
+    if (role === 'user' && asked && agentMemory.DECLINE_OPEN.test(String(content).trim())) agentMemory.resolveOpen([asked.openItem]).catch(() => {});
     target.messages.push({ role, content, ts: Date.now(), ...extra });
     target.updatedAt = Date.now();
     persistSession(target);

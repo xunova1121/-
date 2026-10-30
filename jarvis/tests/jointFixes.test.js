@@ -179,3 +179,37 @@ describe('“上次说好的事”：问过两次没接就不再问；回“不�
     for (const t of ['好的，接着做', '要', '帮我查一下']) expect(DECLINE_OPEN.test(t)).toBe(false);
   });
 });
+
+describe('同一件事被记成好几条也只问两次；说“为啥一直问”也算不做了（用户 2026-10-30 再次截图：又问供销社）', () => {
+  it('次数按内容算：换一条新记录（别的对话又提到）不会从 0 重新问；同一件事只列一条', async () => {
+    const memory = await import('../src/agent/memory.js');
+    const first = await memory.addEpisode({ summary: '查停车', turns: 2, session: { id: 's-park-1', title: '停车' }, open: ['查一下南京禄口机场的停车收费标准（按小时、按天）'] });
+    const again = await memory.addEpisode({ summary: '又聊到停车', turns: 2, session: { id: 's-park-2', title: '停车2' }, open: ['查南京禄口机场停车收费标准'] });
+    const list = async () => (await memory.openItems({ k: 20 })).filter((o) => /禄口/.test(o.text));
+    expect(await list()).toHaveLength(1); // 两条记录是同一件事，只列一条
+    const [one] = await list();
+    await memory.noteOpenOffered([one]);
+    const [two] = await list();
+    await memory.noteOpenOffered([two]);
+    expect(await list()).toEqual([]); // 问过两次，哪条记录都不再提
+    // 之后又有对话提到同一件事，后台整理再记一条：仍不再问
+    await memory.addEpisode({ summary: '第三次', turns: 2, session: { id: 's-park-3', title: '停车3' }, open: ['禄口机场停车收费标准查一下'] });
+    expect(await list()).toEqual([]);
+    expect([first.id, again.id].every(Boolean)).toBe(true);
+  });
+  it('说过不做了：所有记录里同一件事都划掉', async () => {
+    const memory = await import('../src/agent/memory.js');
+    await memory.addEpisode({ summary: 'a', turns: 2, session: { id: 's-tax-1', title: '个税' }, open: ['帮我算一下今年个税汇算要补多少'] });
+    await memory.addEpisode({ summary: 'b', turns: 2, session: { id: 's-tax-2', title: '个税2' }, open: ['算今年个税汇算补多少钱'] });
+    const [item] = (await memory.openItems({ k: 20 })).filter((o) => /个税/.test(o.text));
+    await memory.resolveOpen([item]);
+    expect((await memory.openItems({ k: 20 })).filter((o) => /个税/.test(o.text))).toEqual([]);
+  });
+  it('认得抱怨式的拒绝；正常回答和无关的“问”不误判', async () => {
+    const { DECLINE_OPEN, sameOpenItem } = await import('../src/agent/memory.js');
+    for (const t of ['不是说不做了吗，为啥一直问', '我说了不用了', '别再问了', '怎么老问这个', '又提这个，不要再提了']) expect(DECLINE_OPEN.test(t), t).toBe(true);
+    for (const t of ['好的，接着做', '要', '帮我查一下', '我想问一下天气', '问问他明天来不来']) expect(DECLINE_OPEN.test(t), t).toBe(false);
+    expect(sameOpenItem('查询江苏供销合作总社的详细简介（机构性质、职能、', '查江苏供销合作总社简介')).toBe(true);
+    expect(sameOpenItem('查询江苏供销合作总社的详细简介', '整理周报')).toBe(false);
+  });
+});

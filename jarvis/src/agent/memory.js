@@ -372,30 +372,69 @@ export function ruleOpen(userLines) {
  */
 /** 主动问候最多问几次：问过这么多次用户都没接，就不再问（用户 2026-10-30：老问供销社那件事，说了不做也没用） */
 export const OPEN_OFFER_LIMIT = 2;
+/**
+ * 问过几次、用户说不做了，按“这件事的内容”记在 kv 里，不按某一段对话的摘要记。
+ * 用户 2026-10-30 再次截图：同一件事每被别的对话提到一次，后台整理就新记一条“没做完”，按摘要记的次数又从 0 开始，于是一直问。
+ */
+const OPEN_MEMO = 'open-item-memo';
+const DROP_DAYS = 60;
+const bigrams = (s) => {
+  const t = [...String(s ?? '').replace(/[\s，,。.、；;：:（）()「」“”"'《》【】\[\]!！?？…-]/g, '')];
+  return new Set(t.slice(1).map((c, i) => t[i] + c));
+};
+/** 两句是不是说的同一件事（字面相近即可：“查询江苏供销合作总社的详细简介”≈“查江苏供销总社简介”） */
+export function sameOpenItem(a, b) {
+  const x = bigrams(a), y = bigrams(b);
+  if (!x.size || !y.size) return false;
+  let both = 0;
+  for (const g of x) if (y.has(g)) both++;
+  return both / Math.min(x.size, y.size) >= 0.6;
+}
+const openMemo = async () => (await kv.get(OPEN_MEMO))?.items ?? [];
+const memoFor = (items, text) => items.find((m) => sameOpenItem(m.text, text));
+async function updateMemo(text, change) {
+  const items = (await openMemo()).filter((m) => now() - (m.at ?? 0) <= DROP_DAYS * DAY);
+  const hit = memoFor(items, text);
+  const next = change(hit ? { ...hit } : { text: String(text).slice(0, 120), offered: 0 });
+  next.at = now();
+  await kv.put({ id: OPEN_MEMO, items: [...items.filter((m) => m !== hit), next].slice(-200) });
+}
+const muted = (memo, text) => {
+  const m = memoFor(memo, text);
+  return Boolean(m && (m.declined || (m.offered ?? 0) >= OPEN_OFFER_LIMIT));
+};
+
 export async function openItems({ exclude = null, days = 14, k = 4, at = now() } = {}) {
   const eps = (await episodes.all()).filter((e) => e.open?.length && e.sessionId !== exclude && at - e.ts <= days * DAY).filter(safe((e) => e.summary));
+  const memo = await openMemo();
+  const seen = [];
   return eps.sort((a, b) => b.ts - a.ts)
-    .flatMap((e) => e.open.filter((text) => !injectionReason(text) && (e.openOffered?.[text] || 0) < OPEN_OFFER_LIMIT).map((text) => ({ episodeId: e.id, sessionId: e.sessionId ?? null, sessionTitle: e.sessionTitle ?? '', text, ts: e.ts })))
+    .flatMap((e) => e.open.filter((text) => !injectionReason(text) && (e.openOffered?.[text] || 0) < OPEN_OFFER_LIMIT && !muted(memo, text)).map((text) => ({ episodeId: e.id, sessionId: e.sessionId ?? null, sessionTitle: e.sessionTitle ?? '', text, ts: e.ts })))
+    .filter((o) => (seen.some((t) => sameOpenItem(t, o.text)) ? false : seen.push(o.text))) // 同一件事被记了好几条，只算一条
     .slice(0, k);
 }
 
-/** 主动问候里提了这件事：记一次（问够 OPEN_OFFER_LIMIT 次就不再提） */
+/** 主动问候里提了这件事：记一次（问够 OPEN_OFFER_LIMIT 次就不再提；按内容计，换了哪条记录都算同一件） */
 export async function noteOpenOffered(items) {
   for (const o of items) {
     const e = await episodes.get(o.episodeId);
-    if (!e) continue;
-    await episodes.put({ ...e, openOffered: { ...(e.openOffered || {}), [o.text]: (e.openOffered?.[o.text] || 0) + 1 } });
+    if (e) await episodes.put({ ...e, openOffered: { ...(e.openOffered || {}), [o.text]: (e.openOffered?.[o.text] || 0) + 1 } });
+    await updateMemo(o.text, (m) => ({ ...m, offered: (m.offered ?? 0) + 1 }));
   }
 }
 
-/** 用户对“要接着做吗”回了“不用 / 不做了 / 算了 / 别问了”：当场划掉，不等后台整理（服务器模式下整理在服务器上，手机本地的一直划不掉） */
-export const DECLINE_OPEN = /^(?:不用了?|不做了?|不要了?|不需要了?|算了|别问了?|不了|先不用|取消|不管它|那个不用)/;
+/**
+ * 用户对“要接着做吗”说不做：开头是“不用 / 不做了 / 算了 / 别问了”，
+ * 或者整句在抱怨老问（“不是说不做了吗，为啥一直问”——以前只认开头，这句没认出来）
+ */
+export const DECLINE_OPEN = /^(?:不用了?|不做了?|不要了?|不需要了?|算了|别问了?|不了|先不用|取消|不管它|那个不用)|(?:说了?|已经说|跟你说).{0,6}不(?:做|用|要)了|(?:一直|老是?|总是?|反复|又|还)(?:在)?(?:问|提)|别(?:再)?(?:问|提)了?|不要(?:再)?(?:问|提)了?/;
 
-/** 标记为已完成（从所在的对话摘要里移除） */
+/** 标记为已完成或不做了（从所在的对话摘要里移除，并按内容记下，别的记录里同一件事也不再提） */
 export async function resolveOpen(items) {
   const byEp = new Map();
   for (const o of items) byEp.set(o.episodeId, [...(byEp.get(o.episodeId) ?? []), o.text]);
   for (const [id, texts] of byEp) {
+    for (const text of texts) await updateMemo(text, (m) => ({ ...m, declined: true }));
     const e = await episodes.get(id);
     if (!e) continue;
     await episodes.put({ ...e, open: (e.open ?? []).filter((t) => !texts.includes(t)) });
