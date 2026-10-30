@@ -3,6 +3,9 @@ import { sportsNewsIntent, todayNewsIntent } from '../src/agent/newsIntent.js';
 import { sportsPreCall, createSportsScoresTool } from '../src/agent/sportsScores.js';
 import { wantsPreSearch } from '../src/agent/preSearch.js';
 import { runAgent } from '../src/agent/agent.js';
+import { createTodayNewsTool } from '../src/agent/todayNews.js';
+import { internationalNewsFeeds } from '../src/agent/newsFeeds.js';
+import fs from 'node:fs';
 
 const schema = { type: 'object', properties: {} };
 const answer = text => ({ text, toolCalls: [], stop: 'end_turn' });
@@ -65,4 +68,16 @@ it('先前聊比分和轻量模式不能覆盖本轮资讯；用户中途明确�
     { name: 'web_search', input_schema: schema, run: search }, { name: 'get_sports_scores', input_schema: schema, run: scores }
   ] });
   expect(search).toHaveBeenCalledTimes(1); expect(scores).toHaveBeenCalledTimes(1);
+});
+it('接入真实体育新闻来源后才用体育新闻工具，不能借新增能力重新引入比分', async () => {
+  const now = Date.parse('2026-10-30T14:00:00Z'); const get = vi.fn(async () => new Response(fs.readFileSync(new URL('./fixtures/news/bbc.xml', import.meta.url), 'utf8')));
+  const news = createTodayNewsTool({ fetchImpl: get, newsSources: [internationalNewsFeeds(['体育'])[0]], now: () => now });
+  const search = vi.fn(), scores = vi.fn();
+  const adapter = { stream: async input => {
+    expect(input.tools.some(t => t.name === 'get_sports_scores')).toBe(false);
+    expect(input.messages.at(-1).content).toContain('BBC');
+    return answer('体育报道：试点开放预约。来源：BBC，尚未读取报道原文。');
+  } };
+  await runAgent({ adapter, model: 'fixture', context: { dynamic: '' }, history: [], userText: '体育资讯', now: () => now, quiet: true, emit() {}, tools: [news, { name: 'web_search', input_schema: schema, run: search }, { name: 'get_sports_scores', input_schema: schema, run: scores }] });
+  expect(get).toHaveBeenCalledTimes(1); expect(search).not.toHaveBeenCalled(); expect(scores).not.toHaveBeenCalled();
 });

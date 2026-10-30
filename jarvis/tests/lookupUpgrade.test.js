@@ -14,7 +14,7 @@ const schema={type:'object',properties:{query:{type:'string'},url:{type:'string'
 it('实际对话和定时入口都先并发查新闻，主模型不用先决定搜索，原文核实工具仍可用', async()=>{
   for (const userText of ['今日新闻',scheduledPrompt({title:'每日重点新闻',prompt:'今日新闻，打开原文核实'},'2026/10/30 09:00')]) {
     const seen=[],get=vi.fn(async url=>new Response(fs.readFileSync(new URL('./fixtures/news/'+NEWS_SOURCES.find(s=>s.url===url).id+'.html',import.meta.url),'utf8')));
-    const tool=createTodayNewsTool({fetchImpl:get,now:()=>now});
+    const tool=createTodayNewsTool({fetchImpl:get,now:()=>now,newsSources:NEWS_SOURCES});
     const search=vi.fn(); const fetchPage=vi.fn(async()=> '已读取原文，正文信息');
     const adapter={stream:vi.fn(async o=>{seen.push(o);return result('今天的新闻已取得，先按实际来源整理。');})};
     const answer=await runAgent({adapter,model:'fixture',context,history:[],userText,now:()=>now,quiet:true,emit(){},tools:[tool,{name:'web_search',input_schema:schema,run:search},{name:'fetch_url',input_schema:schema,run:fetchPage}]});

@@ -41,7 +41,7 @@ export function createLookupDelivery(request, now = Date.now) {
     get hasResults() { return rows.size > 0; },
     text() {
       if (!rows.size) return failures.length ? '本轮尚未取得可交付的资料。具体卡点：\n' + failures.map(text => '- ' + text).join('\n') : '';
-      const text = '先给你已经取得的内容：\n\n' + [...rows.values()].map(item => `- **${item.title}**\n${item.summary || '来源只提供了这一标题，未取得报道正文，不补写细节。'}\n${item.publishedAt ? '发布时间：' + item.publishedAt.replace('T', ' ').replace('+08:00', '') + '（北京时间）；' : ''}来源：${item.source || ''} ${item.url}\n${['page_read', 'json_read'].includes(item.verification) ? '已读取该来源，未做独立交叉核验。' : '待核实：尚未读取报道原文。'}`).join('\n\n');
+      const text = '先给你已经取得的内容：\n\n' + [...rows.values()].map(item => `- **${item.title}**\n${item.summary || '来源只提供了这一标题，未取得报道正文，不补写细节。'}\n${item.publishedAt ? (item.timeBasis || '发布时间') + '：' + item.publishedAt.replace('T', ' ').replace('+08:00', '') + '（北京时间）；' : ''}来源：${item.source || ''} ${item.url}\n${['page_read', 'json_read'].includes(item.verification) ? '已读取该来源，未做独立交叉核验。' : '待核实：尚未读取报道原文。'}`).join('\n\n');
       return safe(text) ? text : '';
     },
     substitute(text) {

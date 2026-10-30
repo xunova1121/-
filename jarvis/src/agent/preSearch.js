@@ -55,7 +55,7 @@ export async function preSearch({ run, text, signal, timeoutMs = PRE_SEARCH_MS, 
 
 /** 搜到的结果附在用户这句话后面（写明是系统先搜的，不是用户说的） */
 export function preSearchNote({ query, output, tool }) {
-  if (tool === 'get_today_news') return `（系统已先查get_today_news，以下是实际读取的当天汇总页条目。直接整理简报并标来源和发布时间，未打开报道原文的标待核实；明确要求原文核实时再fetch_url，不重新搜索同一批。缺栏目/数量如实说明。）\n${output}`;
+  if (tool === 'get_today_news') return `（系统已先查get_today_news，以下是实际取得的当天新闻。用中文按事件整理，把不同媒体新增的信息与有依据的分歧放在同一事件下，保留来源链接；转载不当独立报道。RSS/汇总不冒充原文核实，CNA转载写明转载站及转载时间。无二来源不凑交叉核验；缺栏目/数量如实说明，不重新搜索同一批。）\n${output}`;
   if (tool === 'get_sports_scores') return `（系统已先查了赛程和比分（get_sports_scores），结果如下。按它回答：按赛事列出时间和比分，写明哪些赛事没查到、哪些项目不在查询范围；不在范围的用户又问到了再用 web_search 补。）\n${output}`;
   return `（系统已先按这句话联网搜索了一次，搜索词“${query}”，结果如下。够用就直接回答，注明来源链接和日期；不够或对不上再用 web_search / fetch_url 补查。）\n${output}`;
 }

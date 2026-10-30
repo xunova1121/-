@@ -1,5 +1,5 @@
 import { answerConstraintIssues as lookupAnswerIssues } from './answerRequirements.js';
-import { lookupComplaint, todayNewsIntent, sportsNewsIntent, SPORTS_NEWS_NOTE, NEWS_LOOKUP_NOTE, WEB_LOOKUP_NOTE } from './newsIntent.js';
+import { lookupComplaint, todayNewsIntent, sportsNewsIntent, supportsSportsNews, newsCategoryRequest, SPORTS_NEWS_NOTE, NEWS_LOOKUP_NOTE, WEB_LOOKUP_NOTE } from './newsIntent.js';
 import { createLookupDelivery } from './lookupDelivery.js';
 import { lookupPhase } from './lookupModels.js';
 import { codeWorkBlock, CODE_TASK_CORE } from './codeDevelopment.js';
@@ -264,7 +264,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   const availableTools = tools;
   let questionProfile = light ? null : questionToolProfile(requirementText, { images, history });
   tools = toolsForQuestion(tools, questionProfile);
-  if (sportsNewsOnly) tools = tools.filter(tool => !['get_sports_scores', 'get_today_news'].includes(tool.name));
+  if (sportsNewsOnly) tools = tools.filter(tool => tool.name !== 'get_sports_scores' && (tool.name !== 'get_today_news' || supportsSportsNews(tool)));
   const capabilities = capabilityBlock(availableTools);
   // 环境完全没有产物/计算核验能力时，直接说明未验收，不空转两轮模型。
   const canReview = availableTools.some(tool => /^(?:create_document|write_long_document|edit_office_document|read_file|write_file|run_javascript|run_python|computer_run|computer_read_file|verify_numbers|create_diagram|export_diagram|generate_image|sing_song|generate_video|code_read|code_edit|code_write|code_run)$/.test(tool.name));
@@ -381,7 +381,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     const nextSportsNews = !images.length && !codeWork?.enabled && sportsNewsIntent(currentRequest);
     if (sportsNewsOnly || nextSportsNews) {
       sportsNewsOnly = nextSportsNews;
-      tools = availableTools.filter(tool => !sportsNewsOnly || !['get_sports_scores', 'get_today_news'].includes(tool.name));
+      tools = availableTools.filter(tool => !sportsNewsOnly || tool.name !== 'get_sports_scores' && (tool.name !== 'get_today_news' || supportsSportsNews(tool)));
       loader = createToolLoader([...tools, ...own]); toolHint = loader.hint();
     }
     if(said.some(s=>computerTaskKind(s)==='gui')){loadGUI();toolHint=loader.hint();}
@@ -414,7 +414,13 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     }
   }
   // 明显要查实时信息的短问题：先按原话搜一次，结果随问题交给模型，一轮答完（见 preSearch.js）；问赛程比分的先查比分接口
-  const newsArgs = depth === 0 && !codeWork?.enabled && todayNewsIntent(requirementText) && loader.get('get_today_news') ? { limit: 12 } : null;
+  const asksNews = depth === 0 && !codeWork?.enabled && (todayNewsIntent(requirementText) || sportsNewsOnly);
+  const newsTool = asksNews ? loader.get('get_today_news') : null;
+  const newsCategories = asksNews ? newsCategoryRequest(requirementText) : [];
+  // 多源预查最多8读；明确逐条原文核实时默认取8条，给原有16读预算留足原文读取空间。
+  // 用户指定数量仍保留12条候选，不擅改数量；缺多少须按实际回执说明。
+  const newsLimit = /原文核实|逐条.*(?:原文|核实)|逐项核验/.test(requirementText) && !/[0-9一二三四五六七八九十]+\s*条/.test(requirementText) ? 8 : 12;
+  const newsArgs = depth === 0 && !codeWork?.enabled && (todayNewsIntent(requirementText) || sportsNewsOnly && supportsSportsNews(newsTool)) && newsTool ? { limit: newsLimit, ...(newsCategories.length && { categories: newsCategories }) } : null;
   const sportsArgs = depth === 0 && loader.get('get_sports_scores') ? sportsPreCall(requirementText) : null;
   if (depth === 0 && !light && !images.length && (newsArgs || sportsArgs || wantsPreSearch(requirementText)) && !creativeWithoutLookup(requirementText) && (newsArgs || sportsArgs || loader.get('web_search'))) {
     const found = await preSearch({

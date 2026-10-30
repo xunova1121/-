@@ -25,14 +25,14 @@ it('实际工具并发3路、逐请求先扣预算；一源卡住8秒后返回�
     if (url === NEWS_SOURCES[1].url) return new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
     return new Response(fixtures[NEWS_SOURCES.find(s => s.url === url).id]);
   });
-  const pending = createTodayNewsTool({ fetchImpl: get, now: () => now }).run({}, { retrieval: { consume } });
+  const pending = createTodayNewsTool({ fetchImpl: get, now: () => now, newsSources: NEWS_SOURCES }).run({}, { retrieval: { consume } });
   await vi.advanceTimersByTimeAsync(1); expect(starts).toHaveLength(3);
   await vi.advanceTimersByTimeAsync(8000); const result = JSON.parse(await pending);
   expect(result.items.length).toBe(3); expect(result.sources[1].error).toContain('超时');
   expect(result.items.every(i => i.verification === 'index_only')).toBe(true);
 });
 it('全部失败仍明确给每个来源的原因；不捏造任何新闻', async () => {
-  const result = JSON.parse(await createTodayNewsTool({ fetchImpl: async () => new Response('', { status: 403 }), now: () => now }).run());
+  const result = JSON.parse(await createTodayNewsTool({ fetchImpl: async () => new Response('', { status: 403 }), now: () => now, newsSources: NEWS_SOURCES }).run());
   expect(result.items).toEqual([]); expect(result.sources.every(s => /403/.test(s.error))).toBe(true);
   const delivery = createLookupDelivery('今日新闻', () => now);
   delivery.record({ name: 'get_today_news', ok: true, output: JSON.stringify(result) });
@@ -40,9 +40,9 @@ it('全部失败仍明确给每个来源的原因；不捏造任何新闻', asyn
 });
 it('用户停止及预算用完继续上抛，不伪装成来源失败', async () => {
   const ctrl = new AbortController(); ctrl.abort(Object.assign(new Error('已停止'), { name: 'AbortError' }));
-  const get = vi.fn(); await expect(createTodayNewsTool({ fetchImpl: get }).run({}, { signal: ctrl.signal })).rejects.toMatchObject({ name: 'AbortError' }); expect(get).not.toHaveBeenCalled();
+  const get = vi.fn(); await expect(createTodayNewsTool({ fetchImpl: get, newsSources: NEWS_SOURCES }).run({}, { signal: ctrl.signal })).rejects.toMatchObject({ name: 'AbortError' }); expect(get).not.toHaveBeenCalled();
   const error = Object.assign(new Error('预算'), { code: 'RETRIEVAL_BUDGET' });
-  await expect(createTodayNewsTool({ fetchImpl: get }).run({}, { retrieval: { consume: () => { throw error; } } })).rejects.toBe(error);
+  await expect(createTodayNewsTool({ fetchImpl: get, newsSources: NEWS_SOURCES }).run({}, { retrieval: { consume: () => { throw error; } } })).rejects.toBe(error);
 });
 it('新闻简报/定时任务识别；抱怨、历史日期不能变成今日检索', () => {
   for (const s of ['今日新闻', '今天重点新闻', '每日重点新闻', '新闻简报', scheduledPrompt({ title: '每日重点新闻', prompt: '今日新闻，打开原文核实' }, '2026/10/30 09:00')]) expect(todayNewsIntent(s), s).toBe(true);

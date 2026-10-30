@@ -9,7 +9,7 @@ import { DEFAULT_CONFIG } from '../../src/llm/config.js';
 const data = process.env.JARVIS_DATA;
 let upstream = 0, models = 0;
 const stats = () => fs.writeFileSync(path.join(data, 'news-stats.json'), JSON.stringify({ upstream, models }));
-const hosts = ['www.cnfin.com', 'news.cnr.cn', 'www.chinanews.com.cn', 'data.example.com', 'private.example.com'];
+const hosts = ['www.cnfin.com', 'news.cnr.cn', 'www.chinanews.com.cn', 'feeds.bbci.co.uk', 'www.channelnewsasia.com', 'www.theguardian.com', 'www.aljazeera.com', 'data.example.com', 'private.example.com'];
 const originalLookup = dns.lookup.bind(dns);
 dns.lookup = (host, options) => hosts.includes(host) ? Promise.resolve([{ address: host === 'private.example.com' ? '127.0.0.1' : '93.184.216.34', family: 4 }]) : originalLookup(host, options);
 const originalFetch = globalThis.fetch;
@@ -19,9 +19,19 @@ globalThis.fetch = async (address, init) => {
   if (!hosts.includes(url.hostname)) throw TypeError('隔离测试不访问外部网络');
   upstream++; stats();
   if (url.hostname === 'data.example.com') return url.pathname === '/redirect' ? new Response('', { status: 302, headers: { location: 'https://169.254.169.254/latest/meta-data' } }) : Response.json({ count: 18, unit: '条', date: '2026-10-30' });
+  const today = new Date(Date.now() + 28800000).toISOString().slice(0, 10);
+  if (url.hostname === 'www.channelnewsasia.com' && /^\/(?:world|sport)\/fixture-/.test(url.pathname)) {
+    const id = url.pathname.at(-1);
+    return new Response(`<script type="application/ld+json">${JSON.stringify({ '@type': 'NewsArticle', mainEntityOfPage: url.href, datePublished: today + 'T00:00:00+08:00' })}</script><div class="source source--with-label">Source: ${id === '3' ? 'Reuters' : 'AFP'}/fs</div>`);
+  }
+  if (['feeds.bbci.co.uk', 'www.channelnewsasia.com', 'www.theguardian.com', 'www.aljazeera.com'].includes(url.hostname)) {
+    const file = url.hostname === 'www.channelnewsasia.com' ? 'reuters-cna.xml' : 'bbc.xml';
+    let xml = fs.readFileSync('tests/fixtures/news/' + file, 'utf8').replaceAll('Fri, 30 Oct 2026 01:00:00 GMT', new Date(today + 'T00:00:00+08:00').toUTCString());
+    if (url.pathname.includes('/sport/') || url.searchParams.get('category') === '10296') xml = xml.replaceAll('虚构国际报道', '虚构体育报道').replaceAll('/world/fixture-', '/sport/fixture-');
+    return new Response(xml.replaceAll('www.bbc.com', url.hostname === 'www.theguardian.com' ? 'www.theguardian.com' : url.hostname === 'www.aljazeera.com' ? 'www.aljazeera.com' : 'www.bbc.com'), { headers: { 'Content-Type': 'application/rss+xml' } });
+  }
   const id = { 'www.cnfin.com': 'cnfin', 'news.cnr.cn': 'cnr', 'www.chinanews.com.cn': 'cns' }[url.hostname];
   if (!id) throw Error('私网不应发出请求');
-  const today = new Date(Date.now() + 28800000).toISOString().slice(0, 10);
   const yesterday = new Date(Date.now() - 86400000 + 28800000).toISOString().slice(0, 10);
   const html = fs.readFileSync('tests/fixtures/news/' + id + '.html', 'utf8').replaceAll('2026-10-29', yesterday).replaceAll('20261029', yesterday.replaceAll('-', '')).replaceAll('2026-10-30', today).replaceAll('20261030', today.replaceAll('-', '')).replaceAll('2026/10-30', today.replaceAll('-', '/').replace(/\/(\d{2})$/, '-$1')).replaceAll('10-30 ', today.slice(5) + ' ');
   // 虚构条目统一当日零点发布，避免清晨/跨天打包时测试数据落到未来；生产日期校验不放宽。
