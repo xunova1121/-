@@ -42,6 +42,8 @@ jobs:
           cache: npm
           cache-dependency-path: jarvis/package-lock.json
       - run: npm ci --no-audit --no-fund
+      - name: 原SVG测试所需系统依赖
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: npm test
   skill-build:
     if: github.event_name == 'workflow_dispatch' && inputs.skill_only == true
@@ -178,7 +180,10 @@ jobs:
           npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends fonts-wqy-microhei fonts-noto-cjk
+          sudo apt-get install -y --no-install-recommends fonts-wqy-microhei fonts-noto-cjk ffmpeg
+          mkdir -p "$RUNNER_TEMP/weather-check"
+          ffmpeg -version > "$RUNNER_TEMP/weather-check/environment.log"
+          node --version >> "$RUNNER_TEMP/weather-check/environment.log"
       - name: 天气数据与显示守护
         run: npx vitest run tests/homepageWeather.test.js tests/qweather.test.js tests/weatherPresentation.test.js tests/homeWeatherRouting.test.js
       - name: 同源码全量检查（只读，不打包发版）
