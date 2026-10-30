@@ -1,22 +1,52 @@
-:root body #inputbar .composer-row > #project-chip {
-  grid-column: 2;
-  grid-row: 2;
-  justify-self: end;
-  align-self: center;
-  min-height: 38px;
-  max-width: 48px;
-  padding: 6px 8px;
-  font-size: 12px;
-  border: 1px solid var(--line, #dedbe8);
-  border-radius: 12px;
-  background: var(--chip-bg, #f1eef7);
-  color: var(--muted, #655e77);
+/* 项目入口放进导航，输入区只保留写消息相关操作。 */
+.drawer-project-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 60px;
+  padding: 12px 15px;
+  margin: 0 0 16px;
+  border: 1px solid var(--border, #e6e1ef);
+  border-radius: 16px;
+  background: var(--surface-2, #fff);
+  color: var(--text, #34323e);
+  text-align: left;
   cursor: pointer;
 }
-:root body #inputbar .composer-row:has(> #project-chip) > #model-chip {
-  max-width: calc(100% - 52px);
+.drawer-project-entry > svg {
+  width: 23px;
+  height: 23px;
+  fill: none;
+  stroke: var(--accent, #9270dd);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+.drawer-project-entry > span {
+  flex: 1;
+  min-width: 0;
+}
+.drawer-project-entry strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.drawer-project-entry small {
+  display: block;
+  color: var(--muted, #817b8f);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.drawer-project-entry > i {
+  font-style: normal;
+  font-size: 22px;
+  color: var(--muted, #817b8f);
 }
 .code-project-dialog {
+  box-sizing: border-box;
   width: min(560px, calc(100vw - 24px));
   max-height: 88dvh;
   padding: 24px;

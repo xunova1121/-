@@ -1,3 +1,4 @@
+import { createModelLocalOptions } from './modelLocalOptions.js';
 import { testDeepseekSearch } from '../agent/deepseekSearch.js';
 /** 模型工作台：分位置读写配置，界面细节放在ui，不改任务执行中的运行位置。 */
 import { createModelScopes } from '../llm/modelScopes.js';
@@ -10,6 +11,7 @@ import { $, toast } from './env.js';
 
 export function createModelWorkspace(app) {
   let scope = app.server ? 'server' : 'local';
+  const localOptions = createModelLocalOptions();
   const getClient = () => {
     const settings = loadServerSettings();
     return settings.url && settings.token ? createServerClient({ base: settings.url, token: settings.token }) : null;
@@ -27,6 +29,7 @@ export function createModelWorkspace(app) {
     }
   });
   const workspace = {
+    openLocalOptions: localOptions.openLocalOptions,
     get scope() {
       return scope;
     },

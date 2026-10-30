@@ -393,7 +393,13 @@ export function initModelLibrary({ root, workspace, toast }) {
     const message = node('p', { className: 'ml-notice', role: 'status', textContent: notice });
     root.append(message);
     if (pullController) root.append(button('停止拉取', () => pullController.abort(), 'ml-link'));
-    if (!cfg) return;
+    const localTools = button('本机连接与选项', () => workspace.openLocalOptions(), 'ml-local-tools');
+    localTools.setAttribute('aria-label', '本机连接与选项');
+    // 本机诊断不依赖云端配置读取成功，断网时仍保留入口。
+    if (!cfg) {
+      root.append(localTools);
+      return;
+    }
     const providers = configuredProviders(cfg, workspace.gateway()?.keys);
     if (mobile && !providers.some((meta) => meta.id === catalogProvider)) catalogProvider = providers[0]?.id || '';
     const pages = mobile
@@ -501,6 +507,7 @@ export function initModelLibrary({ root, workspace, toast }) {
       );
       root.append(node('footer', { className: 'mc-footer' }, addProvider, node('small', { textContent: '配置按位置独立保存' })));
     }
+    root.append(localTools);
     root.querySelectorAll('button,input,select').forEach((control) => {
       if (busy && control.textContent !== '停止拉取') control.disabled = true;
     });

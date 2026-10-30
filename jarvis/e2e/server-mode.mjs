@@ -79,6 +79,7 @@ try {
   check('输入框里显示服务器上设的模型', /^云端/.test(await page.locator('#model-chip-text').textContent()));
   // 本机设置不自动覆盖服务器；新界面明确编辑服务器模型。
   await page.evaluate(() => window.__jarvis.showPanel('models'));
+  await page.getByRole('button', { name: '本机连接与选项', exact: true }).click();
   await page.locator('#model-advanced').evaluate(element => element.open = true);
   await page.selectOption('#llm-provider', 'custom');
   await page.fill('#llm-base', 'https://example.invalid/v1');
@@ -87,6 +88,7 @@ try {
   await page.click('#btn-llm-save');
   await page.waitForTimeout(1000);
   check('本机修改不会覆盖服务器模型或密钥', !fs.existsSync(path.join(dataDir, 'config.json')) || !fs.readFileSync(path.join(dataDir, 'config.json'), 'utf8').includes('sk-local-only'));
+  await page.evaluate(() => document.querySelector('#model-tools-dialog').close());
   await page.locator('#model-workspace .ml-add-select').selectOption('custom');
   await page.locator('.ml-provider').filter({hasText:'自定义（OpenAI 兼容）'}).getByRole('button', {name:'配置 ›',exact:true}).click();
   const editor=page.locator('.ml-editor');

@@ -371,7 +371,7 @@
         <label class="field" for="fal-key"><span>fal.ai Key（让未央把写好的歌唱出来：有人声、有伴奏）</span><input type="password" id="fal-key" placeholder="fal 的 API Key" autocomplete="off" /></label>
         <p class="note">用 fal.ai 上的 MiniMax Music 2.0 作曲演唱，按次收费（约 0.03 美元一首，以 fal 官网为准），一首要一两分钟。fal 是海外服务，国内网络可能不稳定。申请：打开 <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener">fal.ai/dashboard/keys</a> 登录后创建 Key，复制粘贴到上面。不填就不能唱，只写歌词。云服务器用的 Key 在上面切到“云服务器”后填写。</p>
         </div>
-        <details id="model-advanced" class="ml-advanced"><summary>高级 · 本机：连接测试、本机模型、直接填写服务商</summary>
+        <details id="model-advanced" class="ml-advanced"><summary>手动连接诊断</summary>
         <p class="note">以下只修改本机，不会自动同步到云服务器。服务器配置请在上方选择“云服务器”。</p>
         <label class="field" for="llm-provider"><span>服务商</span><select id="llm-provider"></select></label>
         <p class="note" id="llm-note" hidden></p>
@@ -396,7 +396,7 @@
           <button class="btn ghost sm" type="submit">下载</button>
         </form>
         </details>
-        <p class="muted small">密钥只保存在这台电脑的浏览器里，请求直接发往服务商（或经由你本机的网关）。不要在公用电脑上保存密钥。</p>
+
       </section>
 
       <!-- 系统 -->
