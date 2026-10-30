@@ -47,7 +47,7 @@ try{
   await page.goto(BASE);await page.waitForSelector('body.compact.companion-edition');
   await page.evaluate(()=>document.documentElement.classList.add('mobile-app'));
   await page.waitForFunction(()=>window.__jarvis&&document.querySelector('#app-splash')?.hidden!==false);await page.waitForTimeout(400);
-  await page.waitForFunction(()=>document.querySelector('.home-city b')?.textContent.includes('23°'));
+  await page.waitForFunction(()=>document.querySelector('.home-weather-temp')?.textContent==='23°');
   check('首页自动定位城市、真实数据渲染，不需要手动选择',await page.evaluate(()=>window.__weatherLocations===1&&document.querySelector('.home-city b').textContent.includes('上海')));
   check('首页问候与未央不重叠，卡片不横向溢出',await page.evaluate(()=>{const h=document.querySelector('.home-hero-copy').getBoundingClientRect(),p=document.querySelector('.home-pet').getBoundingClientRect();return p.bottom<=h.top+1&&document.documentElement.scrollWidth<=innerWidth;}));
   check('首次首页从日期天气开始，顶部不会被自动滚动裁掉',await page.evaluate(()=>{const weather=document.querySelector('.home-weather').getBoundingClientRect(),header=document.querySelector('.topbar').getBoundingClientRect();return weather.top>=header.bottom-1&&document.querySelector('#transcript').scrollTop===0;}));

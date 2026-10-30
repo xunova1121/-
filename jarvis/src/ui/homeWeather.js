@@ -1,4 +1,6 @@
-import { POPULAR_CITIES, weatherKind, weatherAdvice, cityKey } from '../core/weather.js';
+import { renderWeatherDetails, weatherOverview, weatherTravelAdvice } from './weatherDetails.js';
+import './weatherCard.css';
+import { POPULAR_CITIES, weatherKind, cityKey } from '../core/weather.js';
 
 export function weatherSVG(kind = 'sun', night = false) {
   const paths = {
@@ -38,16 +40,18 @@ let sessionLocation;
 const locateOnce = () => (sessionLocation ??= locateWeatherCity());
 export function createHomeWeather({ client, onAdvice, locate = locateOnce } = {}) {
   const root = node('section', undefined, 'home-weather');
+  root.id = 'homepage-weather';
   root.setAttribute('aria-label', '日期与天气');
   root.innerHTML =
-    '<div class="home-weather-top"><span class="home-date"></span><div class="home-city"><button type="button" class="home-weather-details" aria-label="查看天气详情"><span class="home-weather-icon"></span></button><b>选择城市</b><button type="button" class="home-weather-location" aria-label="切换天气位置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button></div></div><div class="home-weather-bottom"><span class="home-weather-summary" role="status">选个城市，看看出门的天气</span></div>';
+    '<div class="home-weather-top"><span class="home-date"></span><div class="home-city"><button type="button" class="home-weather-details" aria-label="查看天气详情"><span class="home-weather-icon"></span><span class="home-weather-place"><b>选择城市</b><small class="home-weather-condition">查看天气</small></span><strong class="home-weather-temp">—</strong></button><button type="button" class="home-weather-location" aria-label="切换天气位置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button></div></div><div class="home-weather-bottom"><span class="home-weather-summary" role="status">选个城市，看看出门的天气</span></div>';
   root.querySelector('.home-date').textContent = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'long', timeZone: 'Asia/Shanghai' })
     .format(new Date())
     .replace('日', '日 · ');
   const dialog = node('dialog', undefined, 'weather-dialog');
+  dialog.id = 'homepage-weather-dialog';
   dialog.setAttribute('aria-labelledby', 'weather-dialog-title');
   dialog.innerHTML =
-    '<header><h2 id="weather-dialog-title">选择城市</h2><button type="button" class="weather-close" aria-label="关闭天气">×</button></header><div class="weather-city-view"><p class="weather-privacy">选择城市即可查看天气；使用定位时只查询约公里级位置，不持续定位。</p><form class="weather-search"><input aria-label="搜索天气城市" placeholder="输入城市名，如杭州" maxlength="80"><button type="submit">搜索</button></form><button type="button" class="weather-locate">⌖ 使用当前位置</button><p class="weather-message" role="status"></p><div class="weather-city-results"></div><button type="button" class="weather-clear">关闭首页天气</button><p class="weather-attribution">城市检索数据：<a href="https://www.geonames.org/" target="_blank" rel="noopener noreferrer">GeoNames</a></p></div><div class="weather-detail-view" hidden><div class="weather-current"></div><p class="weather-detail-advice"></p><div class="weather-alerts"></div><div class="weather-extra"></div><div class="weather-hours"></div><div class="weather-days"></div><div class="weather-indices"></div><p class="weather-updated"></p><div class="weather-detail-actions"><button type="button" class="weather-change">切换城市</button><button type="button" class="weather-refresh">刷新天气</button></div><p class="weather-attribution weather-source">天气数据：<a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a> · 预报仅供出行参考</p></div>';
+    '<header><h2 id="weather-dialog-title">选择城市</h2><button type="button" class="weather-close" aria-label="关闭天气">×</button></header><div class="weather-city-view"><p class="weather-privacy">选择城市即可查看天气；使用定位时只查询约公里级位置，不持续定位。</p><form class="weather-search"><input aria-label="搜索天气城市" placeholder="输入城市名，如杭州" maxlength="80"><button type="submit">搜索</button></form><button type="button" class="weather-locate">⌖ 使用当前位置</button><p class="weather-message" role="status"></p><div class="weather-city-results"></div><button type="button" class="weather-clear">关闭首页天气</button><p class="weather-attribution">城市检索数据：<a href="https://www.geonames.org/" target="_blank" rel="noopener noreferrer">GeoNames</a></p></div><div class="weather-detail-view" hidden><div class="weather-current"></div><div class="weather-alerts"></div><p class="weather-detail-advice"></p><section class="weather-metrics-section"><h3>天气详情</h3><div class="weather-extra"></div></section><section class="weather-hours-section"><h3>逐小时预报 <small>左右滑动查看</small></h3><div class="weather-hours"></div></section><section class="weather-days-section"><h3 class="weather-days-heading">未来天气</h3><div class="weather-days"></div></section><section class="weather-life-section"><h3>生活建议 <small>和风生活指数</small></h3><div class="weather-indices"></div></section><p class="weather-updated"></p><div class="weather-detail-actions"><button type="button" class="weather-change">切换城市</button><button type="button" class="weather-refresh">刷新天气</button></div><p class="weather-attribution weather-source">天气数据：<a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a> · 预报仅供出行参考</p></div>';
   document.body.append(dialog);
   const $ = (s) => dialog.querySelector(s),
     results = $('.weather-city-results');
@@ -138,102 +142,30 @@ export function createHomeWeather({ client, onAdvice, locate = locateOnce } = {}
     searchId++;
     locationId++;
     searchCtrl?.abort();
-    previousFocus?.focus();
+    previousFocus?.focus({ preventScroll: true });
   });
   dialog.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') e.stopPropagation();
   });
-  // 和风天气才有的维度：实况细节、预警、逐小时、生活指数（Open-Meteo 没有这些，就都不显示）
-  const renderExtra = (data) => {
-    const x = data?.extra,
-      qw = data?.source === 'qweather';
-    const grid = $('.weather-extra'),
-      hours = $('.weather-hours'),
-      idx = $('.weather-indices'),
-      alerts = $('.weather-alerts');
-    grid.replaceChildren();
-    hours.replaceChildren();
-    idx.replaceChildren();
-    alerts.replaceChildren();
-    $('.weather-source').innerHTML = qw
-      ? '天气数据：<a href="https://www.qweather.com/" target="_blank" rel="noopener noreferrer">和风天气</a> · 预报仅供出行参考'
-      : '天气数据：<a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a> · 预报仅供出行参考';
-    if (!x) return;
-    for (const a of x.alerts || []) {
-      const row = node('div', undefined, 'weather-alert');
-      row.append(node('b', a.title), node('span', (a.text || '').slice(0, 90)));
-      alerts.append(row);
-    }
-    const today = data.days?.[0],
-      put = (label, value) => {
-        if (value === null || value === undefined || value === '') return;
-        const cell = node('div', undefined, 'weather-metric');
-        cell.append(node('small', label), node('b', String(value)));
-        grid.append(cell);
-      };
-    put('体感', x.feels === null ? null : `${Math.round(x.feels)}°`);
-    put('湿度', x.humidity === null ? null : `${x.humidity}%`);
-    put('风', x.wind?.replace(/（.*$/, ''));
-    put('空气', x.air?.aqi == null ? null : `${x.air.aqi} ${x.air.category}`);
-    put('紫外线', today?.uv == null ? null : today.uv);
-    put('能见度', x.vis === null ? null : `${x.vis} km`);
-    put('气压', x.pressure === null ? null : `${x.pressure} hPa`);
-    put('日出 / 日落', today?.sunrise ? `${today.sunrise}–${today.sunset}` : null);
-    if (x.rainSoon) {
-      const p = node('p', x.rainSoon, 'weather-rain-soon');
-      grid.append(p);
-    }
-    for (const h of (x.hourly || []).slice(0, 24).filter((_, i) => i % 2 === 0)) {
-      const item = node('div', undefined, 'weather-hour'),
-        icon = node('span');
-      icon.innerHTML = weatherSVG(weatherKind(h.code).icon);
-      item.append(node('small', h.time), icon, node('b', degrees(h.temp)), node('small', h.pop == null ? '' : `${h.pop}%`));
-      hours.append(item);
-    }
-    for (const i of x.indices || []) {
-      const item = node('div', undefined, 'weather-index');
-      item.title = i.text;
-      item.append(node('small', i.name.replace(/指数$/, '')), node('b', i.category));
-      idx.append(item);
-    }
-  };
   const unsubscribe = client.subscribe((state) => {
     const { city, data, status, stale, error } = state,
       kind = weatherKind(data?.code);
-    root.querySelector('.home-city b').textContent = city ? `${city.name.replace(/市$/, '')}${data ? ' · ' + degrees(data.temp) : ''}` : '选择城市';
+    root.querySelector('.home-city b').textContent = city ? city.name.replace(/市$/, '') : '选择城市';
+    root.querySelector('.home-weather-temp').textContent = data ? degrees(data.temp) : '—';
+    root.querySelector('.home-weather-condition').textContent = weatherOverview(data, { stale });
+    root.querySelector('.home-weather-details').setAttribute('aria-label', city ? `查看${city.name}天气详情${data ? '，' + degrees(data.temp) : ''}` : '查看天气详情');
     root.querySelector('.home-weather-location').setAttribute('aria-label', city ? `切换天气位置，当前${city.name}` : '切换天气位置');
     root.querySelector('.home-weather-icon').innerHTML = weatherSVG(data ? kind.icon : 'cloud', data && !data.isDay);
     root.querySelector('.home-weather-summary').textContent = data
-      ? `${stale ? '缓存 · ' : ''}${data.text || kind.label} · ${degrees(data.days[0]?.low)}–${degrees(data.days[0]?.high)}`
+      ? `${stale ? '缓存 · ' : ''}${weatherTravelAdvice(data, { stale })}`
       : status === 'loading'
         ? '正在看看天气…'
         : error
           ? '天气暂不可用，点击重试'
           : '选个城市，看看出门的天气';
-    const advice = weatherAdvice(data, { stale });
+    const advice = weatherTravelAdvice(data, { stale });
     onAdvice?.(advice);
-    const current = $('.weather-current');
-    current.replaceChildren(
-      node('strong', city?.name || '尚未选择城市'),
-      node('b', data ? degrees(data.temp) : '—'),
-      node('span', data ? data.text || kind.label : status === 'loading' ? '正在获取天气…' : error || '请选择城市')
-    );
-    $('.weather-detail-advice').textContent = advice;
-    $('.weather-days').replaceChildren();
-    for (const day of data?.days || []) {
-      const item = node('div', undefined, 'weather-day'),
-        icon = node('span');
-      icon.innerHTML = weatherSVG(weatherKind(day.code).icon);
-      item.append(
-        node('b', day.date.slice(5).replace('-', '/')),
-        icon,
-        node('span', day.text || weatherKind(day.code).label),
-        node('strong', `${degrees(day.low)} / ${degrees(day.high)}`),
-        node('small', day.rain !== null && day.rain !== undefined ? `降雨概率 ${day.rain}%` : day.wind || '降雨概率暂无')
-      );
-      $('.weather-days').append(item);
-    }
-    renderExtra(data);
+    renderWeatherDetails(dialog, { city, data, status, stale, error, advice }, weatherSVG);
     $('.weather-updated').textContent = data ? `${stale ? '缓存数据 · ' : ''}资料时间 ${data.at.replace('T', ' ')}${error ? ' · 暂未更新' : ''}` : error;
   });
   let autoCancelled = false;
