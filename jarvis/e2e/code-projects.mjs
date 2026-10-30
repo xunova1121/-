@@ -17,15 +17,11 @@ try {
     page.on('pageerror', (e) => errors.push(e.message));
     await page.goto(base + '/e2e/fixtures/code-projects.html');
     await page.waitForFunction(() => window.fixtureReady);
-    const rectangles = await page.locator('#model-chip,#project-chip').evaluateAll((es) =>
-      es.map((e) => {
-        const r = e.getBoundingClientRect();
-        return { left: r.left, right: r.right };
-      })
-    );
-    assert(rectangles[0].right <= rectangles[1].left + 1);
-    checks++;
-    await page.getByRole('button', { name: '项目与GitHub仓库' }).click();
+    assert.equal(await page.locator('.composer-row #project-chip').count(), 0, '项目不占用输入框');
+    assert.equal(await page.locator('#project-chip').isVisible(), false, '旧调用目标不重复显示');
+    assert.equal(await page.getByRole('button', { name: '代码项目', exact: true }).count(), 1, '导航保留项目入口');
+    checks += 3;
+    await page.getByRole('button', { name: '代码项目', exact: true }).click();
     await page.getByText('GitHub · demo', { exact: true }).waitFor();
     assert.equal(await page.getByRole('link', { name: 'demo/example' }).getAttribute('href'), 'https://github.com/demo/example');
     checks++;

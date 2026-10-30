@@ -21,13 +21,14 @@ const check = (name, ok, detail = '') => {
 };
 
 /** 工作台：功能页是整页打开的（对话区隐藏），用测试接口直接打开 / 关闭 */
-const openPanel = (page, name) => page.evaluate((n) => window.__jarvis.showPanel(n), name);
+const openPanel = (page, name) => page.evaluate((n) => { document.querySelector('#model-tools-dialog')?.close(); window.__jarvis.showPanel(n); }, name);
 const closeSide = (page) => page.evaluate(() => { document.body.classList.add('side-closed'); document.body.classList.remove('side-open'); });
 /** 工作台的“对话 / 工作室”切换：粒子舞台只在工作室里显示 */
 const studio = async (page, on) => { await closeSide(page); await page.click(`.wb-tabs button:nth-child(${on ? 2 : 1})`); await page.waitForTimeout(300); };
 
 /** 发一条消息并等这一轮结束 */
 async function ask(page, q, timeout = 40000) {
+  await page.evaluate(() => { const tools = document.querySelector('#model-tools-dialog'); if (tools?.open) tools.close(); });
   const before = await page.locator('#transcript .msg.agent').count();
   if (await page.isVisible('#prompt')) {
     await page.fill('#prompt', q);
@@ -424,6 +425,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
 
   // —— 缺少密钥时引导到模型面板
   await openPanel(page, 'models');
+  await page.getByRole('button', { name: '本机连接与选项', exact: true }).click();
   await page.locator('#model-advanced').evaluate(element => element.open = true);
   await page.selectOption('#llm-provider', 'deepseek');
   await page.fill('#llm-key', '');
@@ -433,6 +435,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
 
   // —— OpenAI 兼容接口（本地假服务端）：流式文本 + 分片工具调用 + 第二轮回传
   const fake = await fakeOpenAI();
+  await page.getByRole('button', { name: '本机连接与选项', exact: true }).click();
   await page.selectOption('#llm-provider', 'custom');
   await page.fill('#llm-base', fake.url);
   await page.fill('#llm-model', 'fake-model');
@@ -486,9 +489,12 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('关闭模型分工后用默认模型', fake.seen[rIdx]?.model === 'fake-model', fake.seen[rIdx]?.model);
   fake.server.close();
   await openPanel(page, 'models');
+  await page.getByRole('button', { name: '本机连接与选项', exact: true }).click();
   await page.locator('#model-advanced').evaluate(element => element.open = true);
   await page.selectOption('#llm-provider', 'mock');
   await page.click('#btn-llm-save');
+
+  await page.evaluate(() => document.querySelector('#model-tools-dialog').close());
 
   // —— 科幻声线：云端语音（假服务）→ 效果链 → 真实音量驱动光核
   check('有本机网关、没有百炼密钥时，自动选免费在线声音', /当前使用：免费在线声音/.test(await page.textContent('#tts-note')) && (await page.locator('#tts-voice option').count()) >= 8, await page.textContent('#tts-note'));

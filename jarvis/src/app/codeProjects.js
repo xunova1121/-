@@ -1,16 +1,17 @@
 import '../ui/codeProjects.css';
 /** 项目与分支以服务器持久记录为准，不把令牌或工作副本路径写入浏览器存储。 */
 export function createCodeProjectsUI(app) {
-  const bar = document.querySelector('#model-chip');
-  if (!bar) return {};
+  if (!document.querySelector('#model-chip')) return {};
   const chip = document.createElement('button');
   chip.id = 'project-chip';
   chip.type = 'button';
   chip.className = 'project-chip';
-  chip.textContent = '项目';
+  chip.textContent = '代码项目';
+  // 保留旧侧栏调用的目标，实际入口统一放导航，不占输入框。
+  chip.hidden = true;
   chip.setAttribute('aria-label', '项目与GitHub仓库');
   chip.setAttribute('aria-haspopup', 'dialog');
-  bar.after(chip);
+  document.body.append(chip);
   const dialog = document.createElement('dialog');
   dialog.className = 'code-project-dialog';
   dialog.setAttribute('aria-label', '项目与GitHub仓库');
@@ -160,10 +161,30 @@ export function createCodeProjectsUI(app) {
       requests.append(card);
     }
   }
-  chip.addEventListener('click', () => {
-    dialog.showModal();
+  let returnFocus = null;
+  const openCodeProjects = () => {
+    const fromDrawer = document.activeElement?.closest('#drawer');
+    returnFocus = fromDrawer ? document.querySelector('#btn-menu') : document.activeElement;
+    app.drawer?.close();
+    if (!dialog.open) dialog.showModal();
     run(async () => {});
+  };
+  chip.addEventListener('click', openCodeProjects);
+  dialog.addEventListener('close', () => {
+    if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
   });
+  // App使用原生抽屉；PC沿用workbench已有的“代码项目”导航。
+  const drawer = document.querySelector('#drawer');
+  if (drawer && !drawer.querySelector('[data-destination="code-projects"]')) {
+    const entry = document.createElement('button');
+    entry.type = 'button';
+    entry.className = 'drawer-project-entry';
+    entry.dataset.destination = 'code-projects';
+    entry.innerHTML =
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v11H3zM3 7V4h7l2 3"/><path d="m10 12-3 3 3 3m4-6 3 3-3 3"/></svg><span><strong>代码项目</strong><small>GitHub · 项目与分支</small></span><i aria-hidden="true">›</i>';
+    entry.addEventListener('click', openCodeProjects);
+    drawer.querySelector('.drawer-new')?.after(entry);
+  }
   dialog.querySelector('[data-close]').addEventListener('click', () => dialog.close());
   for (const [selector, action] of [
     [
@@ -189,5 +210,5 @@ export function createCodeProjectsUI(app) {
       event.preventDefault();
       run(() => action(event.currentTarget));
     });
-  return { refreshCodeProjects: refresh };
+  return { refreshCodeProjects: refresh, openCodeProjects };
 }

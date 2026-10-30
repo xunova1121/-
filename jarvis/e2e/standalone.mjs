@@ -17,6 +17,7 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? '✓' : '✗'} ${name}${detail ? ` — ${String(detail).slice(0, 140)}` : ''}`);
 };
 async function ask(page, q) {
+  await page.evaluate(() => { const tools = document.querySelector('#model-tools-dialog'); if (tools?.open) tools.close(); });
   // 工作台：功能页整页打开时对话区隐藏，先回到对话
   await page.evaluate(() => { document.body.classList.add('side-closed'); document.body.classList.remove('side-open'); });
   const before = await page.locator('#transcript .msg.agent').count();
@@ -70,6 +71,7 @@ check('记住信息', /我在上海工作/.test(await page.textContent('#mind-li
 await page.screenshot({ path: `${OUT}/standalone.png` });
 
 await page.evaluate((n) => window.__jarvis.showPanel(n), 'models');
+await page.getByRole('button', { name: '本机连接与选项', exact: true }).click();
 await page.locator('#model-advanced').evaluate(element => element.open = true);
 await page.selectOption('#llm-provider', 'qwen');
 check('不允许浏览器直连的服务商有提示', /启动\.bat/.test(await page.textContent('#llm-note')));
@@ -105,6 +107,7 @@ check('无页面错误', errors.length === 0, errors.join(' | '));
   await p2.evaluate(() => window.__jarvis.showPanel('models'));
   await p2.waitForFunction(() => /已连网关/.test(document.querySelector('#gw-badge').textContent), null, { timeout: 20000 }).catch(() => {});
   check('自动连上本机网关', /已连网关/.test(await p2.textContent('#gw-badge')));
+  await p2.getByRole('button', { name: '本机连接与选项', exact: true }).click();
   await p2.locator('#model-advanced').evaluate(element => element.open = true);
   await p2.selectOption('#llm-provider', 'custom');
   await p2.fill('#llm-base', `http://relay-${relay.address().port}.test:${relay.address().port}/v1`);

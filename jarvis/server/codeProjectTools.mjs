@@ -6,7 +6,7 @@ export function codeProjectTools(projects, sessionId) {
     tool('project_list', '查看本对话当前项目、最近项目、真实副本和待确认操作。', schema({}), () => projects.list(sessionId)),
     tool(
       'project_prepare',
-      '用户要新建项目时，准备GitHub建仓确认卡；默认私有，name用英文仓库名，title可中文。右下角项目菜单确认后才创建远程仓库与工作分支；此回执不是已创建。',
+      '用户要新建项目时，准备GitHub建仓确认卡；默认私有，name用英文仓库名，title可中文。菜单或侧栏的“代码项目”确认后才创建远程仓库与工作分支；此回执不是已创建。',
       schema(
         {
           name: { type: 'string', maxLength: 80 },
