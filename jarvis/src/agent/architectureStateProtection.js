@@ -87,6 +87,11 @@ export async function assertArchitectureToolCall(name, args, options = {}) {
     for (const key of outputs) if (typeof args?.[key] === 'string') await assertArchitectureWriteAllowed(args[key], undefined, options);
     return;
   }
+  // 文档可省略新建路径或另存路径；真正受管目标仍逐项检查，不放开底层回写保护。
+  if (['create_document', 'edit_office_document'].includes(name)) {
+    args = { ...args };
+    for (const key of ['path', 'source_path', 'save_as']) if (typeof args[key] === 'string' && !args[key].trim()) delete args[key];
+  }
   const targets = [...targetPaths(args), ...patchTargets(args)];
   if (targets.length > 1000) throw Object.assign(new Error('文件目标超过1000项，不能只检查一部分'), { code: 'ARCHITECTURE_STATE_ARGS', kind: 'input' });
   for (const target of targets) await assertArchitectureWriteAllowed(target.path, target.data, options);

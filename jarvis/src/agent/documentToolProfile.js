@@ -7,3 +7,14 @@ export const DOCUMENT_TASK_CORE = new Set([
   'execution_capabilities', 'verify_numbers', 'preview', 'tool_search',
   'web_search', 'fetch_url', 'get_current_time'
 ]);
+
+/** 已有内容整理无需重启调研和专业分节；仍保留完整文件/内容检查。 */
+export function simpleDocumentTask(request) {
+  const text = String(request || '');
+  return text.length <= 600 && /Word|PPT|文档|幻灯片/i.test(text)
+    && /上面|上述|刚才|这些|整理成|做一份清爽|再做一份/.test(text)
+    && !/调研|研究|搜集|搜索|联网|补充资料|标书|论文|完整方案|逐条核实/.test(text);
+}
+export function documentRouteNote(request) {
+  return simpleDocumentTask(request) ? '本轮是把已有内容整理为文件，直接用create_document并保留原内容；不要重新调研或升级为write_professional_document，仍执行真实文件和交付检查。' : '';
+}

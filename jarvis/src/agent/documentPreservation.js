@@ -39,7 +39,7 @@ export async function formattingSource({ request, sessionId, sourceId, sourcePat
   const latest = /^#\s+\S/m.test(request)
     ? { id: 'current', text: request }
     : recent.reverse().find((entry) => entry.text.length > 100 || /^#\s+\S/m.test(entry.text) || uploadedWordPaths(entry.text).length);
-  if (sourceId && sourcePath) throw fail('原文编号与Word原文件只能绑定一种来源');
+  if (sourceId && sourcePath) throw fail('原文编号与Word原文件只能绑定一种来源：已有Word请只传source_path（如 上传/原稿.docx）；聊天原文请只传source_requirement_id，另一项删除或留空');
   if (!sourceId) {
     const instruction = request.split(/^#\s/m)[0];
     const preferText = formattingOnly(request) && /内容我发你了|我发给你的(?:完整)?(?:正文|原文)/.test(instruction);

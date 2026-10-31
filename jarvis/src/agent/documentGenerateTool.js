@@ -1,3 +1,4 @@
+import { documentOutputPath } from './documentPath.js';
 import { officeTypography } from './officeTypography.js';
 import { requestedSlides, presentationCover } from './documentPageBudget.js';
 import * as ws from './workspace.js';
@@ -69,7 +70,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
     input_schema: S(
       {
         format: { type: 'string', enum: ['docx', 'pptx', 'xlsx', 'pdf', 'html', 'md', 'txt', 'csv'] },
-        path: str('保存路径（扩展名会自动修正）'),
+        path: str('保存路径；新建可省略，自动保存到outputs且重名不覆盖。修改指定原文件时必须提供原路径'),
         title: str('文档标题'),
         font_size: { type: 'number', minimum: 8, maximum: 72, description: '正文/单元格字号，磅；用户明确原话优先' },
         title_font_size: { type: 'number', minimum: 8, maximum: 72, description: '标题字号，磅' },
@@ -92,13 +93,14 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         ),
         requirements: str('用户对这份文档的原始要求（尽量用原话：主题、必须包含的内容、字数页数、格式）。填了会在生成前对照检查有没有漏项，并自动改一轮')
       },
-      ['format', 'path', 'content']
+      ['format', 'content']
     ),
     run: async (
       { format, path, title, content, font_size: bodySize, title_font_size: titleSize, theme, style, sheet_style: sheetStyle, kind, cover, subtitle, author, issuer, docNo, toc, template, template_id: templateId, requirements, source_requirement_id: sourceId, source_path: sourcePath },
       execution = {}
     ) => {
       const { progress, signal, checkpoint, rawRequestText, requestText, executionScope, sessionId } = execution;
+      path = await documentOutputPath(path, title, format, { signal });
       if (format !== 'docx' && (sourceId || sourcePath)) throw documentError('原Word/原文绑定请使用docx输出；PDF使用该Word的真实Office预览，不能另写一份替代原稿', 'DOCUMENT_SOURCE');
       // 每轮独立作用域，跨轮不能以旧回执跳过检查。
       let cache = memo;

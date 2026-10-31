@@ -38,6 +38,7 @@ export function createDocumentEditingTools(ctx) {
         ['path']
       ),
       run: async ({ path, replacements = [], append = [], slides = [], expected_count: expectedCount, save_as: saveAs }, options = {}) => {
+        if (typeof path !== 'string' || !path.trim()) throw documentError('修改已有文档必须先指定原文件path，例如 outputs/赛程.docx；请用find_files定位，不会新建文件代替原稿', 'DOCUMENT_SOURCE_PATH');
         const kind = ws.ext(path);
         if (!['docx', 'pptx'].includes(kind)) throw new Error('只能修改 .docx 或 .pptx 文件；文本文件用 edit_file');
         const r = await editOffice(await ws.readBlob(path), kind, {
