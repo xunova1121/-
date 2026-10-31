@@ -90,3 +90,37 @@ it('新闻核实失败也保留候选链接，明确不是已核实新闻，不�
   review.revise('改成写故事');
   expect(review.newsCandidates()).toEqual([]);
 });
+
+it('生成失败后补救成功，只展示最终交付结论，不串入失效失败答复', async () => {
+  const { runAgent } = await import('../src/agent/agent.js');
+  let requests = 0, writes = 0;
+  const shown = [];
+  const adapter = { async stream({ onText }) {
+    requests++;
+    if (requests === 1 || requests === 3) return { text: '', toolCalls: [{ id: 'doc' + requests, name: 'create_document', args: { path: '交付/补救.docx' } }], stop: 'tool_use' };
+    const text = requests === 2 ? '未能生成Word，路径回写失败。' : '已生成：[Word](交付/补救.docx)。';
+    onText(text);
+    return { text, toolCalls: [], stop: 'end_turn' };
+  } };
+  const tool = { name: 'create_document', input_schema: { type: 'object', properties: {} }, run: async (_, execution) => {
+    if (++writes === 1) throw Object.assign(Error('路径回写失败'), { code: 'DOCUMENT_INPUT' });
+    await execution.checkpoint({ type: 'artifact_validation', path: '交付/补救.docx', validation: { format: 'docx', readback: 'passed', structure: 'passed', errors: 0 } });
+    return '已生成';
+  } };
+  const result = await runAgent({ adapter, model: 'fixture', userText: '写一份Word周报', history: [], context: { dynamic: '' }, tools: [tool], quiet: true, emit: e => { if (e.type === 'text') shown.push(e.delta); } });
+  expect(result.text).toContain('已生成');
+  expect(result.text).not.toContain('未能生成');
+  expect(shown.join('')).not.toContain('未能生成');
+  expect(requests).toBe(4);
+});
+it('明确不要比分赛程时，不用胜负标题补足资讯条数', async () => {
+  const { newsMatchesRequest } = await import('../src/agent/newsDelivery.js');
+  const request = '3条体育资讯，不要比分赛程';
+  expect(newsMatchesRequest({ title: 'CBA常规赛：广州队主场不敌山西队' }, request)).toBe(false);
+  expect(newsMatchesRequest({ title: '俱乐部宣布新的青训计划' }, request)).toBe(true);
+  expect(newsMatchesRequest({ title: '广州队主场不敌山西队' }, '看看比赛结果')).toBe(true);
+});
+it('方案选择先给推荐并说明反向选择条件，不以计算工具过程开头', async () => {
+  const { responseGuidance } = await import('../src/agent/responseGuidance.js');
+  expect(responseGuidance('A方案投入20万，B方案不用投入，选哪个')).toContain('什么条件变化会改选另一项');
+});

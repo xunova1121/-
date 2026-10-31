@@ -61,7 +61,7 @@ export async function runJointOnce(api, item, { download, runId, attempt, signal
     status: last.status,
     environment: 'ready',
     isolated: Boolean(evaluationId),
-    turns: turns.map((t) => ({ prompt: t.prompt, status: t.status, answer: t.answer, files: t.files, timing: t.timing, clientTotalMs: t.clientTotalMs, failure: t.failure || null, review: t.review || null })),
+    turns: turns.map((t) => ({ prompt: t.prompt, status: t.status, answer: t.answer, files: t.files, timing: t.timing, clientTotalMs: t.clientTotalMs, failure: t.failure || (t.status === 'error' ? { phase: 'server_task', kind: ['api', 'network', 'timeout', 'aborted', 'auth', 'rate_limit'].includes(t.lastTaskState?.errorKind) ? t.lastTaskState.errorKind : 'unknown' } : null), review: t.review || null })),
     mechanical: { mechanical: mechanical.failures.length ? 'failed' : 'passed', failures: mechanical.failures, warnings: mechanical.warnings },
     fileFacts: item.file ? fileFacts : null,
     evidence,

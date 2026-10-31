@@ -38,3 +38,12 @@ export function newsCandidateLinks(request, candidates) {
   const text = '已找到以下候选来源，但尚未完成原文核实，不能当作新闻结论：\n' + candidates.slice(0, 8).map(item => `- [${item.title}](${item.url.replace(/[()]/g, character => '%' + character.charCodeAt(0).toString(16))})`).join('\n');
   return answerConstraintIssues(request, text).length ? '' : text;
 }
+
+/** 明确不要比分赛程时，只有胜负/对阵的列表标题不能充当资讯正文。 */
+export function newsMatchesRequest(item, request = '') {
+  if (!/(?:不要|不看|别给|不需要)[^。\n]{0,12}(?:比分|赛程|赛果)/.test(request)) return true;
+  const title = String(item.title || '');
+  const resultOnly = /(?:\d{1,3}\s*[:：-]\s*\d{1,3}|主场不敌|客场不敌|赛程公布|对阵表)/.test(title);
+  // 有报道正文和具体新增信息的体育报道仍可供模型取舍；标题列表不拿结果凑数。
+  return !resultOnly || Boolean(item.verified === 'page' && String(item.summary || '').length >= 80);
+}

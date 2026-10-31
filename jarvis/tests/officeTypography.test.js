@@ -34,3 +34,17 @@ it('真实Excel原生单元格字号读回，公式数据不随字号修改', as
   });
   expect(await measureDocx(out.blob)).toMatchObject({ format: 'xlsx', body: 14, title: 24, rules: null });
 });
+it('字小一点不是小一号：相对缩小不能意外变成24磅', () => {
+  const request = '字再小一点，标题下面不要横线';
+  const explicit = officeTypography(request);
+  expect(explicit).toEqual({});
+  expect(relativeTypography(explicit, styleRequests(request), { previous: { format: 'docx', body: 11, title: 22 }, request, explicit }).typography).toMatchObject({ body: { size: 9 }, title: { size: 19 } });
+  expect(officeTypography('正文小一号')).toMatchObject({ body: { size: 24 } });
+});
+it('Excel表头字号只映射标题角色；原件回执明确加粗与字号的范围', async () => {
+  const profile = officeTypography('Excel表头14磅加粗');
+  expect(profile.title.size).toBe(14);
+  expect(profile.body).toBeUndefined();
+  const out = await generate('xlsx', { title: '核对', content: '| 项目 | 金额 |\n| --- | --- |\n| 研发 | 100 |', typography: profile });
+  expect(await measureDocx(out.blob)).toMatchObject({ headerBold: true, headerSizes: [14] });
+});

@@ -30,6 +30,8 @@ export function responseGuidance(text, history = [], { light = false, compact = 
     parts.push('先回应具体处境，允许用户只想被倾听；不急着列任务、讲道理或诊断情绪。需要建议时给一两个有针对性的选择，不假装有人的经历或感情。');
   if (!light && /分析|建议|方案|比较|文章|写作|为什么/.test(String(text)))
     parts.push('复杂问题给核心判断、支撑依据、重要取舍和可执行下一步；不为显得深入堆篇幅，不展示内部推理草稿，不编造论据。');
+  if (!light && /选[ABＡＢ]|[ABＡＢ]方案|方案[ABＡＢ]|选哪|哪个更|哪种更|两种方案/.test(String(text)))
+    parts.push('比较决策先说推荐哪个，再给关键计算或证据；写清推荐成立的前提，以及什么条件变化会改选另一项。不要以工具核对过程开头，不编造未提供的费用。');
   parts.push(answerStyle(text, { light, care, feeling, model }).note);
   return parts.join('\n');
 }

@@ -1,3 +1,4 @@
+import { DOCUMENT_TASK_CORE } from './documentToolProfile.js';
 import { answerConstraintIssues as lookupAnswerIssues } from './answerRequirements.js';
 import { lookupComplaint, todayNewsIntent, sportsNewsIntent, supportsSportsNews } from './newsIntent.js';
 import { lookupIntent } from './lookup/intent.js';
@@ -337,7 +338,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   // 工具按需加载：工具多时只带常用的完整说明，其余列名字、用 tool_search 加载（见 toolLoader.js）
   // 普通问答、查资料：做文档的工具先只列名字（用到时按名字调用或 tool_search 加载）
   // “字大点 / 不要横线”这类短句是在改刚做的文件：做文档的工具要常驻（第一轮 30 题实测：被当成普通问答，先搜工具、再找文件、先试改文字失败，一道题 15 次调用）
-  let loader = createToolLoader(light ? [] : questionProfile ? tools : [...tools, ...own], { defer: isQuickLookup(requirementText, images) && !styleRequests(requirementText).length ? DOCUMENT_TOOLS : null, ...(codeWork?.enabled && { core: CODE_TASK_CORE }) });
+  let loader = createToolLoader(light ? [] : questionProfile ? tools : [...tools, ...own], { defer: isQuickLookup(requirementText, images) && !styleRequests(requirementText).length ? DOCUMENT_TOOLS : null, ...(codeWork?.enabled ? { core: CODE_TASK_CORE } : makingFile && !pipelineContext && !images.length && !/架构图|流程图|关系图|拓扑图|生成图片/.test(requirementText) ? { core: DOCUMENT_TASK_CORE } : {}) });
   const loadGUI=()=>{if(availableTools.some(t=>t.name==='computer_look'))for(const name of ['computer_look','computer_click','computer_type','computer_key','computer_scroll','computer_drag'])loader.get(name);};
   if(!light&&(computerTask==='gui'||computerTaskKind(requirementText,{history})==='gui'))loadGUI();
   let outputRepairs = 0;
@@ -476,7 +477,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     const guardedAnswer = review.guardsAnswer();
     const lookupEnabled = Boolean(lookupModel) && (infoPrompt || todayNewsIntent(requirementText)) && !light && !images.length && !codeWork?.enabled;
     const phase = lookupPhase({ enabled: lookupEnabled, step, closing, preFound, messages: convo, final: lookupFinal });
-    const holding = Boolean(checkedText) || guardedAnswer || lookupEnabled && !phase && !lookupJudged;
+    const holding = makingFile || Boolean(checkedText) || guardedAnswer || lookupEnabled && !phase && !lookupJudged;
     const requestCurrent = phase ? lookupModel : cur;
     const showText = (text) => {
       request.clearSearchTimer();
@@ -631,6 +632,17 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     if (!r.toolCalls.length && holding) {
       const substitute = lookupDelivery.substitute(held);
       if (substitute && !lookupAnswerIssues(requirementText, substitute, now()).length) held = substitute;
+    }
+    // 文档尚有可补救缺口时，先修再发表最终答复，避免“没做成”与后续“已完成”拼在一起。
+    const deliveryState = review.report();
+    const deliveryGap = deliveryState.pendingFormats.length || deliveryState.failures.length || deliveryState.pendingReadback.length || deliveryState.artifacts.some(item => item.errors > 0);
+    const deliveryRepair = makingFile && canReview && deliveryGap && !r.toolCalls.length && !closing && !signal?.aborted && checks < 1 && cur.adapter.kind !== 'mock' ? review.guidance() : '';
+    if (deliveryRepair) {
+      checks++;
+      convo.push({ role: 'assistant', content: held, toolCalls: [], raw: r.raw });
+      convo.push({ role: 'user', content: `（系统交付核对，前一段暂未展示给用户。）${deliveryRepair}只补救具体缺口，成功后给出一份完整最终答复；不要重复之前失败的结论。无法补救就如实说明并保留可用文件。` });
+      emit({ type: 'tool_progress', id: 'delivery-check', text: '正在核对并补齐交付文件…' });
+      continue;
     }
     if (!guardedAnswer || !r.toolCalls.length) releaseHeld();
     finalText += stepText;

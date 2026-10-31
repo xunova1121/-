@@ -2,7 +2,7 @@ import { normalizeTypography, typographyFromText } from './documentTypography.js
 /** Office专用字号解析；不让Word解析器原来的PPT/Excel排除规则吞掉本格式要求。 */
 export function officeTypography(request, { body, title } = {}) {
   for (const n of [body, title]) if (n !== undefined && (!Number.isFinite(n) || n < 8 || n > 72)) throw new Error('字号需要8到72磅');
-  const direct = typographyFromText(String(request || '').replace(/PPT|pptx|Excel|xlsx|幻灯片/gi, ''));
+  const direct = typographyFromText(String(request || '').replace(/PPT|pptx|Excel|xlsx|幻灯片/gi, '').replace(/表头/g, '标题'));
   return normalizeTypography({ ...direct, body: { ...(body && { size: body }), ...direct.body }, title: { ...(title && { size: title }), ...direct.title } });
 }
 /** 在原生文字入口应用字号，再交原记录器做溢出检查；不栅格化、不改页数约束。 */
@@ -70,12 +70,13 @@ export async function measureOtherOffice(zip) {
     if (!styles || styles.length > 2e6) return null;
     const fonts = [...(styles.match(/<fonts\b[^>]*>([\s\S]*?)<\/fonts>/)?.[1] || '').matchAll(/<font\b[^>]*>([\s\S]*?)<\/font>/g)].map((m) => ({
       size: Number(m[1].match(/<sz\b[^>]*val="([\d.]+)"/)?.[1]) || 11,
-      bold: /<b\b/.test(m[1]),
+      bold: /<b\b(?![^>]*val="(?:0|false)")/.test(m[1]),
       u: /<u\b/.test(m[1])
     }));
     const xfs = [...(styles.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)?.[1] || '').matchAll(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g)].map(
       (m) => Number(attr(m[0], 'fontId')) || 0
     );
+    const headers = [];
     let bytes = 0,
       underlines = 0;
     const sheets = Object.keys(zip.files).filter((n) => /^xl\/worksheets\/sheet\d+\.xml$/.test(n));
@@ -84,6 +85,13 @@ export async function measureOtherOffice(zip) {
       const xml = await zip.file(name).async('string');
       bytes += xml.length;
       if (bytes > 8e6) return null;
+      // 明确限定为各工作表第一行，不能把全表最大字号当表头核验。
+      const firstRow = xml.match(/<row\b[^>]*>([\s\S]*?)<\/row>/)?.[1] || '';
+      for (const cell of firstRow.matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)) {
+        if (!/<v>|<t[ >]/.test(cell[2])) continue;
+        const font = fonts[xfs[Number(attr(cell[1], 's')) || 0]];
+        headers.push(font || null);
+      }
       for (const m of xml.matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)) {
         if (!/<v>|<t[ >]/.test(m[2])) continue;
         const f = fonts[xfs[Number(attr(m[1], 's')) || 0]] || fonts[0];
@@ -99,6 +107,9 @@ export async function measureOtherOffice(zip) {
       title: Math.max(...histogram.keys()),
       rules: null,
       underlines,
+      headerBold: headers.length && headers.every(Boolean) ? headers.every(font => font.bold) : null,
+      headerSizes: [...new Set(headers.filter(Boolean).map(font => font.size))],
+      headerScope: '各工作表第一行有内容的单元格；含标题行的工作表不等于数据表头',
       scope: '有内容的单元格字号，不含图片内文字'
     };
   }

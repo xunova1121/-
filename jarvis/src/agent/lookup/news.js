@@ -1,3 +1,4 @@
+import { newsMatchesRequest } from '../newsDelivery.js';
 import { lookupIntent } from './intent.js';
 import { runLookup } from './runner.js';
 import { newsDate } from '../newsSources.js';
@@ -15,6 +16,7 @@ export async function runNewsLookup(ctx, args = {}, execution = {}) {
     ...ctx.lookup, now, get: ctx.fetchViaGateway || ctx.fetchImpl,
     signal: execution.signal, retrieval: execution.retrieval, progress: execution.progress
   });
+  result.items = result.items.filter(item => newsMatchesRequest(item, execution.requestText));
   if (execution.signal?.aborted) throw execution.signal.reason;
   if (execution.sessionId && result.items.length) await evidence.put(execution.sessionId, {
     sources: result.items.map(item => ({ url: item.url, title: item.title,

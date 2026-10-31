@@ -33,3 +33,10 @@ it('证据说应判过但布尔值为否，记评审错误而非自动通过；�
   data.pass = true; data.overclaim = true;
   expect(parseJudgement(JSON.stringify(data), { rubric: ['x'] }).pass).toBe(false);
 });
+it('服务器任务失败保留错误类型，不再导出failure:null，也不复制服务商错误正文', async () => {
+  const { runJointOnce } = await import('../evals/joint.mjs');
+  const api = async route => route === '/api/tasks' ? { id: 't', sessionId: 's' } : route === '/api/tasks/t' ? { status: 'error', errorKind: 'timeout', error: '不应导出的服务商正文', files: [] } : { messages: [] };
+  const result = await runJointOnce(api, { id: 'fixture', requires: [], checks: {}, prompt: '写PPT', targetMs: 1000, timeoutMs: 5000 }, { download: async () => null, runId: 'x', attempt: 1 });
+  expect(result.turns[0].failure).toEqual({ phase: 'server_task', kind: 'timeout' });
+  expect(JSON.stringify(result)).not.toContain('不应导出');
+});
