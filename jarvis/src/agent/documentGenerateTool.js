@@ -1,3 +1,4 @@
+import { preparePresentationImages } from './presentationImagePlan.js';
 import { documentOutputPath } from './documentPath.js';
 import { officeTypography } from './officeTypography.js';
 import { requestedSlides, presentationCover } from './documentPageBudget.js';
@@ -61,6 +62,7 @@ content 用 Markdown：
   · 每页多出一两句不带标签的话（总结、提醒）放进底部深色横条
   · 标题有“关系 / 人物 / 构成 / 架构”且写成 3–6 条“名称：说明”→ 关系图（一句不带标签的话当中心）；占比加起来 100% 的表格 → 环形图；行名是月份 / 季度 / 年份的数字表 → 折线图
   · 页内单独一行“版式：卡片”（大数字 / 卡片 / 步骤 / 时间线 / 流程 / 对比 / 图表 / 柱状图 / 饼图 / 折线图 / 关系图 / 进度 / 表格 / 重点句 / 章节 / 要点）可以指定版式，前后各空一行；排不成时生成结果里会说明
+  图标可用get_ppt_icon_catalog按主题获取名字与含义，再在页内单独写“图标：volleyball, trophy”，按内容挑选；不必把全目录放进对话。
   每条一句完整的话，不要整页长段落；同一种版式不要连续超过 2 页，普通要点列表全篇不超过 3 页；封面信息（单位、日期）用 author 和副标题，不要再做一页“副封面”
 - xlsx：CSV 或 Markdown 表格，“## 名称”分出多个工作表；“合计”行和“增长率 / 同比 / 完成率 / 执行率 / 占比”列会自动写成 Excel 公式（占比列留空即可），有“毛重 / 皮重（筐重）/ 净重”列时净重自动 = 毛重 − 皮重，有“数量（净重）/ 单价 / 金额”列时金额自动 = 数量 × 单价；也可以直接写“=SUM(B2:B5)”，汇总表引用明细表写“=明细!G10”；录入的数显示蓝字、公式格灰底，负数、超预算、“逾期 / 未付”自动标红，状态列有下拉选项，打印区域和页码自动设好；kind 填 settlement / ledger / budget / analysis 按用途排（不填自动判断）；1,200、18%、¥300、2026-10-14 会自动设成对应的数字格式。
   一个工作表里可以排成报表：“## 名称”下面第一行普通文字是副标题；“### 小节”是小节标题；可以放多张表（空行隔开）；表格之间的普通文字是说明 / 备注（整行显示）；不写“|---|”分隔行的表格是信息表（“| 项目名称 | xxx | 编号 | xxx |”，左边是名目）。只放一张表、没有文字时就是普通数据表（表头在第一行、带筛选）。
@@ -172,11 +174,14 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         signal,
         onProgress: (t) => progress?.(t)
       });
-      const build = (text) =>
-        generate(format, {
+      let imagePlan = [];
+      const build = async (text) => {
+        const prepared = format === 'pptx' ? await preparePresentationImages(ctx, text, { title: title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''), requirements: goal, style: design.style, expectedSlides, requireCover, forbidCover }, execution) : { content: text, issues: [], plan: [] };
+        imagePlan = prepared.plan;
+        const generated = await generate(format, {
           // 文件名常带“_5页”：封面标题不要这个尾巴
           title: (title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, '')).replace(/[_\s-]*\d+\s*页$/, ''),
-          content: text,
+          content: prepared.content,
           typography,
           noRules,
           scale,
@@ -200,6 +205,12 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
           toPdf: ctx.toPdf ?? null,
           template: tpl
         });
+        if (format === 'pptx') {
+          generated.info.layoutIssues = [...(generated.info.layoutIssues || []), ...prepared.issues];
+          generated.info.imagePlan = prepared.plan;
+        }
+        return generated;
+      };
       let finalContent = check.content;
       let out = await build(finalContent);
       // 生成后才查得出的问题：Excel 公式错、PPT 字放不下 / 互相压住；有硬伤请模型改一轮再生成
@@ -271,6 +282,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       }
       const r = await deliverDocument(ctx, out, target, { progress, signal, checkpoint, plan, issues: lint(format, finalContent, { kind: design.kind }), generatorReview: looked, requirements: goal || requirements, preservation, design: sheetDesign || design });
       const notes = [
+        ...(imagePlan.length ? [`配图计划${imagePlan.length}段，来源顺序：用户指定图片、已有图表/图标、已验证图库、AI配图；成功资产缓存复用，实际页数与图片以读回回执为准`] : []),
         `主题：${out.theme.name}`,
         ...(design.label ? [`设计：${STYLE_NAMES[out.info?.style] || design.label}（${out.info?.style && out.info.style !== design.style ? '公文主题固定稳重商务，与请求风格冲突；未按请求风格生成' : design.reason}）`] : []),
         ...(sheetDesign ? [`表格样式：${SHEET_STYLE_NAMES[out.info?.sheetStyle] || sheetDesign.label}（${out.info?.sheetStyle !== sheetDesign.style ? '公文主题与请求风格冲突；未按请求风格生成' : sheetDesign.reason}）`] : []),

@@ -66,6 +66,7 @@ export async function inspectDocument(blob, filePath, { info = {}, requiredText 
     const paths = await orderedSlidePaths(zip);
     validation.slides = paths.length;
     validation.presentation = await inspectPresentation(zip, { signal });
+    if (info.imagePlan) validation.imagePlan = info.imagePlan.slice(0, 120);
     if (requiresEverySlideImage(requirements) && validation.presentation.missingImagePages.length) issues.push({ level: 'error', text: `缺少内容配图的页：${validation.presentation.missingImagePages.join('、')}；请补图后交付，图标不算配图` });
     for (const [index, slidePath] of paths.entries()) {
       const xml = await zip.file(slidePath).async('string');

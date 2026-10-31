@@ -27,7 +27,7 @@ function mediaPath(slidePath, target) {
   const resolved = parts.join('/');
   return /^ppt\/media\/[^/]+$/.test(resolved) ? resolved : null;
 }
-export const requiresEverySlideImage = request => /(?:每(?:一)?页|所有页|全部页|逐页).{0,12}(?:配图|有图|图片|加图|补图)|(?:图片|配图).{0,8}(?:每(?:一)?页|所有页)/.test(String(request));
+export const requiresEverySlideImage = request => !/(?:每(?:一)?[页张]|所有页|全部页).{0,5}(?:不要|不用|无需).{0,4}(?:图|配图)/.test(String(request)) && /(?:每(?:一)?[页张]|所有页|全部页|逐页).{0,12}(?:配图|有图|要图|图片|加图|补图)|(?:图片|配图).{0,8}(?:每(?:一)?[页张]|所有页)/.test(String(request));
 
 /** 仅从真正嵌入且被页面引用的媒体计数；孤立rels、图标、外链、缺文件不能冒充内容配图。 */
 export async function inspectPresentation(zip, { signal } = {}) {
