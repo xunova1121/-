@@ -1,7 +1,7 @@
 /** 文档任务常驻完成交付所需工具；其他能力仍可按名字或tool_search加载，未禁用。 */
 export const DOCUMENT_TASK_CORE = new Set([
   'create_document', 'write_long_document', 'write_professional_document', 'generate_task_brief',
-  'edit_office_document', 'edit_spreadsheet', 'check_document',
+  'read_document_structure', 'edit_office_document', 'edit_spreadsheet', 'check_document',
   'find_files', 'list_files', 'read_file', 'write_file', 'edit_file', 'search_in_files',
   'read_task_requirements', 'read_tool_result', 'read_evidence', 'update_plan', 'review_task',
   'execution_capabilities', 'verify_numbers', 'preview', 'tool_search',
@@ -16,6 +16,7 @@ export function simpleDocumentTask(request) {
     && !/调研|研究|搜集|搜索|联网|补充资料|标书|论文|完整方案|逐条核实/.test(text);
 }
 export function documentRouteNote(request) {
+  if (/排版|下划线|字号|页码|目录|页边距|调整.*(?:表格|标题|页面)|修改.*(?:Word|PPT|Excel|PDF)/i.test(request)) return '已有文档修改：先read_document_structure，按真实对象和sha256调用edit_office_document operations，保留原件。模型理解自然语言并组合操作，不用模板重抄正文。标题不要线同时处理remove_lines和underline；目录必须update_toc真实分页。只使用结构工具声明支持的操作，局部修改不能扩大到全文。新建文档仍用create_document。';
   if (/PPT|幻灯片|演示文稿|\.pptx/i.test(request) && /补图|每页.*(?:图|图片)|逐页.*配图/.test(request)) return '沿用现有PPT补图：优先一次create_document，format=pptx、source_path=原PPT、path=另存路径、content为空、requirements填原要求；工具从可核对底稿批量配图并复用缓存，不要逐张generate_image后重抄正文。旧文件没有底稿时如实报告，再核对页面，不覆盖原件。';
   return simpleDocumentTask(request) ? '本轮是把已有内容整理为文件，直接用create_document并保留原内容；不要重新调研或升级为write_professional_document，仍执行真实文件和交付检查。' : '';
 }

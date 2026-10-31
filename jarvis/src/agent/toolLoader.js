@@ -13,7 +13,7 @@ export const LIMIT = 24;
 export const MCP_CORE = 12;
 
 /** 做文档的工具：说明长（合计约 7 千字），普通问答、查资料时先不带完整说明 */
-export const DOCUMENT_TOOLS = new Set(['write_long_document', 'create_document', 'write_professional_document', 'generate_task_brief', 'edit_office_document', 'edit_spreadsheet']);
+export const DOCUMENT_TOOLS = new Set(['write_long_document', 'create_document', 'write_professional_document', 'generate_task_brief', 'read_document_structure', 'edit_office_document', 'edit_spreadsheet']);
 
 /** 常驻工具：系统提示里点名的、几乎每天都用的 */
 export const CORE = new Set([
@@ -23,7 +23,7 @@ export const CORE = new Set([
   'get_today_news', 'fetch_json', 'web_search', 'fetch_url', 'read_evidence', 'fact_check', 'deep_research', 'kb_search', 'search_conversations', 'list_my_messages', 'read_conversation', 'delete_conversations',
   'generate_image', 'sing_song', 'read_image_text', 'inspect_image', 'schedule_task',
   'update_plan', 'delegate_task', 'need_more_time', 'find_files', 'search_in_files', 'read_task_requirements', 'read_tool_result',
-  'list_files', 'read_file', 'write_file', 'edit_file', 'edit_spreadsheet', 'create_document', 'write_long_document', 'edit_office_document', 'check_document',
+  'read_document_structure', 'list_files', 'read_file', 'write_file', 'edit_file', 'edit_spreadsheet', 'create_document', 'write_long_document', 'edit_office_document', 'check_document',
   'run_javascript', 'run_python', 'preview',
   'computer_capabilities', 'computer_list_dir', 'computer_search', 'computer_read_file', 'computer_write_file', 'computer_edit_file', 'computer_edit_office_document', 'computer_run', 'computer_open'
 ]);

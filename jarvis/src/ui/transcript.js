@@ -144,6 +144,7 @@ const TOOL_LABEL = {
   repo_clone: '准备代码工作副本', repo_status: '查看代码改动', repo_diff: '查看代码补丁', code_search: '搜索代码', code_read: '读取代码', code_edit: '修改代码', code_write: '保存代码文件', code_run: '隔离运行检查',
   inspect_image: '复核原图', plan_architecture: '梳理架构关系', create_diagram: '制作可编辑图形', export_diagram: '从同稿导出图形', render_diagram: '渲染并检查图形', list_work_records: '核对成果记录',
   remember: '记住', recall: '回忆', forget: '遗忘', save_skill: '习得技能', kb_search: '检索知识库',
+  read_document_structure: '读取文档结构', edit_office_document: '编辑文档',
   list_files: '列出文件', read_file: '读取文件', write_file: '写入文件', create_document: '生成文档',
   run_javascript: '运行 JS', run_python: '运行 Python', preview: '打开预览', fetch_url: '读取网页',
   update_plan: '更新清单', delegate_task: '交给分身', find_files: '找文件', search_in_files: '搜内容',

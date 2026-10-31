@@ -1,7 +1,18 @@
+import { parseXml, serialize } from './documentXml.js';
+import { editWord } from './wordStructuredEdit.js';
 import { openOfficePackage } from './officePackage.js';
 /** 只改段落横线和下划线，不删表格边框、文字、图片、链接关系。 */
-export async function stripDocumentLines(blob, { noRules = false, noUnderline = false, signal } = {}) {
+export async function stripDocumentLines(blob, { noRules = false, noUnderline = false, noTitleLines = false, signal } = {}) {
   const zip = await openOfficePackage(blob);
+  if (noTitleLines) {
+    const doc = parseXml(await zip.file('word/document.xml').async('string'));
+    const styles = parseXml(await zip.file('word/styles.xml').async('string'));
+    const { wordObjects } = await import('./wordStructuredEdit.js');
+    const objects = wordObjects(doc, styles);
+    const operations = ['title','heading'].filter(role => objects.paragraphs.some(p => p.role === role)).map(role => ({action:'format',target:{role},properties:{remove_lines:true,underline:false}}));
+    if (operations.length) editWord(doc, styles, operations);
+    zip.file('word/document.xml', serialize(doc));
+  }
   for (const name of Object.keys(zip.files).filter(name => /^word\/(?:document|styles|header\d+|footer\d+)\.xml$/.test(name))) {
     signal?.throwIfAborted();
     let xml = await zip.file(name).async('string');
@@ -19,6 +30,7 @@ export async function stripDocumentLines(blob, { noRules = false, noUnderline = 
 function requestedLines(text) {
   const result = {};
   for (const clause of String(text).split(/[。；;\n]/)) {
+    if (/标题/.test(clause) && /(?:不要|去掉|删除|取消|不加|不用).{0,8}下划线/.test(clause)) { result.noTitleLines = true; continue; }
     for (const [key, noun] of [['noRules', '横线|分割线|分隔线'], ['noUnderline', '下划线']]) {
       if (new RegExp(`(?:不要|不加|不用|去掉|删除|取消|别).{0,8}(?:${noun})`).test(clause)) result[key] = true;
       else if (new RegExp(`(?:保留|需要|加上|恢复|使用).{0,8}(?:${noun})`).test(clause)) result[key] = false;

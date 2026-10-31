@@ -139,3 +139,5 @@
 
 - 2026-10-31 Codex：用户已确认A—H逐项后统一发版；H接入涉及serverMode/taskRunner/serverKeysPanel/modelWorkspace/serverClient，E接入documentDelivery/slidePreview；同版本diagramIconAssets仅扩素材不改架构算法。真实渲染补修PPT段内图片抽取与裁切，未碰writingRoles.js；国内图库与用户总览验收待完成，未发新版。
 - 2026-10-31 Codex：用户在三步实测失败后明确授权“修改，发版”。本批修源材料与重排字段歧义、PPT显式分页与数字卡、真实回执样式丢失、已有PPT批量配图及取消资产保全。涉及documentGenerateTool/documentQuality/pptxWriter/documentTools/toolLoader必要接缝先行登记；不改writingRoles、架构对照阈值、正式模型配置。图库未国内通过仍禁用，保存[skip ci]，验收后统一发布。
+
+- 2026-11-01 Codex：用户授权开发自然语言跨格式编辑并发版。新增结构读取/摘要绑定/可组合编辑适配器，Word目录实际更新与标题线修复，PPT元素及Excel样式/PDF页面操作。需接documentEditingTools/documentDelivery/styleCheck、taskRunner/officeRender及工具目录和回执；保留Claude表达/架构/写作逻辑，原内容和旧测试不删，所有提交[skip ci]。PDF扫描/OCR及任意正文重排不冒充无损支持；实际模型与真机未测须注明。

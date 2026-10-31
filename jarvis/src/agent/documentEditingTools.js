@@ -1,3 +1,4 @@
+import { documentStructureTool, structuredOperationSchema, runStructuredEdit } from './documentStructureTool.js';
 import * as ws from './workspace.js';
 import { editOffice } from './officeEdit.js';
 import { editSpreadsheet } from './spreadsheetEdit.js';
@@ -11,10 +12,12 @@ export function createDocumentEditingTools(ctx) {
     {
       name: 'edit_office_document',
       description:
-        '修改工作区里已有的 Word（.docx）或 PPT（.pptx），保留原来的排版和格式：替换文字（正文、表格、页眉页脚、每页幻灯片和备注都会找），Word 还可以在末尾追加段落（格式照抄最后一段）。适合“把文档里的 2025 改成 2026”“在合同里把甲方名称换掉”“在报告最后加一段说明”。要大改结构、或用户说“重新做 / 重做 / 再做一版”时用 create_document 重新生成。它只换文字，**改不了字号、横线、版式**：用户说“字大点 / 小点 / 不要横线 / 铺满一页”时不要先试它，直接用 create_document 按原内容重新生成，path 用原文件路径覆盖。',
+        '编辑已有Word/PPT/Excel/PDF。排版用read_document_structure获取当前对象及sha256，再传operations、expected_sha256和另存路径；按用户要求组合格式/位置/表格/目录/打印或PDF页面操作，局部修改不套模板重写。Word标题下划线通常指装饰线，应同时对选中标题remove_lines:true、underline:false。目录用update_toc实际分页更新，缺渲染能力不能说页码正确。PDF目前仅页面旋转/排序/裁切，不支持扫描件正文改写或脱敏。旧replacements/append仅Word/PPT文字修改，和operations不能混用。',
       input_schema: S(
         {
-          path: str('文件路径（.docx / .pptx）'),
+          path: str('已有文件路径（docx/pptx/xlsx/pdf）'),
+          operations: { type: 'array', minItems: 1, maxItems: 30, items: structuredOperationSchema },
+          expected_sha256: str('结构读取返回的sha256；operations必填'),
           slides: {
             type: 'array',
             maxItems: 100,
@@ -37,8 +40,12 @@ export function createDocumentEditingTools(ctx) {
         },
         ['path']
       ),
-      run: async ({ path, replacements = [], append = [], slides = [], expected_count: expectedCount, save_as: saveAs }, options = {}) => {
+      run: async ({ path, replacements = [], append = [], slides = [], expected_count: expectedCount, save_as: saveAs, operations, expected_sha256: expectedDigest }, options = {}) => {
         if (typeof path !== 'string' || !path.trim()) throw documentError('修改已有文档必须先指定原文件path，例如 outputs/赛程.docx；请用find_files定位，不会新建文件代替原稿', 'DOCUMENT_SOURCE_PATH');
+        if (operations !== undefined) {
+          if (replacements.length || append.length || slides.length) throw documentError('结构编辑与文字替换请分批执行，避免对象编号漂移');
+          return runStructuredEdit(ctx, { path, operations, expected_sha256: expectedDigest, save_as: saveAs }, options);
+        }
         const kind = ws.ext(path);
         if (!['docx', 'pptx'].includes(kind)) throw new Error('只能修改 .docx 或 .pptx 文件；文本文件用 edit_file');
         const r = await editOffice(await ws.readBlob(path), kind, {
@@ -93,6 +100,7 @@ export function createDocumentEditingTools(ctx) {
         const saved = await deliverDocument(ctx, { blob: edited.blob, ext: 'xlsx' }, target, options);
         return `已修改${edited.changed}个单元格，保存${saved.path}；${saved.notes.join('；')}`;
       }
-    }
+    },
+    documentStructureTool
   ];
 }

@@ -31,8 +31,8 @@ const titleOnly = (text) => /标题/.test(text) && !/内文|内筒|正文|内容
 
 const prop = (xml, tag) => xml.match(new RegExp(`<w:${tag}\\b[^>]*?(?:/>|>[\\s\\S]*?</w:${tag}>)`))?.[0] || '';
 const val = (xml) => xml.match(/w:val="([^"]+)"/)?.[1];
-const hasRule = (pPr) => /<w:pBdr\b[\s\S]*?<w:(?:top|bottom)\b(?![^>]*w:val="(?:none|nil)")/.test(prop(pPr, 'pBdr'));
-const hasUnderline = (rPr) => { const u = prop(rPr, 'u'); return Boolean(u) && !/w:val="(?:none|0)"/.test(u); };
+const hasRule = (pPr) => { const bdr = prop(pPr, 'pBdr'); if (!bdr) return undefined; return /<w:(?:top|bottom)\b(?![^>]*w:val="(?:none|nil)")/.test(bdr); };
+const hasUnderline = (rPr) => { const u = prop(rPr, 'u'); return u ? !/w:val="(?:none|0)"/.test(u) : undefined; };
 
 /** 量 Word 里实际的字号和线条（磅）。读不了返回 null，不当成“做到了” */
 export async function measureDocx(blob) {
@@ -52,7 +52,7 @@ export async function measureDocx(blob) {
       defs.set(id, { basedOn: val(prop(xml, 'basedOn')), sz: Number(val(prop(prop(xml, 'rPr'), 'sz'))) || 0, rule: hasRule(prop(xml, 'pPr')), u: hasUnderline(prop(xml, 'rPr')) });
     }
     const chain = (id, key) => {
-      for (let i = 0, s = defs.get(id); s && i < 8; i++, s = defs.get(s.basedOn)) if (s[key]) return s[key];
+      for (let i = 0, s = defs.get(id); s && i < 8; i++, s = defs.get(s.basedOn)) if (key === 'sz' ? s[key] > 0 : s[key] !== undefined) return s[key];
       return key === 'sz' ? base : false;
     };
     const sizes = new Map();
@@ -60,13 +60,14 @@ export async function measureDocx(blob) {
     for (const [p] of doc.matchAll(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g)) {
       const pPr = prop(p, 'pPr');
       const style = val(prop(pPr, 'pStyle')) || defaultPara;
-      if (hasRule(pPr) || chain(style, 'rule')) rules++;
+      if (hasRule(pPr) ?? chain(style, 'rule')) rules++;
       for (const [r] of p.matchAll(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g)) {
         const text = [...r.matchAll(/<w:t\b[^>]*>([^<]*)<\/w:t>/g)].map((m) => m[1]).join('').replace(/\s/g, '');
         if (!text) continue;
         const rPr = prop(r, 'rPr');
         const size = (Number(val(prop(rPr, 'sz'))) || chain(style, 'sz')) / 2;
-        if (hasUnderline(rPr) || chain(val(prop(rPr, 'rStyle')), 'u') || chain(style, 'u')) underlines++;
+        const characterStyle = val(prop(rPr, 'rStyle'));
+        if (hasUnderline(rPr) ?? (characterStyle ? chain(characterStyle, 'u') : chain(style, 'u'))) underlines++;
         sizes.set(size, (sizes.get(size) || 0) + text.length);
         max = Math.max(max, size);
       }
@@ -166,6 +167,7 @@ export function styleReport(request, artifact) {
     }
     if (id === 'noRule' && f.rules == null) return { id, label, state: 'unchecked', detail: '此格式横线尚未自动量取' };
     if (id === 'noRule') return { id, label, state: f.rules ? 'missed' : 'done', detail: f.rules ? `文件里还有${f.rules}条横线（段落上下边框）` : '文件里没有横线' };
+    if (id === 'noUnderline' && /标题/.test(request) && f.rules) return { id, label, state: 'unchecked', detail: `文字下划线${f.underlines}处，但仍有${f.rules}条段落横线，须核对标题装饰线，不能仅凭下划线为0宣布完成` };
     if (id === 'noUnderline') return { id, label, state: f.underlines ? 'missed' : 'done', detail: f.underlines ? `文件里还有${f.underlines}处下划线` : '文件里没有下划线' };
     // 铺满：程序量不出空白占多少，只能确认页数和字号
     if (artifact.pages > 1) return { id, label, state: 'missed', detail: `实际${artifact.pages}页，不是一页` };

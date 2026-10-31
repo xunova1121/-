@@ -230,6 +230,8 @@ jobs:
             echo "第 $i 次安装没完成，重试"
           done
           exit 1
+      - name: 验证四格式结构编辑与目录连续分页
+        run: node e2e/structured-document-edit.mjs "$RUNNER_TEMP/jarvis-e2e/structured-edit"
       - name: 验证Word、PPT、Excel真实转PDF
         run: node e2e/office-render.mjs
       - name: 验证PPT和Excel字号及Word97转换

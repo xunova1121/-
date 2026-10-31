@@ -1,3 +1,4 @@
+import { refreshWordToc } from './wordTableOfContents.js';
 import { documentLinePreferences, stripDocumentLines } from './documentLineRules.js';
 import * as ws from './workspace.js';
 import { inspectDocument, qualitySummary } from './documentQuality.js';
@@ -13,9 +14,19 @@ import { measureDocx } from './styleCheck.js';
 export async function deliverDocument(ctx, out, target, { progress, signal, checkpoint, issues = [], plan, generatorReview, requiredText = [], requirements = '', preservation = null, design = null } = {}) {
   let lineRules = {};
   if (out.ext === 'docx') {
-    lineRules = await documentLinePreferences(ctx, requirements, signal);
-    if (lineRules.noRules || lineRules.noUnderline) out = { ...out, blob: await stripDocumentLines(out.blob, { ...lineRules, signal }), wordPreview: null };
-    out = await coordinateWordLayout(ctx, out, requirements, { signal, progress });
+    lineRules = out.structuredEdit ? {} : await documentLinePreferences(ctx, requirements, signal);
+    if (lineRules.noRules || lineRules.noUnderline || lineRules.noTitleLines) out = { ...out, blob: await stripDocumentLines(out.blob, { ...lineRules, signal }), wordPreview: null };
+    if (!out.structuredEdit) out = await coordinateWordLayout(ctx, out, requirements, { signal, progress });
+    if (!out.tocUpdate) {
+      try {
+        const toc = await refreshWordToc(ctx, out.blob, { signal, progress });
+        if (toc.state !== 'not_present') out = { ...out, blob: toc.blob, wordPreview: toc.preview, tocUpdate: { state: toc.state, entries: toc.entries, passes: toc.passes } };
+      } catch (error) {
+        throwControl(error, signal);
+        out = { ...out, tocUpdate: { state: 'failed' } };
+        issues = [...issues, { level: 'error', text: '目录实际页码未更新：' + String(error.message).slice(0, 180) }];
+      }
+    }
     const typographyIssues = await directTypographyConflicts(out.blob, out.info?.typographyProfile || {}, { signal });
     issues = [...issues, ...typographyIssues];
   }
@@ -30,6 +41,7 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
     validation.design = { requested: design.style, effective: effectiveStyle, state: conflict ? 'conflict' : 'applied' };
     if (conflict) issues = [...issues, { level: design.required || design.excluded?.includes(effectiveStyle) ? 'error' : 'warn', text: `公文主题固定稳重商务，与选择的${validation.format === 'pptx' ? 'PPT' : 'Excel'}风格冲突；请调整主题后再交付` }];
   }
+  if (out.tocUpdate) validation.tocUpdate = out.tocUpdate;
   if (out.wordLayout) validation.wordLayout = out.wordLayout;
   if (out.info?.typographyProfile && Object.keys(out.info.typographyProfile).length) validation.typography = { profile: out.info.typographyProfile, scope: '正文和标题样式；原件直接格式、代码、页眉页脚独立格式保留' };
   const wordPages = validation.format === 'docx' ? requestedWordPages(requirements, { wordContext: true }) : null;
@@ -43,7 +55,7 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
     }
   }
   validation.contentReview = ctx.documentContentReview || { business: 'not_checked' };
-  if (preservation) validation.contentPreservation = preservation;
+  if (preservation) validation.contentPreservation = out.tocUpdate?.state === 'updated_verified' ? { ...preservation, scope: '原内容与未触及部件保留；目录缓存按真实分页更新，不声称主文档XML逐字节不变' } : preservation;
   if (out.officeVisual) validation.officeVisual = out.officeVisual;
   validation.generatorVisual = generatorReview ? 'generator_preview_reviewed' : 'not_checked';
   if (generatorReview?.problems?.length && !generatorReview.changed) {
@@ -92,8 +104,9 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
   await receipt();
   let checkedPath;
   const notes = [];
+  if (out.tocUpdate) notes.push(out.tocUpdate.state === 'updated_verified' ? `目录${out.tocUpdate.entries}条已按真实PDF分页更新，${out.tocUpdate.passes}轮确认稳定` : '目录页码尚未验证，不得宣称更新成功');
   if (out.wordLayout) notes.push(out.wordLayout.note);
-  if (['docx', 'pptx', 'xlsx'].includes(out.ext)) {
+  if (['docx', 'pptx', 'xlsx', 'pdf'].includes(out.ext)) {
     const preview = await renderDocument(ctx, out, saved.path, { progress, signal });
     notes.push(...preview.notes);
     validation.render = preview.state;
@@ -141,17 +154,21 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
 }
 
 async function renderDocument(ctx, out, filePath, { progress, signal }) {
-  if (!ctx.officeRender) return { state: 'not_checked', notes: ['本端未做Office真实渲染；现有PPT预览及排版检查属于生成器检查'] };
+  if (!ctx.officeRender && out.ext !== 'pdf') return { state: 'not_checked', notes: ['本端未做Office真实渲染；现有PPT预览及排版检查属于生成器检查'] };
   try {
     progress?.('生成Office真实预览…');
     signal?.throwIfAborted();
-    const rendered = out.officePreview || out.wordPreview || await ctx.officeRender(out.blob, out.ext, { signal });
+    const rendered = out.ext === 'pdf' ? { available: true, blob: out.blob } : out.officePreview || out.wordPreview || await ctx.officeRender(out.blob, out.ext, { signal });
     signal?.throwIfAborted();
     if (!rendered.available) return { state: 'not_available', notes: [rendered.reason || '本端不支持Office真实渲染'] };
     if (!rendered.blob?.size || (await rendered.blob.slice(0, 5).text()) !== '%PDF-') throw documentError('Office未生成有效PDF', 'DOCUMENT_RENDER');
     const preview = await ws.write(filePath.slice(0, filePath.lastIndexOf('.')) + '.预览.pdf', rendered.blob);
     ctx.onFileChanged?.(preview.path);
     const overviewPaths = [];
+    if (!out.officeOverview && out.structuredEdit && ctx.presentationOverview) {
+      try { out.officeOverview = await ctx.presentationOverview(rendered.blob, { signal }); }
+      catch (error) { throwControl(error, signal); out.officeVisual = { state: 'not_checked', note: '页面截图未生成：' + String(error.message).slice(0, 160) }; }
+    }
     if (out.officeOverview) {
       for (const [index, sheet] of out.officeOverview.sheets.entries()) {
         const overview = await ws.write(filePath.replace(/\.[^.]+$/, '') + `.总览-${index + 1}.png`, sheet.blob);
@@ -174,7 +191,7 @@ async function renderDocument(ctx, out, filePath, { progress, signal }) {
       overviewPaths,
       path: preview.path,
       pdfCheck,
-      notes: [...overviewPaths.map(path => '真实页面总览：' + path), ...(out.officeVisual?.problems || []).map(text => '视觉待修：' + text), ...(out.officeVisual?.note ? [out.officeVisual.note] : []), '已用LibreOffice真实转换为PDF：' + preview.path + '；可打开核对实际分页，未宣称人工视觉验收通过', ...inspectionNotes]
+      notes: [...overviewPaths.map(path => '真实页面总览：' + path), ...(out.officeVisual?.problems || []).map(text => '视觉待修：' + text), ...(out.officeVisual?.note ? [out.officeVisual.note] : []), (out.ext === 'pdf' ? '实际PDF预览：' : '已用LibreOffice真实转换为PDF：') + preview.path + '；可打开核对实际分页，未宣称人工视觉验收通过', ...inspectionNotes]
     };
   } catch (error) {
     throwControl(error, signal);

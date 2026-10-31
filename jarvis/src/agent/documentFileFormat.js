@@ -55,5 +55,8 @@ export async function formatDocumentFile(ctx, source, args, execution = {}) {
     preservation,
     requirements: execution.requestText || execution.rawRequestText || args.requirements || ''
   });
-  return `${delivered.path}（${fmtSize(out.blob.size)}）。绑定原文件${source.path}；仅调整样式，正文、表格、图片及关联等${out.preservation.parts}个非样式部件逐字节保持；保留直接格式和原有封面/目录${tplPath ? '；样式模板：' + tplPath : ''}；${delivered.notes.join('；')}`;
+  const kept = delivered.validation.tocUpdate?.state === 'updated_verified'
+    ? '调整样式并更新目录实际页码，原正文、表格、图片及关联保留；目录缓存已改变'
+    : `仅调整样式，正文、表格、图片及关联等${out.preservation.parts}个非样式部件逐字节保持；保留直接格式和原有封面/目录`;
+  return `${delivered.path}（${fmtSize(delivered.blob.size)}）。绑定原文件${source.path}；${kept}${tplPath ? '；样式模板：' + tplPath : ''}；${delivered.notes.join('；')}`;
 }
