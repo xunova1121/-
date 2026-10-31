@@ -278,7 +278,9 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   let lookupDelivery = createLookupDelivery(requirementText, now);
   if (lookupControl) {
     lookupControl.fallback = () => lookupDelivery.text();
+    lookupControl.delivery = () => lookupDelivery.delivery();
     lookupControl.review = () => review.report();
+    lookupControl.recovery = () => lookupDelivery.recovery;
   }
   const recordReceipt = review.record;
   review.record = receipt => { if (!codeWork?.enabled && !images.length && !complaint && (isQuickLookup(requirementText, images) || todayNewsIntent(requirementText) || sportsNewsOnly)) lookupDelivery.record(receipt); return recordReceipt(receipt); };
@@ -286,6 +288,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   let nativeSearchCalls = 0;
   let closingTurns = 0;
   let retrievalStopped = false;
+  let answerCompleted = false;
   emit({ type: 'state', value: 'processing' });
   const { ctx: preparedContext, record, requirementContext, archive } = await prepareAgentContext({ userText, priorMessages: history, context, sessionId, summary, light: light || Boolean(questionProfile), requirements, depth, requirementText, emit, buildContext, isolated });
   // 动态规则只属于本轮，不能修改调用方复用的上下文，让新闻规则污染后面的写作。
@@ -438,7 +441,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         return results;
       }
     });
-    if (found) { preFound = found; convo.at(-1).content = `${convo.at(-1).content}\n\n${lookupReceiptData(found)}`; }
+    if (found && intent.kind === 'general' && lookupControl && !fallbacks.length && !['failed', 'input'].includes(found.recovery?.state)) lookupControl.phased = true;
+    if (found) { if (found.recovery && found.recovery.state !== 'fresh') lookupDelivery.record({ name: found.tool, args: found.args, ok: !['failed', 'input'].includes(found.recovery.state), output: found.output, lookupRecovery: found.recovery }); preFound = found; convo.at(-1).content = `${convo.at(-1).content}\n\n${lookupReceiptData(found)}`; }
     toolHint = loader.hint();
   }
 
@@ -539,6 +543,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     // 服务档位（快速档）实际有没有生效：告诉界面，回答底下显示
     if (r?.tier) emit({ type: 'tier', ...r.tier });
     } catch (e) {
+      if (e.code === 'LOOKUP_ANSWER_TIMEOUT') { releaseSafePartial(); throw e; }
       if (e.code === 'LOOKUP_RETRIEVAL_END' && !signal?.aborted) {
         releaseSafePartial();
         retrieval.close('已预留时间整理现有资料');
@@ -646,7 +651,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       const maxChecks = wroteCode || review.report().contract.coding ? 2 : 1;
       const calcPending = !guardedAnswer && canReview && review.report().contract?.calculation && review.report().calculation === 'not_checked';
       const note = (!closing || retrieval.extensive) && checks < maxChecks && (review.required() || calcPending || unfinished(plan.steps).length > 0) && !light && cur.adapter.kind !== 'mock' ? [finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }), (review.required() && canReview && !lookupDeadline) || calcPending ? review.guidance() : ''].filter(Boolean).join('\n') : '';
-      if (!note) break;
+      if (!note) { answerCompleted = Boolean(stepText.trim()); break; }
       checks++;
       // 以用户身份发给模型，但必须说清是系统核对：以前模型会回“你说得对，我来逐项核实”，再写一大段复盘
       convo.push({ role: 'user', content: `（以下是系统自动核对，不是用户说的话：不要回应它、不要道歉或复盘，也不要把已经给用户的回答再写一遍；需要补做的直接补，补完只写有变化的地方；没有要补的就直接结束，不要再写任何字。）\n${note}` });
@@ -692,7 +697,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       if (!stuck && limit < hardCap) limit = Math.min(hardCap, limit + maxSteps);
     }
   }
-  return finishAgentRun({ step, limit, retrievalStopped, retrieval, stuck, review, nativeSearchCalls, light, signal, quiet, toolCount, lastToolOk, failCount, userText, finalText, emit, lookupFallback: lookupDelivery.text(), lookupDeadline, autoExtend: false });
+  return finishAgentRun({ step, limit, retrievalStopped, retrieval, stuck, review, nativeSearchCalls, light, signal, quiet, toolCount, lastToolOk, failCount, userText, finalText, emit, lookupRecovery: lookupDelivery.recovery, lookupFallback: lookupDelivery.text(), lookupDeadline, answerCompleted: lookupControl?.phased && answerCompleted, autoExtend: false });
 }
 
 /** 保留旧导出的深度研究预算；普通查询默认预算见 retrievalBudget.js。 */

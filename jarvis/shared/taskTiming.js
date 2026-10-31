@@ -8,6 +8,7 @@ export function createTaskTiming(createdAt, now = Date.now) {
   let inputChars = 0, inputCharSamples = 0, helperModelCalls = 0, helperInputChars = 0;
   let inputTextChars = 0, inputTextSamples = 0, systemChars = 0, toolSchemaChars = 0;
   let delegateTasks = 0;
+  let lookupBudget = null;
   const activeTools = new Set();
   // 每次模型调用的明细（只记用途、型号、耗时、Token，不记内容）：评测看哪一步多、哪一步慢
   const calls = [], openCalls = new Map(), rewrites = {};
@@ -32,6 +33,9 @@ export function createTaskTiming(createdAt, now = Date.now) {
       if (endedAt != null) return;
       const t = now();
       phases.event(e, t);
+      if (e.type === 'diagnostic' && e.phase === 'lookup_budget' && Number.isFinite(e.targetMs) && Number.isFinite(e.hardLimitMs)) {
+        lookupBudget = { kind: String(e.kind).slice(0, 24), targetMs: e.targetMs, hardLimitMs: e.hardLimitMs };
+      }
       if (e.type === 'diagnostic' && ['model_start', 'helper_start'].includes(e.phase) && Number.isFinite(e.inputTextChars)) {
         inputTextChars += e.inputTextChars;
         inputTextSamples++;
@@ -88,6 +92,7 @@ export function createTaskTiming(createdAt, now = Date.now) {
       const t = endedAt ?? now();
       return {
         version: 1,
+        ...(lookupBudget && { lookup: { ...lookupBudget, elapsedMs: elapsed(startedAt, t), targetMet: endedAt == null || startedAt == null ? null : elapsed(startedAt, t) <= lookupBudget.targetMs } }),
         ...phases.snapshot(t),
         measurementVersion: 2,
         callDetailVersion: 1, // 有 calls 明细、视觉 / 文档审稿辅助调用和后台记忆调用单独计数

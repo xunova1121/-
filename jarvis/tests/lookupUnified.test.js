@@ -45,18 +45,18 @@ it('新闻/天气/赛程/股票/汇率在同一个runner选择原工具，不猜
 });
 
 it('生产总时钟包含上下文等待，检索与模型读取同一资源账本，工具调用不会重置时间', () => {
-  let t = 0; const clock = createLookupClock({ totalMs: LOOKUP_TOTALS.news, now: () => t });
+  let t = 0; const clock = createLookupClock({ totalMs: LOOKUP_TOTALS.news, phased: true, now: () => t });
   const budget = createRetrievalBudget('今日新闻', { clock });
-  t = 9000; expect(budget.remaining).toBe(6000); budget.begin(); budget.consume('read');
+  t = 9000; expect(budget.remaining).toBe(30000); budget.begin(); budget.consume('read');
   expect(createRetrievalBudget('今日新闻', { clock })).toBe(budget);
-  t = 15000; expect(budget.remaining).toBe(0); expect(budget.begin()).toBe(false);
+  t = 39000; expect(budget.remaining).toBe(0); expect(budget.begin()).toBe(false);
   expect(() => budget.consume('search')).toThrow('这次搜索没有执行');
-  expect(clock.remaining()).toBe(5000); expect(budget.resources.read).toBe(1);
+  expect(clock.remaining()).toBe(6000); expect(budget.resources.read).toBe(1);
 });
 
-it('生产天气/赛程总期限各5/10秒，不自动悄悄延长180秒；普通旧API仍有原门禁', async () => {
+it('生产天气/赛程硬期限各40秒，不自动悄悄延长180秒；普通旧API仍有原门禁', async () => {
   vi.useFakeTimers();
-  for (const [text, totalMs] of [['南京天气', 5000], ['今天足球赛程', 10000]]) {
+  for (const [text, totalMs] of [['南京天气', 40000], ['今天足球赛程', 40000]]) {
     const call = vi.fn(async () => new Promise(() => {}));
     const pending = withLookupDeadline({ userText: text }, call, { profiles: true });
     await vi.advanceTimersByTimeAsync(totalMs);
@@ -74,7 +74,7 @@ it('总期限到点时保留真实数据回执，晚到模型的文字不再写�
     forwarded = options; options.lookupControl.fallback = () => '地点：南京江宁；来源：和风天气；实况18°C。';
     return new Promise(() => {});
   }, { profiles: true });
-  await vi.advanceTimersByTimeAsync(5000); const result = await pending;
+  await vi.advanceTimersByTimeAsync(40000); const result = await pending;
   expect(result.text).toContain('实况18°C'); expect(result.text).toContain(MORE_TIME_ASK);
   const before = events.length; forwarded.emit({ type: 'text', delta: '迟到的未核实文字' }); expect(events).toHaveLength(before);
 });
@@ -82,7 +82,7 @@ it('总期限到点时保留真实数据回执，晚到模型的文字不再写�
 it('预查超时会取消忽略signal的提供者，回执不冒充成功；再查新轮的时钟不沿用旧起点', async () => {
   vi.useFakeTimers(); let signal;
   const work = runLookup(lookupIntent('南京天气'), { text: '南京天气', getTool, execute: async (_, s) => { signal = s; return new Promise(() => {}); } });
-  await vi.advanceTimersByTimeAsync(4001); expect(await work).toBeNull(); expect(signal.aborted).toBe(true);
+  await vi.advanceTimersByTimeAsync(40000); expect((await work).recovery.state).toBe('failed'); expect(signal.aborted).toBe(true);
   const first = createLookupClock({ totalMs: 5000 }); await vi.advanceTimersByTimeAsync(5000);
   const second = createLookupClock({ totalMs: 5000 }); expect(first.remaining()).toBe(0); expect(second.remaining()).toBe(5000);
 });

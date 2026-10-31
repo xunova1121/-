@@ -45,7 +45,7 @@ export function createModelRequest({ current, effort, signal, lookupDeadline, lo
         maxWebSearches: lookupDeadline ? Math.min(2, retrieval.left) : retrieval.left
       };
       const selfSearching = requestUsesNativeSearch(current.adapter, searchOptions);
-      requestWindow = modelWindow(lookupDeadline && (closing || retrieval.active || selfSearching) ? lookupControl : null, closing, requestCtrl);
+      requestWindow = modelWindow(lookupDeadline && (lookupControl?.phased || closing || retrieval.active || selfSearching) ? lookupControl : null, closing, requestCtrl);
       const result = await requestWindow.race(() =>
         current.adapter.stream({
           model: current.model,
@@ -87,7 +87,9 @@ export function createModelRequest({ current, effort, signal, lookupDeadline, lo
               return;
             }
             streamed = true;
-            onText(boundary.push(delta));
+            const fragment = boundary.push(delta);
+            if (fragment.trim()) requestWindow.output();
+            onText(fragment);
           }
         })
       );

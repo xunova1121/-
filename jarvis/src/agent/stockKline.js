@@ -1,4 +1,5 @@
-import { retryRead, httpError, throwControl } from '../core/networkRequest.js';
+import { shortSourceRetry } from './lookup/sourceRetry.js';
+import { httpError, throwControl } from '../core/networkRequest.js';
 
 const invalid = (message) => Object.assign(new Error(message), { name: 'ValidationError', code: 'INVALID_STOCK_INPUT' });
 export function stockSymbol(code) {
@@ -133,13 +134,14 @@ export function createStockKlineTool(ctx = {}) {
       const failedSources = [];
       for (const provider of providers) {
         try {
-          const rows = await retryRead(
+          const rows = await shortSourceRetry(
             async (requestSignal) => {
+              retrieval?.consume('read');
               const response = await get(provider.url, { signal: requestSignal });
               if (!response.ok) throw httpError(response.status, '', provider.source);
               return provider.parse(await response.text());
             },
-            { signal, timeoutMs: 5000, beforeAttempt: () => retrieval?.consume('read') }
+            { signal }
           );
           const result = summarizeKline(rows, { start, end });
           const requested = result.bars.slice(-limit);

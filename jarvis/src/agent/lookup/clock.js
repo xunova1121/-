@@ -30,7 +30,7 @@ export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs, cloc
   };
   const budget = {
     registerQuery: createQueryLedger(),
-    begin() { if (check()) return false; if (started === null) started = now(); calls++; return true; },
+    begin() { if (check()) return false; if (started === null) { started = now(); clock?.beginRetrieval?.(); } calls++; return true; },
     consume(kind) {
       // 整轮已收尾时，写清是哪一类先用完、这次哪一步没执行（用户 2026-10-29：读网页却报“search 调用已达到预算”，看不懂）
       if (reason || started !== null && (clock && clock.retrievalRemaining() <= 0 || duration()>0 && now()-started>=duration())) throw Object.assign(new Error(`${reason || '本轮联网检索已达到时间预算'}，这次${KIND_LABEL[kind] || kind}没有执行`), {code:'RETRIEVAL_BUDGET'});
@@ -69,15 +69,23 @@ export const WRITING_GRACE_MS = 30_000;
 export const WRITING_GAP_MS = 6_000;
 const RECHECK_MS = 1_000;
 
-export function createLookupClock({ totalMs, now = Date.now, disabled = () => false }) {
+export function createLookupClock({ totalMs, now = Date.now, disabled = () => false, phased = false }) {
   const started = now();
   let lastText = -Infinity;
-  const reserve = Math.min(SUMMARY_RESERVE_MS, Math.max(1, totalMs / 4));
+  let retrievalStarted = null;
+  const reserve = phased ? SUMMARY_RESERVE_MS : Math.min(SUMMARY_RESERVE_MS, Math.max(1, totalMs / 4));
   const remaining = () => (disabled() ? Infinity : Math.max(0, totalMs - (now() - started)));
   return {
-    startedAt: started, totalMs,
+    startedAt: started, totalMs, phased,
     remaining,
-    retrievalRemaining: () => Math.max(0, remaining() - reserve),
+    beginRetrieval: () => { retrievalStarted ??= now(); },
+    retrievalRemaining: () => {
+      const left = remaining();
+      if (!phased || !Number.isFinite(left)) return Math.max(0, left - reserve);
+      // 模型先决定地点/工具的等待不吃掉来源额度；整轮硬截止仍不延长。
+      const used = retrievalStarted === null ? 0 : now() - retrievalStarted;
+      return Math.max(0, Math.min(left - 1000, totalMs - reserve - used));
+    },
     /** 收到一段答案文字 */
     wrote: () => { lastText = now(); },
     /** 还在写、且没超出宽限（slack：外层总时限比内层多等一会儿，让内层先体面收尾） */
@@ -89,20 +97,25 @@ export function createLookupClock({ totalMs, now = Date.now, disabled = () => fa
 export function modelWindow(control, closing, controller) {
   let timer;
   let onAbort;
+  let output = false;
   const expired = new Promise((resolve, reject) => {
     onAbort = () => reject(controller.signal.reason || Object.assign(new Error('已停止'), { name: 'AbortError' }));
     controller.signal.addEventListener('abort', onAbort, { once: true });
     if (controller.signal.aborted) onAbort();
-    const delay = closing ? control?.remaining() - 1000 : control?.retrievalRemaining();
+    // 普通查询：取数收住后仍给模型独立首字窗口，不能拿取数期限截断正常回答。
+    const delay = control?.phased ? Math.min(FIRST_OUTPUT_MS, control.remaining() - 1000) : closing ? control?.remaining() - 1000 : control?.retrievalRemaining();
     if (!Number.isFinite(delay)) return;
     const expire = () => {
       if (!Number.isFinite(control.remaining())) return;
+      if (control.phased && output && control.remaining() > 1000) {
+        timer = setTimeout(expire, control.remaining() - 1000); return;
+      }
       // 正在写答案：先不掐，过一秒再看
       if (control.writing?.()) { timer = setTimeout(expire, RECHECK_MS); return; }
       const error = Object.assign(new Error(closing ? '答案整理时间已用完' : '已预留时间整理现有资料'), {
         name: 'LookupPhaseError',
         kind: 'timeout',
-        code: closing ? 'LOOKUP_SUMMARY_TIMEOUT' : 'LOOKUP_RETRIEVAL_END'
+        code: control.phased ? 'LOOKUP_ANSWER_TIMEOUT' : closing ? 'LOOKUP_SUMMARY_TIMEOUT' : 'LOOKUP_RETRIEVAL_END'
       });
       controller.abort(error);
       reject(error);
@@ -113,6 +126,8 @@ export function modelWindow(control, closing, controller) {
   // 允许请求前已过期；即使调用方尚未进入race也不产生未处理拒绝。
   expired.catch(() => {});
   return {
+    // 受内容约束而暂缓展示的正文也算在写；仍须通过原审查才显示。
+    output: () => { output = true; control?.wrote?.(); },
     race: (work) =>
       controller.signal.aborted
         ? Promise.reject(controller.signal.reason)
@@ -132,5 +147,8 @@ export function modelWindow(control, closing, controller) {
   };
 }
 
-/** 生产各类的总时限；深度任务沿用显式长预算。 */
-export const LOOKUP_TOTALS = Object.freeze({ weather: 5000, sports_live: 10000, news: 20000, sports_news: 20000, market: 15000, general: 45000 });
+/** 速度目标只作统计，绝不能用于中止请求。 */
+export const LOOKUP_TARGETS = Object.freeze({ weather: 5000, sports_live: 10000, news: 20000, sports_news: 20000, market: 15000, general: 45000 });
+export const FIRST_OUTPUT_MS = 15_000;
+/** 天气含API及两级免费备用共14秒+15秒首字；行情8秒取数+15秒首字。 */
+export const LOOKUP_TOTALS = Object.freeze({ weather: 40000, sports_live: 40000, news: 45000, sports_news: 45000, market: 35000, general: 60000 });

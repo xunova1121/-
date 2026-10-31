@@ -16,7 +16,7 @@ export function lookupPanel({ cfg, workspace, node, toast }) {
     rows.replaceChildren(...[...value.sources, ...(value.operations || [])].map(source => {
       const sample = source.samples.at(-1);
       const label = source.validation === 'not_selected' ? '暂不选用' : source.validation === 'pending_cn' ? '待国内实测' : source.cooling ? '冷却至' + new Date(source.cooldownUntil).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai' }) : !sample ? '尚未检查' : sample.state === 'failed' ? '连接失败' : sample.state === 'empty' ? '已连通，当前无可验证条目' : '可读取';
-      const details = sample ? ` · ${sample.elapsedMs}ms · 最近${source.samples.length}次` : '';
+      const details = sample ? ` · 最近${source.samples.length}次成功率${Math.round((source.successRate ?? source.samples.filter(s => s.state === 'ok').length / source.samples.length) * 100)}% · 平均${source.averageMs ?? sample.elapsedMs}ms${source.authorizationIssue ? ' · 请检查来源授权或额度' : ''}` : '';
       return node('li', { textContent: `${source.label} · ${source.category || '查询入口'} · ${source.region === 'cn' ? '国内' : '海外'}：${label}${details}${source.storageError ? ' · ' + source.storageError : ''}` });
     }));
     result.textContent = `${place}当前按${value.resolvedRegion === 'cn' ? '国内' : '海外'}地区选源。检查只证明连通，不代表全文核实。`;

@@ -22,7 +22,9 @@ it('腾讯失败后新浪回执字段/日期/未复权口径一致，记录失�
   const result = JSON.parse(await createStockKlineTool({ fetchImpl: get, now: () => afterClose }).run({ code: '600000' }));
   expect(result).toMatchObject({ source: '新浪行情', latestClose: 13, previousClose: 12, priceDate: '2026-10-28', adjustment: 'none', holdingCompatible: true });
   expect(result.failedSources).toEqual([{ source: '腾讯行情', code: 'HTTP_ERROR' }]);
-  expect(get).toHaveBeenCalledTimes(2);
+  expect(get).toHaveBeenCalledTimes(3);
+  expect(get.mock.calls[1][0]).toBe(get.mock.calls[0][0]);
+  expect(get.mock.calls[2][0]).toContain('quotes.sina.cn');
 });
 it('预算和停止不被备用源吞掉', async () => {
   const get = vi.fn();

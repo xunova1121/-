@@ -1,6 +1,7 @@
 import { sportsPreCall } from '../sportsScores.js';
 import { supportsSportsNews } from '../newsIntent.js';
 import { wantsPreSearch, preSearchQuery } from './prefetch.js';
+import { WEATHER_FETCH_MS } from './weatherLimits.js';
 
 /** 只提取用户确实说过的地点。无定位、无城市时交模型追问，绝不默认北京/南京。 */
 export function weatherPlace(text, params = {}) {
@@ -25,7 +26,8 @@ export function lookupPlan(intent, { text, getTool, now = Date.now() }) {
     }
   } else if (intent.kind === 'weather') {
     const place = weatherPlace(text, params);
-    return place && getTool('get_weather') ? { name: 'get_weather', args: { place }, timeoutMs: 4000 } : null;
+    // 与天气操作同一额度，不能外层先取消地点解析和免费备用源。
+    return place && getTool('get_weather') ? { name: 'get_weather', args: { place }, timeoutMs: WEATHER_FETCH_MS } : null;
   } else if (intent.kind === 'sports_live' && getTool('get_sports_scores')) {
     const args = sportsPreCall(text, now);
     if (args || params.period === 'forward_live') return { name: 'get_sports_scores', args: { ...args, ...(params.period === 'forward_live' && { period: params.period, window_minutes: params.window_minutes, sport: params.sport }) }, timeoutMs: 8000 };

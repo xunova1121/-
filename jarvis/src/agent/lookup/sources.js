@@ -41,11 +41,13 @@ export async function selectLookupSources({ kind, params = {}, region = 'auto', 
   const resolvedRegion = lookupRegion(region, timezone);
   const limit = maxSources ?? (resolvedRegion === 'global' && kind === 'sports_news' ? 3 : 5);
   let probing = false;
-  const candidates = [...sources].sort((a, b) => Number(a.region !== resolvedRegion) - Number(b.region !== resolvedRegion) || a.priority - b.priority);
+  const healthRows = new Map(await Promise.all(sources.map(async source => [source.id, await health?.get(source.id)])));
+  const penalty = source => { const row = healthRows.get(source.id); return row?.samples?.length ? (1 - (row.successRate ?? row.samples.filter(s => s.state === 'ok').length / row.samples.length)) * 30 + Math.min(10, (row.averageMs || 0) / 1000) : 0; };
+  const candidates = [...sources].sort((a, b) => Number(a.region !== resolvedRegion) - Number(b.region !== resolvedRegion) || (a.priority + penalty(a)) - (b.priority + penalty(b)));
   for (const source of candidates) {
     if (signal?.aborted) throw signal.reason;
     let reason = '';
-    const recent = await health?.get(source.id);
+    const recent = healthRows.get(source.id);
     if (source.validation === 'pending_cn') reason = '国内网络尚未实测，未启用';
     else if (source.validation === 'not_selected') reason = source.validationNote;
     else if (recent?.cooling) reason = '连续失败后冷却30分钟，暂用其他来源';

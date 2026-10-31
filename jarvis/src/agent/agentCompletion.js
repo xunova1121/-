@@ -24,7 +24,9 @@ export async function finishAgentRun({
   finalText,
   emit,
   lookupFallback = '',
+  lookupRecovery = null,
   lookupDeadline = false,
+  answerCompleted = false,
   autoExtend = false
 }) {
   const query = lookupIntent(userText);
@@ -38,7 +40,8 @@ export async function finishAgentRun({
   if (autoExtend && lookupDeadline && (retrievalStopped || retrieval.reason) && !finalText.trim() && !signal?.aborted) return { text: '', steps: step + 1, toolCalls: toolCount, needsMoreTime: true };
   // 普通问题查到时限或次数上限：不说“检索已停止”，先给已有的，再问要不要再查
   //   模型已用现有资料答完（检索因时限、次数收住了）也问一句，方便接着查
-  const quickStop = lookupDeadline && (retrievalStopped || Boolean(retrieval.reason));
+  // 模型已正常答完，只有取数计时过期不代表回答缺失；次数耗尽等真实缺口仍提示再查。
+  const quickStop = lookupDeadline && (retrievalStopped || Boolean(retrieval.reason)) && !(answerCompleted && !retrievalStopped && retrieval.reason === '本轮联网检索已达到时间预算');
   if (!unifiedQuery && (step >= limit || retrievalStopped || quickStop)) {
     // 一个字都没写出来（比如资料都没核实到）：别只剩一句“回答到这里”
     const note = quickStop && !finalText.trim()
@@ -72,7 +75,7 @@ export async function finishAgentRun({
   const unmet = review.guidance();
   const alreadyExplained = acceptance.warnings?.length && acceptance.warnings.every(warning => finalText.includes(warning));
   if (unifiedQuery && !light) {
-    const note = lookupClosingNote({ answer: finalText, quickStop, interrupted: retrievalStopped || step >= limit, warnings: acceptance.warnings, reason: retrieval.reason });
+    const note = lookupClosingNote({ answer: finalText, quickStop, interrupted: retrievalStopped || step >= limit, warnings: acceptance.warnings, reason: retrieval.reason, recovery: lookupRecovery });
     finalText += note;
     if (note) emit({ type: 'text', delta: note });
   } else if (acceptance.notice && !light && !alreadyExplained) {

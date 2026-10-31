@@ -1,3 +1,5 @@
+import { WEATHER_HEALTH } from './weatherProvider.js';
+import { createLastGood } from './lastGood.js';
 import { createLookupHealth } from './health.js';
 import { lookupRegion, lookupSourceRegistry } from './sources.js';
 import { DOMESTIC_APPROVALS } from './domesticValidation.js';
@@ -12,6 +14,7 @@ export function memoryLookupStorage() {
 }
 export function createLookupService({ storage, get, now = Date.now } = {}) {
   const health = createLookupHealth({ storage, now });
+  const lastGood = createLastGood({ storage, now });
   const registry = options => lookupSourceRegistry({ ...options, approvals: DOMESTIC_APPROVALS });
   const all = () => [...new Map([
     registry({ kind: 'news' }), ...['国际', '财经', '科技'].map(category => registry({ kind: 'news', params: { categories: [category] } })),
@@ -19,12 +22,12 @@ export function createLookupService({ storage, get, now = Date.now } = {}) {
   ].flat().map(source => [source.id, source])).values()];
   let checking = false;
   const status = async (region = 'auto') => ({ region, resolvedRegion: lookupRegion(region),
-    operations: await Promise.all(LOOKUP_OPERATIONS.map(async source => ({ id: source.id, label: source.label, region: source.region, validation: source.validation, validationNote: '随真实查询更新，主动检查不猜地点/代码或请求模型', ...(await health.get(source.id)) }))),
+    operations: await Promise.all([...LOOKUP_OPERATIONS, ...WEATHER_HEALTH].map(async source => ({ id: source.id, label: source.label, region: source.region, validation: source.validation, validationNote: '随真实查询更新，主动检查不猜地点/代码或请求模型', ...(await health.get(source.id)) }))),
     sources: await Promise.all(all().map(async source => ({ id: source.id, label: source.label, category: source.category,
       region: source.region, validation: source.validation, validationNote: source.validationNote || '', ...(await health.get(source.id)) }))) });
   return {
-    health, registry, status, preferences: () => readLookupPreferences(storage),
-    options: (region = 'auto') => ({ region, health, registry, probeUnknown: true, queue: createLookupQueue() }),
+    health, registry, lastGood, status, preferences: () => readLookupPreferences(storage),
+    options: (region = 'auto') => ({ region, health, registry, lastGood, now, probeUnknown: true, queue: createLookupQueue() }),
     async probe(region = 'auto', { signal } = {}) {
       lookupRegion(region);
       if (checking) throw Object.assign(new Error('正在检查来源，请稍候'), { code: 'LOOKUP_BUSY', status: 429 });

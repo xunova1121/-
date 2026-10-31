@@ -44,6 +44,7 @@ export async function executeToolCalls(
     let outImages = [];
     let ok = true;
     let failure = null;
+    let lookupRecovery;
     const sig = `${c.name}:${JSON.stringify(c.args ?? {})}`;
     const times = (seen.get(sig) ?? 0) + 1;
     seen.set(sig, times);
@@ -108,12 +109,14 @@ export async function executeToolCalls(
           : await run(signal);
       if (r && typeof r === 'object' && 'text' in r) {
         output = String(r.text);
+        lookupRecovery = r.lookupRecovery;
         outImages = r.images ?? [];
       } else output = String(r);
       if (outImages.length && /^computer_(look|click|type|key|scroll|drag|screenshot)$/.test(c.name)) newScreenThisStep = true;
     } catch (e) {
       ok = false;
       failure = e;
+      lookupRecovery = e.lookupRecovery;
       if (e.code === 'RETRIEVAL_BUDGET') retrieval.close(e.message);
       output = `错误：${e.message || e}`;
     }
@@ -130,8 +133,8 @@ export async function executeToolCalls(
     await checkpoint?.({ type: 'tool_end', id: c.id, name: c.name, ok, output });
     emit({ type: 'tool_end', id: c.id, name: c.name, ok, output, ...(failure && { errorKind: errorKind(failure), code: failure.code }), ms: Date.now() - t0 });
     if (failure?.code !== 'RETRIEVAL_BUDGET') throwControl(failure, signal);
-    review.record({ name: c.name, args: c.args, ok, output, code: failure?.code });
-    return { c, ok, output, outImages, ...(recovery?.stopped && { recoveryStop: recovery.message }) };
+    review.record({ name: c.name, args: c.args, ok, output, code: failure?.code, lookupRecovery });
+    return { c, ok, output, outImages, ...(lookupRecovery && { lookupRecovery }), ...(failure && { failure: { code: failure.code, name: failure.name, kind: failure.kind, status: failure.status } }), ...(recovery?.stopped && { recoveryStop: recovery.message }) };
   };
   // 互不影响的只读调用（搜索、读文件、读网页……）同时做；其余按顺序一个个做
   const results = [];

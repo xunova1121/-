@@ -44,7 +44,7 @@ export async function preSearch({ run, text, signal, timeoutMs = PRE_SEARCH_MS, 
     const query = call ? call.name === 'web_search' ? String(call.args?.query || '') : '' : preSearchQuery(text);
     const [result] = await withWebDeadline(activeSignal => run([{ id: 'pre-search', name: call?.name ?? 'web_search', args: call?.args ?? { query } }], activeSignal), { signal: ctrl.signal, timeoutMs });
     if (!result?.ok || !String(result.output || '').trim()) return null;
-    return { query, output: String(result.output), tool: call?.name ?? 'web_search', args: call?.args ?? { query } };
+    return { query, ...(result.lookupRecovery && { recovery: result.lookupRecovery }), output: String(result.output), tool: call?.name ?? 'web_search', args: call?.args ?? { query } };
   } catch (e) {
     if (signal?.aborted) throw e;
     return null;

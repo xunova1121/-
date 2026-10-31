@@ -8,6 +8,7 @@ import { DOMESTIC_NEWS_CANDIDATES } from '../src/agent/lookup/sourceCatalog.js';
 import { lookupIntent } from '../src/agent/lookup/intent.js';
 import { LOOKUP_INTENT_EXAMPLES } from '../src/agent/lookup/intentExamples.js';
 import { readLookupSource } from '../src/agent/lookup/readSource.js';
+import { runLookupFaults } from './lookup-live-faults.mjs';
 import { runLookupLiveQueries } from './lookup-live-queries.mjs';
 
 export async function runLookupLive(args = process.argv.slice(2)) {
@@ -31,6 +32,7 @@ export async function runLookupLive(args = process.argv.slice(2)) {
   try {
     console.log('只读来源实测：不读取未央配置、不调用模型、不更新正式服务。');
     console.log('网络地区为执行者声明，脚本不会把时区或HTTP200当作国内网络证明。');
+    if (args.includes('--faults')) return await runLookupFaults({ out, signal: ctrl.signal, declaredRegion, only: args.find(a => a.startsWith('--only='))?.slice(7) });
     if (args.includes('--queries')) return await runLookupLiveQueries({ out, signal: ctrl.signal, declaredRegion, script: fileURLToPath(import.meta.url), only: args.find(a => a.startsWith('--only='))?.slice(7) });
     await Promise.all(Array.from({ length: 3 }, worker));
     const classification = LOOKUP_INTENT_EXAMPLES.map(({ text, kind }) => { const actual = lookupIntent(text); return { text, expected: kind, actual: actual.kind, ok: actual.kind === kind }; });

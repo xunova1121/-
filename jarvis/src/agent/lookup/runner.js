@@ -1,3 +1,4 @@
+import { recoverLookup } from './recovery.js';
 import { readLookupSource } from './readSource.js';
 import { selectLookupSources } from './sources.js';
 import { lookupTimeRange } from './domesticNews.js';
@@ -21,10 +22,12 @@ export async function runLookup(intent, options = {}) {
   if (options.execute) {
     const plan = lookupPlan(intent, { text: options.text, getTool: options.getTool, now: options.now });
     if (!plan) return null;
-    const found = await preSearch({ text: options.text, call: { name: plan.name, args: plan.args },
-      timeoutMs: Math.min(plan.timeoutMs, options.clock?.retrievalRemaining() ?? Infinity),
-      signal: options.signal, run: options.execute });
-    return found ? { ...found, kind: intent.kind, items: lookupReceiptItems(found, intent), failures: [] } : null;
+    const managed = options.getTool(plan.name)?.recoveryManaged;
+    let found = managed ? await preSearch({ text: options.text, call: { name: plan.name, args: plan.args },
+      timeoutMs: Math.min(options.clock?.retrievalRemaining() ?? 30000, 30000), signal: options.signal, run: options.execute })
+      : await recoverLookup(intent, plan, options);
+    if (found?.recovery?.tool) found = { ...found, tool: found.recovery.tool, output: found.recovery.output || found.output };
+    return found ? { ...found, kind: intent.kind, items: ['failed', 'input'].includes(found.recovery?.state) ? [] : lookupReceiptItems(found, intent), failures: [] } : null;
   }
   if (!['news', 'sports_news'].includes(intent.kind)) throw Object.assign(new Error('该查询需要注入已配置的工具适配器；未发起网络请求'), { code: 'LOOKUP_KIND_PENDING' });
   const { signal, retrieval, health, get, progress, now = Date.now() } = options;
@@ -45,6 +48,7 @@ export async function runLookup(intent, options = {}) {
     if (!remaining) break;
     if (source.parseArticle && details.get(source.id) < (source.maxDetails ?? 5)) { details.set(source.id, details.get(source.id) + 1); remaining--; }
   }
+  const requestLimits = new Map(sources.map(source => { const retrySlot = remaining > 0 ? 1 : 0; remaining -= retrySlot; return [source.id, 1 + details.get(source.id) + retrySlot]; }));
   const controller = new AbortController();
   const stop = () => controller.abort(signal.reason);
   signal?.addEventListener('abort', stop, { once: true });
@@ -54,7 +58,7 @@ export async function runLookup(intent, options = {}) {
     while (next < sources.length && !controller.signal.aborted) {
       const source = sources[next++];
       progress?.('正在读取' + source.label);
-      const row = await readLookupSource(source, { get, now, params, signal: controller.signal, retrieval, detailLimit: details.get(source.id) });
+      const row = await readLookupSource(source, { get, now, params, signal: controller.signal, retrieval, detailLimit: details.get(source.id), requestLimit: requestLimits.get(source.id) });
       if (controller.signal.aborted) throw controller.signal.reason;
       await health?.record(source.id, row, { signal: controller.signal });
       results.push(row);

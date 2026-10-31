@@ -1,6 +1,6 @@
 import { lookupComplaint } from '../newsIntent.js';
 import { isResponseRevision } from '../../core/responseRevision.js';
-import { createLookupClock, LOOKUP_TOTALS } from './clock.js';
+import { createLookupClock, LOOKUP_TOTALS, LOOKUP_TARGETS } from './clock.js';
 import { lookupIntent } from './intent.js';
 import { lookupClosingNote } from './answer.js';
 import { reviewOutcome } from '../reviewOutcome.js';
@@ -68,7 +68,9 @@ export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_
   const release = () => { clearTimeout(timer); timer = null; deadlineDisabled = true; };
   const disable = (note) => { if (isTask(note)) release(); };
   const userAbort = () => { ctrl.abort(); finishWait(abortError()); };
-  const control = createLookupClock({ totalMs, now: options.clockNow || Date.now, disabled: () => deadlineDisabled || options.inbox?.some(isTask) });
+  // 未分类的通用问题保留原20秒主备切换；不能在15秒先中止，吞掉已配置备用模型。
+  const control = createLookupClock({ totalMs, phased: profiles && intent.lookup && intent.kind !== 'general', now: options.clockNow || Date.now, disabled: () => deadlineDisabled || options.inbox?.some(isTask) });
+  if (profiles && intent.lookup) options.emit?.({ type: 'diagnostic', phase: 'lookup_budget', kind: intent.kind, targetMs: LOOKUP_TARGETS[intent.kind], hardLimitMs: totalMs });
   // 模型自己判断这不是一问一答（need_more_time），或调用了画图等工具：解除时限
   control.release = release;
   control.released = () => deadlineDisabled;
@@ -114,17 +116,20 @@ export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_
     if (!profiles && result?.needsMoreTime && !options.signal?.aborted) return await extend();
     return result;
   } catch (error) {
-    if (!profiles || error.code !== 'LOOKUP_TIMEOUT' || options.signal?.aborted) throw error;
+    if (!profiles || !['LOOKUP_TIMEOUT', 'LOOKUP_ANSWER_TIMEOUT'].includes(error.code) || options.signal?.aborted) throw error;
     // 到点先交本轮真实回执或已写出的文字；不再静默启动180秒的另一轮。
     closed = true;
-    const fallback = partial.trim() ? '' : control.fallback?.() || '';
+    ctrl.abort(error);
+    const delivery = !partial.trim() && control.delivery?.();
+    const fallback = partial.trim() ? '' : delivery?.text || control.fallback?.() || '';
     const text = partial || fallback || '本轮查询未能在时限内取得可核实的结果，可以稍后重试。';
     const report = control.review?.() || {};
-    const outcome = report.request ? reviewOutcome(report, { interrupted: true, answer: text }) : { warnings: ['查询已到总时限，保留本轮已取得内容。'] };
-    const note = lookupClosingNote({ answer: text, quickStop: true, warnings: outcome.warnings });
+    const complete = Boolean(delivery?.complete && fallback);
+    const outcome = report.request ? reviewOutcome(report, { interrupted: !complete, answer: text }) : { outcome: complete ? 'not_checked' : 'partial', warnings: complete ? [] : ['查询已到总时限，保留本轮已取得内容。'] };
+    const note = lookupClosingNote({ answer: text, quickStop: !complete, warnings: outcome.warnings, recovery: control.recovery?.() || delivery?.recovery });
     if (!partial) options.emit?.({ type: 'text', delta: text });
     if (note) options.emit?.({ type: 'text', delta: note });
-    const review = { ...report, ...outcome, outcome: 'partial', request: undefined };
+    const review = { ...report, ...outcome, request: undefined };
     options.emit?.({ type: 'task_review', review });
     options.emit?.({ type: 'state', value: 'done' });
     return { text: text + note, review };

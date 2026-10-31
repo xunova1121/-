@@ -6,6 +6,7 @@ import { lookupIntent } from '../src/agent/lookup/intent.js';
 import { runLookup } from '../src/agent/lookup/runner.js';
 import { createRetrievalBudget } from '../src/agent/retrievalBudget.js';
 import { lookupPublicQuery } from './lookup-public-query.mjs';
+import { LOOKUP_TARGETS, LOOKUP_TOTALS } from '../src/agent/lookup/clock.js';
 
 export const LOOKUP_LIVE_CASES = [
   ['sports', '体育资讯', 'sports_news'], ['recent-sports', '最近体育资讯', 'sports_news'],
@@ -41,7 +42,7 @@ export async function runLookupLiveQueries({ out, signal, declaredRegion, script
       }
       continue;
     }
-    console.log(`${id}：开始真实读取（最多8读，每源总8秒）`);
+    console.log(`${id}：开始真实读取（最多8读，每源总5秒）`);
     const started = performance.now();
     const retrieval = createRetrievalBudget(text);
     retrieval.begin();
@@ -60,7 +61,8 @@ export async function runLookupLiveQueries({ out, signal, declaredRegion, script
   const summary = { version: 1, scope: 'unified_lookup_public_no_model', strategyRegion: 'cn', declaredRegion, regionVerified: false,
     scriptSHA256: crypto.createHash('sha256').update(await fs.readFile(script)).digest('hex'),
     classifier: { total: cases.length, correct: cases.filter(row => row.intentCorrect).length },
-    cases: cases.map(({ items, ...row }) => ({ ...row, count: items?.length || 0 })),
+    cases: cases.map(({ items, ...row }) => ({ ...row, count: items?.length || 0,
+      timingTarget: { targetMs: LOOKUP_TARGETS[row.actual] ?? null, hardLimitMs: LOOKUP_TOTALS[row.actual] ?? null, targetMet: null, state: 'not_measured', note: '未请求模型，不能用取数耗时判定完整回答达标' } })),
     selection: selected.map(row => row[0]),
     required: cases.filter(row => ['sports', 'world', 'tech'].includes(row.id)).map(row => ({ id: row.id, count: row.items?.length || 0, minimum: row.id === 'tech' ? 1 : 5 })),
     productionChanged: false, modelRequested: false, note: `统一runner公开取数+所选${cases.length}/15条意图；未选题不算通过。缺城市必须追问；无Key探测不代表用户已配置的和风/博查服务验收，不等于含模型问答或30题完成验收` };

@@ -21,7 +21,10 @@ export function createLookupHealth({ storage = collection('kv'), now = Date.now 
     const samples = Array.isArray(record?.samples) ? record.samples.slice(-10) : [];
     const cooldownUntil = Number(record?.cooldownUntil) || 0;
     const lastConnectedAt = samples.reduce((at, sample) => sample.connected ? Math.max(at, sample.at) : at, 0);
-    return { id, samples, lastConnectedAt, cooldownUntil, cooling: cooldownUntil > now(), storageError };
+    const successRate = samples.length ? samples.filter(s => s.state === 'ok').length / samples.length : null;
+    const averageMs = samples.length ? Math.round(samples.reduce((n, s) => n + s.elapsedMs, 0) / samples.length) : null;
+    const authorizationIssue = samples.at(-1)?.code === 'LOOKUP_AUTH';
+    return { id, samples, successRate, averageMs, authorizationIssue, lastConnectedAt, cooldownUntil, cooling: cooldownUntil > now(), storageError };
   }
   return {
     async get(id) {
@@ -41,7 +44,7 @@ export function createLookupHealth({ storage = collection('kv'), now = Date.now 
         const samples = [...(Array.isArray(old?.samples) ? old.samples : []), {
           at, connected: result.state !== 'failed', state: result.state,
           elapsedMs: Math.max(0, Math.min(60000, Number(result.elapsedMs) || 0)),
-          code: String(result.code || '').slice(0, 60)
+          code: String([401, 403, 429].includes(result.status) ? 'LOOKUP_AUTH' : result.code || '').slice(0, 60)
         }].slice(-10);
         const failures = samples.slice(-3);
         const cooling = failures.length === 3 && failures.every(s => !s.connected);

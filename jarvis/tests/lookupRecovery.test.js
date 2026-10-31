@@ -41,7 +41,7 @@ describe('普通查询预留整理窗口', () => {
     }
   });
 
-  it('真实调度：45秒终止无结果检索，仍可用剩余时间给正式说明', async () => {
+  it('真实调度：15秒无首字结束卡住的模型，给正式失败说明且不重复请求', async () => {
     vi.useFakeTimers();
     try {
       let calls = 0;
@@ -58,10 +58,10 @@ describe('普通查询预留整理窗口', () => {
         }
       };
       const resultPromise = runAgent({ ...input, adapter });
-      await vi.advanceTimersByTimeAsync(45001);
+      await vi.advanceTimersByTimeAsync(15001);
       const result = await resultPromise;
-      expect(calls).toBe(2);
-      expect(result.text).toContain('暂未取得');
+      expect(calls).toBe(1);
+      expect(result.text).toContain('未能在时限内取得');
       expect(result.review.outcome).toBe('partial');
       expect(messages[0].signal.aborted).toBe(true);
       expect(result.text).not.toContain('交付回执核对');
@@ -70,7 +70,7 @@ describe('普通查询预留整理窗口', () => {
     }
   });
 
-  it('最后整理也卡住时59秒留存半成品，不等60秒全局错误', async () => {
+  it('模型已写部分后卡住：45秒硬上限留存文字，取消后不再回写', async () => {
     vi.useFakeTimers();
     try {
       let calls = 0;
@@ -78,7 +78,7 @@ describe('普通查询预留整理窗口', () => {
       const emitted = [];
       const adapter = {
         stream: (options) => {
-          if (++calls === 1) return new Promise(() => {});
+          calls++;
           options.onText('已整理的部分。');
           late = options.onText;
           return new Promise(() => {});
@@ -91,7 +91,7 @@ describe('普通查询预留整理窗口', () => {
           if (event.type === 'text') emitted.push(event.delta);
         }
       });
-      await vi.advanceTimersByTimeAsync(59001);
+      await vi.advanceTimersByTimeAsync(45001);
       const result = await resultPromise;
       expect(result.review.outcome).toBe('partial');
       expect(result.text).toContain('已整理的部分');

@@ -1,8 +1,11 @@
-import { retryRead, httpError, throwControl } from '../core/networkRequest.js';
+import { httpError, throwControl } from '../core/networkRequest.js';
 import { errorKind } from '../core/suggest.js';
 import { fetchQWeather, parseQWeather, lookupQWeatherCity, formatQWeather } from '../core/qweather.js';
+import { weatherProvider, shortSourceRetry } from './lookup/weatherProvider.js';
+import { failureKind } from './lookup/recoveryData.js';
+import { WEATHER_SOURCE_MS } from './lookup/weatherLimits.js';
 /**
- * 查天气：不走搜索引擎（天气在搜索结果页里是特殊卡片，抓网页抓不到），直接问免费的天气接口，不用密钥。
+ * 查天气：不走搜索引擎（天气在搜索结果页里是特殊卡片，抓网页抓不到），优先已配置的和风API，失败后才用无需密钥的免费接口。
  *   1. Open-Meteo：先用地名查经纬度（支持中文地名），再取实况和未来几天预报
  *   2. 连不上时换 wttr.in
  * 结果整理成中文文字，交给模型回答。
@@ -58,33 +61,39 @@ export function formatWttr(placeName, j, days = 3, dataUrl = '') {
  * @param {string} place 地名（中文或英文）
  * @param {{ get: (url: string) => Promise<Response>, days?: number }} o
  */
-export async function getWeather(place, { get, days = 3, signal, retrieval, qweather = null }) {
+export async function getWeather(place, { get, days = 3, signal, retrieval, qweather = null, health }) {
   if (!String(place || '').trim()) throw Object.assign(new Error('缺少地点，请提供城市或定位结果，不能默认猜测城市'), { code: 'WEATHER_LOCATION_REQUIRED', name: 'ValidationError' });
   const name = String(place || '').trim().replace(/(市|区|县)$/, '') || '北京';
-  const json = url => retryRead(async requestSignal => { const response = await get(url, { signal: requestSignal }); if (!response.ok) throw httpError(response.status, '', '天气服务'); return response.json(); }, { signal, timeoutMs: 4000, beforeAttempt: () => retrieval?.consume('read') });
+  const json = (url, activeSignal) => shortSourceRetry(async requestSignal => { retrieval?.consume('read'); const response = await get(url, { signal: requestSignal }); if (!response.ok) throw httpError(response.status, '', '天气服务'); return response.json(); }, { signal: activeSignal });
   let firstErr;
   // 和风天气（填了 Key 时）：国内快、维度多；失败了再走 Open-Meteo。Key 同时放在请求头和 key 参数里：经网关转发网页时请求头会丢
   if (qweather) {
     try {
-      retrieval?.consume('read');
-      const fetchImpl = (url, init) => get(`${url}${url.includes('?') ? '&' : '?'}key=${encodeURIComponent(qweather.key)}`, init);
-      const city = (await lookupQWeatherCity({ ...qweather, query: name, fetchImpl, signal }))[0];
-      if (!city) throw new Error(`没找到地点“${name}”`);
-      const data = parseQWeather(await fetchQWeather({ ...qweather, latitude: city.latitude, longitude: city.longitude, fetchImpl, signal }));
-      return formatQWeather([city.name, city.region].filter(Boolean).join('，'), data, days, city.link);
+      return await weatherProvider('weather_qweather', async activeSignal => {
+        retrieval?.consume('read');
+        const fetchImpl = (url, init) => shortSourceRetry(async requestSignal => { const response = await get(`${url}${url.includes('?') ? '&' : '?'}key=${encodeURIComponent(qweather.key)}`, { ...init, signal: requestSignal }); if (response.status >= 500) throw httpError(response.status, '', '和风天气'); return response; }, { signal: init?.signal, beforeRetry: () => retrieval?.consume('read') });
+        const city = (await lookupQWeatherCity({ ...qweather, query: name, fetchImpl, signal: activeSignal }))[0];
+        throwControl(null, activeSignal);
+        if (!city) throw new Error(`没找到地点“${name}”`);
+        const data = parseQWeather(await fetchQWeather({ ...qweather, latitude: city.latitude, longitude: city.longitude, fetchImpl, signal: activeSignal }));
+        return formatQWeather([city.name, city.region].filter(Boolean).join('，'), data, days, city.link);
+      }, { signal, timeoutMs: WEATHER_SOURCE_MS.qweather, health });
     } catch (e) { throwControl(e, signal); firstErr = e; }
   }
   try {
-    const geo = await json(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=zh&format=json`);
-    const p = geo.results?.[0];
-    if (!p) throw new Error(`没找到地点“${name}”`);
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${p.latitude}&longitude=${p.longitude}`
-      + '&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,precipitation'
-      + `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=${Math.min(7, Math.max(1, days))}`;
-    return formatOpenMeteo(p, await json(url), days, url);
+    return await weatherProvider('weather_openmeteo', async activeSignal => {
+      const geo = await json(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=zh&format=json`, activeSignal);
+      throwControl(null, activeSignal);
+      const p = geo.results?.[0];
+      if (!p) throw new Error(`没找到地点“${name}”`);
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${p.latitude}&longitude=${p.longitude}`
+        + '&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,precipitation'
+        + `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=${Math.min(7, Math.max(1, days))}`;
+      return (qweather ? `和风天气暂时不可用，已改用Open-Meteo${failureKind(firstErr) === 'auth' ? '；请在设置中检查和风授权或额度' : ''}。\n` : '') + formatOpenMeteo(p, await json(url, activeSignal), days, url);
+    }, { signal, timeoutMs: WEATHER_SOURCE_MS.openMeteo, health });
   } catch (e) { throwControl(e, signal); firstErr = e; }
   try {
-    return formatWttr(name, await json(`https://wttr.in/${encodeURIComponent(name)}?format=j1&lang=zh`), days, `https://wttr.in/${encodeURIComponent(name)}?lang=zh`);
+    return await weatherProvider('weather_wttr', async activeSignal => '前面的天气来源暂时不可用，已改用wttr.in。\n' + formatWttr(name, await json(`https://wttr.in/${encodeURIComponent(name)}?format=j1&lang=zh`, activeSignal), days, `https://wttr.in/${encodeURIComponent(name)}?lang=zh`), { signal, timeoutMs: WEATHER_SOURCE_MS.wttr, health });
   } catch (e) {
     throwControl(e, signal);
     throw Object.assign(new Error('天气服务访问失败（' + firstErr?.message + '；' + e.message + '），可以改用web_search查询'), { code: e.code || 'WEATHER_FAILED', kind: errorKind(e) || 'api', status: e.status, cause: e });
