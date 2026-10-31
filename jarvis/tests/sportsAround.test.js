@@ -1,3 +1,4 @@
+import { pageMatch } from './fixtures/sports-page.mjs';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import fixture from './fixtures/zhibo8-real-redacted.json';
 import { sportsWindow, inSportsWindow, inferSportsWindow } from '../src/agent/sportsWindow.js';
@@ -48,13 +49,14 @@ it('跨午夜真实查询前后两日，直播吧优先；进行中在未赛前�
   expect(card.query).not.toHaveProperty('date'); expect(card.sources).toEqual([{ name: '直播吧', count: 3 }]);
 });
 
-it('ESPN兜底沿用around窗口和状态排序，来源降级明确', async () => {
-  const event = (id, offset, state) => ({ id, date: new Date(now + offset * 60000).toISOString(), status: { type: { state, shortDetail: state === 'in' ? 'HT' : '' } }, competitions: [{ competitors: [{ homeAway: 'home', score: '0', team: { displayName: id } }, { homeAway: 'away', score: '0', team: { displayName: 'Away' } }] }] });
-  const get = async url => { if (url === ZHIBO8_URL) throw new TypeError('fetch failed'); return { ok: true, json: async () => ({ events: [event('未赛', 10, 'pre'), event('中场', -120, 'in'), event('完场', -30, 'post')] }) }; };
+it('国内网页备用沿用around窗口，但不能把过去计划猜成中场或完场', async () => {
+  const date = offset => new Date(now + 28800000 + offset * 60000).toISOString().slice(0, 16).replace('T', ' ');
+  const get = async url => { if (url === ZHIBO8_URL) throw new TypeError('fetch failed'); return new Response(pageMatch('1', date(10), '未来计划') + pageMatch('2', date(-120), '过去计划') + pageMatch('3', date(130), '窗口外')); };
   const cards = [];
   const out = await getSportsScores({ period: 'around', leagues: ['英超'] }, { get, now, onScores: v => cards.push(v) });
-  expect(out).toContain('直播吧暂时取不到，以下来自 ESPN'); expect(out).not.toContain('完场（主）');
-  expect(cards[0].events.map(e => e.home)).toEqual(['中场', '未赛']); expect(cards[0].events[0].league).toBe('英超');
+  expect(out).toContain('公开赛程页'); expect(out).not.toMatch(/过去计划|窗口外|ESPN/);
+  expect(cards[0].events.map(e => e.home)).toEqual(['未来计划']);
+  expect(cards[0].events[0]).toMatchObject({ league: '英超', state: 'unknown', score: 'VS' });
 });
 
 it('真实返回脱敏样例：只按已知字段归一化，is_jingcai不是编号；联赛缺失不从队名猜', () => {

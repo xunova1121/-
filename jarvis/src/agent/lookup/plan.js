@@ -30,7 +30,7 @@ export function lookupPlan(intent, { text, getTool, now = Date.now() }) {
     return place && getTool('get_weather') ? { name: 'get_weather', args: { place }, timeoutMs: WEATHER_FETCH_MS } : null;
   } else if (intent.kind === 'sports_live' && getTool('get_sports_scores')) {
     const args = sportsPreCall(text, now);
-    if (args || params.period === 'forward_live') return { name: 'get_sports_scores', args: { ...args, ...(params.period === 'forward_live' && { period: params.period, window_minutes: params.window_minutes, sport: params.sport }) }, timeoutMs: 8000 };
+    if (args || params.period === 'forward_live') return { name: 'get_sports_scores', args: { ...args, ...(params.period === 'forward_live' && { period: params.period, window_minutes: params.window_minutes, sport: params.sport }) }, timeoutMs: 12000 };
   } else if (intent.kind === 'market' && getTool('get_stock_kline')) {
     const code = String(text).match(/(?<![\dA-Za-z])((?:sh|sz|bj)?\d{6})(?!\d)/i)?.[1];
     if (code && !/实时|分时|汇率|金价|油价|币价|港股|美股|分钟|去年|今年|历史|最高|最低|过去|近\d|20\d{2}/.test(text)) return { name: 'get_stock_kline', args: { code, adjustment: 'none', limit: 3 }, timeoutMs: 8000 };

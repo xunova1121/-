@@ -1,3 +1,4 @@
+import { sportsAnswerTable } from './sportsPresentation.js';
 import { recoveryText } from './lookup/recoveryData.js';
 import { newsCandidates } from './newsDelivery.js';
 import { answerConstraintIssues, answerConstraints } from './answerRequirements.js';
@@ -79,7 +80,7 @@ export function createLookupDelivery(request, now = Date.now) {
     text() {
       if (recovery && recoveredText) return recoveredText;
       if (direct.length) {
-        const text = direct.map(row => row.name === 'get_weather' ? weatherFallback(row.output, request, now()).text : row.name === 'get_stock_kline' ? marketFallback(row.output) : row.output.replace(/^球队名是英文[^\n]*$/m, '')).filter(Boolean).join('\n\n');
+        const text = direct.map(row => row.name === 'get_weather' ? weatherFallback(row.output, request, now()).text : row.name === 'get_stock_kline' ? marketFallback(row.output) : sportsAnswerTable(row.output, request)).filter(Boolean).join('\n\n');
         return safe(text) ? text : '';
       }
       if (!rows.size) return failures.length ? `本轮还没有确切结果（${failedSources.length ? failedSources.join('、') : '查询来源暂时未能提供可用资料'}），可以稍后再试。` : '';

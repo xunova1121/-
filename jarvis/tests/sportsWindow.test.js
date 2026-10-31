@@ -1,3 +1,4 @@
+import { pageMatch } from './fixtures/sports-page.mjs';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { sportsWindow, inSportsWindow, beijingTimestamp, inferSportsWindow } from '../src/agent/sportsWindow.js';
 import { getSportsScores, createSportsScoresTool, clearScoresCache, sportsPreCall } from '../src/agent/sportsScores.js';
@@ -46,12 +47,11 @@ describe('赛程时间由程序筛选', () => {
     expect(result).toContain('主队afternoon');
     expect(result).not.toContain('主队morning');
   });
-  it('ESPN兜底同样筛时间，不把旧场次混回结果', async () => {
-    const events = ['00:30', '06:30'].map((time, i) => ({ id: String(i), date: `2026-10-25T${time}:00+08:00`, status: { type: { state: 'pre' } }, competitions: [{ competitors: [{ homeAway: 'home', team: { displayName: `主队${i}` } }, { homeAway: 'away', team: { displayName: `客队${i}` } }] }] }));
-    const get = async (url) => url === ZHIBO8_URL ? { ok: true, json: async () => ({ list: [] }) } : { ok: true, json: async () => ({ events }) };
+  it('国内赛程页备用同样筛时间，不把旧计划混回结果或编成实时比分', async () => {
+    const get = async url => url === ZHIBO8_URL ? new Response('{"list":[]}') : new Response(pageMatch('0', '2026-10-25 00:30', '主队0') + pageMatch('1', '2026-10-25 06:30', '主队1'));
     const result = await getSportsScores({ leagues: ['英超'], period: 'upcoming' }, { get, now });
-    expect(result).toContain('主队1');
-    expect(result).not.toContain('主队0');
+    expect(result).toContain('主队1'); expect(result).not.toContain('主队0');
+    expect(result).toContain('实时状态未核实'); expect(result).not.toContain('ESPN');
   });
   it('跨午夜未来窗口会包含次日，而非只查今天', async () => {
     const list = [{ ...match('today', '23:55') }, { ...match('tomorrow', '00:10'), sdate: '2026-10-26' }];

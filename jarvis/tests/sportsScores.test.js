@@ -33,86 +33,69 @@ beforeEach(() => {
   clearZhibo8Cache();
 });
 
-describe('赛程赛果：按北京时间查', () => {
-  it('北京“今天”跨 ESPN 的两天：往前多取一天，再按开球时间筛回北京当天；没开打的给时间，打完的给比分', async () => {
-    const espn = fakeEspn({
-      'chn.1': [
-        ev('1', '2026-10-24T11:35Z', 'Shanghai Port', 'Shandong Taishan', PRE),
-        ev('2', '2026-10-24T07:00Z', 'Beijing Guoan', 'Chengdu Rongcheng', FT, { hs: '2', as: '1' })
-      ],
-      'eng.1': [
-        // 北京 10-23 23:00：昨天的，不算
-        ev('3', '2026-10-23T15:00Z', 'Arsenal', 'Chelsea', FT, { hs: '1', as: '1' }),
-        // 北京 10-24 03:00：欧洲“昨晚”的比赛，在北京是今天凌晨
-        ev('4', '2026-10-23T19:00Z', 'Liverpool', 'Everton', FT, { hs: '3', as: '0' })
-      ],
-      'uefa.champions': [ev('5', '2026-10-24T19:00Z', 'Real Madrid', 'Inter', { name: 'STATUS_FINAL_PEN', state: 'post', detail: 'FT-Pens', shortDetail: 'FT-Pens' }, { hs: '1', as: '1', hx: { shootoutScore: 4 }, ax: { shootoutScore: 3 } })]
-    });
-    const out = await getSportsScores({ sport: 'football' }, { get: espn.get, now: NOW });
-    expect(espn.urls[0]).toContain('dates=20261023-20261024');
+const domesticMatch = (id, date, time, home, away, state = '1', hs = '', vs = '') => ({ id, sdate: date, time, type: 'football', leagueid: 'fixture', home_team: home, visit_team: away, state, home_score: hs, visit_score: vs });
+const domesticGet = list => vi.fn(async url => { expect(url).toBe(ZHIBO8_URL); return new Response(JSON.stringify({ list })); });
+const scheduleHtml = (date, home = '测试主队', away = '测试客队') => `<li id="saishi1" data-time="${date}" data-type="football" data-rightishome="0"><time>19:30</time><b><span class="_league">英超第1轮</span><span class="_teams">${home}<span> - </span>${away}</span></b></li>`;
+
+describe('赛程赛果：按北京时间查（用户停用ESPN，保留业务边界）', () => {
+  it('北京今天只含当日场次：凌晨/晚间均保留，昨天明天排除，未赛不编比分', async () => {
+    const get = domesticGet([
+      domesticMatch('1', '2026-10-24', '19:35', 'Shanghai Port', 'Shandong Taishan'),
+      domesticMatch('2', '2026-10-24', '15:00', 'Beijing Guoan', 'Chengdu Rongcheng', '3', '2', '1'),
+      domesticMatch('3', '2026-10-23', '23:00', 'Arsenal', 'Chelsea', '3', '1', '1'),
+      domesticMatch('4', '2026-10-24', '03:00', 'Liverpool', 'Everton', '3', '3', '0'),
+      domesticMatch('5', '2026-10-25', '03:00', 'Real Madrid', 'Inter')]);
+    const out = await getSportsScores({ sport: 'football' }, { get, now: NOW });
+    expect(get.mock.calls.map(([url]) => url)).toEqual([ZHIBO8_URL]);
     expect(out).toContain('北京时间 2026-10-24（周六）');
-    expect(out).toMatch(/## 中超\n- 15:00 完场：Beijing Guoan（主）2-1 Chengdu Rongcheng（客）\n- 19:35 未开赛：Shanghai Port（主）vs Shandong Taishan（客）/);
-    expect(out).toContain('03:00 完场：Liverpool（主）3-0 Everton（客）');
-    expect(out).not.toContain('Arsenal');
-    // 北京 10-25 03:00 的欧冠不在今天
-    expect(out).not.toContain('Real Madrid');
-    // 中超排在英超前面
-    expect(out.indexOf('## 中超')).toBeLessThan(out.indexOf('## 英超'));
-    expect(out).toContain('不在查询范围：CBA');
-    expect(out).not.toContain('NBA');
+    expect(out).toContain('15:00 完场：Beijing Guoan 2-1 Chengdu Rongcheng');
+    expect(out).toContain('19:35 未开赛：Shanghai Port vs Shandong Taishan');
+    expect(out).toContain('03:00 完场：Liverpool 3-0 Everton');
+    expect(out).not.toMatch(/Arsenal|Real Madrid|ESPN/);
+    expect(out).toContain('列表不带联赛名');
   });
-
-  it('点球、跨两天、只看某队', async () => {
-    const espn = fakeEspn({ 'uefa.champions': [ev('5', '2026-10-24T19:00Z', 'Real Madrid', 'Inter', { name: 'STATUS_FINAL_PEN', state: 'post', detail: 'FT-Pens', shortDetail: 'FT-Pens' }, { hs: '1', as: '1', hx: { shootoutScore: 4 }, ax: { shootoutScore: 3 } }), ev('6', '2026-10-24T19:00Z', 'Bayern', 'PSG', PRE)] });
-    const out = await getSportsScores({ date: '2026-10-24', end_date: '2026-10-25', leagues: ['欧冠'], team: 'madrid' }, { get: espn.get, now: NOW });
-    expect(espn.urls).toHaveLength(1);
-    expect(espn.urls[0]).toContain('dates=20261023-20261025');
+  it('跨两天只看某队；新来源没有点球字段时不补猜点球结果', async () => {
+    const get = domesticGet([domesticMatch('0', '2026-10-24', '21:00', '其他队', '对手'), domesticMatch('1', '2026-10-25', '03:00', 'Real Madrid', 'Inter', '3', '1', '1'), domesticMatch('2', '2026-10-25', '03:00', 'Bayern', 'PSG')]);
+    const out = await getSportsScores({ date: '2026-10-24', end_date: '2026-10-25', team: 'madrid' }, { get, now: NOW });
     expect(out).toContain('# 2026-10-25（周日）');
-    expect(out).toContain('03:00 完场（含点球）：Real Madrid（主）1-1 Inter（客），点球 4-3');
-    expect(out).not.toContain('Bayern');
+    expect(out).toContain('03:00 完场：Real Madrid 1-1 Inter');
+    expect(out).not.toMatch(/Bayern|其他队|点球|ESPN/);
+    expect(get).toHaveBeenCalledTimes(1);
   });
-
-  it('个别赛事连不上：其余照常给，并写明哪些没取到', async () => {
-    const espn = fakeEspn({ 'eng.1': [ev('4', '2026-10-24T11:30Z', 'Liverpool', 'Everton', PRE)] }, { fail: ['chn.1'] });
-    const out = await getSportsScores({ leagues: ['中超', '英超'] }, { get: espn.get, now: NOW });
-    expect(out).toContain('Liverpool');
-    expect(out).toMatch(/没取到的（1 个[^\n]*web_search[^\n]*）：中超/);
+  it('国内日期只部分覆盖：网页失败也保留已取得场次，明确缺口', async () => {
+    const get = vi.fn(async url => url === ZHIBO8_URL ? new Response(JSON.stringify({ list: [domesticMatch('1', '2026-10-24', '19:30', 'Liverpool', 'Everton')] })) : new Response('', { status: 503 }));
+    const out = await getSportsScores({ date: '2026-10-24', end_date: '2026-10-25' }, { get, now: NOW });
+    expect(out).toContain('Liverpool'); expect(out).toContain('缺失日期'); expect(out).toContain('web_search');
+    expect(get.mock.calls.some(([u]) => /espn/i.test(u))).toBe(false);
   });
-
-  it('ESPN 完全连不上：很快放弃，不把几十个赛事一个个等超时；告诉模型改用搜索', async () => {
-    const espn = fakeEspn({}, { fail: LEAGUES.map((l) => l.code) });
-    await expect(getSportsScores({}, { get: espn.get, now: NOW })).rejects.toMatchObject({ code: 'SPORTS_UNAVAILABLE', message: expect.stringContaining('web_search') });
-    expect(espn.urls.length).toBeLessThan(LEAGUES.length);
+  it('国内接口与网页均失败：只有两条国内请求，不尝试ESPN，交搜索自救', async () => {
+    const get = vi.fn(async () => { throw new TypeError('fetch failed'); });
+    await expect(getSportsScores({}, { get, now: NOW })).rejects.toMatchObject({ code: 'SPORTS_UNAVAILABLE', message: expect.stringContaining('web_search') });
+    expect(get.mock.calls.map(([u]) => u)).toEqual([ZHIBO8_URL, 'https://www.zhibo8.com/']);
   });
-
-  it('用户点停止：立即停，不当成“没取到”', async () => {
+  it('用户点停止：立即停，不当成没取到，也不再读赛程页', async () => {
     const ctrl = new AbortController();
-    const get = (url, { signal }) => new Promise((_, reject) => signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true }));
+    const get = vi.fn((url, { signal }) => new Promise((_, reject) => signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true })));
     const p = getSportsScores({}, { get, signal: ctrl.signal, now: NOW });
     setTimeout(() => ctrl.abort(), 20);
-    await expect(p).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(p).rejects.toMatchObject({ name: 'AbortError' }); expect(get).toHaveBeenCalledTimes(1);
   });
-
   it('整次查询只扣一次读取预算；日期不对、跨太多天、认不出的赛事报清楚', async () => {
-    const espn = fakeEspn({});
-    let reads = 0;
-    await getSportsScores({}, { get: espn.get, now: NOW, retrieval: { consume: () => reads++ } });
-    expect(reads).toBe(1);
-    await expect(getSportsScores({ date: '2026-13-01' }, { get: espn.get })).rejects.toThrow(/YYYY-MM-DD/);
-    await expect(getSportsScores({ date: '2026-10-01', end_date: '2026-10-09' }, { get: espn.get })).rejects.toThrow(/最多查 3 天/);
-    await expect(getSportsScores({ leagues: ['排球联赛'] }, { get: espn.get })).rejects.toThrow(/没认出/);
+    const get = domesticGet([domesticMatch('1', '2026-10-24', '19:30', '甲', '乙')]); let reads = 0;
+    await getSportsScores({}, { get, now: NOW, retrieval: { consume: () => reads++ } }); expect(reads).toBe(1);
+    await expect(getSportsScores({ date: '2026-13-01' }, { get })).rejects.toThrow(/YYYY-MM-DD/);
+    await expect(getSportsScores({ date: '2026-10-01', end_date: '2026-10-09' }, { get })).rejects.toThrow(/最多查 3 天/);
+    clearZhibo8Cache();
+    await expect(getSportsScores({ leagues: ['排球联赛'] }, { get: async () => { throw new TypeError('offline'); } })).rejects.toThrow(/没认出/);
   });
-
-  it('同一轮又查一次（先查过）：不重复联网', async () => {
-    const espn = fakeEspn({});
-    await getSportsScores({ leagues: ['中超'] }, { get: espn.get, now: NOW });
-    await getSportsScores({ leagues: ['中超'] }, { get: espn.get, now: NOW });
-    expect(espn.urls).toHaveLength(1);
+  it('同一轮又查一次：国内接口使用短时缓存不重复联网', async () => {
+    const get = domesticGet([domesticMatch('1', '2026-10-24', '19:30', '甲', '乙')]);
+    await getSportsScores({}, { get, now: NOW }); await getSportsScores({}, { get, now: NOW });
+    expect(get).toHaveBeenCalledTimes(1);
   });
-
-  it('赛事挑选：中文名、分组、项目', () => {
-    expect(pickLeagues({ leagues: ['五大联赛'] }).map((l) => l.name)).toEqual(['英超', '西甲', '德甲', '意甲', '法甲']);
-    expect(pickLeagues({ sport: 'basketball' }).map((l) => l.name)).toEqual(['NBA', 'WNBA']);
+  it('赛事挑选：中文名、分组、项目；旧代码仅为名称别名，不发海外请求', () => {
+    expect(pickLeagues({ leagues: ['五大联赛'] }).map(l => l.name)).toEqual(['英超', '西甲', '德甲', '意甲', '法甲']);
+    expect(pickLeagues({ sport: 'basketball' }).map(l => l.name)).toEqual(['NBA', 'WNBA']);
     expect(pickLeagues({}).length).toBe(LEAGUES.length);
   });
 });
@@ -145,7 +128,7 @@ describe('问赛程比分时先查好', () => {
     try {
       clearScoresCache();
       clearZhibo8Cache();
-      const espn = fakeEspn({ 'chn.1': [ev('1', new Date(Date.now() + 3600_000).toISOString(), 'Shanghai Port', 'Shandong Taishan', PRE)] });
+      const espn = { get: domesticGet([domesticMatch('1', '2026-10-24', '15:00', 'Shanghai Port', 'Shandong Taishan')]) };
       const tool = createSportsScoresTool({ fetchImpl: espn.get });
       const seenByModel = [];
       const adapter = {
@@ -155,7 +138,7 @@ describe('问赛程比分时先查好', () => {
         }
       };
       await runAgent({ adapter, model: 'fixture', history: [], userText: '今天有什么比赛？', tools: [tool], context: { dynamic: '' }, emit() {}, quiet: true });
-      expect(espn.urls.length).toBeGreaterThan(0);
+      expect(espn.get).toHaveBeenCalledTimes(1);
       expect(seenByModel[0]).toContain('Shanghai Port');
     } finally {
       vi.useRealTimers();
@@ -207,10 +190,11 @@ describe('国内来源：直播吧', () => {
     expect(team).not.toContain('北京国安 2-1');
   });
 
-  it('直播吧没有的日期（前天）改查 ESPN；直播吧连不上也照常走 ESPN', async () => {
-    const espn = fakeEspn({ 'eng.1': [ev('9', '2026-10-22T11:30Z', 'Arsenal', 'Chelsea', FT, { hs: '2', as: '0' })] }, { zhibo8: ZHIBO8 });
-    const out = await getSportsScores({ date: '2026-10-22', leagues: ['英超'] }, { get: espn.get, now: NOW2 });
-    expect(espn.urls).toHaveLength(1);
-    expect(out).toContain('Arsenal（主）2-0 Chelsea（客）');
+  it('直播吧接口未覆盖日期时读国内赛程页，不请求ESPN', async () => {
+    const get = vi.fn(async url => url === ZHIBO8_URL ? new Response(JSON.stringify({ list: ZHIBO8 })) : new Response(scheduleHtml('2026-10-22 19:30', 'Arsenal', 'Chelsea')));
+    const out = await getSportsScores({ date: '2026-10-22', leagues: ['英超'] }, { get, now: NOW2 });
+    expect(get.mock.calls.map(([u]) => u)).toEqual([ZHIBO8_URL, 'https://www.zhibo8.com/']);
+    expect(out).toContain('Arsenal（主）vs Chelsea（客）'); expect(out).toContain('实时状态未核实');
+    expect(out).not.toMatch(/2-0|ESPN/);
   });
 });

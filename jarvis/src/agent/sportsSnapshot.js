@@ -26,6 +26,15 @@ export function sportsQuery(args = {}) {
   const out = {};
   for (const k of ['period', 'date', 'end_date', 'sport', 'team']) if (args[k] != null) out[k] = text(args[k], k === 'team' ? 64 : 16);
   if (args.window_minutes != null) out.window_minutes = args.window_minutes;
+  if (args.teams != null) out.teams = (Array.isArray(args.teams) ? args.teams : []).slice(0, 12).map(v => text(v));
   if (args.leagues != null) out.leagues = (Array.isArray(args.leagues) ? args.leagues : [args.leagues]).slice(0, 40).map(v => text(v));
   return out;
+}
+
+/** 用户停用ESPN后，历史卡不再回放其数据；不删除历史消息正文。 */
+export function withoutRetiredSports(value = {}) {
+  const retired = row => /espn/i.test(String(row?.source || row?.name || ''));
+  if (!(value.events || []).some(retired) && !(value.sources || []).some(retired)) return value;
+  return { ...value, events: (value.events || []).filter(row => !retired(row)), sources: (value.sources || []).filter(row => !retired(row)),
+    notice: '已移除停用来源的旧数据，请刷新国内赛程。' };
 }

@@ -251,8 +251,8 @@ var LOOKUP_RULES = [
 function lookupIntent(text2 = "", { history = [], preferences = [] } = {}) {
   const original = String(text2).trim();
   const value = original.replace(/^【这是定时任务[\s\S]*?】\s*/, "").trim();
-  const compact2 = value.replace(/[，,。！？!?\s]+/g, "");
-  if (compact2.length <= 80 && META.test(compact2)) return { kind: "meta", params: { metaType: "status" }, sure: true, lookup: false, rule: "meta" };
+  const compact = value.replace(/[，,。！？!?\s]+/g, "");
+  if (compact.length <= 80 && META.test(compact)) return { kind: "meta", params: { metaType: "status" }, sure: true, lookup: false, rule: "meta" };
   if (/^(?:你好|早上好|晚上好|谢谢|晚安|在吗|我(?:最近)?好累|陪我聊聊)[。！!\s]*$/.test(value)) return { kind: "meta", params: { metaType: "smalltalk" }, sure: true, lookup: false, rule: "meta" };
   if (/^(?:各[一二两三四五六七八九十\d]+条|继续|再查|再查一会儿)[。！!\s]*$/.test(value)) {
     const previous = [...history].reverse().find((m) => m.role === "user" && !/^(?:继续|再查|各.{0,3}条)/.test(String(m.content || "")));
@@ -859,7 +859,7 @@ function lookupReceiptItems(found, intent) {
     kind: intent.kind,
     category: intent.kind,
     summary: found.output,
-    verified: found.tool === "web_search" ? "index" : "api"
+    verified: found.tool === "web_search" ? "index" : found.tool === "get_sports_scores" && /公开赛程页/.test(found.output) ? "page" : "api"
   }];
 }
 
@@ -870,13 +870,14 @@ function lastGoodKey(intent, plan, text2 = "") {
   if (!KINDS.has(intent.kind) || /持仓|账户|我的|文件|密码|令牌|密钥|住址|家里/.test(text2) || intent.params?.dateMode === "specified") return null;
   const args = plan?.args || {};
   if (intent.kind === "weather" && !args.place || intent.kind === "market" && !args.code) return null;
-  const allowed = ["place", "days", "code", "adjustment", "limit", "sport", "period", "date", "window_minutes", "categories", "publishers", "date_mode"];
+  const allowed = ["place", "days", "code", "adjustment", "limit", "sport", "teams", "period", "date", "window_minutes", "categories", "publishers", "date_mode"];
   const params = Object.fromEntries(allowed.filter((k) => args[k] != null).map((k) => [k, args[k]]));
   if (JSON.stringify(params).length > 440 || /https?:|[0-9]|@|路|街|号|室|弄|幢|楼|小区|经度|纬度/.test(String(args.place || ""))) return null;
   const key = intent.kind + ":" + JSON.stringify({ ...params, mode: intent.params?.dateMode || "today" });
   return key.length <= 500 ? key : null;
 }
 function valid(row, kind, at) {
+  if (kind === "sports_live" && /espn/i.test(JSON.stringify(row?.found || {}))) return false;
   if (!row || row.at > at || !Number.isFinite(row.at)) return false;
   const age = at - row.at;
   if (kind === "weather") return age <= 3 * 36e5;
@@ -903,6 +904,7 @@ function createLastGood({ storage = collection("kv"), now = Date.now } = {}) {
       return structuredClone(row);
     },
     async put(key, kind, found, { signal } = {}) {
+      if (kind === "sports_live" && /espn/i.test(found.output || "")) return;
       if (!key || /(?:Bearer\s+[A-Za-z0-9]|[?&](?:key|token|api_key|access_token)=)/i.test(found.output || "") || !usefulReceipt(found) || found.output.length > 1e5 || found.recovery?.state === "cached" || signal?.aborted) return;
       if (!["get_weather", "get_stock_kline", "get_sports_scores", "get_today_news"].includes(found.tool) || !/https?:\/\//.test(found.output)) return;
       let output = found.output;
@@ -910,9 +912,9 @@ function createLastGood({ storage = collection("kv"), now = Date.now } = {}) {
         const data = JSON.parse(output);
         if (data.kind === "today_news") {
           const items2 = data.items.slice(0, 12).map((item2) => ({ ...item2, title: String(item2.title).slice(0, 160), summary: String(item2.summary || "").slice(0, 180) }));
-          const compact2 = { kind: data.kind, date: data.date, range: data.range, items: items2, sources: [], cacheTruncated: true, note: "\u7F13\u5B58\u53EA\u4FDD\u7559\u90E8\u5206\u6761\u76EE\u548C\u77ED\u6458\u8981\uFF0C\u4E0D\u80FD\u5F53\u4F5C\u539F\u59CB\u5B8C\u6574\u5217\u8868\u3002" };
-          while (items2.length > 1 && new TextEncoder().encode(JSON.stringify(compact2)).length > 6e3) items2.pop();
-          output = JSON.stringify(compact2);
+          const compact = { kind: data.kind, date: data.date, range: data.range, items: items2, sources: [], cacheTruncated: true, note: "\u7F13\u5B58\u53EA\u4FDD\u7559\u90E8\u5206\u6761\u76EE\u548C\u77ED\u6458\u8981\uFF0C\u4E0D\u80FD\u5F53\u4F5C\u539F\u59CB\u5B8C\u6574\u5217\u8868\u3002" };
+          while (items2.length > 1 && new TextEncoder().encode(JSON.stringify(compact)).length > 6e3) items2.pop();
+          output = JSON.stringify(compact);
         }
       } catch {
       }
@@ -1030,6 +1032,7 @@ function relevantRecoverySearch(output, intent, args = {}, request = "") {
   if (!rows) rows = String(output).split(/\n(?=- )/).map((block) => ({ title: block.split("\n")[0].replace(/^-\s*/, ""), url: block.match(/https?:\/\/[^\s]+/)?.[0], snippet: block.split("\n").slice(2).join(" ") }));
   const kept = rows.filter((row) => {
     if (!row.url || !row.title) return false;
+    if (intent.kind === "sports_live" && /espn/i.test(`${row.url} ${row.source || ""} ${row.title}`)) return false;
     const text2 = `${row.title} ${row.snippet || ""}`;
     if (/客服电话|售后维修|账号登录|验证码/.test(text2) && !/客服|售后|维修|登录|验证码/.test(request)) return false;
     if (intent.kind === "weather") return /天气|气温|温度|weather|forecast/i.test(text2) && text2.includes(String(args.place || "").replace(/[市区县]$/, ""));
@@ -1096,7 +1099,7 @@ async function recoverLookup(intent, plan, options) {
     found = await attempt({ name: plan.name, args: plan.args }, label + "\u77ED\u91CD\u8BD5", 2e3);
     if (found) return finish(found);
   }
-  const query = intent.kind === "weather" ? `${plan.args.place} ${text2 || "\u4ECA\u5929\u5929\u6C14"}` : text2;
+  const query = intent.kind === "sports_live" && (plan.args.teams?.length || plan.args.team) ? `${[...plan.args.teams || [], plan.args.team || ""].filter(Boolean).join(" ")} ${text2}` : intent.kind === "weather" ? `${plan.args.place} ${text2 || "\u4ECA\u5929\u5929\u6C14"}` : text2;
   if (getTool("web_search") && query.trim()) {
     found = await attempt({ name: "web_search", args: { query: plan.name === "web_search" ? query.replace(/[？?。！!]/g, "").trim() + " \u5B98\u65B9\u8D44\u6599" : query } }, "\u516C\u5F00\u641C\u7D22", 5e3);
     if (!found && left() > 250) {
@@ -1128,15 +1131,15 @@ ${page.output.slice(0, 6e3)}`;
     if (found) return finish(found);
   }
   check();
-  const cached2 = await lastGood?.get(key, intent.kind, { signal });
+  const cached3 = await lastGood?.get(key, intent.kind, { signal });
   check();
-  if (cached2) {
-    const time = new Date(cached2.at).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
-    return { ...cached2.found, recovery: {
+  if (cached3) {
+    const time = new Date(cached3.at).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
+    return { ...cached3.found, recovery: {
       state: "cached",
       attempts,
-      fetchedAt: cached2.at,
-      note: `\u73B0\u67E5\u6CA1\u6210\u529F\uFF0C\u8FD9\u662F\u5317\u4EAC\u65F6\u95F4${time}\u67E5\u5230\u7684\u6570\u636E${intent.kind === "sports_live" ? `\uFF08${Math.max(0, Math.floor((now() - cached2.at) / 6e4))}\u5206\u949F\u524D\u7684\u72B6\u6001\uFF0C\u5E76\u975E\u5B9E\u65F6\u6BD4\u5206\uFF09` : "\uFF0C\u4E0D\u662F\u672C\u6B21\u5B9E\u65F6\u66F4\u65B0"}\u3002`
+      fetchedAt: cached3.at,
+      note: `\u73B0\u67E5\u6CA1\u6210\u529F\uFF0C\u8FD9\u662F\u5317\u4EAC\u65F6\u95F4${time}\u67E5\u5230\u7684\u6570\u636E${intent.kind === "sports_live" ? `\uFF08${Math.max(0, Math.floor((now() - cached3.at) / 6e4))}\u5206\u949F\u524D\u7684\u72B6\u6001\uFF0C\u5E76\u975E\u5B9E\u65F6\u6BD4\u5206\uFF09` : "\uFF0C\u4E0D\u662F\u672C\u6B21\u5B9E\u65F6\u66F4\u65B0"}\u3002`
     } };
   }
   return { tool: plan.name, args: plan.args, output: failureSentence(intent.kind, attempts), recovery: { state: "failed", attempts } };
@@ -1149,7 +1152,7 @@ var WEATHER_FETCH_MS = 14e3;
 // src/agent/lookup/operations.js
 var LOOKUP_OPERATIONS = [
   { id: "query_weather", label: "\u5929\u6C14\u67E5\u8BE2\uFF08\u548C\u98CE\u53CA\u539F\u6709\u5907\u7528\uFF09", kinds: ["weather"], tools: ["get_weather"], region: "cn", priority: 1, timeoutMs: WEATHER_FETCH_MS, needsKey: false, optionalKey: true, validation: "existing" },
-  { id: "query_sports", label: "\u8D5B\u7A0B\u67E5\u8BE2\uFF08\u76F4\u64AD\u5427\u53CA\u539F\u6709\u5907\u7528\uFF09", kinds: ["sports_live"], tools: ["get_sports_scores"], region: "cn", priority: 1, timeoutMs: 8e3, needsKey: false, validation: "existing" },
+  { id: "query_sports", label: "\u8D5B\u7A0B\u67E5\u8BE2\uFF08\u76F4\u64AD\u5427\u63A5\u53E3\u53CA\u8D5B\u7A0B\u9875\uFF09", kinds: ["sports_live"], tools: ["get_sports_scores"], region: "cn", priority: 1, timeoutMs: 12e3, needsKey: false, validation: "existing" },
   { id: "query_market", label: "\u80A1\u7968\u65E5K\u67E5\u8BE2\uFF08\u539F\u6709\u540C\u6E90\u53E3\u5F84\uFF09", kinds: ["market"], tools: ["get_stock_kline"], region: "cn", priority: 1, timeoutMs: 1e4, needsKey: false, validation: "existing" },
   { id: "query_search", label: "\u901A\u7528\u641C\u7D22\uFF08\u5DF2\u914D\u7F6E\u5F15\u64CE\uFF09", kinds: ["general", "market"], tools: ["web_search"], region: "cn", priority: 2, timeoutMs: 8e3, needsKey: false, optionalKey: true, validation: "existing" },
   { id: "query_page", label: "\u7F51\u9875\u8BFB\u53D6\uFF08\u539F\u5B89\u5168\u7F51\u5173\uFF09", kinds: ["general"], tools: ["fetch_url"], region: "global", priority: 2, timeoutMs: 8e3, needsKey: false, validation: "existing" },
@@ -1203,11 +1206,12 @@ function connectLookupTools(tools, lookup) {
     const guarded = (args, execution) => runLookupOperation(tool, args, execution, lookup);
     if (!RECOVERY_TOOLS.has(tool.name)) return LOOKUP_OPERATIONS.some((source) => source.tools.includes(tool.name)) ? { ...tool, run: guarded } : tool;
     return { ...tool, recoveryManaged: true, run: async (args, execution = {}) => {
+      if (tool.name === "get_sports_scores" && execution.retrieval?.sportsScope?.teams?.length && !args?.team && !args?.teams?.length) args = { ...args, teams: execution.retrieval.sportsScope.teams, period: "all" };
       const request = execution.requestText || "";
       const intent = execution.retrieval?.intent || lookupIntent(request);
       if (!request || !intent.lookup || execution.retrieval?.extensive) return guarded(args, execution);
       const kind = { get_weather: "weather", get_stock_kline: "market", get_sports_scores: "sports_live" }[tool.name] || intent.kind;
-      const timeoutMs = tool.name === "get_weather" ? WEATHER_FETCH_MS : ["get_stock_kline", "get_today_news", "get_sports_scores"].includes(tool.name) ? 1e4 : 5e3;
+      const timeoutMs = tool.name === "get_weather" ? WEATHER_FETCH_MS : tool.name === "get_sports_scores" ? 12e3 : ["get_stock_kline", "get_today_news", "get_sports_scores"].includes(tool.name) ? 1e4 : 5e3;
       const found = await recoverLookup({ ...intent, kind }, { name: tool.name, args, timeoutMs }, {
         text: request,
         signal: execution.signal,
@@ -1689,9 +1693,16 @@ function zhibo8Result(list, { from, to, today, sports = null, team = "", focus =
   if (days.some((d) => d > today)) lines.push("\u660E\u5929\u53CA\u4EE5\u540E\u7684\u6BD4\u8D5B\u8FD9\u91CC\u53EA\u6392\u8FDB\u4E86\u5C11\u6570\u51E0\u573A\uFF0C\u4E0D\u5168\uFF1B\u7528\u6237\u8981\u5B8C\u6574\u8D5B\u7A0B\u65F6\u7528 web_search \u8865\u3002");
   if (!covered) lines.push(`\u5217\u8868\u53EA\u8986\u76D6\u5927\u7EA6\u6628\u5929\u5230\u660E\u5929\uFF0C${days.filter((d) => !have.has(d)).join("\u3001")} \u6CA1\u6709\u6570\u636E\u3002`);
   lines.push("\u8FDB\u884C\u4E2D\u7684\u6BD4\u5206\u4F1A\u53D8\uFF1B\u6BD4\u5206\u4EE5\u8FD9\u91CC\u4E3A\u51C6\uFF0C\u672A\u5F00\u8D5B\u7684\u4E0D\u8981\u7F16\u6BD4\u5206\u3002");
+  lines.push("\u6765\u6E90\uFF1A\u76F4\u64AD\u5427 https://bifen4pc.qiumibao.com/json/list.htm");
   lines.push("\u672C\u5217\u8868\u672A\u63D0\u4F9B\u53EF\u6838\u5B9E\u7684\u7ADE\u5F69\u573A\u6B21\u7F16\u53F7\u3001\u505C\u552E\u65F6\u95F4\u53CA\u8D54\u7387\uFF1B\u53EA\u5C55\u793A\u666E\u901A\u8D5B\u7A0B\uFF0C\u4E0D\u628A\u8D5B\u4E8BID\u6216is_jingcai\u6807\u8BB0\u7F16\u6210\u7ADE\u5F69\u7F16\u53F7\u3002");
   const events = shown.map((e) => ({ ...e, time: beijingTimestamp(e.date, e.time), state: { "1": "pre", "2": "in", "3": "post" }[e.state] || "unknown", status: e.state === "2" ? `\u8FDB\u884C\u4E2D ${e.period}`.trim() : STATE[e.state] || "\u72B6\u6001\u672A\u77E5" }));
   return { covered, text: lines.join("\n"), count: shown.length, events };
+}
+
+// src/agent/sportsFollowup.js
+function selectedTeam(name, teams = []) {
+  const normalized = String(name).normalize("NFKC").toLowerCase().replace(/\s+/g, "");
+  return !teams.length || teams.some((team) => normalized.includes(String(team).normalize("NFKC").toLowerCase().replace(/\s+/g, "")));
 }
 
 // src/agent/sportsSnapshot.js
@@ -1728,8 +1739,79 @@ function sportsQuery(args = {}) {
   const out = {};
   for (const k of ["period", "date", "end_date", "sport", "team"]) if (args[k] != null) out[k] = text(args[k], k === "team" ? 64 : 16);
   if (args.window_minutes != null) out.window_minutes = args.window_minutes;
+  if (args.teams != null) out.teams = (Array.isArray(args.teams) ? args.teams : []).slice(0, 12).map((v) => text(v));
   if (args.leagues != null) out.leagues = (Array.isArray(args.leagues) ? args.leagues : [args.leagues]).slice(0, 40).map((v) => text(v));
   return out;
+}
+
+// src/agent/sportsSchedulePage.js
+var SCHEDULE_URL = "https://www.zhibo8.com/";
+var cached2;
+var attr = (text2, name) => text2.match(new RegExp(`\\b${name}=["']([^"']*)["']`, "i"))?.[1] || "";
+function parseSchedulePage(html) {
+  const events = [], seen = /* @__PURE__ */ new Set();
+  for (const match of String(html).slice(0, 1e6).matchAll(/<li\b([^>]*)>([\s\S]*?)<\/li>/gi)) {
+    const attrs = match[1], body = match[2];
+    const date = attr(attrs, "data-time");
+    if (!/^\d{4}-\d{2}-\d{2} (?:[01]\d|2[0-3]):[0-5]\d$/.test(date)) continue;
+    const time = beijingTimestamp(date.slice(0, 10), date.slice(11));
+    if (!Number.isFinite(time) || new Date(time + 288e5).toISOString().slice(0, 10) !== date.slice(0, 10)) continue;
+    const league = newsPlain(body.match(/<span\b[^>]*class=["']_league["'][^>]*>([\s\S]*?)<\/span>/i)?.[1] || "").slice(0, 100);
+    const teamMarkup = body.match(/<span\b[^>]*class=["']_teams["'][^>]*>([\s\S]*?)<\/b>/i)?.[1] || "";
+    const teams = newsPlain(teamMarkup).split(/\s+-\s+/);
+    if (teams.length !== 2 || teams.some((t) => !t.trim() || t.length > 100) || !league) continue;
+    const id = attr(attrs, "id").replace(/^saishi/, "").slice(0, 40);
+    const key = `${id}|${date}|${teams.join("|")}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const [home, away] = attr(attrs, "data-rightishome") === "1" ? teams.reverse() : teams;
+    events.push({
+      id,
+      time,
+      date: date.slice(0, 10),
+      clock: date.slice(11),
+      league,
+      sport: attr(attrs, "data-type"),
+      state: "unknown",
+      status: "\u8BA1\u5212\u8D5B\u7A0B\uFF0C\u5B9E\u65F6\u72B6\u6001\u672A\u6838\u5B9E",
+      home: { name: home.trim(), score: "" },
+      away: { name: away.trim(), score: "" }
+    });
+    if (events.length >= 600) break;
+  }
+  return events;
+}
+async function fetchSchedulePage({ get, signal, refresh = false }) {
+  if (!refresh && cached2 && Date.now() - cached2.at < 3e4) return cached2.events;
+  const events = await withWebDeadline(async (activeSignal) => {
+    const response = await get(SCHEDULE_URL, { signal: activeSignal, credentials: "omit", redirect: "error" });
+    if (!response.ok) throw httpError(response.status, "", "\u56FD\u5185\u8D5B\u7A0B\u9875");
+    const bytes = await webBody(response, 1e6, activeSignal);
+    throwControl(null, activeSignal);
+    return parseSchedulePage(new TextDecoder().decode(bytes));
+  }, { signal, timeoutMs: 4e3 });
+  if (!events.length) throw Object.assign(new Error("\u8D5B\u7A0B\u9875\u6CA1\u6709\u53EF\u6838\u5BF9\u7684\u5BF9\u9635\u548C\u65E5\u671F"), { code: "SPORTS_PAGE_EMPTY" });
+  cached2 = { at: Date.now(), events };
+  return events;
+}
+function schedulePageResult(events, { from, to, sports, team = "", focus = [], window, now }) {
+  const days = new Set(events.map((e) => e.date));
+  const countDays = (Date.parse(to) - Date.parse(from)) / 864e5 + 1;
+  const covered = [...days].filter((d) => d >= from && d <= to).length === countDays;
+  const currentMinute = Math.floor(now / 6e4) * 6e4;
+  const picked = events.filter((e) => e.date >= from && e.date <= to && (!sports || sports.includes(e.sport)) && (!team || `${e.home.name} ${e.away.name}`.toLowerCase().includes(team.toLowerCase())) && (!focus.length || focus.some((name) => e.league.includes(name))) && (window.period === "all" || window.period === "afternoon" ? inSportsWindow(e.time, "unknown", window) : e.time >= currentMinute && inSportsWindow(e.time, "pre", window)));
+  picked.sort((a, b) => a.time - b.time);
+  const text2 = [
+    `\u76F4\u64AD\u5427\u6BD4\u5206\u63A5\u53E3\u672A\u53D6\u5F97\u5B8C\u6574\u7ED3\u679C\uFF0C\u5DF2\u8BFB\u53D6\u516C\u5F00\u8D5B\u7A0B\u9875\u3002\u6765\u6E90\uFF1A${SCHEDULE_URL}`,
+    `\u5317\u4EAC\u65F6\u95F4 ${from}${to !== from ? " \u81F3 " + to : ""}${window.label ? "\uFF1B" + window.label : ""}\u3002\u67E5\u8BE2\u4E8E\u5317\u4EAC\u65F6\u95F4 ${new Date(now + 288e5).toISOString().slice(0, 16).replace("T", " ")}\u3002`,
+    "\u4EE5\u4E0B\u662F\u7F51\u9875\u5217\u51FA\u7684\u8BA1\u5212\u8D5B\u7A0B\uFF0C\u5B9E\u65F6\u72B6\u6001\u672A\u6838\u5B9E\uFF1B\u4E0D\u542B\u5DF2\u6838\u5B9E\u7684\u5B9E\u65F6\u6BD4\u5206\u3001\u8FDB\u884C\u4E2D\u6216\u5B8C\u573A\u72B6\u6001\uFF0C\u4E0D\u80FD\u636E\u6B64\u79F0\u5B9E\u65F6\u6BD4\u5206\u5DF2\u67E5\u5168\u3002",
+    ...picked.slice(0, 150).map((e) => `- ${e.date} ${e.clock} ${e.league}\uFF1A${e.home.name}\uFF08\u4E3B\uFF09vs ${e.away.name}\uFF08\u5BA2\uFF09`),
+    !picked.length ? "\u9875\u9762\u672A\u8FD4\u56DE\u7B26\u5408\u6B64\u7A97\u53E3\u7684\u5BF9\u9635\uFF0C\u4E0D\u4EE3\u8868\u6CA1\u6709\u6BD4\u8D5B\u3002" : "",
+    !covered ? "\u6240\u67E5\u65E5\u671F\u672A\u5168\u90E8\u8986\u76D6\uFF0C\u9700\u7EE7\u7EED\u641C\u7D22\u7F3A\u5931\u65E5\u671F\u3002" : "",
+    picked.length > 150 ? `\u5171\u5339\u914D${picked.length}\u573A\uFF0C\u4EC5\u5217\u524D150\u573A\u3002` : "",
+    "\u672A\u63D0\u4F9B\u53EF\u6838\u5B9E\u7684\u7ADE\u5F69\u7F16\u53F7\u3001\u505C\u552E\u65F6\u95F4\u548C\u8D54\u7387\u3002"
+  ].filter(Boolean).join("\n");
+  return { text: text2, events: picked, count: picked.length, covered };
 }
 
 // src/agent/sportsScores.js
@@ -1781,17 +1863,12 @@ var LEAGUES = [
 ];
 var GROUPS = { \u4E94\u5927\u8054\u8D5B: ["eng.1", "esp.1", "ger.1", "ita.1", "fra.1"], \u6B27\u6218: ["uefa.champions", "uefa.europa", "uefa.europa.conf"] };
 var NOT_COVERED = "CBA\u3001\u4E2D\u7532\u3001\u4E2D\u4E59\u3001\u5973\u8DB3\u8054\u8D5B\u3001\u7F51\u7403\u3001\u6392\u7403\u3001\u4E52\u4E53\u7403\u3001\u7FBD\u6BDB\u7403\u3001F1\u3001\u7535\u7ADE\u3001\u65AF\u8BFA\u514B";
-var PARALLEL = 10;
-var LEAGUE_TIMEOUT_MS = 7e3;
-var MAX_EVENTS = 150;
 var MAX_DAYS = 3;
 var BEIJING_MS = 8 * 36e5;
 var DAY_MS = 24 * 36e5;
 var invalid = (message) => Object.assign(new Error(message), { name: "ValidationError", code: "INVALID_SPORTS_INPUT" });
 var beijingDate = (ms) => new Date(ms + BEIJING_MS).toISOString().slice(0, 10);
 var beijingClock = (ms) => new Date(ms + BEIJING_MS).toISOString().slice(11, 16);
-var WEEK2 = "\u65E5\u4E00\u4E8C\u4E09\u56DB\u4E94\u516D";
-var weekday2 = (date) => `\u5468${WEEK2[(/* @__PURE__ */ new Date(`${date}T00:00:00Z`)).getUTCDay()]}`;
 function checkDate(value) {
   const v = String(value);
   const ms = Date.parse(`${v}T00:00:00Z`);
@@ -1799,7 +1876,6 @@ function checkDate(value) {
   return v;
 }
 var shiftDate = (date, days) => new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10);
-var compact = (date) => date.replaceAll("-", "");
 function pickLeagues({ sport = "all", leagues } = {}) {
   const wanted = (Array.isArray(leagues) ? leagues : leagues ? [leagues] : []).map((x) => String(x).trim()).filter(Boolean);
   if (wanted.length) {
@@ -1815,109 +1891,6 @@ function pickLeagues({ sport = "all", leagues } = {}) {
   const s = { football: "soccer", soccer: "soccer", basketball: "basketball" }[sport];
   return s ? LEAGUES.filter((l) => l.sport === s) : LEAGUES;
 }
-var STATUS = { pre: "\u672A\u5F00\u8D5B", in: "\u8FDB\u884C\u4E2D", post: "\u5B8C\u573A" };
-function statusOf(event) {
-  const type = event.status?.type ?? event.competitions?.[0]?.status?.type ?? {};
-  const name = String(type.name || "");
-  if (/POSTPONED/.test(name)) return { state: "post", text: "\u5EF6\u671F" };
-  if (/CANCEL/.test(name)) return { state: "post", text: "\u53D6\u6D88" };
-  if (/ABANDON|SUSPENDED/.test(name)) return { state: "post", text: "\u4E2D\u65AD" };
-  const state = type.state || (/SCHEDULED/.test(name) ? "pre" : "unknown");
-  if (state === "in") return { state, text: `\u8FDB\u884C\u4E2D ${type.shortDetail || ""}`.trim() };
-  if (state === "post") {
-    const extra = /Pens|PK|penalt/i.test(type.detail || type.shortDetail || "") ? "\uFF08\u542B\u70B9\u7403\uFF09" : /AET|ET|OT/i.test(type.shortDetail || "") ? "\uFF08\u542B\u52A0\u65F6\uFF09" : "";
-    return { state, text: `\u5B8C\u573A${extra}` };
-  }
-  return state === "pre" ? { state: "pre", text: STATUS.pre } : { state: "unknown", text: `\u72B6\u6001\u672A\u77E5\uFF08\u6765\u6E90${name || type.state || "\u672A\u63D0\u4F9B"}\uFF09` };
-}
-function normalizeEvent(event, league) {
-  const time = Date.parse(event.date);
-  const comp = event.competitions?.[0] ?? {};
-  const side = (homeAway) => {
-    const c = (comp.competitors ?? []).find((x) => x.homeAway === homeAway) ?? {};
-    return {
-      name: c.team?.displayName || c.team?.shortDisplayName || c.team?.name || "\u672A\u77E5",
-      score: c.score ?? "",
-      shootout: c.shootoutScore
-    };
-  };
-  const status = statusOf(event);
-  return {
-    id: String(event.id ?? ""),
-    league: league.name,
-    sport: league.sport,
-    time,
-    home: side("home"),
-    away: side("away"),
-    state: status.state,
-    status: status.text,
-    venue: comp.venue?.fullName || ""
-  };
-}
-function lineOf2(e) {
-  const clock = beijingClock(e.time);
-  const scoreKnown = [e.home.score, e.away.score].every((value) => value !== null && value !== void 0 && /^\d+$/.test(String(value)));
-  const score = ["in", "post"].includes(e.state) && scoreKnown && !/延期|取消/.test(e.status) ? `${e.home.score}-${e.away.score}` : "vs";
-  const pens = e.home.shootout != null && e.away.shootout != null ? `\uFF0C\u70B9\u7403 ${e.home.shootout}-${e.away.shootout}` : "";
-  return `- ${clock} ${e.status}\uFF1A${e.home.name}\uFF08\u4E3B\uFF09${score} ${e.away.name}\uFF08\u5BA2\uFF09${pens}`;
-}
-function formatScores({ events, from, to, asked, failed, now = Date.now(), window = null }) {
-  const lines = [`\u5317\u4EAC\u65F6\u95F4 ${from}\uFF08${weekday2(from)}\uFF09${to !== from ? ` \u81F3 ${to}\uFF08${weekday2(to)}\uFF09` : ""}\u7684\u8D5B\u7A0B\u548C\u8D5B\u679C\uFF0C\u6765\u6E90 ESPN\uFF08espn.com\uFF09\uFF0C\u67E5\u8BE2\u4E8E\u5317\u4EAC\u65F6\u95F4 ${beijingDate(now)} ${beijingClock(now)}\u3002\u65F6\u95F4\u5747\u5DF2\u6362\u7B97\u6210\u5317\u4EAC\u65F6\u95F4\u3002`];
-  const shown = events.slice(0, MAX_EVENTS);
-  lines.push(`\u672C\u6765\u6E90\u672C\u6B21\u7B5B\u9009\u8FD4\u56DE${events.length}\u573A\uFF0C\u672C\u56DE\u6267\u5217\u51FA${shown.length}\u573A\uFF1B\u8986\u76D6\u8303\u56F4\u4E0E\u5931\u8D25\u8D5B\u4E8B\u89C1\u540E\u6587\u3002`);
-  if (window?.label) lines.push("\u65F6\u95F4\u7B5B\u9009\uFF1A" + window.label + "\uFF1B\u4E0D\u4EE3\u8868\u5168\u5929\u5B8C\u6574\u8D5B\u7A0B\u3002");
-  if (!shown.length) lines.push(window?.label ? "\n\u8FD9\u4E2A\u65F6\u95F4\u7A97\u53E3\u672A\u8FD4\u56DE\u7B26\u5408\u6761\u4EF6\u7684\u6BD4\u8D5B\uFF0C\u4E0D\u4EE3\u8868\u5176\u4ED6\u65F6\u6BB5\u6216\u8054\u8D5B\u6CA1\u6709\u6BD4\u8D5B\u3002" : "\n\u67E5\u5230\u7684\u8D5B\u4E8B\u5728\u8FD9\u6BB5\u65F6\u95F4\u90FD\u6CA1\u6709\u6BD4\u8D5B\u3002");
-  let day2 = "";
-  let league = "";
-  for (const e of shown) {
-    const d = beijingDate(e.time);
-    if (d !== day2) {
-      day2 = d;
-      league = "";
-      if (from !== to) lines.push(`
-# ${d}\uFF08${weekday2(d)}\uFF09`);
-    }
-    if (e.league !== league) {
-      league = e.league;
-      lines.push(`
-## ${league}`);
-    }
-    lines.push(lineOf2(e));
-  }
-  if (events.length > shown.length) lines.push(`
-\uFF08\u5171 ${events.length} \u573A\uFF0C\u53EA\u5217\u4E86\u524D ${shown.length} \u573A\uFF1B\u8981\u770B\u5176\u4F59\u7684\uFF0C\u7528 leagues \u6307\u5B9A\u8D5B\u4E8B\u518D\u67E5\uFF09`);
-  const ok = asked.filter((l) => !failed.includes(l));
-  lines.push(`
-\u5DF2\u67E5\u7684\u8D5B\u4E8B\uFF08${ok.length} \u4E2A\uFF09\uFF1A${ok.map((l) => l.name).join("\u3001") || "\u65E0"}\u3002`);
-  if (failed.length) lines.push(`\u6CA1\u53D6\u5230\u7684\uFF08${failed.length} \u4E2A\uFF0C\u8FD9\u4E9B\u8D5B\u4E8B\u7684\u573A\u6B21\u53EF\u80FD\u7F3A\uFF0C\u9700\u8981\u65F6\u7528 web_search \u8865\uFF09\uFF1A${failed.map((l) => l.name).join("\u3001")}\u3002`);
-  lines.push(`\u4E0D\u5728\u67E5\u8BE2\u8303\u56F4\uFF1A${NOT_COVERED}\u2014\u2014\u7528\u6237\u95EE\u5230\u65F6\u7528 web_search \u8865\u67E5\uFF0C\u4E0D\u8981\u8BF4\u6210\u201C\u6CA1\u6709\u6BD4\u8D5B\u201D\u3002`);
-  lines.push("\u7403\u961F\u540D\u662F\u82F1\u6587\uFF0C\u56DE\u7B54\u65F6\u7528\u56FD\u5185\u5E38\u7528\u7684\u4E2D\u6587\u8BD1\u540D\uFF1B\u6BD4\u5206\u4EE5\u8FD9\u91CC\u4E3A\u51C6\uFF0C\u672A\u5F00\u8D5B\u7684\u4E0D\u8981\u7F16\u6BD4\u5206\u3002");
-  return lines.join("\n");
-}
-var cache = /* @__PURE__ */ new Map();
-var CACHE_MAX = 200;
-var CACHE_MS2 = 6e4;
-function remember(key, value) {
-  if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
-  cache.set(key, { at: Date.now(), value });
-}
-async function fetchLeague(league, range, { get, signal, refresh = false }) {
-  const key = `${league.code}|${range}`;
-  const hit = cache.get(key);
-  if (!refresh && hit && Date.now() - hit.at < CACHE_MS2) return hit.value;
-  const url = `https://site.api.espn.com/apis/site/v2/sports/${league.sport}/${league.code}/scoreboard?dates=${range}&limit=300`;
-  const data = await withWebDeadline(
-    async (s) => {
-      const response = await get(url, { signal: s });
-      if (!response.ok) throw httpError(response.status, "", "ESPN");
-      return response.json();
-    },
-    { signal, timeoutMs: LEAGUE_TIMEOUT_MS }
-  );
-  const events = (data?.events ?? []).map((e) => normalizeEvent(e, league));
-  remember(key, events);
-  return events;
-}
 async function getSportsScores(args = {}, { get, signal, retrieval, now = Date.now(), progress, onScores, refresh = false } = {}) {
   let from = args.date ? checkDate(args.date) : beijingDate(now);
   const window = sportsWindow(args, now);
@@ -1929,23 +1902,25 @@ async function getSportsScores(args = {}, { get, signal, retrieval, now = Date.n
   if (window.period === "upcoming" && !args.end_date && from === beijingDate(now)) to = beijingDate(now + window.minutes * 6e4);
   if (to < from) throw invalid("\u7ED3\u675F\u65E5\u671F\u4E0D\u80FD\u65E9\u4E8E\u5F00\u59CB\u65E5\u671F");
   if ((Date.parse(to) - Date.parse(from)) / DAY_MS >= MAX_DAYS) throw invalid(`\u4E00\u6B21\u6700\u591A\u67E5 ${MAX_DAYS} \u5929`);
+  const selected = Array.isArray(args.teams) ? args.teams.filter((t) => typeof t === "string" && t.trim()).slice(0, 12) : [];
+  if (args.teams && (!Array.isArray(args.teams) || args.teams.length > 12 || selected.length !== args.teams.length)) throw invalid("teams\u9700\u4E3A\u6700\u591A12\u4E2A\u975E\u7A7A\u961F\u540D");
   const asked = pickLeagues(args);
   const named = (Array.isArray(args.leagues) ? args.leagues : args.leagues ? [args.leagues] : []).map((x) => String(x).trim()).filter(Boolean);
   retrieval?.consume("read");
   let partial = null;
   let primary = null;
-  let primaryUnavailable = false;
-  const deliver = (text2, groups, notice2 = "") => {
-    onScores?.(sportsSnapshot({ args, groups, now, window, notice: notice2 }));
-    return text2;
+  const deliver = (text2, groups, notice = "") => {
+    const missing = selected.filter((name) => !groups.some((g) => g.events.some((e) => selectedTeam(`${e.home.name} ${e.away.name}`, [name]))));
+    const scope = selected.length ? `\u672C\u8F6E\u4EC5\u6838\u5BF9\u6307\u5B9A\u7684${selected.length}\u4E2A\u7403\u961F\u7EBF\u7D22\uFF0C\u4E0D\u5305\u542B\u5176\u4ED6\u6BD4\u8D5B\u3002${missing.length ? "\u672A\u5339\u914D\u5230\uFF1A" + missing.join("\u3001") + "\uFF1B\u4E0D\u80FD\u7528\u5176\u4ED6\u573A\u6B21\u8865\u9F50\u3002" : ""}` : "";
+    onScores?.(sportsSnapshot({ args, groups, now, window, notice: [scope, notice].filter(Boolean).join("\uFF1B") }));
+    return [scope, text2].filter(Boolean).join("\n");
   };
   try {
     progress?.("\u6B63\u5728\u67E5\u76F4\u64AD\u5427\u7684\u8D5B\u7A0B\u548C\u6BD4\u5206");
     const list = await fetchZhibo8({ get, signal, refresh });
-    primary = zhibo8Result(list, { from, to, today: beijingDate(now), sports: zhibo8Sports(args, asked, named), team: args.team, focus: named, clock: `${beijingDate(now)} ${beijingClock(now)}`, window });
+    primary = zhibo8Result(selected.length ? list.filter((e) => selectedTeam(`${e.home_team} ${e.visit_team}`, selected)) : list, { from, to, today: beijingDate(now), sports: zhibo8Sports(args, asked, named), team: args.team, focus: named, clock: `${beijingDate(now)} ${beijingClock(now)}`, window });
   } catch (error) {
     throwControl(error, signal);
-    primaryUnavailable = true;
   }
   if (primary?.covered) return deliver(primary.text, [{ source: "\u76F4\u64AD\u5427", events: primary.events }]);
   if (primary?.count) partial = primary;
@@ -1953,62 +1928,26 @@ async function getSportsScores(args = {}, { get, signal, retrieval, now = Date.n
     if (partial) return deliver(partial.text, [{ source: "\u76F4\u64AD\u5427", events: partial.events }]);
     throw invalid(`\u6CA1\u8BA4\u51FA\u8981\u67E5\u7684\u8D5B\u4E8B\u3002\u80FD\u67E5\uFF1A${LEAGUES.map((l) => l.name).join("\u3001")}\uFF1B\u67E5\u4E0D\u4E86\uFF1A${NOT_COVERED}\uFF08\u7528 web_search\uFF09`);
   }
-  const range = `${compact(shiftDate(from, -1))}-${compact(to)}`;
-  const start = Date.parse(`${from}T00:00:00Z`) - BEIJING_MS;
-  const end = Date.parse(`${to}T00:00:00Z`) - BEIJING_MS + DAY_MS;
-  const stop = new AbortController();
-  const relay = () => stop.abort(signal?.reason);
-  signal?.addEventListener("abort", relay, { once: true });
-  const results = /* @__PURE__ */ new Map();
-  const failed = [];
-  let done = 0;
-  let networkFails = 0;
-  let next = 0;
-  progress?.(`\u6B63\u5728\u67E5 ${asked.length} \u4E2A\u8D5B\u4E8B\u7684\u8D5B\u7A0B\u548C\u6BD4\u5206`);
-  const worker = async () => {
-    while (next < asked.length && !stop.signal.aborted) {
-      const league = asked[next++];
-      try {
-        results.set(league.code, await fetchLeague(league, range, { get, signal: stop.signal, refresh }));
-      } catch (error) {
-        throwControl(null, signal);
-        if (!stop.signal.aborted) throwControl(error, signal);
-        failed.push(league);
-        if (["network", "timeout"].includes(errorKind(error))) networkFails++;
-        if (!results.size && networkFails >= Math.min(PARALLEL, asked.length)) stop.abort();
-      }
-      done++;
-    }
-  };
   try {
-    await Promise.all(Array.from({ length: Math.min(PARALLEL, asked.length) }, worker));
-  } finally {
-    signal?.removeEventListener("abort", relay);
+    const page = await fetchSchedulePage({ get, signal, refresh });
+    const result = schedulePageResult(selected.length ? page.filter((e) => selectedTeam(`${e.home.name} ${e.away.name}`, selected)) : page, {
+      from,
+      to,
+      sports: zhibo8Sports(args, asked, named),
+      team: args.team,
+      focus: named.flatMap((name) => GROUPS[name] ? LEAGUES.filter((l) => GROUPS[name].includes(l.code)).map((l) => l.name) : [LEAGUES.find((l) => l.code === name)?.name || name]),
+      window,
+      now
+    });
+    if (!result.covered && !result.count && !partial) throw Object.assign(new Error("\u8D5B\u7A0B\u9875\u672A\u8986\u76D6\u6240\u67E5\u65E5\u671F"), { code: "SPORTS_PAGE_EMPTY" });
+    const notice = "\u6BD4\u5206\u63A5\u53E3\u672A\u53D6\u5F97\u5B8C\u6574\u7ED3\u679C\uFF0C\u8D5B\u7A0B\u9875\u4EC5\u63D0\u4F9B\u8BA1\u5212\u5BF9\u9635\uFF0C\u5B9E\u65F6\u72B6\u6001\u548C\u6BD4\u5206\u672A\u6838\u5B9E";
+    const text2 = partial ? partial.text + "\n\n" + result.text + "\n\u4E24\u4EFD\u6765\u6E90\u53EF\u80FD\u91CD\u53E0\uFF0C\u4E0D\u80FD\u628A\u4E24\u4EFD\u573A\u6570\u76F4\u63A5\u76F8\u52A0\u3002" : result.text;
+    return deliver(text2, [...partial ? [{ source: "\u76F4\u64AD\u5427", events: partial.events }] : [], { source: "\u76F4\u64AD\u5427\u8D5B\u7A0B\u9875", events: result.events }], notice);
+  } catch (error) {
+    throwControl(error, signal);
+    if (partial) return deliver(partial.text + "\n\u7F3A\u5931\u65E5\u671F\u7684\u8D5B\u7A0B\u9875\u4E5F\u672A\u53D6\u5F97\uFF0C\u9700\u7528 web_search \u8865\u67E5\u3002", [{ source: "\u76F4\u64AD\u5427", events: partial.events }], "\u4EC5\u5C55\u793A\u5DF2\u53D6\u5F97\u7684\u90E8\u5206\u65E5\u671F");
+    throw Object.assign(new Error(`\u76F4\u64AD\u5427\u6BD4\u5206\u63A5\u53E3\u53CA\u8D5B\u7A0B\u9875\u672A\u53D6\u5F97\u6240\u67E5\u8303\u56F4\uFF1B\u7528 web_search \u67E5\u8BE2\u201C${from} ${named.join(" ") || "\u8DB3\u7403"} \u8D5B\u7A0B \u6BD4\u5206\u201D\u3002`), { code: "SPORTS_UNAVAILABLE", kind: "network" });
   }
-  throwControl(null, signal);
-  if (!results.size) {
-    if (partial) return deliver(`${partial.text}
-\uFF08ESPN \u4E5F\u8FDE\u4E0D\u4E0A\uFF0C\u7F3A\u7684\u65E5\u671F\u7528 web_search \u8865\uFF09`, [{ source: "\u76F4\u64AD\u5427", events: partial.events }], "ESPN\u8865\u5145\u672A\u53D6\u5F97\uFF0C\u4EC5\u5C55\u793A\u76F4\u64AD\u5427\u90E8\u5206\u7ED3\u679C");
-    throw Object.assign(new Error(`\u8FDE\u4E0D\u4E0A ESPN \u6BD4\u5206\u63A5\u53E3\uFF08${asked.length} \u4E2A\u8D5B\u4E8B\u90FD\u6CA1\u53D6\u5230\uFF09\u3002\u6539\u7528 web_search \u67E5\uFF0C\u4E2D\u6587\u641C\u7D22\u8BCD\u5E26\u4E0A\u65E5\u671F\u548C\u8054\u8D5B\u540D\uFF0C\u5982\u201C${from} \u4E2D\u8D85 \u8D5B\u7A0B \u6BD4\u5206\u201D`), { code: "SPORTS_UNAVAILABLE", kind: "network" });
-  }
-  const team = String(args.team || "").trim().toLowerCase();
-  const seen = /* @__PURE__ */ new Set();
-  const events = [];
-  for (const league of asked) {
-    for (const e of results.get(league.code) ?? []) {
-      if (!Number.isFinite(e.time) || e.time < start || e.time >= end) continue;
-      if (e.id && seen.has(e.id)) continue;
-      if (team && !`${e.home.name} ${e.away.name}`.toLowerCase().includes(team)) continue;
-      seen.add(e.id);
-      if (inSportsWindow(e.time, e.state, window)) events.push(e);
-    }
-  }
-  const order = new Map(LEAGUES.map((l, i) => [l.name, i]));
-  events.sort((a, b) => (["around", "forward_live"].includes(window.period) ? Number(b.state === "in") - Number(a.state === "in") : 0) || (window.period !== "all" ? a.time - b.time : beijingDate(a.time).localeCompare(beijingDate(b.time)) || order.get(a.league) - order.get(b.league) || a.time - b.time));
-  progress?.(`\u67E5\u5230 ${events.length} \u573A\uFF08${done - failed.length}/${asked.length} \u4E2A\u8D5B\u4E8B\u6709\u6570\u636E\uFF09`);
-  const secondary = formatScores({ events, from, to, asked, failed, now, window });
-  const notice = partial ? "\u76F4\u64AD\u5427\u90E8\u5206\u65E5\u671F\u672A\u8986\u76D6\uFF0CESPN\u72EC\u7ACB\u8865\u5145\uFF0C\u53EF\u80FD\u91CD\u590D\uFF0C\u4E0D\u80FD\u76F4\u63A5\u76F8\u52A0\u573A\u6570" : primaryUnavailable ? "\u76F4\u64AD\u5427\u6682\u65F6\u53D6\u4E0D\u5230\uFF0C\u4EE5\u4E0B\u6765\u81EA ESPN" : "\u76F4\u64AD\u5427\u5F53\u524D\u5217\u8868\u672A\u8986\u76D6\u6240\u67E5\u65E5\u671F\uFF0C\u4EE5\u4E0B\u6765\u81EA ESPN";
-  return deliver(partial ? partial.text + "\n\n## ESPN\u8865\u5145\uFF08\u4E0E\u4E0A\u65B9\u4E3A\u72EC\u7ACB\u6765\u6E90\uFF0C\u53EF\u80FD\u91CD\u590D\uFF0C\u4E0D\u80FD\u628A\u4E24\u4EFD\u573A\u6570\u76F4\u63A5\u76F8\u52A0\uFF09\n" + secondary : notice + "\n" + secondary, [...partial ? [{ source: "\u76F4\u64AD\u5427", events: partial.events }] : [], { source: "ESPN", events }], notice);
 }
 function zhibo8Sports(args, asked, named) {
   if (named.length) {
@@ -2027,7 +1966,7 @@ function createSportsScoresTool(ctx = {}) {
   const get = ctx.fetchViaGateway ?? ctx.fetchImpl ?? ((...args) => fetch(...args));
   return {
     name: "get_sports_scores",
-    description: `\u67E5\u8D5B\u7A0B\u548C\u8D5B\u679C\uFF08\u6BD4\u5206\uFF09\uFF1A\u5317\u4EAC\u65F6\u95F4\u67D0\u4E00\u5929\uFF08\u6216\u6700\u591A ${MAX_DAYS} \u5929\uFF09\u7684\u8DB3\u7403\u3001\u7BEE\u7403\uFF08NBA\u3001CBA \u7B49\uFF09\u3001\u7F51\u7403\u6BD4\u8D5B\uFF0C\u6CA1\u5F00\u6253\u7684\u7ED9\u5F00\u7403\u65F6\u95F4\uFF0C\u8FDB\u884C\u4E2D\u7684\u7ED9\u7B2C\u51E0\u5206\u949F\u548C\u6BD4\u5206\uFF0C\u6253\u5B8C\u7684\u7ED9\u6BD4\u5206\uFF0C\u4E00\u6B21\u67E5\u9F50\u3002\u95EE\u201C\u4ECA\u5929 / \u6628\u665A / \u660E\u5929\u6709\u4EC0\u4E48\u6BD4\u8D5B\u201D\u201C\u67D0\u8054\u8D5B\u8D5B\u7A0B\u201D\u201C\u6BD4\u5206 / \u8D5B\u679C\u201D\u65F6\u5148\u7528\u8FD9\u4E2A\uFF0C\u4E0D\u8981\u5148\u641C\u7F51\u9875\u3001\u4E5F\u4E0D\u8981\u7528\u6280\u80FD\u3002\u5148\u67E5\u76F4\u64AD\u5427\uFF08\u4E2D\u6587\u961F\u540D\uFF0C\u5927\u7EA6\u6628\u5929\u5230\u660E\u5929\uFF09\uFF0C\u66F4\u65E9\u6216\u66F4\u665A\u7684\u67E5 ESPN\uFF08\u53EA\u6709\u4E3B\u8981\u8DB3\u7403\u8054\u8D5B\u548C NBA\uFF09\u3002\u201C\u6628\u665A\u201D\u7684\u6B27\u6D32\u6BD4\u8D5B\u5728\u5317\u4EAC\u65F6\u95F4\u662F\u4ECA\u5929\u51CC\u6668\uFF0Cdate \u586B\u6628\u5929\u3001end_date \u586B\u4ECA\u5929\u3002\u67E5\u4E0D\u5230\u7684\u518D\u7528 web_search\u3002\u754C\u9762\u5361\u7247\u4E0D\u80FD\u66FF\u4EE3\u6587\u5B57\u7B54\u590D\uFF1A\u56DE\u7B54\u4ECD\u8981\u5217\u51FA\u4E3B\u8981\u5BF9\u9635\u3001\u5317\u4EAC\u65F6\u95F4\u3001\u72B6\u6001\u53CA\u6BD4\u5206\uFF0C\u65B9\u4FBF\u5355\u72EC\u9605\u8BFB\u548C\u8BED\u97F3\u6717\u8BFB\u3002`,
+    description: `\u67E5\u8D5B\u7A0B\u548C\u8D5B\u679C\uFF08\u6BD4\u5206\uFF09\uFF1A\u5317\u4EAC\u65F6\u95F4\u67D0\u4E00\u5929\uFF08\u6216\u6700\u591A ${MAX_DAYS} \u5929\uFF09\u7684\u8DB3\u7403\u3001\u7BEE\u7403\uFF08NBA\u3001CBA \u7B49\uFF09\u3001\u7F51\u7403\u6BD4\u8D5B\uFF0C\u6CA1\u5F00\u6253\u7684\u7ED9\u5F00\u7403\u65F6\u95F4\uFF0C\u8FDB\u884C\u4E2D\u7684\u7ED9\u7B2C\u51E0\u5206\u949F\u548C\u6BD4\u5206\uFF0C\u6253\u5B8C\u7684\u7ED9\u6BD4\u5206\uFF0C\u4E00\u6B21\u67E5\u9F50\u3002\u95EE\u201C\u4ECA\u5929 / \u6628\u665A / \u660E\u5929\u6709\u4EC0\u4E48\u6BD4\u8D5B\u201D\u201C\u67D0\u8054\u8D5B\u8D5B\u7A0B\u201D\u201C\u6BD4\u5206 / \u8D5B\u679C\u201D\u65F6\u5148\u7528\u8FD9\u4E2A\uFF0C\u4E0D\u8981\u5148\u641C\u7F51\u9875\u3001\u4E5F\u4E0D\u8981\u7528\u6280\u80FD\u3002\u5148\u67E5\u76F4\u64AD\u5427\uFF08\u4E2D\u6587\u961F\u540D\uFF0C\u5927\u7EA6\u6628\u5929\u5230\u660E\u5929\uFF09\uFF0C\u63A5\u53E3\u5931\u8D25\u6216\u65E5\u671F\u672A\u8986\u76D6\u65F6\u8BFB\u76F4\u64AD\u5427\u516C\u5F00\u8D5B\u7A0B\u9875\uFF1B\u9875\u9762\u4E0D\u542B\u53EF\u6838\u5B9E\u5B9E\u65F6\u6BD4\u5206\u65F6\u660E\u786E\u8BF4\u660E\u3002\u201C\u6628\u665A\u201D\u7684\u6B27\u6D32\u6BD4\u8D5B\u5728\u5317\u4EAC\u65F6\u95F4\u662F\u4ECA\u5929\u51CC\u6668\uFF0Cdate \u586B\u6628\u5929\u3001end_date \u586B\u4ECA\u5929\u3002\u67E5\u4E0D\u5230\u7684\u518D\u7528 web_search\u3002\u754C\u9762\u5361\u7247\u4E0D\u80FD\u66FF\u4EE3\u6587\u5B57\u7B54\u590D\uFF1A\u56DE\u7B54\u4ECD\u8981\u5217\u51FA\u4E3B\u8981\u5BF9\u9635\u3001\u5317\u4EAC\u65F6\u95F4\u3001\u72B6\u6001\u53CA\u6BD4\u5206\uFF0C\u65B9\u4FBF\u5355\u72EC\u9605\u8BFB\u548C\u8BED\u97F3\u6717\u8BFB\u3002`,
     input_schema: {
       type: "object",
       properties: {
@@ -2037,16 +1976,21 @@ function createSportsScoresTool(ctx = {}) {
         end_date: { type: "string", description: "\u53EF\u9009\uFF1A\u67E5\u5230\u54EA\u5929\uFF08\u542B\uFF09\uFF0C\u6700\u591A\u8DE8 3 \u5929" },
         sport: { type: "string", enum: ["all", "football", "basketball", "tennis"], description: "\u7528\u6237\u6CA1\u8BF4\u54EA\u9879\u8FD0\u52A8\u5C31\u586B all" },
         leagues: { type: "array", items: { type: "string" }, description: "\u53EF\u9009\uFF1A\u53EA\u67E5\u8FD9\u4E9B\u8D5B\u4E8B\uFF0C\u5199\u4E2D\u6587\u540D\uFF08\u4E2D\u8D85\u3001\u4E2D\u7532\u3001\u82F1\u8D85\u3001\u6B27\u51A0\u3001NBA\u3001CBA\u2026\u2026\uFF09\u6216\u201C\u4E94\u5927\u8054\u8D5B\u201D\u201C\u6B27\u6218\u201D" },
+        teams: { type: "array", maxItems: 12, items: { type: "string" }, description: "\u524D\u6587\u6216\u622A\u56FE\u6307\u5B9A\u591A\u573A\u65F6\u586B\u5404\u573A\u5DF2\u8BC6\u522B\u7684\u961F\u540D\uFF0C\u6700\u591A12\u4E2A\uFF1B\u4E0D\u662F\u67E5\u5168\u90E8\u6BD4\u8D5B\u3002\u540D\u79F0\u522B\u540D\u987B\u6709\u4F9D\u636E\uFF0C\u672A\u5339\u914D\u7684\u660E\u786E\u8BF4\u660E\u3002" },
         team: { type: "string", description: "\u53EF\u9009\uFF1A\u53EA\u770B\u67D0\u652F\u7403\u961F\uFF0C\u5199\u4E2D\u6587\u961F\u540D\u7684\u4E00\u90E8\u5206\uFF08\u5982 \u6D77\u6E2F\u3001\u963F\u68EE\u7EB3\u3001\u6E56\u4EBA\uFF09" }
       },
       additionalProperties: false
     },
     run: async (args, { signal, retrieval, progress, requestText = "", rawRequestText = "" } = {}) => {
+      if (retrieval?.sportsScope) {
+        if (!args?.team && !args?.teams?.length && retrieval.sportsScope.teams.length) args = { ...args, teams: retrieval.sportsScope.teams, period: "all" };
+        if (!args?.team && !args?.teams?.length) throw invalid("\u8BF7\u5148\u4ECE\u524D\u6587\u6216\u539F\u56FE\u8BC6\u522B\u7528\u6237\u9009\u5B9A\u7684\u5BF9\u9635\uFF0C\u7528teams\u67E5\u8BE2\uFF1B\u4E0D\u80FD\u7528\u5168\u90E8\u8D5B\u7A0B\u4EE3\u66FF\u3002");
+      }
       if (sportsNewsIntent(requestText || rawRequestText)) throw Object.assign(new Error("\u7528\u6237\u8981\u4F53\u80B2\u65B0\u95FB\u8D44\u8BAF\uFF0C\u4E0D\u662F\u6BD4\u5206\u8D5B\u7A0B\uFF1B\u8BF7\u7528web_search\u67E5\u62A5\u9053\uFF0C\u4E0D\u80FD\u7528\u6BD4\u5206\u66FF\u4EE3\u3002"), { code: "SPORTS_NEWS_NOT_SCORES" });
       const text2 = requestText || rawRequestText;
       const intent = retrieval?.intentRequest === text2 && retrieval.intent ? retrieval.intent : lookupIntent(text2);
       const policy = intent.kind === "sports_live" && intent.params.period === "forward_live" ? { period: "forward_live", window_minutes: intent.params.window_minutes, sport: intent.params.sport } : inferSportsWindow(text2);
-      return getSportsScores({ ...args, ...policy }, { get, signal, retrieval, progress, onScores: ctx.onSportsScores });
+      return getSportsScores({ ...args, ...retrieval?.sportsScope ? {} : policy }, { get, signal, retrieval, progress, onScores: ctx.onSportsScores });
     }
   };
 }
@@ -2144,7 +2088,7 @@ function lookupPlan(intent, { text: text2, getTool, now = Date.now() }) {
     return place && getTool("get_weather") ? { name: "get_weather", args: { place }, timeoutMs: WEATHER_FETCH_MS } : null;
   } else if (intent.kind === "sports_live" && getTool("get_sports_scores")) {
     const args = sportsPreCall(text2, now);
-    if (args || params.period === "forward_live") return { name: "get_sports_scores", args: { ...args, ...params.period === "forward_live" && { period: params.period, window_minutes: params.window_minutes, sport: params.sport } }, timeoutMs: 8e3 };
+    if (args || params.period === "forward_live") return { name: "get_sports_scores", args: { ...args, ...params.period === "forward_live" && { period: params.period, window_minutes: params.window_minutes, sport: params.sport } }, timeoutMs: 12e3 };
   } else if (intent.kind === "market" && getTool("get_stock_kline")) {
     const code = String(text2).match(/(?<![\dA-Za-z])((?:sh|sz|bj)?\d{6})(?!\d)/i)?.[1];
     if (code && !/实时|分时|汇率|金价|油价|币价|港股|美股|分钟|去年|今年|历史|最高|最低|过去|近\d|20\d{2}/.test(text2)) return { name: "get_stock_kline", args: { code, adjustment: "none", limit: 3 }, timeoutMs: 8e3 };
@@ -2269,19 +2213,19 @@ function evidenceId(url) {
   return `e${h.toString(36)}`;
 }
 function createEvidenceStore({ store = collection("kv"), now = Date.now, limits = EVIDENCE_LIMITS } = {}) {
-  const cache2 = /* @__PURE__ */ new Map();
+  const cache = /* @__PURE__ */ new Map();
   const dirty = /* @__PURE__ */ new Set();
   let timer = null;
   let writing = Promise.resolve();
   const alive = (items) => items.filter((x) => now() - x.at < limits.ttlMs);
   function load(sid) {
-    let p = cache2.get(sid);
-    if (p) cache2.delete(sid);
+    let p = cache.get(sid);
+    if (p) cache.delete(sid);
     else p = store.get(recId(sid)).then((r) => ({ items: Array.isArray(r?.items) ? r.items : [] })).catch(() => ({ items: [] }));
-    cache2.set(sid, p);
-    for (const old of cache2.keys()) {
-      if (cache2.size <= limits.sessions) break;
-      if (old !== sid && !dirty.has(old)) cache2.delete(old);
+    cache.set(sid, p);
+    for (const old of cache.keys()) {
+      if (cache.size <= limits.sessions) break;
+      if (old !== sid && !dirty.has(old)) cache.delete(old);
     }
     return p;
   }
@@ -2301,7 +2245,7 @@ function createEvidenceStore({ store = collection("kv"), now = Date.now, limits 
     if (!sids.length) return writing;
     writing = writing.then(async () => {
       for (const sid of sids) {
-        const rec = await cache2.get(sid);
+        const rec = await cache.get(sid);
         if (rec) await store.put({ id: recId(sid), items: rec.items, at: now() }).catch(() => {
         });
       }
@@ -2311,7 +2255,7 @@ function createEvidenceStore({ store = collection("kv"), now = Date.now, limits 
       list.sort((a, b) => a.at - b.at);
       const gone = list.filter((x, i) => now() - x.at >= limits.ttlMs || i < list.length - limits.sessions);
       for (const x of gone) {
-        cache2.delete(x.sid);
+        cache.delete(x.sid);
         await store.delete(recId(x.sid)).catch(() => {
         });
       }
@@ -2366,7 +2310,7 @@ function createEvidenceStore({ store = collection("kv"), now = Date.now, limits 
     /** 对话删了：证据一起删 */
     async drop(sid) {
       if (!sid) return;
-      cache2.delete(sid);
+      cache.delete(sid);
       dirty.delete(sid);
       writing = writing.then(async () => {
         await store.delete(recId(sid)).catch(() => {
@@ -2380,7 +2324,7 @@ function createEvidenceStore({ store = collection("kv"), now = Date.now, limits 
     flush,
     /** 测试用：内存里现在有几段对话 */
     get cached() {
-      return cache2.size;
+      return cache.size;
     }
   };
 }
@@ -3234,8 +3178,8 @@ function parseSo360(html) {
   for (const b of blocks) {
     const tag = b.match(/<h3[^>]*>[\s\S]*?(<a\b[^>]*>)([\s\S]*?)<\/a>/);
     if (!tag) continue;
-    const attr = (n) => decode(tag[1].match(new RegExp(`\\b${n}="([^"]+)"`))?.[1] ?? "");
-    const url = [attr("data-mdurl"), attr("data-url"), attr("href")].find((u) => /^https?:/.test(u) && !/so\.com\/link/.test(u)) || attr("href");
+    const attr2 = (n) => decode(tag[1].match(new RegExp(`\\b${n}="([^"]+)"`))?.[1] ?? "");
+    const url = [attr2("data-mdurl"), attr2("data-url"), attr2("href")].find((u) => /^https?:/.test(u) && !/so\.com\/link/.test(u)) || attr2("href");
     if (!/^https?:/.test(url) || /e\.so\.com|ad\./.test(url)) continue;
     const s = b.match(/class="[^"]*(?:res-desc|res-comm-con|res-rich)[^"]*"[^>]*>([\s\S]*?)<\/(?:p|div)>/);
     out.push({ title: decode(tag[2]), url, snippet: decode(s?.[1] ?? "").slice(0, 300) });
@@ -3555,7 +3499,7 @@ async function runLookupFaults({ out, signal, declaredRegion, only, get }) {
     const started = performance.now();
     const intent = kind === "general" ? { kind, lookup: true, sure: true, params: {} } : lookupIntent(text2);
     const result = await lookupPublicQuery(text2, intent, { service, signal, get: fault.get, includeGeneral: true });
-    const passed = result.items.length > 0 && fault.attempts.some((r) => r.injected) && fault.attempts.some((r) => !r.injected && r.status >= 200 && r.status < 300);
+    const passed = !fault.attempts.some((r) => /espn/i.test(r.sourceHost)) && result.items.length > 0 && fault.attempts.some((r) => r.injected) && fault.attempts.some((r) => !r.injected && r.status >= 200 && r.status < 300);
     cases.push({ kind, passed, ...result, elapsedMs: Math.round(performance.now() - started), attempts: fault.attempts });
     console.log(`${kind}\uFF1A${passed ? "\u5907\u7528\u53D6\u5F97\u6570\u636E" : "\u672A\u901A\u8FC7\uFF0C\u67E5\u770B\u62A5\u544A"}\uFF1B${result.items.length}\u6761\uFF1B${cases.at(-1).elapsedMs}ms`);
   }

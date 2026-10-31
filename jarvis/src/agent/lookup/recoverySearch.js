@@ -5,6 +5,7 @@ export function relevantRecoverySearch(output, intent, args = {}, request = '') 
   if (!rows) rows = String(output).split(/\n(?=- )/).map(block => ({ title: block.split('\n')[0].replace(/^-\s*/, ''), url: block.match(/https?:\/\/[^\s]+/)?.[0], snippet: block.split('\n').slice(2).join(' ') }));
   const kept = rows.filter(row => {
     if (!row.url || !row.title) return false;
+    if (intent.kind === 'sports_live' && /espn/i.test(`${row.url} ${row.source || ''} ${row.title}`)) return false;
     const text = `${row.title} ${row.snippet || ''}`;
     if (/客服电话|售后维修|账号登录|验证码/.test(text) && !/客服|售后|维修|登录|验证码/.test(request)) return false;
     if (intent.kind === 'weather') return /天气|气温|温度|weather|forecast/i.test(text) && text.includes(String(args.place || '').replace(/[市区县]$/, ''));

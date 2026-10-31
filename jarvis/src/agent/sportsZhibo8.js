@@ -3,7 +3,7 @@ import { httpError } from '../core/networkRequest.js';
 import { withWebDeadline } from './retrievalBudget.js';
 /**
  * 赛程比分的国内来源：直播吧的比分列表（bifen4pc.qiumibao.com，不用密钥）。
- * 国内服务器连得上（ESPN 连不上）；中文队名、北京时间、比分、半场、第几分钟都有。
+ * 已有国内服务器实测；中文队名、北京时间、比分、半场、第几分钟都有。
  * 局限（2026-10-25 在用户服务器上实测）：
  *   - 只是“当前”列表：大约昨天到明天，明天的只排进了少数几场；不能按任意日期查
  *   - 没有联赛名，只有联赛编号：同一编号放在一起，不按队名猜联赛级别
@@ -123,6 +123,7 @@ export function zhibo8Result(list, { from, to, today, sports = null, team = '', 
   if (days.some((d) => d > today)) lines.push('明天及以后的比赛这里只排进了少数几场，不全；用户要完整赛程时用 web_search 补。');
   if (!covered) lines.push(`列表只覆盖大约昨天到明天，${days.filter((d) => !have.has(d)).join('、')} 没有数据。`);
   lines.push('进行中的比分会变；比分以这里为准，未开赛的不要编比分。');
+  lines.push('来源：直播吧 https://bifen4pc.qiumibao.com/json/list.htm');
   lines.push('本列表未提供可核实的竞彩场次编号、停售时间及赔率；只展示普通赛程，不把赛事ID或is_jingcai标记编成竞彩编号。');
   const events = shown.map(e => ({ ...e, time: beijingTimestamp(e.date, e.time), state: ({ '1': 'pre', '2': 'in', '3': 'post' })[e.state] || 'unknown', status: e.state === '2' ? `进行中 ${e.period}`.trim() : STATE[e.state] || '状态未知' }));
   return { covered, text: lines.join('\n'), count: shown.length, events };

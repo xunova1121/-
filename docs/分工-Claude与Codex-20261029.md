@@ -126,3 +126,6 @@
 - 2026-10-31 用户追加合并交接已同步be6be2b：统一查询自救与时限同批发布。扩充lookup/recovery、lastGood、source health及来源设置；agentToolExecution仅传递结构化恢复元数据，agentCompletion/lookupClosingNote仅去重已解释的网络警告，数值/内容/文件/视觉守护保留。tools.js只向天气传健康实例，server评测沿用已有独立memoryLookupStorage，不改持仓/表达/架构/提醒逻辑。
 
 - 2026-10-31 自救最终复核补充：core/qweather.js仅纠正GeoAPI以HTTP200返回401/402/403/429时被当成“城市没找到”的分类；保留真正404/无地点处理和全部解析字段。对应测试新增，不改首页天气设计。
+
+- 2026-10-31 用户明确要求去掉ESPN请求及数据：Codex移除sportsScores中的ESPN联网链，采用已接入直播吧的公开赛程页作为同站备用读取，失败后原搜索阶梯继续；只解析明确日期/对阵/联赛，不把网页计划当实时比分。sportsCards显示旧卡时过滤ESPN行，lastGood拒绝旧ESPN回执；历史对话文字不删除。旧专用ESPN网络测试迁移为国内备用链/日期/状态/取消等同业务保护，逐条记录，不保留测试专用后门或隐藏ESPN开关。
+- 同批用户追加“那六场答非所问”和“所有回答要有层次排版”：agent.js只在比分追问时跳过无范围预取并传递选定队名；responseGuidance只加通用排版指导，不改表达情绪/写作角色；sportsCards默认6场其余展开，历史停用来源过滤。新增独立手机组件验收接原CI，不放宽已有门槛。

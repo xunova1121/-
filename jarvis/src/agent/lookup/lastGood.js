@@ -9,13 +9,14 @@ export function lastGoodKey(intent, plan, text = '') {
   const args = plan?.args || {};
   if (intent.kind === 'weather' && !args.place || intent.kind === 'market' && !args.code) return null;
   // 仅公开查询参数；不存用户原话、坐标、凭据或任意扩展字段。
-  const allowed = ['place', 'days', 'code', 'adjustment', 'limit', 'sport', 'period', 'date', 'window_minutes', 'categories', 'publishers', 'date_mode'];
+  const allowed = ['place', 'days', 'code', 'adjustment', 'limit', 'sport', 'teams', 'period', 'date', 'window_minutes', 'categories', 'publishers', 'date_mode'];
   const params = Object.fromEntries(allowed.filter(k => args[k] != null).map(k => [k, args[k]]));
   if (JSON.stringify(params).length > 440 || /https?:|[0-9]|@|路|街|号|室|弄|幢|楼|小区|经度|纬度/.test(String(args.place || ''))) return null;
   const key = intent.kind + ':' + JSON.stringify({ ...params, mode: intent.params?.dateMode || 'today' });
   return key.length <= 500 ? key : null;
 }
 function valid(row, kind, at) {
+  if (kind === 'sports_live' && /espn/i.test(JSON.stringify(row?.found || {}))) return false;
   if (!row || row.at > at || !Number.isFinite(row.at)) return false;
   const age = at - row.at;
   if (kind === 'weather') return age <= 3 * 3600_000;
@@ -36,6 +37,7 @@ export function createLastGood({ storage = collection('kv'), now = Date.now } = 
       return structuredClone(row);
     },
     async put(key, kind, found, { signal } = {}) {
+      if (kind === 'sports_live' && /espn/i.test(found.output || '')) return;
       if (!key || /(?:Bearer\s+[A-Za-z0-9]|[?&](?:key|token|api_key|access_token)=)/i.test(found.output || '') || !usefulReceipt(found) || found.output.length > 100000 || found.recovery?.state === 'cached' || signal?.aborted) return;
       // 搜索摘要不作为结构化天气/比分/日K缓存；新闻必须有明确发布时间。
       if (!['get_weather', 'get_stock_kline', 'get_sports_scores', 'get_today_news'].includes(found.tool) || !/https?:\/\//.test(found.output)) return;

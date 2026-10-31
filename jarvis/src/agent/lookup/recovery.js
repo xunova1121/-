@@ -51,7 +51,7 @@ export async function recoverLookup(intent, plan, options) {
     if (found) return finish(found);
   }
   // 专用源全失败才搜索；词中保留用户原始范围，不把体育资讯改为比分。
-  const query = intent.kind === 'weather' ? `${plan.args.place} ${text || '今天天气'}` : text;
+  const query = intent.kind === 'sports_live' && (plan.args.teams?.length || plan.args.team) ? `${[...(plan.args.teams || []), plan.args.team || ''].filter(Boolean).join(' ')} ${text}` : intent.kind === 'weather' ? `${plan.args.place} ${text || '今天天气'}` : text;
   if (getTool('web_search') && query.trim()) {
     found = await attempt({ name: 'web_search', args: { query: plan.name === 'web_search' ? query.replace(/[？?。！!]/g, '').trim() + ' 官方资料' : query } }, '公开搜索', 5000);
     if (!found && left() > 250) {

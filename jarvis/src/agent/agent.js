@@ -1,6 +1,7 @@
 import { answerConstraintIssues as lookupAnswerIssues } from './answerRequirements.js';
 import { lookupComplaint, todayNewsIntent, sportsNewsIntent, supportsSportsNews } from './newsIntent.js';
 import { lookupIntent } from './lookup/intent.js';
+import { sportsFollowupScope, SPORTS_FOLLOWUP_NOTE } from './sportsFollowup.js';
 import { runLookup } from './lookup/runner.js';
 import { classifyLookupIntent } from './lookup/classify.js';
 import { LOOKUP_DEFAULT_PREFERENCES } from './lookup/preferences.js';
@@ -425,8 +426,10 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       takeInbox();
     }
   }
+  const sportsScope = sportsFollowupScope(requirementText, history);
+  if (sportsScope) { retrieval.sportsScope = sportsScope; ctx.dynamic = (ctx.dynamic || '') + '\n' + SPORTS_FOLLOWUP_NOTE; }
   // 所有查询在此唯一入口预取；原工具承担数据/卡片/安全校验，执行器保留真实进度回执。
-  if (depth === 0 && !codeWork?.enabled && !light && !images.length && !creativeWithoutLookup(requirementText)) {
+  if (depth === 0 && !sportsScope && !codeWork?.enabled && !light && !images.length && !creativeWithoutLookup(requirementText)) {
     let preferences = LOOKUP_DEFAULT_PREFERENCES;
     if (lookupPreferences && lookupIntent(requirementText, { history }).kind === 'sports_live') {
       try { preferences = await withWebDeadline(() => lookupPreferences(), { signal, timeoutMs: 500 }); } catch (error) { if (signal?.aborted) throw error; }

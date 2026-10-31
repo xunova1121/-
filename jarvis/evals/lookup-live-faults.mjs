@@ -36,7 +36,7 @@ export async function runLookupFaults({ out, signal, declaredRegion, only, get }
     // general明确使用搜索，不把分类器给新闻的判定当作一般问题覆盖。
     const intent = kind === 'general' ? { kind, lookup: true, sure: true, params: {} } : lookupIntent(text);
     const result = await lookupPublicQuery(text, intent, { service, signal, get: fault.get, includeGeneral: true });
-    const passed = result.items.length > 0 && fault.attempts.some(r => r.injected) && fault.attempts.some(r => !r.injected && r.status >= 200 && r.status < 300);
+    const passed = !fault.attempts.some(r => /espn/i.test(r.sourceHost)) && result.items.length > 0 && fault.attempts.some(r => r.injected) && fault.attempts.some(r => !r.injected && r.status >= 200 && r.status < 300);
     cases.push({ kind, passed, ...result, elapsedMs: Math.round(performance.now() - started), attempts: fault.attempts });
     console.log(`${kind}：${passed ? '备用取得数据' : '未通过，查看报告'}；${result.items.length}条；${cases.at(-1).elapsedMs}ms`);
   }

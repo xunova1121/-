@@ -4,3 +4,5 @@
 @media(max-width:360px){.sports-card-head{padding:12px 10px 8px;gap:6px}.sports-card-head strong{font-size:15px}.sports-card-zone{font-size:10px}.sports-match-teams{gap:6px;font-size:13px}.sports-match-meta,.sports-match-status{font-size:10px}.sports-card .sports-card-window{margin-left:10px;margin-right:10px}}
 .companion-edition.workbench .msg.agent>.sports-card{width:100%;max-width:640px}
 :root:not([data-theme='light']) .sports-card .is-live .sports-match-status>span:first-child{color:#5bd8b2}
+
+.sports-card-more summary{padding:12px 8px;cursor:pointer;font-weight:600;color:#7561c5;min-height:44px;box-sizing:border-box}.sports-card-more[open] summary{border-top:1px solid var(--sports-line)}.sports-card-more summary:focus-visible{outline:2px solid #8c73dc;outline-offset:-2px}

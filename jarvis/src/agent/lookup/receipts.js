@@ -16,5 +16,5 @@ export function lookupReceiptItems(found, intent) {
   const urls = [...String(found.output).matchAll(/https?:\/\/[^\s<>"）)]+/g)].map(match => match[0]);
   return [{ title: found.tool, url: urls[0] || null, source: String(found.output).match(/来源[：:]([^\n]+)/)?.[1] || found.tool,
     publishedAt: null, kind: intent.kind, category: intent.kind, summary: found.output,
-    verified: found.tool === 'web_search' ? 'index' : 'api' }];
+    verified: found.tool === 'web_search' ? 'index' : found.tool === 'get_sports_scores' && /公开赛程页/.test(found.output) ? 'page' : 'api' }];
 }
