@@ -55,7 +55,11 @@ export async function preSearch({ run, text, signal, timeoutMs = PRE_SEARCH_MS, 
 
 /** 搜到的结果附在用户这句话后面（写明是系统先搜的，不是用户说的） */
 export function preSearchNote({ query, output, tool }) {
-  if (tool === 'get_today_news') return `（系统已先查get_today_news，以下是实际取得的当天新闻。用中文按事件整理，把不同媒体新增的信息与有依据的分歧放在同一事件下，保留来源链接；转载不当独立报道。RSS/汇总不冒充原文核实，CNA转载写明转载站及转载时间。无二来源不凑交叉核验；缺栏目/数量如实说明，不重新搜索同一批。）\n${output}`;
+  if (tool === 'get_today_news') {
+    let period = '当天';
+    try { if (JSON.parse(output).range?.mode === 'recent24h') period = '最近24小时'; } catch { /* 旧文本回执沿用今日说明。 */ }
+    return `（系统已先查get_today_news，以下是实际取得的${period}新闻，不能把最近24小时稿件统称为今天。用中文按事件整理，把不同媒体新增的信息与有依据的分歧放在同一事件下，保留来源链接；转载不当独立报道。RSS/汇总不冒充原文核实，CNA转载写明转载站及转载时间。无二来源不凑交叉核验；缺栏目/数量如实说明，不重新搜索同一批。）\n${output}`;
+  }
   if (tool === 'get_sports_scores') return `（系统已先查了赛程和比分（get_sports_scores），结果如下。按它回答：按赛事列出时间和比分，写明哪些赛事没查到、哪些项目不在查询范围；不在范围的用户又问到了再用 web_search 补。）\n${output}`;
   return `（系统已先按这句话联网搜索了一次，搜索词“${query}”，结果如下。够用就直接回答，注明来源链接和日期；不够或对不上再用 web_search / fetch_url 补查。）\n${output}`;
 }
@@ -64,7 +68,14 @@ const norm = (q) => String(q ?? '').toLowerCase().replace(/[\s，。！？、；
 /** 模型这次的 web_search 调用是不是和先搜的一模一样（同一个搜索词、没有别的词） */
 export function reusesPreSearch(call, found) {
   // 赛程比分：参数和先查的一样就直接用先查的结果
-  if (found?.tool === 'get_sports_scores' || found?.tool === 'get_today_news') return call?.name === found.tool && JSON.stringify(call.args ?? {}) === JSON.stringify(found.args ?? {});
+  if (found?.tool === 'get_sports_scores') return call?.name === found.tool && JSON.stringify(call.args ?? {}) === JSON.stringify(found.args ?? {});
+  if (found?.tool === 'get_today_news') {
+    if (call?.name !== found.tool) return false;
+    const known = ['categories', 'publishers', 'limit', 'date_mode'];
+    if ([...Object.keys(call.args || {}), ...Object.keys(found.args || {})].some(key => !known.includes(key))) return false;
+    const args = value => ({ categories: [...(value.categories?.length ? value.categories : found.args?.categories || [])].sort(), publishers: [...(value.publishers || [])].sort(), limit: value.limit ?? 12, date_mode: value.date_mode ?? found.args?.date_mode ?? 'today' });
+    return JSON.stringify(args(call.args || {})) === JSON.stringify(args(found.args || {}));
+  }
   if (!found || call?.name !== 'web_search') return false;
   const extra = Array.isArray(call.args?.queries) ? call.args.queries.filter((q) => norm(q) && norm(q) !== norm(found.query)) : [];
   return !extra.length && norm(call.args?.query || call.args?.queries?.[0]) === norm(found.query);

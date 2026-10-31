@@ -1,5 +1,6 @@
 import { answerConstraintIssues as lookupAnswerIssues } from './answerRequirements.js';
-import { lookupComplaint, todayNewsIntent, sportsNewsIntent, supportsSportsNews, newsCategoryRequest, SPORTS_NEWS_NOTE, NEWS_LOOKUP_NOTE, WEB_LOOKUP_NOTE } from './newsIntent.js';
+import { lookupComplaint, todayNewsIntent, sportsNewsIntent, supportsSportsNews, newsCategoryRequest, SPORTS_NEWS_NOTE, newsLookupNote, WEB_LOOKUP_NOTE } from './newsIntent.js';
+import { lookupIntent } from './lookup/intent.js';
 import { createLookupDelivery } from './lookupDelivery.js';
 import { lookupPhase } from './lookupModels.js';
 import { codeWorkBlock, CODE_TASK_CORE } from './codeDevelopment.js';
@@ -253,7 +254,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     return { text: workAnswer.text, toolCalls: 1 };
   }
   let complaint = !images.length && lookupComplaint(userText);
-  let sportsNewsOnly = !images.length && !codeWork?.enabled && sportsNewsIntent(requirementText);
+  let sportsNewsOnly = !images.length && !codeWork?.enabled && sportsNewsIntent(requirementText, { history });
   if (sportsNewsOnly) light = false;
   if (complaint) light = true;
   if (!complaint && light && needsActionTools(userText, history)) light = false;
@@ -282,7 +283,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   // 动态规则只属于本轮，不能修改调用方复用的上下文，让新闻规则污染后面的写作。
   const ctx = { ...preparedContext };
   if (complaint) ctx.dynamic = (ctx.dynamic || '') + '\n用户当前是在询问状态或抱怨，不是要求重新搜索。根据已有任务状态简短回答；没有正在执行的任务就不假称还在查。本条仅问状态时不要调用联网工具；之后明确追加新查询则按新要求处理。';
-  else if (!light && !questionProfile && !codeWork?.enabled && !images.length && (isQuickLookup(requirementText, images) || todayNewsIntent(requirementText) || /深度调研|查资料|联网查询|逐项核验/.test(requirementText))) ctx.dynamic = (ctx.dynamic || '') + '\n' + WEB_LOOKUP_NOTE + (todayNewsIntent(requirementText) ? '\n' + NEWS_LOOKUP_NOTE : '');
+  else if (!light && !questionProfile && !codeWork?.enabled && !images.length && (isQuickLookup(requirementText, images) || todayNewsIntent(requirementText) || /深度调研|查资料|联网查询|逐项核验/.test(requirementText))) ctx.dynamic = (ctx.dynamic || '') + '\n' + WEB_LOOKUP_NOTE + (todayNewsIntent(requirementText) ? '\n' + newsLookupNote(requirementText) : '');
   ctx.dynamic = (ctx.dynamic || '') + await workHistoryBlock(requirementText, sessionId, { signal });
   if (codeWork?.enabled) ctx.dynamic = (ctx.dynamic || '') + '\n' + codeWorkBlock(codeWork, await packs.get('code-development'));
   const convo = [...history.map((m) => ({ ...m })), { role: 'user', content: userText, ...(images.length && { images }) }];
@@ -378,7 +379,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     onTaskUpdate?.(said.join("\n"));
     if (COMPLEX.test(said.join("\n")) || creativeWithoutLookup(currentRequest) || computerNote) { infoPrompt = false; lookupDeadline = false; }
     if (light) { light=false; tools=availableTools; loader=createToolLoader([...tools,...own]); toolHint=loader.hint(); }
-    const nextSportsNews = !images.length && !codeWork?.enabled && sportsNewsIntent(currentRequest);
+    const nextSportsNews = !images.length && !codeWork?.enabled && sportsNewsIntent(currentRequest, { history });
     if (sportsNewsOnly || nextSportsNews) {
       sportsNewsOnly = nextSportsNews;
       tools = availableTools.filter(tool => !sportsNewsOnly || tool.name !== 'get_sports_scores' && (tool.name !== 'get_today_news' || supportsSportsNews(tool)));
@@ -414,13 +415,14 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     }
   }
   // 明显要查实时信息的短问题：先按原话搜一次，结果随问题交给模型，一轮答完（见 preSearch.js）；问赛程比分的先查比分接口
-  const asksNews = depth === 0 && !codeWork?.enabled && (todayNewsIntent(requirementText) || sportsNewsOnly);
+  const newsRequest = lookupIntent(requirementText, { history });
+  const asksNews = depth === 0 && !codeWork?.enabled && (todayNewsIntent(requirementText, { history }) || sportsNewsOnly);
   const newsTool = asksNews ? loader.get('get_today_news') : null;
-  const newsCategories = asksNews ? newsCategoryRequest(requirementText) : [];
+  const newsCategories = asksNews ? newsCategoryRequest(requirementText, { history }) : [];
   // 多源预查最多8读；明确逐条原文核实时默认取8条，给原有16读预算留足原文读取空间。
   // 用户指定数量仍保留12条候选，不擅改数量；缺多少须按实际回执说明。
-  const newsLimit = /原文核实|逐条.*(?:原文|核实)|逐项核验/.test(requirementText) && !/[0-9一二三四五六七八九十]+\s*条/.test(requirementText) ? 8 : 12;
-  const newsArgs = depth === 0 && !codeWork?.enabled && (todayNewsIntent(requirementText) || sportsNewsOnly && supportsSportsNews(newsTool)) && newsTool ? { limit: newsLimit, ...(newsCategories.length && { categories: newsCategories }) } : null;
+  const newsLimit = newsRequest.params.perCategory ? Math.min(24, newsRequest.params.perCategory * (newsCategories.length || 5)) : /原文核实|逐条.*(?:原文|核实)|逐项核验/.test(requirementText) && !/[0-9一二三四五六七八九十]+\s*条/.test(requirementText) ? 8 : 12;
+  const newsArgs = depth === 0 && !codeWork?.enabled && (todayNewsIntent(requirementText, { history }) || sportsNewsOnly && supportsSportsNews(newsTool)) && newsTool ? { limit: newsLimit, ...(newsCategories.length && { categories: newsCategories }), ...(newsTool.input_schema?.properties?.date_mode && { date_mode: newsRequest.params.dateMode === 'recent24h' ? 'recent24h' : 'today' }) } : null;
   const sportsArgs = depth === 0 && loader.get('get_sports_scores') ? sportsPreCall(requirementText) : null;
   if (depth === 0 && !light && !images.length && (newsArgs || sportsArgs || wantsPreSearch(requirementText)) && !creativeWithoutLookup(requirementText) && (newsArgs || sportsArgs || loader.get('web_search'))) {
     const found = await preSearch({

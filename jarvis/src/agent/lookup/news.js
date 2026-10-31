@@ -8,9 +8,9 @@ import { evidence } from '../evidenceStore.js';
 export async function runNewsLookup(ctx, args = {}, execution = {}) {
   const now = ctx.now?.() ?? Date.now();
   const classified = lookupIntent(execution.requestText || '今日新闻');
-  const categories = args.categories || classified.params.categories || [];
+  const categories = args.categories?.length ? args.categories : classified.params.categories || [];
   const kind = categories.length === 1 && categories[0] === '体育' ? 'sports_news' : 'news';
-  const dateMode = classified.params.dateMode || 'today';
+  const dateMode = classified.params.dateMode === 'specified' ? 'specified' : /今天|今日/.test(execution.requestText || '') ? 'today' : args.date_mode || classified.params.dateMode || 'today';
   const result = await runLookup({ kind, params: { categories, publishers: args.publishers || [], limit: args.limit || 12, dateMode } }, {
     ...ctx.lookup, now, get: ctx.fetchViaGateway || ctx.fetchImpl,
     signal: execution.signal, retrieval: execution.retrieval, progress: execution.progress

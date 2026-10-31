@@ -1,4 +1,5 @@
 import { publicDataPanel } from './publicDataPanel.js';
+import { lookupPanel } from './lookupPanel.js';
 /** 模型库主界面：服务商卡片与常用型号，完整目录按搜索和分页显示。 */
 import './modelLibrary.css';
 import { PROVIDERS, providerById } from '../../shared/providers.js';
@@ -489,6 +490,7 @@ export function initModelLibrary({ root, workspace, toast }) {
     // 联网搜索、文档审查与写作偏好放在服务商后面：先选模型，再管搜索，审查和偏好不常改，收起来
     providersHost.append(deepseekSearchPanel({ cfg, workspace, node, toast }));
     providersHost.append(publicDataPanel({ cfg, workspace, node, toast }));
+    providersHost.append(lookupPanel({ cfg, workspace, node, toast }));
     const review = node(
       'details',
       { className: 'ml-copy ml-review', open: reviewOpen },

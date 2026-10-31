@@ -1,4 +1,5 @@
 import { createLookupModel } from '../src/agent/lookupModels.js';
+import { createLookupService, memoryLookupStorage } from '../src/agent/lookup/service.js';
 import { convertLegacyDoc } from './officeRender.mjs';
 import { codeProjectTools } from './codeProjectTools.mjs';
 import { codeFollowup, codeTaskPolicy, CODE_TASK_MS } from './codeTaskPolicy.mjs';
@@ -120,7 +121,7 @@ export function serverApproves(ask, text) {
   return false;
 }
 
-export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now, skillRunner = null, codeRepos = null, codeProjects = null, projectBaseDir, codeMaxSteps = 80, codeTaskMs = CODE_TASK_MS }) {
+export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now, skillRunner = null, codeRepos = null, codeProjects = null, projectBaseDir, codeMaxSteps = 80, codeTaskMs = CODE_TASK_MS, lookupService = createLookupService({ get: publicFetch }) }) {
   const tasks = new Map();
   const waiting = [];
   let running = 0;
@@ -275,6 +276,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       ...deepseekSearchOptions(cfg),
       // 评测不读用户保存的文档偏好（字号、风格），结果才能复现
       ...(task.evaluationId && { documentStylePreferences: async () => '' }),
+      lookup: (task.evaluationId ? createLookupService({ storage: memoryLookupStorage(), get: publicFetch }) : lookupService).options(cfg.lookupRegion || 'auto'),
       publicDataHosts: cfg.publicDataHosts, tavilyKey: cfg.tavilyKey, qweather: qweatherConfig(cfg), bochaKey: cfg.bochaKey, falKey: cfg.falKey, searchRegion: cfg.searchRegion || 'auto',
       fetchPublicJson: (url, init) => publicFetch(url, init),
       fetchViaGateway: (url, init) => publicFetch(url, init), // 不填搜索密钥也能联网搜索、读网页

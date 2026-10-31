@@ -19,7 +19,8 @@ export async function runLookup(intent, options = {}) {
   const { signal, retrieval, health, get, progress, now = Date.now() } = options;
   if (signal?.aborted) throw signal.reason;
   if (intent.params?.dateMode === 'specified') throw Object.assign(new Error('指定历史日期暂走原查询路径，不转换成今日'), { code: 'LOOKUP_DATE_PENDING' });
-  const selection = await selectLookupSources({ ...options, kind: intent.kind, params: intent.params });
+  const sourcesForQuery = options.sources ?? options.registry?.({ kind: intent.kind, params: intent.params });
+  const selection = await selectLookupSources({ ...options, sources: sourcesForQuery, kind: intent.kind, params: intent.params });
   if (signal?.aborted) throw signal.reason;
   const params = intent.params || {};
   const range = lookupTimeRange(params, now);
@@ -31,7 +32,7 @@ export async function runLookup(intent, options = {}) {
   let remaining = maxReads - sources.length;
   for (let i = 0; i < 5 && remaining > 0; i++) for (const source of sources) {
     if (!remaining) break;
-    if (source.parseArticle) { details.set(source.id, details.get(source.id) + 1); remaining--; }
+    if (source.parseArticle && details.get(source.id) < (source.maxDetails ?? 5)) { details.set(source.id, details.get(source.id) + 1); remaining--; }
   }
   const controller = new AbortController();
   const stop = () => controller.abort(signal.reason);

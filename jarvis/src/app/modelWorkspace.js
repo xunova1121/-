@@ -1,4 +1,5 @@
 import { createModelLocalOptions } from './modelLocalOptions.js';
+import { localLookup } from './lookup.js';
 import { testDeepseekSearch } from '../agent/deepseekSearch.js';
 /** 模型工作台：分位置读写配置，界面细节放在ui，不改任务执行中的运行位置。 */
 import { createModelScopes } from '../llm/modelScopes.js';
@@ -61,6 +62,16 @@ export function createModelWorkspace(app) {
       const client = getClient();
       if (!client) throw Object.assign(new Error('请先登录云服务器'), { kind: 'api', code: 'SERVER_NOT_CONNECTED' });
       return client.memoryStatus();
+    },
+    async lookupHealth(probe = false, target = scope, signal) {
+      if (target === 'local') {
+        const service = localLookup(app);
+        const region = app.panels.config.lookupRegion || 'auto';
+        return probe ? service.probe(region, { signal }) : service.status(region);
+      }
+      const client = getClient();
+      if (!client) throw Object.assign(new Error('请先登录云服务器'), { kind: 'api', code: 'SERVER_NOT_CONNECTED' });
+      return client.lookupHealth(probe, signal);
     },
     async selectScope(target) {
       scope = target;

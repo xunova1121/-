@@ -1,4 +1,7 @@
 import { publicDataHosts } from '../src/agent/publicJson.js';
+import { createLookupService } from '../src/agent/lookup/service.js';
+import { LOOKUP_REGIONS } from '../src/agent/lookup/sources.js';
+import { createLookupRoutes } from './lookupRoutes.mjs';
 import { createCodeProjects } from './codeProjects.mjs';
 import { codeProjectRoutes } from './codeProjectRoutes.mjs';
 import { createCodeBrowser } from './codeBrowser.mjs';
@@ -41,7 +44,7 @@ import path from 'node:path';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createFileStore } from './fileStore.mjs';
-import { createTaskRunner } from './taskRunner.mjs';
+import { createTaskRunner, publicFetch } from './taskRunner.mjs';
 import { createServerSchedules, notices as scheduleNotices } from './serverSchedules.mjs';
 import * as scheduler from '../src/agent/scheduler.js';
 import { useBackend } from '../src/agent/store.js';
@@ -81,6 +84,7 @@ export function mergeConfig(old, next) {
   const { codeRepos: ignored, codeAccount: ignoredAccount, ...modelSettings } = next;
   next = modelSettings;
   if (Object.hasOwn(next, 'publicDataHosts')) next = { ...next, publicDataHosts: publicDataHosts(next.publicDataHosts) };
+  if (Object.hasOwn(next, 'lookupRegion') && !LOOKUP_REGIONS.includes(next.lookupRegion)) throw Object.assign(new Error('查询地区只接受auto、cn或global'), { status: 400, code: 'LOOKUP_REGION' });
   const keep = (n, o) => (!n || String(n).startsWith('••••') ? o ?? '' : n);
   const keys = { ...(old.keys ?? {}) };
   for (const [k, v] of Object.entries(next.keys ?? {})) keys[k] = keep(v, old.keys?.[k]);
@@ -95,7 +99,7 @@ export function mergeConfig(old, next) {
 /**
  * @param {{ dataDir: string, password: string, maxRunning?: number, runner?: object }} o
  */
-export function createServerMode({ dataDir, password, maxRunning = 1, runner: injected = null, appDir = APP_DIR, updateUnit = UPDATE_UNIT, makeModelAdapter, autoSchedules = false, codeHosting = createGitHubHost(), codeGit, codeSandbox = null } = {}) {
+export function createServerMode({ dataDir, password, maxRunning = 1, runner: injected = null, appDir = APP_DIR, updateUnit = UPDATE_UNIT, makeModelAdapter, autoSchedules = false, codeHosting = createGitHubHost(), codeGit, codeSandbox = null, lookupService: injectedLookup = null } = {}) {
   if (!password || String(password).length < 8) throw new Error('服务器模式需要设置 JARVIS_PASSWORD（至少 8 位）');
   const store = createFileStore(path.join(dataDir, 'store'));
   useBackend(store);
@@ -128,7 +132,8 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       await sessions.save(s);
     }
   });
-  runner = injected ?? createTaskRunner({ codeProjects: projects, getConfig: async () => withoutCodeCredentials(loadConfig()), maxRunning, skillRunner, codeRepos, projectBaseDir: path.join(dataDir, 'project-jobs') });
+  const lookupService = injectedLookup ?? createLookupService({ storage: { get: id => store.get('kv', id), put: row => store.put('kv', row) }, get: publicFetch });
+  runner = injected ?? createTaskRunner({ codeProjects: projects, getConfig: async () => withoutCodeCredentials(loadConfig()), maxRunning, skillRunner, codeRepos, projectBaseDir: path.join(dataDir, 'project-jobs'), lookupService });
   // 定时任务 / 提醒：服务器自己按时执行（手机关着也做），见 serverSchedules.mjs；测试里不自动开始计时
   const schedules = createServerSchedules({ runner });
   if (autoSchedules) schedules.start();
@@ -147,6 +152,7 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(body));
   };
+  const lookupRoutes = createLookupRoutes({ service: lookupService, getConfig: loadConfig, json });
   async function readBody(req, limit) {
     let size = 0;
     const chunks = [];
@@ -203,6 +209,10 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
   async function handle(req, res, pathname) {
     const url = new URL(req.url, 'http://x');
     if (pathname === '/api/server/login' && req.method === 'POST') { login(req, res, await readJson(req)); return true; }
+    if (pathname === '/api/server/lookup-health') {
+      if (!authorized(req)) { json(res, 401, { error: '服务器登录已失效' }); return true; }
+      return lookupRoutes(req, res);
+    }
     if (pathname.startsWith('/api/server/code-projects')) {
       if (!authorized(req)) { json(res, 401, { error: '服务器登录已失效' }); return true; }
       return projectRoutes(req, res, pathname, url);

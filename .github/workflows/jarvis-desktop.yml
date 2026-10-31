@@ -273,6 +273,7 @@ jobs:
           node e2e/weather-server.mjs "$RUNNER_TEMP/jarvis-e2e/weather-server"
           node e2e/sports-card.mjs "$RUNNER_TEMP/jarvis-e2e/sports-card"
           node e2e/news-lookup.mjs "$RUNNER_TEMP/jarvis-e2e/news-lookup"
+          node e2e/lookup-step1.mjs "$RUNNER_TEMP/jarvis-e2e/lookup-step1"
           node e2e/server-mobile.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/conversation-flow.mjs
           node e2e/qwen-voices.mjs "$RUNNER_TEMP/jarvis-e2e"

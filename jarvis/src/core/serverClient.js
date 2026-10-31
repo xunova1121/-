@@ -169,6 +169,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     sportsScores: (query, signal) => req('/api/sports/scores?' + new URLSearchParams(query), { signal, timeout: 20000 }),
     listDocumentStyles: () => req('/api/server/document-styles'),
     memoryStatus: () => req('/api/server/memory-status'),
+    lookupHealth: (probe = false, signal) => req('/api/server/lookup-health', { method: probe ? 'POST' : 'GET', signal, timeout: 45000 }),
     deleteDocumentStyle: id => req(`/api/server/document-styles/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     putConfig: (cfg) => req('/api/server/config', { method: 'PUT', body: cfg }),
     testDeepseekSearch: (kind, signal) => req('/api/server/search-test', { method: 'POST', body: { kind }, signal, timeout: 30000 }),

@@ -2,6 +2,7 @@ import { newsCandidates } from './newsDelivery.js';
 import { answerConstraintIssues, answerConstraints } from './answerRequirements.js';
 import { todayNewsIntent } from './newsIntent.js';
 import { newsDate } from './newsSources.js';
+import { lookupIntent } from './lookup/intent.js';
 /** 本轮最多12条短证据，只存于执行期；不用模型旧回复填补失败，不把正文放入检查点。 */
 export function createLookupDelivery(request, now = Date.now) {
   const rows = new Map(), failures = [];
@@ -17,7 +18,11 @@ export function createLookupDelivery(request, now = Date.now) {
         try {
           const result = JSON.parse(output);
           if (result.kind !== 'today_news' || result.date !== newsDate(now())) return;
-          for (const item of (result.items || []).slice(0, 24)) if (item.publishedAt?.startsWith(result.date)) add(item);
+          const recent = lookupIntent(request).params.dateMode === 'recent24h' && !answerConstraints(request).todayNews;
+          for (const item of (result.items || []).slice(0, 24)) {
+            const at = Date.parse(item.publishedAt);
+            if (item.publishedAt?.startsWith(result.date) && at <= now() || recent && result.range?.mode === 'recent24h' && at >= now() - 86400000 && at <= now()) add(item);
+          }
           for (const source of result.sources || []) if (source.error && failures.length < 4) failures.push(source.source + '：' + source.error);
         } catch { /* 非结构化结果不能当作已读当天新闻。 */ }
       } else if (toolName === 'web_search') {

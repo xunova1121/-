@@ -1,4 +1,5 @@
 import { editImage } from '../llm/imageEdit.js';
+import { localLookup } from './lookup.js';
 import { qweatherConfig } from '../core/qweather.js';
 import { deepseekSearchOptions } from '../agent/deepseekSearch.js';
 /**
@@ -80,6 +81,7 @@ export function createToolbox(app) {
         ...deepseekSearchOptions(app.llmConfig),
         tavilyKey: app.llmConfig.tavilyKey,
         publicDataHosts: app.llmConfig.publicDataHosts,
+        lookup: localLookup(app).options(app.llmConfig.lookupRegion || 'auto'),
         fetchPublicJson: app.fetchPublicJson?.(),
         publicJsonAvailable: Boolean(app.gateway && !app.gateway.cors && app.fetchPublicJson),
         qweather: qweatherConfig(app.llmConfig),
