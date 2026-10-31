@@ -272,11 +272,12 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     record(task, { type: 'route', model, task: kind, routed: route.routed });
     const fallbacks = fallbackRoutes(cfg, { provider: route.cfg.provider, model, task: kind }).map((f) => ({ ...createAdapter(f.cfg), label: `${providerLabel(f.cfg, f.provider)} · ${f.model}` })).filter((f) => !f.problem && f.adapter && f.model);
     const history = session.messages.slice(0, -1); // 最后一条是这次的用户原话，单独作为 userText
+    const taskLookup = task.evaluationId ? createLookupService({ storage: memoryLookupStorage(), get: publicFetch }) : lookupService;
     const tools = evaluationTools(makeTools({
       ...deepseekSearchOptions(cfg),
       // 评测不读用户保存的文档偏好（字号、风格），结果才能复现
       ...(task.evaluationId && { documentStylePreferences: async () => '' }),
-      lookup: (task.evaluationId ? createLookupService({ storage: memoryLookupStorage(), get: publicFetch }) : lookupService).options(cfg.lookupRegion || 'auto'),
+      lookup: taskLookup.options(cfg.lookupRegion || 'auto'),
       publicDataHosts: cfg.publicDataHosts, tavilyKey: cfg.tavilyKey, qweather: qweatherConfig(cfg), bochaKey: cfg.bochaKey, falKey: cfg.falKey, searchRegion: cfg.searchRegion || 'auto',
       fetchPublicJson: (url, init) => publicFetch(url, init),
       fetchViaGateway: (url, init) => publicFetch(url, init), // 不填搜索密钥也能联网搜索、读网页
@@ -336,7 +337,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     arm();
     try {
       const r = await runAgent({
-        adapter, model, fallbacks, lookupModel: createLookupModel(cfg, makeAdapter), maxSteps: policy.maxSteps, maxTotalSteps: policy.maxTotalSteps, codeWork, ...sight(cfg, task), hedgeMs: cfg.hedgeBackup === false ? 0 : HEDGE_MS, modelNote: modelNote(cfg, { provider: route.cfg.provider, model }),
+        adapter, model, fallbacks, lookupPreferences: () => taskLookup.preferences(), lookupModel: createLookupModel(cfg, makeAdapter), maxSteps: policy.maxSteps, maxTotalSteps: policy.maxTotalSteps, codeWork, ...sight(cfg, task), hedgeMs: cfg.hedgeBackup === false ? 0 : HEDGE_MS, modelNote: modelNote(cfg, { provider: route.cfg.provider, model }),
         history: unsummarized(history, session.summary).map(({ role, content }) => ({ role, content })),
         userText: task.resumeFrom ? task.text+'\n\n'+checkpointRecoveryText(task.resumeFrom) : task.text, requirementText: task.text, images: task.images,
         // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省

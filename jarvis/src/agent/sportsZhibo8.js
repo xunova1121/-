@@ -91,9 +91,9 @@ export function zhibo8Result(list, { from, to, today, sports = null, team = '', 
   const quiet = shown.filter(e => SPECIAL.has(e.state)).length;
   const unknown = shown.filter(e => !STATE[e.state]).length;
   const order = Object.keys(SPORT);
-  shown.sort((a, b) => (window?.period === 'around' ? Number(b.state === '2') - Number(a.state === '2') : 0) || (window && window.period !== 'all' ? beijingTimestamp(a.date, a.time) - beijingTimestamp(b.date, b.time) : a.date.localeCompare(b.date) || order.indexOf(a.sport) - order.indexOf(b.sport) || a.leagueId.localeCompare(b.leagueId) || a.time.localeCompare(b.time)));
+  shown.sort((a, b) => (['around', 'forward_live'].includes(window?.period) ? Number(b.state === '2') - Number(a.state === '2') : 0) || (window && window.period !== 'all' ? beijingTimestamp(a.date, a.time) - beijingTimestamp(b.date, b.time) : a.date.localeCompare(b.date) || order.indexOf(a.sport) - order.indexOf(b.sport) || a.leagueId.localeCompare(b.leagueId) || a.time.localeCompare(b.time)));
   const lines = [`北京时间 ${from}（${weekday(from)}）${to !== from ? ` 至 ${to}（${weekday(to)}）` : ''}的赛程和比分，来源直播吧（zhibo8.com），查询于北京时间 ${clock}。时间都是北京时间，前面是主队。`];
-  lines.push(`本来源本次筛选共${shown.length}场，${window?.period === 'around' ? '本窗口只显示进行中和未开赛' : '延期/取消/待定和未知状态也保留明细'}；不代表所有联赛完整覆盖。`);
+  lines.push(`本来源本次筛选共${shown.length}场，${['around', 'forward_live'].includes(window?.period) ? '本窗口只显示进行中和未开赛' : '延期/取消/待定和未知状态也保留明细'}；不代表所有联赛完整覆盖。`);
   if (window?.label) lines.push('时间筛选：' + window.label + '；不代表全天完整赛程。');
   if (!shown.length) lines.push('\n这段时间列表里没有符合条件的比赛。');
   let day = '';

@@ -1,6 +1,8 @@
 import { missingDeliveries } from './finalDelivery.js';
 import { reviewOutcome } from './reviewOutcome.js';
 import * as memory from './memory.js';
+import { lookupIntent } from './lookup/intent.js';
+import { lookupClosingNote } from './lookup/answer.js';
 import { MORE_TIME_ASK } from './lookupDeadline.js';
 
 /** 保留已有验收、任务留存与最终事件顺序；不额外调用模型。 */
@@ -25,6 +27,8 @@ export async function finishAgentRun({
   lookupDeadline = false,
   autoExtend = false
 }) {
+  const query = lookupIntent(userText);
+  const unifiedQuery = query.lookup && query.kind !== 'meta' && (query.sure || retrieval.active || nativeSearchCalls > 0);
   if (lookupFallback && (!finalText.trim() || finalText.trim().length < 200 && /没有可靠结果|没有确切结果|未能生成符合|未找到可靠|只找到候选|无法提供|没有查到/.test(finalText))) {
     const delta = (finalText.trim() ? '\n\n' : '') + lookupFallback;
     finalText += delta;
@@ -35,7 +39,7 @@ export async function finishAgentRun({
   // 普通问题查到时限或次数上限：不说“检索已停止”，先给已有的，再问要不要再查
   //   模型已用现有资料答完（检索因时限、次数收住了）也问一句，方便接着查
   const quickStop = lookupDeadline && (retrievalStopped || Boolean(retrieval.reason));
-  if (step >= limit || retrievalStopped || quickStop) {
+  if (!unifiedQuery && (step >= limit || retrievalStopped || quickStop)) {
     // 一个字都没写出来（比如资料都没核实到）：别只剩一句“回答到这里”
     const note = quickStop && !finalText.trim()
       ? `这次一分钟内还没有确切结果（查到的资料都没能核实），先不乱说。${MORE_TIME_ASK}。`
@@ -67,7 +71,11 @@ export async function finishAgentRun({
   }
   const unmet = review.guidance();
   const alreadyExplained = acceptance.warnings?.length && acceptance.warnings.every(warning => finalText.includes(warning));
-  if (acceptance.notice && !light && !alreadyExplained) {
+  if (unifiedQuery && !light) {
+    const note = lookupClosingNote({ answer: finalText, quickStop, interrupted: retrievalStopped || step >= limit, warnings: acceptance.warnings, reason: retrieval.reason });
+    finalText += note;
+    if (note) emit({ type: 'text', delta: note });
+  } else if (acceptance.notice && !light && !alreadyExplained) {
     finalText += acceptance.notice;
     emit({ type: 'text', delta: acceptance.notice });
   }

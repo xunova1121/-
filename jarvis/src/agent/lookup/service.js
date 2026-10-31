@@ -2,6 +2,8 @@ import { createLookupHealth } from './health.js';
 import { lookupRegion, lookupSourceRegistry } from './sources.js';
 import { DOMESTIC_APPROVALS } from './domesticValidation.js';
 import { readLookupSource } from './readSource.js';
+import { createLookupQueue, LOOKUP_OPERATIONS } from './operations.js';
+import { readLookupPreferences } from './preferences.js';
 
 /** 评测专用内存存储；不使用全局kv后端，避免污染生产来源健康。 */
 export function memoryLookupStorage() {
@@ -17,18 +19,20 @@ export function createLookupService({ storage, get, now = Date.now } = {}) {
   ].flat().map(source => [source.id, source])).values()];
   let checking = false;
   const status = async (region = 'auto') => ({ region, resolvedRegion: lookupRegion(region),
+    operations: await Promise.all(LOOKUP_OPERATIONS.map(async source => ({ id: source.id, label: source.label, region: source.region, validation: source.validation, validationNote: '随真实查询更新，主动检查不猜地点/代码或请求模型', ...(await health.get(source.id)) }))),
     sources: await Promise.all(all().map(async source => ({ id: source.id, label: source.label, category: source.category,
       region: source.region, validation: source.validation, validationNote: source.validationNote || '', ...(await health.get(source.id)) }))) });
   return {
-    health, registry, status,
-    options: (region = 'auto') => ({ region, health, registry, probeUnknown: true }),
+    health, registry, status, preferences: () => readLookupPreferences(storage),
+    options: (region = 'auto') => ({ region, health, registry, probeUnknown: true, queue: createLookupQueue() }),
     async probe(region = 'auto', { signal } = {}) {
       lookupRegion(region);
       if (checking) throw Object.assign(new Error('正在检查来源，请稍候'), { code: 'LOOKUP_BUSY', status: 429 });
       if (signal?.aborted) throw signal.reason;
       checking = true;
       try {
-        const sources = all();
+        // 查询工具需要城市、证券代码或用户URL，不能为“检查来源”猜参数请求；状态随真实调用更新。
+        const sources = all().filter(source => !source.tools);
         let next = 0;
         const worker = async () => {
           while (next < sources.length) {

@@ -5,13 +5,18 @@ import { newsDate } from './newsSources.js';
 import { lookupIntent } from './lookup/intent.js';
 /** 本轮最多12条短证据，只存于执行期；不用模型旧回复填补失败，不把正文放入检查点。 */
 export function createLookupDelivery(request, now = Date.now) {
-  const rows = new Map(), failures = [];
+  const rows = new Map(), failures = [], direct = [];
   const safe = text => !answerConstraintIssues(request, text, now()).length;
   function add(row) {
     if (rows.size < 12 && /^https:\/\//.test(row.url) && row.title && safe(row.title + ' ' + (row.summary || ''))) rows.set(row.url, row);
   }
   return {
     record({ name: toolName, args = {}, ok, output = '' }) {
+      if (['get_weather', 'get_stock_kline', 'get_sports_scores'].includes(toolName)) {
+        if (ok && String(output).trim() && safe(String(output)) && direct.length < 3) direct.push(String(output).slice(0, 8000));
+        else if (!ok && failures.length < 4) failures.push(toolName + '：' + String(output).slice(0, 150));
+        return;
+      }
       if (!['get_today_news', 'web_search', 'fetch_url', 'fetch_json'].includes(toolName)) return;
       if (!ok) { if (failures.length < 4) failures.push(toolName + '：' + String(output).slice(0, 150)); return; }
       if (toolName === 'get_today_news') {
@@ -43,9 +48,10 @@ export function createLookupDelivery(request, now = Date.now) {
         if (body.length > 50 && args.url) add({ url: args.url, title: body.split('\n')[0].slice(0, 120), summary: body.slice(0, 350), verification: 'page_read' });
       }
     },
-    get hasResults() { return rows.size > 0; },
+    get hasResults() { return rows.size > 0 || direct.length > 0; },
     text() {
-      if (!rows.size) return failures.length ? '本轮尚未取得可交付的资料。具体卡点：\n' + failures.map(text => '- ' + text).join('\n') : '';
+      if (direct.length) return '先给你本轮实际取得的数据：\n\n' + direct.join('\n\n');
+      if (!rows.size) return failures.length ? '本轮还没有确切结果，具体卡点：' + failures[0] + '。可以稍后重试。' : '';
       const text = '先给你已经取得的内容：\n\n' + [...rows.values()].map(item => `- **${item.title}**\n${item.summary || '来源只提供了这一标题，未取得报道正文，不补写细节。'}\n${item.publishedAt ? (item.timeBasis || '发布时间') + '：' + item.publishedAt.replace('T', ' ').replace('+08:00', '') + '（北京时间）；' : ''}来源：${item.source || ''} ${item.url}\n${['page_read', 'json_read'].includes(item.verification) ? '已读取该来源，未做独立交叉核验。' : '待核实：尚未读取报道原文。'}`).join('\n\n');
       return safe(text) ? text : '';
     },

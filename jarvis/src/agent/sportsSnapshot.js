@@ -3,7 +3,7 @@ export const SPORTS_CARD_LIMIT = 12;
 const text = (value, max = 64) => String(value ?? '').replace(/[\u0000-\u001f]/g, ' ').slice(0, max);
 export function sportsSnapshot({ args, groups, now, window, notice = '' }) {
   const rows = groups.flatMap(g => g.events.map(e => ({ ...e, source: g.source })));
-  rows.sort((a, b) => window?.period === 'around' ? Number(b.state === 'in') - Number(a.state === 'in') || a.time - b.time : a.time - b.time);
+  rows.sort((a, b) => ['around', 'forward_live'].includes(window?.period) ? Number(b.state === 'in') - Number(a.state === 'in') || a.time - b.time : a.time - b.time);
   return {
     version: 1, fetchedAt: now, query: sportsQuery(args), label: text(window?.label, 130),
     notice: text([notice, args.leagues?.length && groups.some(g => g.source === '直播吧') ? '直播吧未提供联赛名称，卡片尚未按所选联赛核实归属，请以文字核对结果为准。' : ''].filter(Boolean).join('；'), 240),

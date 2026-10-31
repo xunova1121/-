@@ -1,4 +1,5 @@
 import { createTodayNewsTool } from './todayNews.js';
+import { connectLookupTools } from './lookup/operations.js';
 import { createPublicJsonTool } from './publicJson.js';
 import { legacyDocumentTool } from './legacyDocumentTool.js';
 import { parseFile as parseOfficeFile } from './docs.js';
@@ -671,7 +672,7 @@ export function createTools(ctx) {
   // 说一句话删某段时间的对话（先列清单、用户确认才删，进回收站留 7 天）
   tools.push(...createConversationTrashTools());
 
-  const engine = createSearch(ctx);
+  const engine = createSearch({ ...ctx, searchRegion: ctx.lookup?.region && ctx.lookup.region !== 'auto' ? ctx.lookup.region : ctx.searchRegion });
   if (engine) {
     tools.push({
       name: 'web_search',
@@ -768,7 +769,7 @@ export function createTools(ctx) {
       }
     });
   }
-  return tools;
+  return connectLookupTools(tools, ctx.lookup);
 }
 
 /** 校验参数：必填项存在、类型正确、枚举值合法 */

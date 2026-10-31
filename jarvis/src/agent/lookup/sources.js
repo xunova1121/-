@@ -1,3 +1,4 @@
+import { LOOKUP_OPERATIONS } from './operations.js';
 import { DOMESTIC_NEWS_CANDIDATES } from './sourceCatalog.js';
 import { internationalNewsFeeds } from '../newsFeeds.js';
 import { parseNewsRss, verifiedReutersReprint } from '../newsRss.js';
@@ -11,6 +12,7 @@ export function lookupRegion(value = 'auto', timezone = Intl.DateTimeFormat().re
 
 /** 原RSS/转载解析器保留；同媒体不同栏目各记健康，原始通讯社另用sourceFamily归组。 */
 export function lookupSourceRegistry({ kind = 'news', params = {}, approvals = {} } = {}) {
+  if (!['news', 'sports_news'].includes(kind)) return LOOKUP_OPERATIONS.filter(source => source.kinds.includes(kind));
   const categories = kind === 'sports_news' ? ['体育'] : params.categories || [];
   const publishers = params.publishers || [];
   const domestic = DOMESTIC_NEWS_CANDIDATES.filter(s => s.kind === kind)

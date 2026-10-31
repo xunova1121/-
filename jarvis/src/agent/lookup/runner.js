@@ -1,6 +1,9 @@
 import { readLookupSource } from './readSource.js';
 import { selectLookupSources } from './sources.js';
 import { lookupTimeRange } from './domesticNews.js';
+import { lookupPlan } from './plan.js';
+import { preSearch } from './prefetch.js';
+import { lookupReceiptItems } from './receipts.js';
 
 function articleKey(value) {
   try {
@@ -13,9 +16,17 @@ function articleKey(value) {
   } catch { return null; }
 }
 
-/** 新闻共用入口。第1步不接比分/天气/行情，不新增另一套整轮时钟，沿用现有signal/预算。 */
+/** 对话只有一个查询入口。execute模式调用原工具；数据模式保留新闻的并发读取接口。 */
 export async function runLookup(intent, options = {}) {
-  if (!['news', 'sports_news'].includes(intent.kind)) throw Object.assign(new Error('本步仅接新闻和体育资讯'), { code: 'LOOKUP_KIND_PENDING' });
+  if (options.execute) {
+    const plan = lookupPlan(intent, { text: options.text, getTool: options.getTool, now: options.now });
+    if (!plan) return null;
+    const found = await preSearch({ text: options.text, call: { name: plan.name, args: plan.args },
+      timeoutMs: Math.min(plan.timeoutMs, options.clock?.retrievalRemaining() ?? Infinity),
+      signal: options.signal, run: options.execute });
+    return found ? { ...found, kind: intent.kind, items: lookupReceiptItems(found, intent), failures: [] } : null;
+  }
+  if (!['news', 'sports_news'].includes(intent.kind)) throw Object.assign(new Error('该查询需要注入已配置的工具适配器；未发起网络请求'), { code: 'LOOKUP_KIND_PENDING' });
   const { signal, retrieval, health, get, progress, now = Date.now() } = options;
   if (signal?.aborted) throw signal.reason;
   if (intent.params?.dateMode === 'specified') throw Object.assign(new Error('指定历史日期暂走原查询路径，不转换成今日'), { code: 'LOOKUP_DATE_PENDING' });

@@ -14,7 +14,7 @@ var NEWS_SOURCES = [
   { id: "cns", label: "\u4E2D\u65B0\u7F51", url: "https://www.chinanews.com.cn/scroll-news/news1.html", category: "\u7EFC\u5408" }
 ];
 var newsDate = (now) => new Date(now).toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" });
-var newsPlain = (text) => String(text).replace(/<!--[\s\S]*?-->/g, "").replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "").replace(/<[^>]*>/g, " ").replace(/&#(x[\da-f]+|\d+);/gi, (_, code) => {
+var newsPlain = (text2) => String(text2).replace(/<!--[\s\S]*?-->/g, "").replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "").replace(/<[^>]*>/g, " ").replace(/&#(x[\da-f]+|\d+);/gi, (_, code) => {
   const n = code[0].toLowerCase() === "x" ? parseInt(code.slice(1), 16) : Number(code);
   return n > 0 && n <= 1114111 ? String.fromCodePoint(n) : "";
 }).replace(/&(?:nbsp|ensp|emsp);/g, " ").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim();
@@ -43,9 +43,9 @@ function parseNewsSource(html, source, now = Date.now()) {
     const stamp = source.id === "cns" ? chunk.match(/class=["']dd_time["'][^>]*>\s*(\d{2}-\d{2})\s+(\d{2}:\d{2})/i) : chunk.match(/(20\d{2}-\d{2}-\d{2})\s+(\d{2}:\d{2}(?::\d{2})?)/);
     if (!stamp) continue;
     const year = source.id === "cns" ? item2.url.match(/\/(20\d{2})\/\d{2}-\d{2}\//)?.[1] : "";
-    const day = source.id === "cns" ? year && year + "-" + stamp[1] : stamp[1];
-    if (day !== date) continue;
-    const publishedAt = day + "T" + stamp[2] + (stamp[2].length === 5 ? ":00" : "") + "+08:00";
+    const day2 = source.id === "cns" ? year && year + "-" + stamp[1] : stamp[1];
+    if (day2 !== date) continue;
+    const publishedAt = day2 + "T" + stamp[2] + (stamp[2].length === 5 ? ":00" : "") + "+08:00";
     if (!Number.isFinite(Date.parse(publishedAt)) || Date.parse(publishedAt) > now) continue;
     const snippet = source.id === "cnfin" ? chunk.match(/<p\b[^>]*>([\s\S]*?)<\/p>/i)?.[1] : source.id === "cnr" ? chunk.match(/<em\b[^>]*>([\s\S]*?)<\/em>/i)?.[1] : "";
     const column = newsPlain(chunk.match(/class=["']dd_lm["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] || "");
@@ -164,34 +164,77 @@ var DOMESTIC_NEWS_CANDIDATES = [
   { id: "cn_sina_sports", label: "\u65B0\u6D6A\u4F53\u80B2\u5019\u9009", kind: "sports_news", category: "\u4F53\u80B2", region: "cn", priority: 30, url: "https://feed.mix.sina.com.cn/api/roll/get?pageid=153&lid=2512&num=30&page=1", hosts: ["feed.mix.sina.com.cn", "sports.sina.com.cn"], timeoutMs: 8e3, needsKey: false, validation: "pending_cn", parse: parseSinaSports }
 ];
 
+// src/agent/lookup/sportsWindow.js
+function sportsWindow(args = {}, now = Date.now()) {
+  const period = args.period || "all";
+  const minutes = args.window_minutes ?? (["around", "forward_live"].includes(period) ? 120 : 60);
+  if (!["all", "upcoming", "remaining", "afternoon", "around", "forward_live"].includes(period) || !Number.isSafeInteger(minutes) || minutes < 1 || minutes > 360) throw Object.assign(new Error("\u65F6\u95F4\u7B5B\u9009\u9700all/upcoming/remaining/afternoon/around/forward_live\uFF0C\u7A97\u53E3\u4E3A1\u81F3360\u5206\u949F"), { code: "INVALID_SPORTS_INPUT", kind: "input" });
+  const lastDate = args.end_date || args.date || new Date(now + 8 * 36e5).toISOString().slice(0, 10);
+  const until = beijingTimestamp(lastDate, "00:00") + 24 * 36e5;
+  return { period, now, minutes, until, label: period === "forward_live" ? `\u5F53\u524D\u8D77${minutes}\u5206\u949F\uFF08\u542B\u8FB9\u754C\uFF09\uFF0C\u4EC5\u8FDB\u884C\u4E2D/\u4E2D\u573A\u53CA\u672A\u5F00\u8D5B\uFF0C\u8FDB\u884C\u4E2D\u4F18\u5148` : period === "around" ? `\u5F53\u524D\u524D\u540E\u5404${minutes}\u5206\u949F\uFF08\u542B\u8FB9\u754C\uFF09\uFF0C\u4EC5\u8FDB\u884C\u4E2D/\u4E2D\u573A\u53CA\u672A\u5F00\u8D5B\uFF0C\u8FDB\u884C\u4E2D\u4F18\u5148` : period === "upcoming" ? `\u63A5\u4E0B\u6765${minutes}\u5206\u949F\uFF0C\u4EC5\u672A\u5F00\u8D5B` : period === "remaining" ? "\u6307\u5B9A\u5317\u4EAC\u65E5\u671F\u5185\u5F53\u524D\u65F6\u523B\u4E4B\u540E\u7684\u672A\u5F00\u8D5B\uFF0C\u76F4\u5230\u5F53\u65E524:00\uFF1B\u4E0D\u9650\u5B9A60\u5206\u949F" : period === "afternoon" ? "\u5317\u4EAC\u65F6\u95F4\u4E0B\u534812:00\uFF08\u542B\uFF09\u81F318:00\uFF08\u4E0D\u542B\uFF09" : "" };
+}
+function beijingTimestamp(date, clock) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(clock)) return NaN;
+  return Date.parse(`${date}T${clock}:00+08:00`);
+}
+function inSportsWindow(timestamp, state, window) {
+  if (!window || window.period === "all") return true;
+  if (!Number.isFinite(timestamp)) return false;
+  if (window.period === "forward_live") return ["pre", "in", "1", "2"].includes(String(state)) && timestamp >= Math.floor(window.now / 6e4) * 6e4 && timestamp <= window.now + window.minutes * 6e4;
+  if (window.period === "around") return ["pre", "in", "1", "2"].includes(String(state)) && timestamp >= window.now - window.minutes * 6e4 && timestamp <= window.now + window.minutes * 6e4;
+  if (window.period === "upcoming") return ["pre", "1"].includes(String(state)) && timestamp >= window.now && timestamp < window.now + window.minutes * 6e4;
+  if (window.period === "remaining") return ["pre", "1"].includes(String(state)) && timestamp >= window.now && timestamp < window.until;
+  const hour = new Date(timestamp + 8 * 36e5).getUTCHours();
+  return hour >= 12 && hour < 18;
+}
+function inferSportsWindow(text2) {
+  text2 = String(text2 || "").split(/补充[:：]|用户最新修正[:：]/).at(-1);
+  if (/全天|整天|所有时段|不限时段/.test(text2)) return { period: "all" };
+  if (/下午/.test(text2)) return { period: "afternoon" };
+  if (/前后|现在.{0,8}(?:什么球|哪些球|球赛|比赛)|当前.{0,8}(?:球赛|比赛)|正在进行/.test(text2)) {
+    const match = text2.match(/前后\s*(\d+|一|二|两|三|四|五|六)\s*(分钟|(?:个)?小时)/);
+    const count = match ? { \u4E00: 1, \u4E8C: 2, \u4E24: 2, \u4E09: 3, \u56DB: 4, \u4E94: 5, \u516D: 6 }[match[1]] ?? Number(match[1]) : null;
+    return { period: "around", window_minutes: match ? count * (match[2] === "\u5206\u949F" ? 1 : 60) : 120 };
+  }
+  if (/马上|即将|快开|接下来/.test(text2)) {
+    const match = String(text2).match(/接下来\s*(\d+)\s*分钟/);
+    const hours = String(text2).match(/接下来\s*([\d.]+|一|二|两|三|四|五|六)\s*(?:个)?小时/);
+    const hourCount = hours ? { \u4E00: 1, \u4E8C: 2, \u4E24: 2, \u4E09: 3, \u56DB: 4, \u4E94: 5, \u516D: 6 }[hours[1]] ?? Number(hours[1]) : null;
+    return { period: "upcoming", window_minutes: match ? Number(match[1]) : hours ? hourCount * 60 : 60 };
+  }
+  if (/(?:今天|今日).{0,12}(?:剩余|剩下|还有|未开赛|没开赛)|(?:剩余|剩下|还没开赛|尚未开赛).{0,8}(?:比赛|球赛|赛程)/.test(text2)) return { period: "remaining" };
+  if (/(?:足彩|竞彩足球)赛程/.test(text2) && !/昨天|明天|后天|前天|昨晚|今晚|\d{1,2}\s*[月/-]\s*\d{1,2}|周[一二三四五六日天]|星期[一二三四五六日天]/.test(text2)) return { period: "around", window_minutes: 120 };
+  return {};
+}
+
 // src/agent/lookup/intent.js
 var LOOKUP_KINDS = ["weather", "sports_live", "sports_news", "news", "market", "general", "meta"];
 var META = /^(?:(?:未央|你|你的|这个|这|查个|发个|发|查|今日|今天|新闻|体育资讯|体育新闻|体坛动态|天气|行情|汇率|比分|赛程|查询))*?(?:(?:怎么|为什么|咋)(?:这么|那么)?慢|(?:这么|那么|太)慢|还没好|还没查完|还没结束|在干嘛|在做什么|到底在干什么|谁让你这么做的|谁让你查的|谁让你搜的|好了吗|做完了吗|进展如何|什么进度)$/;
 var ACTION = /(?:修复|重构|开发|实现|安装|部署|删除|移动|重命名|生成|制作|创作|写一?|画一?|唱一?|翻译|总结|改写|朗读|记住|设置|定时|提醒|架构图|流程图|PPT|Word|Excel|文档|论文|方案|代码|工具说明|功能设计|接口设计|新闻稿)/i;
 var SPORT = /体育|体坛|足坛|篮坛|足球|篮球|网球|乒乓|羽毛球|排球|世界杯|奥运|NBA|CBA|F1|英超|欧冠|中超|比赛|赛事/i;
 var NEWS = /资讯|新闻|消息|动态|转会|伤病|早报|晚报|头条/;
-var withoutNegativeScores = (text) => text.replace(/(?:不要|不用|不需要|别|无需|不想看)(?:再|给我|推|推荐|看|查|提供|报|写|显示|的|\s)*(?:(?:比分|赛程|赛果|对阵|比赛结果)(?:和|、|与|及|\/|\s)*)+/g, "");
+var withoutNegativeScores = (text2) => text2.replace(/(?:不要|不用|不需要|别|无需|不想看)(?:再|给我|推|推荐|看|查|提供|报|写|显示|的|\s)*(?:(?:比分|赛程|赛果|对阵|比赛结果)(?:和|、|与|及|\/|\s)*)+/g, "");
 var LIVE = /比分|赛程|赛果|对阵|比赛结果|几比几|谁赢|开球|(?:什么|哪些|有没有|剩余|剩下|未开赛|正在进行).{0,5}(?:比赛|球赛)|现在有什么球/;
-var dateMode = (text) => /昨天|昨日|前天|上周|去年|历史新闻|20\d{2}[年/-]/.test(text) ? "specified" : /今天|今日/.test(text) ? "today" : /最近|近期|体育|体坛|转会|伤病/.test(text) ? "recent24h" : "today";
-function newsParams(text, sports = false) {
+var dateMode = (text2) => /昨天|昨日|前天|上周|去年|历史新闻|20\d{2}[年/-]/.test(text2) ? "specified" : /今天|今日/.test(text2) ? "today" : /最近|近期|体育|体坛|转会|伤病/.test(text2) ? "recent24h" : "today";
+function newsParams(text2, sports = false) {
   const categories = sports ? ["\u4F53\u80B2"] : [];
   if (!sports) {
-    if (/国内/.test(text)) categories.push("\u56FD\u5185");
-    if (/国际|全球|世界新闻|路透|BBC|卫报|半岛/i.test(text)) categories.push("\u56FD\u9645");
-    if (/财经|经济|金融/.test(text)) categories.push("\u8D22\u7ECF");
-    if (/科技/.test(text)) categories.push("\u79D1\u6280");
+    if (/国内/.test(text2)) categories.push("\u56FD\u5185");
+    if (/国际|全球|世界新闻|路透|BBC|卫报|半岛/i.test(text2)) categories.push("\u56FD\u9645");
+    if (/财经|经济|金融/.test(text2)) categories.push("\u8D22\u7ECF");
+    if (/科技/.test(text2)) categories.push("\u79D1\u6280");
   }
-  return { categories, dateMode: dateMode(text) };
+  return { categories, dateMode: dateMode(text2) };
 }
-function sportsParams(text) {
-  const football = /足球|足彩|竞彩|英超|欧冠|中超|球赛|现在有什么球/.test(text);
-  const params = { sport: /NBA|CBA|篮球/i.test(text) ? "basketball" : /网球/.test(text) ? "tennis" : football ? "football" : "all" };
-  if (/全天|整天/.test(text)) params.period = "all";
-  else if (/下午/.test(text)) params.period = "afternoon";
-  else if (/剩余|剩下/.test(text)) params.period = "remaining";
-  else if (/前后/.test(text)) Object.assign(params, { period: "around", window_minutes: 120 });
-  else if (/^(?:今天|今日)?(?:足球|足彩|竞彩足球|比赛)赛程[？?。\s]*$/.test(text)) Object.assign(params, { sport: "football", period: "forward_live", window_minutes: 120, states: ["in", "pre"], policy: "user_football_forward_two_hours" });
-  else if (/接下来|未来/.test(text)) Object.assign(params, { period: "upcoming", window_minutes: /两小时|二小时|2小时/.test(text) ? 120 : 60 });
+function sportsParams(text2) {
+  const football = /足球|足彩|竞彩|英超|欧冠|中超|球赛|现在有什么球/.test(text2);
+  const params = { ...inferSportsWindow(text2), sport: /NBA|CBA|篮球/i.test(text2) ? "basketball" : /网球/.test(text2) ? "tennis" : football ? "football" : "all" };
+  if (/全天|整天/.test(text2)) params.period = "all";
+  else if (/下午/.test(text2)) params.period = "afternoon";
+  else if (/剩余|剩下/.test(text2)) params.period = "remaining";
+  else if (/前后/.test(text2)) Object.assign(params, inferSportsWindow(text2));
+  else if (/^(?:今天|今日)?(?:足球|足彩|竞彩足球|比赛)赛程[？?。\s]*$/.test(text2)) Object.assign(params, { sport: "football", period: "forward_live", window_minutes: 120, states: ["in", "pre"], policy: "user_football_forward_two_hours" });
+  else if (/接下来|未来/.test(text2)) Object.assign(params, inferSportsWindow(text2.replace("\u672A\u6765", "\u63A5\u4E0B\u6765")));
   return params;
 }
 var LOOKUP_RULES = [
@@ -201,11 +244,11 @@ var LOOKUP_RULES = [
   { id: "news", kind: "news", test: (t) => NEWS.test(t), params: (t) => newsParams(t) },
   { id: "market", kind: "market", test: (t) => /股价|行情|大盘|收盘价|汇率|油价|金价|币价|上证|深证|股票|持仓盈亏/.test(t), params: () => ({}) }
 ];
-function lookupIntent(text = "", { history = [], preferences = [] } = {}) {
-  const original = String(text).trim();
+function lookupIntent(text2 = "", { history = [], preferences = [] } = {}) {
+  const original = String(text2).trim();
   const value = original.replace(/^【这是定时任务[\s\S]*?】\s*/, "").trim();
-  const compact = value.replace(/[，,。！？!?\s]+/g, "");
-  if (compact.length <= 80 && META.test(compact)) return { kind: "meta", params: { metaType: "status" }, sure: true, lookup: false, rule: "meta" };
+  const compact2 = value.replace(/[，,。！？!?\s]+/g, "");
+  if (compact2.length <= 80 && META.test(compact2)) return { kind: "meta", params: { metaType: "status" }, sure: true, lookup: false, rule: "meta" };
   if (/^(?:你好|早上好|晚上好|谢谢|晚安|在吗|我(?:最近)?好累|陪我聊聊)[。！!\s]*$/.test(value)) return { kind: "meta", params: { metaType: "smalltalk" }, sure: true, lookup: false, rule: "meta" };
   if (/^(?:各[一二两三四五六七八九十\d]+条|继续|再查|再查一会儿)[。！!\s]*$/.test(value)) {
     const previous = [...history].reverse().find((m) => m.role === "user" && !/^(?:继续|再查|各.{0,3}条)/.test(String(m.content || "")));
@@ -270,11 +313,19 @@ var LOOKUP_INTENT_EXAMPLES = [
   ["\u597D\u4E86\u5417", "meta"],
   ["\u4F60\u597D", "meta"],
   ["\u6211\u597D\u7D2F", "meta"]
-].map(([text, kind]) => ({ text, kind }));
+].map(([text2, kind]) => ({ text: text2, kind }));
 
 // src/agent/newsIntent.js
-function todayNewsIntent(text = "", options) {
-  const intent = lookupIntent(text, options);
+function lookupComplaint(text2 = "") {
+  return lookupIntent(text2).params.metaType === "status";
+}
+function sportsNewsIntent(text2 = "", options) {
+  const intent = lookupIntent(text2, options);
+  return intent.kind === "sports_news" && !intent.params.includeScores;
+}
+var supportsSportsNews = (tool) => Boolean(tool?.input_schema?.properties?.categories?.items?.enum?.includes("\u4F53\u80B2"));
+function todayNewsIntent(text2 = "", options) {
+  const intent = lookupIntent(text2, options);
   return intent.kind === "news" && intent.params.dateMode !== "specified";
 }
 
@@ -289,32 +340,33 @@ function createQueryLedger() {
   };
 }
 
-// src/agent/retrievalBudget.js
+// src/agent/lookup/clock.js
 var QUICK_RETRIEVAL_MS = 45e3;
 var DEEP_RETRIEVAL_MS = 8 * 6e4;
 var VERIFICATION_MS = 3 * 6e4;
-var strictVerification = (text) => /逐[项一条].{0,12}(?:核[实验对]|查证|查原文)|(?:核[实验对]|查证).{0,12}逐[项一条]|查原文|核实原文|核对原文|原文核实|打开.{0,8}原文.{0,8}(?:核实|核对)/.test(String(text));
-function extensiveRetrieval(text = "") {
-  return strictVerification(text) || /深度|深入|全面|调研|研究报告|逐项|逐一|多来源|交叉核[验对]|报告|方案|文档|论文|PPT|Word|Excel|代码|编程|开发|文件|保存|对比|比较|这几|这些|每场|多场|清单|架构图|流程图|示意图|拓扑图|画图|海报|research|report|document|code|diagram/i.test(String(text));
+var strictVerification = (text2) => /逐[项一条].{0,12}(?:核[实验对]|查证|查原文)|(?:核[实验对]|查证).{0,12}逐[项一条]|查原文|核实原文|核对原文|原文核实|打开.{0,8}原文.{0,8}(?:核实|核对)/.test(String(text2));
+function extensiveRetrieval(text2 = "") {
+  return strictVerification(text2) || /深度|深入|全面|调研|研究报告|逐项|逐一|多来源|交叉核[验对]|报告|方案|文档|论文|PPT|Word|Excel|代码|编程|开发|文件|保存|对比|比较|这几|这些|每场|多场|清单|架构图|流程图|示意图|拓扑图|画图|海报|research|report|document|code|diagram/i.test(String(text2));
 }
 var KIND_LABEL = { search: "\u641C\u7D22", read: "\u8BFB\u7F51\u9875", model: "\u6A21\u578B\u8C03\u7528" };
-function createRetrievalBudget(text, { now = Date.now, timeBudgetMs } = {}) {
+function createRetrievalBudget(text2, { now = Date.now, timeBudgetMs, clock = null } = {}) {
+  if (clock?.retrieval) return clock.retrieval;
   const resources = { search: 0, read: 0, model: 0 };
-  const news = todayNewsIntent(text);
+  const news = todayNewsIntent(text2);
   const limits = { search: 12, read: news ? 8 : 10, model: 3 };
   const totalLimit = limits.search + limits.read;
-  let strict = strictVerification(text);
-  let extensive = extensiveRetrieval(text), started = null, calls = 0, failed = 0, reason = "";
+  let strict = strictVerification(text2);
+  let extensive = extensiveRetrieval(text2), started = null, calls = 0, failed = 0, reason = "";
   const duration = () => timeBudgetMs ?? (strict ? VERIFICATION_MS : extensive ? DEEP_RETRIEVAL_MS : QUICK_RETRIEVAL_MS);
   const check = () => {
     if (!reason && started !== null) {
-      if (duration() > 0 && now() - started >= duration()) reason = "\u672C\u8F6E\u8054\u7F51\u68C0\u7D22\u5DF2\u8FBE\u5230\u65F6\u95F4\u9884\u7B97";
+      if (clock && clock.retrievalRemaining() <= 0 || duration() > 0 && now() - started >= duration()) reason = "\u672C\u8F6E\u8054\u7F51\u68C0\u7D22\u5DF2\u8FBE\u5230\u65F6\u95F4\u9884\u7B97";
       else if (!extensive && calls >= totalLimit) reason = `\u666E\u901A\u67E5\u8BE2\u5DF2\u8FBE\u5230 ${totalLimit} \u6B21\u8054\u7F51\u68C0\u7D22\u515C\u5E95\u9884\u7B97`;
       else if (!extensive && failed >= 3) reason = "\u8FDE\u7EED 3 \u6B21\u8054\u7F51\u68C0\u7D22\u6CA1\u6709\u53D6\u5F97\u6709\u6548\u8D44\u6599";
     }
     return reason;
   };
-  return {
+  const budget = {
     registerQuery: createQueryLedger(),
     begin() {
       if (check()) return false;
@@ -323,7 +375,7 @@ function createRetrievalBudget(text, { now = Date.now, timeBudgetMs } = {}) {
       return true;
     },
     consume(kind) {
-      if (reason || started !== null && duration() > 0 && now() - started >= duration()) throw Object.assign(new Error(`${reason || "\u672C\u8F6E\u8054\u7F51\u68C0\u7D22\u5DF2\u8FBE\u5230\u65F6\u95F4\u9884\u7B97"}\uFF0C\u8FD9\u6B21${KIND_LABEL[kind] || kind}\u6CA1\u6709\u6267\u884C`), { code: "RETRIEVAL_BUDGET" });
+      if (reason || started !== null && (clock && clock.retrievalRemaining() <= 0 || duration() > 0 && now() - started >= duration())) throw Object.assign(new Error(`${reason || "\u672C\u8F6E\u8054\u7F51\u68C0\u7D22\u5DF2\u8FBE\u5230\u65F6\u95F4\u9884\u7B97"}\uFF0C\u8FD9\u6B21${KIND_LABEL[kind] || kind}\u6CA1\u6709\u6267\u884C`), { code: "RETRIEVAL_BUDGET" });
       const limit = (strict ? { search: 20, read: 16 } : !extensive ? limits : {})[kind];
       if (limit && resources[kind] >= limit) {
         reason ||= `${strict ? "\u9010\u9879\u6838\u9A8C" : "\u666E\u901A\u67E5\u8BE2"}\u7684${KIND_LABEL[kind] || kind}\uFF08${kind}\uFF09\u9884\u7B97\u5DF2\u7528\u5B8C\uFF08${limit}\u6B21\uFF09`;
@@ -340,9 +392,9 @@ function createRetrievalBudget(text, { now = Date.now, timeBudgetMs } = {}) {
     end(ok) {
       failed = ok ? 0 : failed + 1;
     },
-    upgrade(text2) {
-      if (extensiveRetrieval(text2)) extensive = true;
-      if (strictVerification(text2)) strict = true;
+    upgrade(text3) {
+      if (extensiveRetrieval(text3)) extensive = true;
+      if (strictVerification(text3)) strict = true;
     },
     close(why) {
       reason ||= why;
@@ -358,13 +410,40 @@ function createRetrievalBudget(text, { now = Date.now, timeBudgetMs } = {}) {
       return check() ? 0 : extensive ? Infinity : Math.max(0, Math.min(limits.search - resources.search, totalLimit - calls));
     },
     get remaining() {
-      return started === null || duration() <= 0 ? Infinity : Math.max(0, duration() - (now() - started));
+      const remaining = started === null || duration() <= 0 ? Infinity : Math.max(0, duration() - (now() - started));
+      return Math.min(remaining, clock?.retrievalRemaining() ?? Infinity);
     },
     get note() {
       return `\uFF08\u7CFB\u7EDF\u63D0\u793A\uFF1A${check() || "\u8054\u7F51\u68C0\u7D22\u5DF2\u505C\u6B62"}\u3002${extensive ? "\u4E0D\u8981\u518D\u8C03\u7528\u8054\u7F51\u5DE5\u5177\uFF1B\u53EF\u4EE5\u7EE7\u7EED\u8BFB\u5199\u6587\u4EF6\u3001\u751F\u6210\u6587\u6863\u548C\u8FD0\u884C\u9A8C\u8BC1\u3002" : "\u4E0D\u8981\u518D\u8C03\u7528\u5DE5\u5177\uFF0C\u4E0D\u8981\u7EE7\u7EED\u8054\u7F51\u641C\u7D22\u3002"}\u73B0\u5728\u7528\u5DF2\u7ECF\u53D6\u5F97\u7684\u8D44\u6599\u56DE\u7B54\uFF0C\u533A\u5206\u5DF2\u6838\u5B9E\u548C\u672A\u6838\u5B9E\uFF0C\u5217\u51FA\u5DF2\u6709\u6765\u6E90\uFF1B\u6CA1\u6709\u786E\u5207\u7ED3\u679C\u5C31\u5982\u5B9E\u8BF4\u8FD8\u6CA1\u6709\u786E\u5207\u7ED3\u679C\uFF0C\u4E0D\u8981\u7F16\u9020\uFF0C\u4E5F\u4E0D\u8981\u628A\u68C0\u7D22\u5931\u8D25\u8BF4\u6210\u95EE\u9898\u6CA1\u6709\u7B54\u6848\u3002\uFF09`;
     }
   };
+  if (clock) clock.retrieval = budget;
+  return budget;
 }
+var SUMMARY_RESERVE_MS = 15e3;
+var WRITING_GRACE_MS = 3e4;
+var WRITING_GAP_MS = 6e3;
+function createLookupClock({ totalMs, now = Date.now, disabled = () => false }) {
+  const started = now();
+  let lastText = -Infinity;
+  const reserve = Math.min(SUMMARY_RESERVE_MS, Math.max(1, totalMs / 4));
+  const remaining = () => disabled() ? Infinity : Math.max(0, totalMs - (now() - started));
+  return {
+    startedAt: started,
+    totalMs,
+    remaining,
+    retrievalRemaining: () => Math.max(0, remaining() - reserve),
+    /** 收到一段答案文字 */
+    wrote: () => {
+      lastText = now();
+    },
+    /** 还在写、且没超出宽限（slack：外层总时限比内层多等一会儿，让内层先体面收尾） */
+    writing: (slack = 0) => now() - lastText < WRITING_GAP_MS && now() - started < totalMs + WRITING_GRACE_MS + slack
+  };
+}
+var LOOKUP_TOTALS = Object.freeze({ weather: 5e3, sports_live: 1e4, news: 2e4, sports_news: 2e4, market: 15e3, general: 45e3 });
+
+// src/agent/lookup/request.js
 async function withWebDeadline(work, { signal, timeoutMs = 12e3 } = {}) {
   const ctrl = new AbortController();
   let timer, rejectAbort;
@@ -685,6 +764,60 @@ function createLookupHealth({ storage = collection("kv"), now = Date.now } = {})
   };
 }
 
+// src/agent/lookup/operations.js
+var LOOKUP_OPERATIONS = [
+  { id: "query_weather", label: "\u5929\u6C14\u67E5\u8BE2\uFF08\u548C\u98CE\u53CA\u539F\u6709\u5907\u7528\uFF09", kinds: ["weather"], tools: ["get_weather"], region: "cn", priority: 1, timeoutMs: 8e3, needsKey: false, optionalKey: true, validation: "existing" },
+  { id: "query_sports", label: "\u8D5B\u7A0B\u67E5\u8BE2\uFF08\u76F4\u64AD\u5427\u53CA\u539F\u6709\u5907\u7528\uFF09", kinds: ["sports_live"], tools: ["get_sports_scores"], region: "cn", priority: 1, timeoutMs: 8e3, needsKey: false, validation: "existing" },
+  { id: "query_market", label: "\u80A1\u7968\u65E5K\u67E5\u8BE2\uFF08\u539F\u6709\u540C\u6E90\u53E3\u5F84\uFF09", kinds: ["market"], tools: ["get_stock_kline"], region: "cn", priority: 1, timeoutMs: 8e3, needsKey: false, validation: "existing" },
+  { id: "query_search", label: "\u901A\u7528\u641C\u7D22\uFF08\u5DF2\u914D\u7F6E\u5F15\u64CE\uFF09", kinds: ["general", "market"], tools: ["web_search"], region: "cn", priority: 2, timeoutMs: 8e3, needsKey: false, optionalKey: true, validation: "existing" },
+  { id: "query_page", label: "\u7F51\u9875\u8BFB\u53D6\uFF08\u539F\u5B89\u5168\u7F51\u5173\uFF09", kinds: ["general"], tools: ["fetch_url"], region: "global", priority: 2, timeoutMs: 8e3, needsKey: false, validation: "existing" },
+  { id: "query_json", label: "\u516C\u5F00JSON\uFF08\u539F\u4FE1\u4EFB\u57DF\u767D\u540D\u5355\uFF09", kinds: ["general", "market"], tools: ["fetch_json"], region: "cn", priority: 2, timeoutMs: 8e3, needsKey: false, validation: "existing" }
+];
+function createLookupQueue(limit = 4) {
+  let active = 0;
+  const waiting = [];
+  return async (work) => {
+    if (active >= limit) await new Promise((resolve) => waiting.push(resolve));
+    active++;
+    try {
+      return await work();
+    } finally {
+      active--;
+      waiting.shift()?.();
+    }
+  };
+}
+async function runLookupOperation(tool, args, execution, lookup = {}) {
+  const source = LOOKUP_OPERATIONS.find((row) => row.tools.includes(tool.name));
+  if (!source) return tool.run(args, execution);
+  const { signal, retrieval } = execution;
+  const started = performance.now();
+  const work = async () => {
+    if (signal?.aborted) throw signal.reason;
+    const status = await lookup.health?.get(source.id);
+    if (signal?.aborted) throw signal.reason;
+    if (status?.cooling) throw Object.assign(new Error(`${source.label}\u8FDE\u7EED\u8FDE\u63A5\u5931\u8D25\uFF0C\u51B7\u5374\u81F3${new Date(status.cooldownUntil).toISOString()}\uFF1B\u53EF\u6362\u539F\u6709\u6765\u6E90\u6216\u7A0D\u540E\u91CD\u8BD5`), { code: "LOOKUP_SOURCE_COOLING" });
+    const timeoutMs = Math.min(source.timeoutMs, retrieval?.remaining ?? Infinity);
+    if (timeoutMs <= 0) throw Object.assign(new Error("\u672C\u8F6E\u67E5\u8BE2\u65F6\u95F4\u5DF2\u7528\u5B8C\uFF0C\u672A\u53D1\u8D77\u65B0\u8BF7\u6C42"), { code: "RETRIEVAL_BUDGET" });
+    try {
+      const result = await withWebDeadline((activeSignal) => tool.run(args, { ...execution, signal: activeSignal }), { signal, timeoutMs });
+      if (signal?.aborted) throw signal.reason;
+      await lookup.health?.record(source.id, { state: "ok", elapsedMs: performance.now() - started }, { signal });
+      return result;
+    } catch (error) {
+      if (!signal?.aborted && !["AbortError", "ValidationError"].includes(error.name) && !["RETRIEVAL_BUDGET", "LOOKUP_SOURCE_COOLING", "UNTRUSTED_JSON_HOST", "INVALID_STOCK_INPUT"].includes(error.code)) {
+        await lookup.health?.record(source.id, { state: "failed", code: error.code || error.name, elapsedMs: performance.now() - started }, { signal });
+      }
+      throw error;
+    }
+  };
+  return lookup.queue ? lookup.queue(work) : work();
+}
+function connectLookupTools(tools, lookup) {
+  if (!lookup) return tools;
+  return tools.map((tool) => LOOKUP_OPERATIONS.some((source) => source.tools.includes(tool.name)) ? { ...tool, run: (args, execution = {}) => runLookupOperation(tool, args, execution, lookup) } : tool);
+}
+
 // src/agent/newsFeeds.js
 var bbc = (section, category) => ({ id: "bbc", label: "BBC", format: "rss", family: "bbc", category, hosts: ["www.bbc.com", "www.bbc.co.uk", "bbc.com", "bbc.co.uk"], url: `https://feeds.bbci.co.uk/${section}/rss.xml` });
 var guardian = (sport) => ({ id: "guardian", label: "\u536B\u62A5", format: "rss", family: "guardian", category: sport ? "\u4F53\u80B2" : "\u56FD\u9645", hosts: ["www.theguardian.com"], url: `https://www.theguardian.com/${sport ? "sport" : "world"}/rss` });
@@ -701,8 +834,8 @@ function internationalNewsFeeds(categories = [], publishers = []) {
 }
 
 // src/agent/newsRss.js
-var field = (text, tag) => {
-  const value = text.match(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, "i"))?.[1] || "";
+var field = (text2, tag) => {
+  const value = text2.match(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, "i"))?.[1] || "";
   return value.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
 };
 var beijingNewsTime = (ms) => new Date(ms + 288e5).toISOString().slice(0, 19) + "+08:00";
@@ -784,6 +917,7 @@ function lookupRegion(value = "auto", timezone = Intl.DateTimeFormat().resolvedO
   return value === "auto" ? !timezone || ["UTC", "Etc/UTC", "GMT", "Etc/GMT", "Asia/Shanghai", "Asia/Chongqing", "Asia/Harbin", "Asia/Urumqi", "PRC"].includes(timezone) ? "cn" : "global" : value;
 }
 function lookupSourceRegistry({ kind = "news", params = {}, approvals = {} } = {}) {
+  if (!["news", "sports_news"].includes(kind)) return LOOKUP_OPERATIONS.filter((source) => source.kinds.includes(kind));
   const categories = kind === "sports_news" ? ["\u4F53\u80B2"] : params.categories || [];
   const publishers = params.publishers || [];
   const domestic = DOMESTIC_NEWS_CANDIDATES.filter((s) => s.kind === kind).filter((s) => !publishers.length || publishers.includes(s.label) || publishers.includes(s.label.replace(/体育|新闻|候选/g, ""))).filter((s) => !categories.length || s.category === "\u7EFC\u5408" || categories.includes(s.category));
@@ -860,6 +994,23 @@ var DOMESTIC_APPROVALS = Object.freeze(Object.fromEntries(Object.keys(DOMESTIC_P
   ...id === "cn_sina_sports" ? { reason: "\u56FD\u5185\u53EF\u8FDE\u901A\uFF0C\u4F46\u4EC5\u4E24\u6761\u6709\u6548\u8D44\u8BAF\u4E14\u961F\u5217\u591A\u4E3A\u5F69\u7968\uFF0C\u6682\u4E0D\u9009\u7528" } : {}
 }])));
 
+// src/agent/lookup/preferences.js
+var KEY2 = "lookup.preferences.v1";
+var LOOKUP_DEFAULT_PREFERENCES = [{
+  phrases: ["\u4ECA\u5929\u6BD4\u8D5B\u8D5B\u7A0B", "\u4ECA\u65E5\u6BD4\u8D5B\u8D5B\u7A0B", "\u8DB3\u5F69\u8D5B\u7A0B", "\u8DB3\u7403\u8D5B\u7A0B", "\u4ECA\u5929\u8DB3\u7403\u8D5B\u7A0B", "\u4ECA\u65E5\u8DB3\u7403\u8D5B\u7A0B"],
+  kind: "sports_live",
+  params: { sport: "football", period: "forward_live", window_minutes: 120, states: ["in", "pre"], policy: "user_football_forward_two_hours" }
+}];
+async function readLookupPreferences(storage = collection("kv")) {
+  try {
+    const row = await storage.get(KEY2);
+    if (row?.version === 1 && Array.isArray(row.preferences)) return row.preferences.slice(0, 20);
+    await storage.put({ id: KEY2, version: 1, preferences: LOOKUP_DEFAULT_PREFERENCES });
+  } catch {
+  }
+  return LOOKUP_DEFAULT_PREFERENCES;
+}
+
 // src/agent/lookup/service.js
 function memoryLookupStorage() {
   const data = /* @__PURE__ */ new Map();
@@ -879,6 +1030,7 @@ function createLookupService({ storage, get, now = Date.now } = {}) {
   const status = async (region = "auto") => ({
     region,
     resolvedRegion: lookupRegion(region),
+    operations: await Promise.all(LOOKUP_OPERATIONS.map(async (source) => ({ id: source.id, label: source.label, region: source.region, validation: source.validation, validationNote: "\u968F\u771F\u5B9E\u67E5\u8BE2\u66F4\u65B0\uFF0C\u4E3B\u52A8\u68C0\u67E5\u4E0D\u731C\u5730\u70B9/\u4EE3\u7801\u6216\u8BF7\u6C42\u6A21\u578B", ...await health.get(source.id) }))),
     sources: await Promise.all(all().map(async (source) => ({
       id: source.id,
       label: source.label,
@@ -893,14 +1045,15 @@ function createLookupService({ storage, get, now = Date.now } = {}) {
     health,
     registry,
     status,
-    options: (region = "auto") => ({ region, health, registry, probeUnknown: true }),
+    preferences: () => readLookupPreferences(storage),
+    options: (region = "auto") => ({ region, health, registry, probeUnknown: true, queue: createLookupQueue() }),
     async probe(region = "auto", { signal } = {}) {
       lookupRegion(region);
       if (checking) throw Object.assign(new Error("\u6B63\u5728\u68C0\u67E5\u6765\u6E90\uFF0C\u8BF7\u7A0D\u5019"), { code: "LOOKUP_BUSY", status: 429 });
       if (signal?.aborted) throw signal.reason;
       checking = true;
       try {
-        const sources = all();
+        const sources = all().filter((source) => !source.tools);
         let next = 0;
         const worker = async () => {
           while (next < sources.length) {
@@ -919,6 +1072,696 @@ function createLookupService({ storage, get, now = Date.now } = {}) {
   };
 }
 
+// src/core/suggest.js
+var NET_CODES = /^(ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EPIPE|ENETUNREACH|EHOSTUNREACH|UND_ERR_SOCKET|UND_ERR_CONNECT_TIMEOUT)$/;
+function errorKind(error) {
+  if (!error) return "";
+  if (typeof error === "object") {
+    if (["timeout", "api", "network", "budget"].includes(error.kind)) return error.kind;
+    const code = String(error.code || error.cause?.code || "");
+    if (code === "RETRIEVAL_BUDGET") return "budget";
+    if (error.name === "NetworkError" || code === "NETWORK_ERROR") return "network";
+    if (error.stalled || error.name === "TimeoutError" || error.name === "LookupTimeoutError" || code === "LOOKUP_TIMEOUT" || code === "ETIMEDOUT") return "timeout";
+    if (Number.isInteger(error.status) && error.status >= 400) return "api";
+    if (NET_CODES.test(code) || error.name === "TypeError" && /fetch|network|load failed/i.test(String(error.message))) return "network";
+  }
+  const message = String(error?.message || error || "");
+  if (/LOOKUP_TIMEOUT|超时|时间预算|等待 \d+ 秒|没有任何输出|timed? ?out/i.test(message)) return "timeout";
+  if (/模型接口|模型服务|返回 [45]\d\d|reasoning_content/.test(message)) return "api";
+  if (/network|网络|failed to fetch|fetch failed|load failed|连接|socket|econn/i.test(message)) return "network";
+  return "";
+}
+
+// src/llm/openai.js
+function retryWait(base, err, random = Math.random) {
+  const after = Number(err?.retryAfterMs) || 0;
+  if (after > 0) return Math.min(3e4, after);
+  return Math.round(base * (0.5 + random() * 0.5));
+}
+
+// src/core/networkRequest.js
+function throwControl(error, signal) {
+  if (signal?.aborted) throw signal.reason ?? Object.assign(new Error("\u5DF2\u505C\u6B62"), { name: "AbortError" });
+  if (error?.name === "AbortError" || error?.code === "RETRIEVAL_BUDGET") throw error;
+}
+function httpError(httpStatus, detail = "", service = "\u7F51\u7EDC\u670D\u52A1") {
+  return Object.assign(
+    new Error(service + (/[A-Za-z]$/.test(service) ? " \u8FD4\u56DE " : "\u8FD4\u56DE ") + httpStatus + (detail ? "\uFF1A" + String(detail).slice(0, 200) : "")),
+    {
+      name: "ApiError",
+      kind: "api",
+      status: httpStatus,
+      code: httpStatus === 429 ? "RATE_LIMITED" : "HTTP_ERROR"
+    }
+  );
+}
+function wait(ms, signal) {
+  return new Promise((resolve, reject) => {
+    let timer;
+    const finish = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+    };
+    const abort = () => {
+      finish();
+      reject(signal.reason ?? Object.assign(new Error("\u5DF2\u505C\u6B62"), { name: "AbortError" }));
+    };
+    if (signal?.aborted) return abort();
+    timer = setTimeout(() => {
+      finish();
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+async function retryRead(work, { signal, timeoutMs = 6e3, beforeAttempt, onRetry, delayMs = 250 } = {}) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    throwControl(null, signal);
+    beforeAttempt?.(attempt);
+    try {
+      return await withWebDeadline(work, { signal, timeoutMs });
+    } catch (error) {
+      throwControl(error, signal);
+      if (attempt || !["timeout", "network"].includes(errorKind(error))) throw error;
+      onRetry?.(error);
+      await wait(retryWait(delayMs, error), signal);
+    }
+  }
+}
+
+// src/agent/sportsZhibo8.js
+var ZHIBO8_URL = "https://bifen4pc.qiumibao.com/json/list.htm";
+var STATE = { 1: "\u672A\u5F00\u8D5B", 2: "\u8FDB\u884C\u4E2D", 3: "\u5B8C\u573A", 4: "\u5EF6\u671F", 6: "\u53D6\u6D88", 7: "\u5F85\u5B9A" };
+var SPORT2 = { football: "\u8DB3\u7403", basketball: "\u7BEE\u7403", tennis: "\u7F51\u7403", snooker: "\u65AF\u8BFA\u514B", game: "\u7535\u7ADE", other: "\u5176\u4ED6" };
+var SPECIAL = /* @__PURE__ */ new Set(["4", "6", "7"]);
+var TIMEOUT_MS = 6e3;
+var CACHE_MS = 3e4;
+var cached = null;
+async function fetchZhibo8({ get, signal, refresh = false }) {
+  if (!refresh && cached && Date.now() - cached.at < CACHE_MS) return cached.list;
+  const data = await withWebDeadline(
+    async (s) => {
+      const response = await get(ZHIBO8_URL, { signal: s });
+      if (!response.ok) throw httpError(response.status, "", "\u76F4\u64AD\u5427");
+      return response.json();
+    },
+    { signal, timeoutMs: TIMEOUT_MS }
+  );
+  if (!Array.isArray(data?.list)) throw Object.assign(new Error("\u76F4\u64AD\u5427\u8FD4\u56DE\u7684\u683C\u5F0F\u4E0D\u8BA4\u8BC6"), { kind: "api", code: "BAD_FORMAT" });
+  cached = { at: Date.now(), list: data.list };
+  return data.list;
+}
+function normalizeZhibo8(m) {
+  const swap = String(m.rightishome) === "1";
+  const left = { name: m.home_team, score: m.home_score };
+  const right = { name: m.visit_team, score: m.visit_score };
+  const [home, away] = swap ? [right, left] : [left, right];
+  return {
+    id: String(m.id ?? ""),
+    sport: String(m.type || "other"),
+    leagueId: String(m.leagueid ?? ""),
+    jingcai: m.is_jingcai === true || String(m.is_jingcai) === "1",
+    date: String(m.sdate || String(m.start || "").slice(0, 10)),
+    time: String(m.time || String(m.start || "").slice(11, 16)),
+    home,
+    away,
+    state: String(m.state ?? ""),
+    period: String(m.period_cn || "").replace(/\s+/g, " ").trim(),
+    half: String(m.half_score || "").replace(/[（）()半:：\s]/g, "")
+  };
+}
+function lineOf(e) {
+  const started = e.state === "2" || e.state === "3";
+  const scoreKnown = [e.home.score, e.away.score].every((value) => value !== null && value !== void 0 && /^\d+$/.test(String(value)));
+  const score = started && scoreKnown ? `${e.home.score}-${e.away.score}` : "vs";
+  const status = e.state === "2" ? `\u8FDB\u884C\u4E2D ${e.period}`.trim() : STATE[e.state] || `\u72B6\u6001\u672A\u77E5\uFF08\u539F\u72B6\u6001${e.state || "\u7A7A"}${e.period ? "\uFF0C\u6765\u6E90\u6587\u5B57" + e.period : ""}\uFF09`;
+  const half = e.half && e.state === "3" ? `\uFF08\u534A\u573A ${e.half}\uFF09` : "";
+  return `- ${e.time} ${status}\uFF1A${e.home.name} ${score} ${e.away.name}${half}`;
+}
+var WEEK = "\u65E5\u4E00\u4E8C\u4E09\u56DB\u4E94\u516D";
+var weekday = (date) => `\u5468${WEEK[(/* @__PURE__ */ new Date(`${date}T00:00:00Z`)).getUTCDay()]}`;
+var datesBetween = (from, to) => {
+  const out = [];
+  for (let d = from; d <= to; d = new Date(Date.parse(`${d}T00:00:00Z`) + 864e5).toISOString().slice(0, 10)) out.push(d);
+  return out;
+};
+function zhibo8Result(list, { from, to, today, sports = null, team = "", focus = [], clock = "", window = null }) {
+  const all = list.map(normalizeZhibo8);
+  const days = datesBetween(from, to);
+  const have = new Set(all.map((e) => e.date));
+  const covered = days.every((d) => have.has(d));
+  const q = String(team || "").trim().toLowerCase();
+  const picked = all.filter((e) => days.includes(e.date) && (!sports || sports.includes(e.sport)) && (!q || `${e.home.name} ${e.away.name}`.toLowerCase().includes(q)));
+  const shown = picked.filter((e) => inSportsWindow(beijingTimestamp(e.date, e.time), e.state, window));
+  const quiet = shown.filter((e) => SPECIAL.has(e.state)).length;
+  const unknown = shown.filter((e) => !STATE[e.state]).length;
+  const order = Object.keys(SPORT2);
+  shown.sort((a, b) => (["around", "forward_live"].includes(window?.period) ? Number(b.state === "2") - Number(a.state === "2") : 0) || (window && window.period !== "all" ? beijingTimestamp(a.date, a.time) - beijingTimestamp(b.date, b.time) : a.date.localeCompare(b.date) || order.indexOf(a.sport) - order.indexOf(b.sport) || a.leagueId.localeCompare(b.leagueId) || a.time.localeCompare(b.time)));
+  const lines = [`\u5317\u4EAC\u65F6\u95F4 ${from}\uFF08${weekday(from)}\uFF09${to !== from ? ` \u81F3 ${to}\uFF08${weekday(to)}\uFF09` : ""}\u7684\u8D5B\u7A0B\u548C\u6BD4\u5206\uFF0C\u6765\u6E90\u76F4\u64AD\u5427\uFF08zhibo8.com\uFF09\uFF0C\u67E5\u8BE2\u4E8E\u5317\u4EAC\u65F6\u95F4 ${clock}\u3002\u65F6\u95F4\u90FD\u662F\u5317\u4EAC\u65F6\u95F4\uFF0C\u524D\u9762\u662F\u4E3B\u961F\u3002`];
+  lines.push(`\u672C\u6765\u6E90\u672C\u6B21\u7B5B\u9009\u5171${shown.length}\u573A\uFF0C${["around", "forward_live"].includes(window?.period) ? "\u672C\u7A97\u53E3\u53EA\u663E\u793A\u8FDB\u884C\u4E2D\u548C\u672A\u5F00\u8D5B" : "\u5EF6\u671F/\u53D6\u6D88/\u5F85\u5B9A\u548C\u672A\u77E5\u72B6\u6001\u4E5F\u4FDD\u7559\u660E\u7EC6"}\uFF1B\u4E0D\u4EE3\u8868\u6240\u6709\u8054\u8D5B\u5B8C\u6574\u8986\u76D6\u3002`);
+  if (window?.label) lines.push("\u65F6\u95F4\u7B5B\u9009\uFF1A" + window.label + "\uFF1B\u4E0D\u4EE3\u8868\u5168\u5929\u5B8C\u6574\u8D5B\u7A0B\u3002");
+  if (!shown.length) lines.push("\n\u8FD9\u6BB5\u65F6\u95F4\u5217\u8868\u91CC\u6CA1\u6709\u7B26\u5408\u6761\u4EF6\u7684\u6BD4\u8D5B\u3002");
+  let day2 = "";
+  let sport = "";
+  let league = "";
+  for (const e of shown) {
+    if (e.date !== day2) {
+      day2 = e.date;
+      sport = league = "";
+      if (from !== to) lines.push(`
+# ${day2}\uFF08${weekday(day2)}\uFF09`);
+    }
+    if (e.sport !== sport) {
+      sport = e.sport;
+      league = "";
+      lines.push(`
+## ${SPORT2[sport] || sport}`);
+    }
+    if (e.leagueId !== league) {
+      league = e.leagueId;
+      lines.push(`### \u8D5B\u4E8B\u7F16\u53F7 ${league}`);
+    }
+    lines.push(lineOf(e));
+  }
+  if (quiet) lines.push(`
+\u5206\u7C7B\u7EDF\u8BA1\uFF1A\u53E6\u6709 ${quiet} \u573A\u5EF6\u671F\u3001\u53D6\u6D88\u6216\u5F85\u5B9A\uFF0C\u5DF2\u5305\u542B\u5728\u4E0A\u65B9\u9010\u573A\u660E\u7EC6\u548C\u603B\u573A\u6570\u5185\uFF0C\u4E0D\u63A8\u65AD\u8054\u8D5B\u7EA7\u522B\u3002`);
+  if (unknown) lines.push(`
+\u53E6\u6709${unknown}\u573A\u6765\u6E90\u72B6\u6001\u672A\u77E5\uFF0C\u5DF2\u4FDD\u7559\u539F\u72B6\u6001\u7801\u548C\u6587\u5B57\uFF0C\u4E0D\u6309\u5F00\u7403\u65F6\u95F4\u731C\u6210\u672A\u5F00\u8D5B\u3001\u5EF6\u671F\u6216\u5B8C\u573A\u3002`);
+  lines.push("\n\u8BF4\u660E\uFF1A\u8FD9\u4E2A\u5217\u8868\u4E0D\u5E26\u8054\u8D5B\u540D\uFF0C\u540C\u4E00\u201C\u8D5B\u4E8B\u7F16\u53F7\u201D\u662F\u540C\u4E00\u4E2A\u8054\u8D5B\u2014\u2014\u4E0D\u80FD\u4ECE\u961F\u540D\u63A8\u65AD\u8054\u8D5B\u6216\u7EA7\u522B\uFF1B\u672A\u8FD4\u56DE\u7684\u8054\u8D5B\u540D\u660E\u786E\u8BF4\u672A\u63D0\u4F9B\uFF0C\u7528\u6237\u786E\u9700\u65F6\u518D\u6838\u5BF9\u5B98\u65B9\u8D5B\u7A0B\u3002\u4E0D\u8981\u628A\u8D5B\u4E8B\u7F16\u53F7\u5F53\u5DF2\u6838\u5B9E\u7684\u8054\u8D5B\u540D\u3002");
+  if (focus.length) lines.push(`\u7528\u6237\u95EE\u7684\u662F\uFF1A${focus.join("\u3001")}\u3002\u53EA\u6311\u8FD9\u4E9B\u8054\u8D5B\u7684\u6BD4\u8D5B\u56DE\u7B54\uFF1B\u5217\u8868\u91CC\u6CA1\u6709\u5C31\u8BF4\u76F4\u64AD\u5427\u5F53\u524D\u5217\u8868\u91CC\u6CA1\u6709\uFF0C\u9700\u8981\u65F6\u7528 web_search \u518D\u67E5\u3002`);
+  if (days.some((d) => d > today)) lines.push("\u660E\u5929\u53CA\u4EE5\u540E\u7684\u6BD4\u8D5B\u8FD9\u91CC\u53EA\u6392\u8FDB\u4E86\u5C11\u6570\u51E0\u573A\uFF0C\u4E0D\u5168\uFF1B\u7528\u6237\u8981\u5B8C\u6574\u8D5B\u7A0B\u65F6\u7528 web_search \u8865\u3002");
+  if (!covered) lines.push(`\u5217\u8868\u53EA\u8986\u76D6\u5927\u7EA6\u6628\u5929\u5230\u660E\u5929\uFF0C${days.filter((d) => !have.has(d)).join("\u3001")} \u6CA1\u6709\u6570\u636E\u3002`);
+  lines.push("\u8FDB\u884C\u4E2D\u7684\u6BD4\u5206\u4F1A\u53D8\uFF1B\u6BD4\u5206\u4EE5\u8FD9\u91CC\u4E3A\u51C6\uFF0C\u672A\u5F00\u8D5B\u7684\u4E0D\u8981\u7F16\u6BD4\u5206\u3002");
+  lines.push("\u672C\u5217\u8868\u672A\u63D0\u4F9B\u53EF\u6838\u5B9E\u7684\u7ADE\u5F69\u573A\u6B21\u7F16\u53F7\u3001\u505C\u552E\u65F6\u95F4\u53CA\u8D54\u7387\uFF1B\u53EA\u5C55\u793A\u666E\u901A\u8D5B\u7A0B\uFF0C\u4E0D\u628A\u8D5B\u4E8BID\u6216is_jingcai\u6807\u8BB0\u7F16\u6210\u7ADE\u5F69\u7F16\u53F7\u3002");
+  const events = shown.map((e) => ({ ...e, time: beijingTimestamp(e.date, e.time), state: { "1": "pre", "2": "in", "3": "post" }[e.state] || "unknown", status: e.state === "2" ? `\u8FDB\u884C\u4E2D ${e.period}`.trim() : STATE[e.state] || "\u72B6\u6001\u672A\u77E5" }));
+  return { covered, text: lines.join("\n"), count: shown.length, events };
+}
+
+// src/agent/sportsSnapshot.js
+var SPORTS_CARD_LIMIT = 12;
+var text = (value, max = 64) => String(value ?? "").replace(/[\u0000-\u001f]/g, " ").slice(0, max);
+function sportsSnapshot({ args, groups, now, window, notice = "" }) {
+  const rows = groups.flatMap((g) => g.events.map((e) => ({ ...e, source: g.source })));
+  rows.sort((a, b) => ["around", "forward_live"].includes(window?.period) ? Number(b.state === "in") - Number(a.state === "in") || a.time - b.time : a.time - b.time);
+  return {
+    version: 1,
+    fetchedAt: now,
+    query: sportsQuery(args),
+    label: text(window?.label, 130),
+    notice: text([notice, args.leagues?.length && groups.some((g) => g.source === "\u76F4\u64AD\u5427") ? "\u76F4\u64AD\u5427\u672A\u63D0\u4F9B\u8054\u8D5B\u540D\u79F0\uFF0C\u5361\u7247\u5C1A\u672A\u6309\u6240\u9009\u8054\u8D5B\u6838\u5B9E\u5F52\u5C5E\uFF0C\u8BF7\u4EE5\u6587\u5B57\u6838\u5BF9\u7ED3\u679C\u4E3A\u51C6\u3002" : ""].filter(Boolean).join("\uFF1B"), 240),
+    sources: groups.slice(0, 2).map((g) => ({ name: g.source, count: g.events.length })),
+    events: rows.slice(0, SPORTS_CARD_LIMIT).map((e) => ({
+      id: text(e.id, 32),
+      time: e.time,
+      state: text(e.state, 12),
+      status: text(e.status, 48),
+      home: text(e.home.name),
+      away: text(e.away.name),
+      // 未赛的0只是占位，不展示为真实比分。
+      score: ["in", "post"].includes(e.state) && [e.home.score, e.away.score].every((s) => /^\d{1,3}$/.test(String(s ?? ""))) ? `${e.home.score} : ${e.away.score}` : "VS",
+      league: text(e.league || "\u8054\u8D5B\u540D\u672A\u63D0\u4F9B"),
+      source: e.source,
+      jingcai: e.jingcai === true ? true : null
+    })),
+    truncated: rows.length > SPORTS_CARD_LIMIT,
+    lotteryNote: "\u666E\u901A\u8D5B\u7A0B\uFF1B\u672C\u6B21\u6765\u6E90\u672A\u63D0\u4F9B\u53EF\u6838\u5B9E\u7684\u7ADE\u5F69\u573A\u6B21\u7F16\u53F7\u3001\u505C\u552E\u65F6\u95F4\u53CA\u8D54\u7387\u3002\u8D5B\u4E8BID\u4E0D\u662F\u7ADE\u5F69\u7F16\u53F7\u3002"
+  };
+}
+function sportsQuery(args = {}) {
+  const out = {};
+  for (const k of ["period", "date", "end_date", "sport", "team"]) if (args[k] != null) out[k] = text(args[k], k === "team" ? 64 : 16);
+  if (args.window_minutes != null) out.window_minutes = args.window_minutes;
+  if (args.leagues != null) out.leagues = (Array.isArray(args.leagues) ? args.leagues : [args.leagues]).slice(0, 40).map((v) => text(v));
+  return out;
+}
+
+// src/agent/sportsScores.js
+var LEAGUES = [
+  // 国内和亚洲
+  { code: "chn.1", sport: "soccer", name: "\u4E2D\u8D85" },
+  { code: "afc.champions", sport: "soccer", name: "\u4E9A\u51A0\u7CBE\u82F1\u8054\u8D5B" },
+  { code: "jpn.1", sport: "soccer", name: "\u65E5\u804C\u8054" },
+  { code: "kor.1", sport: "soccer", name: "\u97E9K\u8054" },
+  { code: "aus.1", sport: "soccer", name: "\u6FB3\u8D85" },
+  { code: "ksa.1", sport: "soccer", name: "\u6C99\u7279\u8054" },
+  // 欧洲五大联赛和欧战
+  { code: "eng.1", sport: "soccer", name: "\u82F1\u8D85" },
+  { code: "esp.1", sport: "soccer", name: "\u897F\u7532" },
+  { code: "ger.1", sport: "soccer", name: "\u5FB7\u7532" },
+  { code: "ita.1", sport: "soccer", name: "\u610F\u7532" },
+  { code: "fra.1", sport: "soccer", name: "\u6CD5\u7532" },
+  { code: "uefa.champions", sport: "soccer", name: "\u6B27\u51A0" },
+  { code: "uefa.europa", sport: "soccer", name: "\u6B27\u8054\u676F" },
+  { code: "uefa.europa.conf", sport: "soccer", name: "\u6B27\u534F\u8054" },
+  // 其他联赛
+  { code: "eng.2", sport: "soccer", name: "\u82F1\u51A0" },
+  { code: "ned.1", sport: "soccer", name: "\u8377\u7532" },
+  { code: "por.1", sport: "soccer", name: "\u8461\u8D85" },
+  { code: "sco.1", sport: "soccer", name: "\u82CF\u8D85" },
+  { code: "tur.1", sport: "soccer", name: "\u571F\u8D85" },
+  { code: "bel.1", sport: "soccer", name: "\u6BD4\u7532" },
+  { code: "usa.1", sport: "soccer", name: "\u7F8E\u804C\u8054" },
+  { code: "mex.1", sport: "soccer", name: "\u58A8\u8D85" },
+  { code: "bra.1", sport: "soccer", name: "\u5DF4\u7532" },
+  { code: "arg.1", sport: "soccer", name: "\u963F\u7532" },
+  // 杯赛和国家队
+  { code: "eng.fa", sport: "soccer", name: "\u82F1\u8DB3\u603B\u676F" },
+  { code: "eng.league_cup", sport: "soccer", name: "\u82F1\u8054\u8D5B\u676F" },
+  { code: "esp.copa_del_rey", sport: "soccer", name: "\u56FD\u738B\u676F" },
+  { code: "ger.dfb_pokal", sport: "soccer", name: "\u5FB7\u56FD\u676F" },
+  { code: "ita.coppa_italia", sport: "soccer", name: "\u610F\u5927\u5229\u676F" },
+  { code: "fra.coupe_de_france", sport: "soccer", name: "\u6CD5\u56FD\u676F" },
+  { code: "conmebol.libertadores", sport: "soccer", name: "\u5357\u7F8E\u89E3\u653E\u8005\u676F" },
+  { code: "fifa.world", sport: "soccer", name: "\u4E16\u754C\u676F" },
+  { code: "fifa.worldq.afc", sport: "soccer", name: "\u4E16\u9884\u8D5B\u4E9A\u6D32\u533A" },
+  { code: "fifa.worldq.uefa", sport: "soccer", name: "\u4E16\u9884\u8D5B\u6B27\u6D32\u533A" },
+  { code: "afc.asian.cup", sport: "soccer", name: "\u4E9A\u6D32\u676F" },
+  { code: "uefa.nations", sport: "soccer", name: "\u6B27\u56FD\u8054" },
+  { code: "fifa.friendly", sport: "soccer", name: "\u56FD\u9645\u53CB\u8C0A\u8D5B" },
+  // 篮球
+  { code: "nba", sport: "basketball", name: "NBA" },
+  { code: "wnba", sport: "basketball", name: "WNBA" }
+];
+var GROUPS = { \u4E94\u5927\u8054\u8D5B: ["eng.1", "esp.1", "ger.1", "ita.1", "fra.1"], \u6B27\u6218: ["uefa.champions", "uefa.europa", "uefa.europa.conf"] };
+var NOT_COVERED = "CBA\u3001\u4E2D\u7532\u3001\u4E2D\u4E59\u3001\u5973\u8DB3\u8054\u8D5B\u3001\u7F51\u7403\u3001\u6392\u7403\u3001\u4E52\u4E53\u7403\u3001\u7FBD\u6BDB\u7403\u3001F1\u3001\u7535\u7ADE\u3001\u65AF\u8BFA\u514B";
+var PARALLEL = 10;
+var LEAGUE_TIMEOUT_MS = 7e3;
+var MAX_EVENTS = 150;
+var MAX_DAYS = 3;
+var BEIJING_MS = 8 * 36e5;
+var DAY_MS = 24 * 36e5;
+var invalid = (message) => Object.assign(new Error(message), { name: "ValidationError", code: "INVALID_SPORTS_INPUT" });
+var beijingDate = (ms) => new Date(ms + BEIJING_MS).toISOString().slice(0, 10);
+var beijingClock = (ms) => new Date(ms + BEIJING_MS).toISOString().slice(11, 16);
+var WEEK2 = "\u65E5\u4E00\u4E8C\u4E09\u56DB\u4E94\u516D";
+var weekday2 = (date) => `\u5468${WEEK2[(/* @__PURE__ */ new Date(`${date}T00:00:00Z`)).getUTCDay()]}`;
+function checkDate(value) {
+  const v = String(value);
+  const ms = Date.parse(`${v}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || !Number.isFinite(ms) || new Date(ms).toISOString().slice(0, 10) !== v) throw invalid("\u65E5\u671F\u8981\u5199\u6210 YYYY-MM-DD\uFF08\u5317\u4EAC\u65F6\u95F4\uFF09");
+  return v;
+}
+var shiftDate = (date, days) => new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10);
+var compact = (date) => date.replaceAll("-", "");
+function pickLeagues({ sport = "all", leagues } = {}) {
+  const wanted = (Array.isArray(leagues) ? leagues : leagues ? [leagues] : []).map((x) => String(x).trim()).filter(Boolean);
+  if (wanted.length) {
+    const codes = /* @__PURE__ */ new Set();
+    for (const w of wanted) {
+      for (const c of GROUPS[w] ?? []) codes.add(c);
+      const hit = LEAGUES.find((l) => l.code === w.toLowerCase() || l.name === w || w.includes(l.name));
+      if (hit) codes.add(hit.code);
+    }
+    return LEAGUES.filter((l) => codes.has(l.code));
+  }
+  if (sport === "tennis") return [];
+  const s = { football: "soccer", soccer: "soccer", basketball: "basketball" }[sport];
+  return s ? LEAGUES.filter((l) => l.sport === s) : LEAGUES;
+}
+var STATUS = { pre: "\u672A\u5F00\u8D5B", in: "\u8FDB\u884C\u4E2D", post: "\u5B8C\u573A" };
+function statusOf(event) {
+  const type = event.status?.type ?? event.competitions?.[0]?.status?.type ?? {};
+  const name = String(type.name || "");
+  if (/POSTPONED/.test(name)) return { state: "post", text: "\u5EF6\u671F" };
+  if (/CANCEL/.test(name)) return { state: "post", text: "\u53D6\u6D88" };
+  if (/ABANDON|SUSPENDED/.test(name)) return { state: "post", text: "\u4E2D\u65AD" };
+  const state = type.state || (/SCHEDULED/.test(name) ? "pre" : "unknown");
+  if (state === "in") return { state, text: `\u8FDB\u884C\u4E2D ${type.shortDetail || ""}`.trim() };
+  if (state === "post") {
+    const extra = /Pens|PK|penalt/i.test(type.detail || type.shortDetail || "") ? "\uFF08\u542B\u70B9\u7403\uFF09" : /AET|ET|OT/i.test(type.shortDetail || "") ? "\uFF08\u542B\u52A0\u65F6\uFF09" : "";
+    return { state, text: `\u5B8C\u573A${extra}` };
+  }
+  return state === "pre" ? { state: "pre", text: STATUS.pre } : { state: "unknown", text: `\u72B6\u6001\u672A\u77E5\uFF08\u6765\u6E90${name || type.state || "\u672A\u63D0\u4F9B"}\uFF09` };
+}
+function normalizeEvent(event, league) {
+  const time = Date.parse(event.date);
+  const comp = event.competitions?.[0] ?? {};
+  const side = (homeAway) => {
+    const c = (comp.competitors ?? []).find((x) => x.homeAway === homeAway) ?? {};
+    return {
+      name: c.team?.displayName || c.team?.shortDisplayName || c.team?.name || "\u672A\u77E5",
+      score: c.score ?? "",
+      shootout: c.shootoutScore
+    };
+  };
+  const status = statusOf(event);
+  return {
+    id: String(event.id ?? ""),
+    league: league.name,
+    sport: league.sport,
+    time,
+    home: side("home"),
+    away: side("away"),
+    state: status.state,
+    status: status.text,
+    venue: comp.venue?.fullName || ""
+  };
+}
+function lineOf2(e) {
+  const clock = beijingClock(e.time);
+  const scoreKnown = [e.home.score, e.away.score].every((value) => value !== null && value !== void 0 && /^\d+$/.test(String(value)));
+  const score = ["in", "post"].includes(e.state) && scoreKnown && !/延期|取消/.test(e.status) ? `${e.home.score}-${e.away.score}` : "vs";
+  const pens = e.home.shootout != null && e.away.shootout != null ? `\uFF0C\u70B9\u7403 ${e.home.shootout}-${e.away.shootout}` : "";
+  return `- ${clock} ${e.status}\uFF1A${e.home.name}\uFF08\u4E3B\uFF09${score} ${e.away.name}\uFF08\u5BA2\uFF09${pens}`;
+}
+function formatScores({ events, from, to, asked, failed, now = Date.now(), window = null }) {
+  const lines = [`\u5317\u4EAC\u65F6\u95F4 ${from}\uFF08${weekday2(from)}\uFF09${to !== from ? ` \u81F3 ${to}\uFF08${weekday2(to)}\uFF09` : ""}\u7684\u8D5B\u7A0B\u548C\u8D5B\u679C\uFF0C\u6765\u6E90 ESPN\uFF08espn.com\uFF09\uFF0C\u67E5\u8BE2\u4E8E\u5317\u4EAC\u65F6\u95F4 ${beijingDate(now)} ${beijingClock(now)}\u3002\u65F6\u95F4\u5747\u5DF2\u6362\u7B97\u6210\u5317\u4EAC\u65F6\u95F4\u3002`];
+  const shown = events.slice(0, MAX_EVENTS);
+  lines.push(`\u672C\u6765\u6E90\u672C\u6B21\u7B5B\u9009\u8FD4\u56DE${events.length}\u573A\uFF0C\u672C\u56DE\u6267\u5217\u51FA${shown.length}\u573A\uFF1B\u8986\u76D6\u8303\u56F4\u4E0E\u5931\u8D25\u8D5B\u4E8B\u89C1\u540E\u6587\u3002`);
+  if (window?.label) lines.push("\u65F6\u95F4\u7B5B\u9009\uFF1A" + window.label + "\uFF1B\u4E0D\u4EE3\u8868\u5168\u5929\u5B8C\u6574\u8D5B\u7A0B\u3002");
+  if (!shown.length) lines.push(window?.label ? "\n\u8FD9\u4E2A\u65F6\u95F4\u7A97\u53E3\u672A\u8FD4\u56DE\u7B26\u5408\u6761\u4EF6\u7684\u6BD4\u8D5B\uFF0C\u4E0D\u4EE3\u8868\u5176\u4ED6\u65F6\u6BB5\u6216\u8054\u8D5B\u6CA1\u6709\u6BD4\u8D5B\u3002" : "\n\u67E5\u5230\u7684\u8D5B\u4E8B\u5728\u8FD9\u6BB5\u65F6\u95F4\u90FD\u6CA1\u6709\u6BD4\u8D5B\u3002");
+  let day2 = "";
+  let league = "";
+  for (const e of shown) {
+    const d = beijingDate(e.time);
+    if (d !== day2) {
+      day2 = d;
+      league = "";
+      if (from !== to) lines.push(`
+# ${d}\uFF08${weekday2(d)}\uFF09`);
+    }
+    if (e.league !== league) {
+      league = e.league;
+      lines.push(`
+## ${league}`);
+    }
+    lines.push(lineOf2(e));
+  }
+  if (events.length > shown.length) lines.push(`
+\uFF08\u5171 ${events.length} \u573A\uFF0C\u53EA\u5217\u4E86\u524D ${shown.length} \u573A\uFF1B\u8981\u770B\u5176\u4F59\u7684\uFF0C\u7528 leagues \u6307\u5B9A\u8D5B\u4E8B\u518D\u67E5\uFF09`);
+  const ok = asked.filter((l) => !failed.includes(l));
+  lines.push(`
+\u5DF2\u67E5\u7684\u8D5B\u4E8B\uFF08${ok.length} \u4E2A\uFF09\uFF1A${ok.map((l) => l.name).join("\u3001") || "\u65E0"}\u3002`);
+  if (failed.length) lines.push(`\u6CA1\u53D6\u5230\u7684\uFF08${failed.length} \u4E2A\uFF0C\u8FD9\u4E9B\u8D5B\u4E8B\u7684\u573A\u6B21\u53EF\u80FD\u7F3A\uFF0C\u9700\u8981\u65F6\u7528 web_search \u8865\uFF09\uFF1A${failed.map((l) => l.name).join("\u3001")}\u3002`);
+  lines.push(`\u4E0D\u5728\u67E5\u8BE2\u8303\u56F4\uFF1A${NOT_COVERED}\u2014\u2014\u7528\u6237\u95EE\u5230\u65F6\u7528 web_search \u8865\u67E5\uFF0C\u4E0D\u8981\u8BF4\u6210\u201C\u6CA1\u6709\u6BD4\u8D5B\u201D\u3002`);
+  lines.push("\u7403\u961F\u540D\u662F\u82F1\u6587\uFF0C\u56DE\u7B54\u65F6\u7528\u56FD\u5185\u5E38\u7528\u7684\u4E2D\u6587\u8BD1\u540D\uFF1B\u6BD4\u5206\u4EE5\u8FD9\u91CC\u4E3A\u51C6\uFF0C\u672A\u5F00\u8D5B\u7684\u4E0D\u8981\u7F16\u6BD4\u5206\u3002");
+  return lines.join("\n");
+}
+var cache = /* @__PURE__ */ new Map();
+var CACHE_MAX = 200;
+var CACHE_MS2 = 6e4;
+function remember(key, value) {
+  if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
+  cache.set(key, { at: Date.now(), value });
+}
+async function fetchLeague(league, range, { get, signal, refresh = false }) {
+  const key = `${league.code}|${range}`;
+  const hit = cache.get(key);
+  if (!refresh && hit && Date.now() - hit.at < CACHE_MS2) return hit.value;
+  const url = `https://site.api.espn.com/apis/site/v2/sports/${league.sport}/${league.code}/scoreboard?dates=${range}&limit=300`;
+  const data = await withWebDeadline(
+    async (s) => {
+      const response = await get(url, { signal: s });
+      if (!response.ok) throw httpError(response.status, "", "ESPN");
+      return response.json();
+    },
+    { signal, timeoutMs: LEAGUE_TIMEOUT_MS }
+  );
+  const events = (data?.events ?? []).map((e) => normalizeEvent(e, league));
+  remember(key, events);
+  return events;
+}
+async function getSportsScores(args = {}, { get, signal, retrieval, now = Date.now(), progress, onScores, refresh = false } = {}) {
+  let from = args.date ? checkDate(args.date) : beijingDate(now);
+  const window = sportsWindow(args, now);
+  let to = args.end_date ? checkDate(args.end_date) : from;
+  if (["around", "forward_live"].includes(window.period)) {
+    from = beijingDate(["around", "forward_live"].includes(window.period) ? now - window.minutes * 6e4 : now);
+    to = beijingDate(now + window.minutes * 6e4);
+  }
+  if (window.period === "upcoming" && !args.end_date && from === beijingDate(now)) to = beijingDate(now + window.minutes * 6e4);
+  if (to < from) throw invalid("\u7ED3\u675F\u65E5\u671F\u4E0D\u80FD\u65E9\u4E8E\u5F00\u59CB\u65E5\u671F");
+  if ((Date.parse(to) - Date.parse(from)) / DAY_MS >= MAX_DAYS) throw invalid(`\u4E00\u6B21\u6700\u591A\u67E5 ${MAX_DAYS} \u5929`);
+  const asked = pickLeagues(args);
+  const named = (Array.isArray(args.leagues) ? args.leagues : args.leagues ? [args.leagues] : []).map((x) => String(x).trim()).filter(Boolean);
+  retrieval?.consume("read");
+  let partial = null;
+  let primary = null;
+  let primaryUnavailable = false;
+  const deliver = (text2, groups, notice2 = "") => {
+    onScores?.(sportsSnapshot({ args, groups, now, window, notice: notice2 }));
+    return text2;
+  };
+  try {
+    progress?.("\u6B63\u5728\u67E5\u76F4\u64AD\u5427\u7684\u8D5B\u7A0B\u548C\u6BD4\u5206");
+    const list = await fetchZhibo8({ get, signal, refresh });
+    primary = zhibo8Result(list, { from, to, today: beijingDate(now), sports: zhibo8Sports(args, asked, named), team: args.team, focus: named, clock: `${beijingDate(now)} ${beijingClock(now)}`, window });
+  } catch (error) {
+    throwControl(error, signal);
+    primaryUnavailable = true;
+  }
+  if (primary?.covered) return deliver(primary.text, [{ source: "\u76F4\u64AD\u5427", events: primary.events }]);
+  if (primary?.count) partial = primary;
+  if (!asked.length) {
+    if (partial) return deliver(partial.text, [{ source: "\u76F4\u64AD\u5427", events: partial.events }]);
+    throw invalid(`\u6CA1\u8BA4\u51FA\u8981\u67E5\u7684\u8D5B\u4E8B\u3002\u80FD\u67E5\uFF1A${LEAGUES.map((l) => l.name).join("\u3001")}\uFF1B\u67E5\u4E0D\u4E86\uFF1A${NOT_COVERED}\uFF08\u7528 web_search\uFF09`);
+  }
+  const range = `${compact(shiftDate(from, -1))}-${compact(to)}`;
+  const start = Date.parse(`${from}T00:00:00Z`) - BEIJING_MS;
+  const end = Date.parse(`${to}T00:00:00Z`) - BEIJING_MS + DAY_MS;
+  const stop = new AbortController();
+  const relay = () => stop.abort(signal?.reason);
+  signal?.addEventListener("abort", relay, { once: true });
+  const results = /* @__PURE__ */ new Map();
+  const failed = [];
+  let done = 0;
+  let networkFails = 0;
+  let next = 0;
+  progress?.(`\u6B63\u5728\u67E5 ${asked.length} \u4E2A\u8D5B\u4E8B\u7684\u8D5B\u7A0B\u548C\u6BD4\u5206`);
+  const worker = async () => {
+    while (next < asked.length && !stop.signal.aborted) {
+      const league = asked[next++];
+      try {
+        results.set(league.code, await fetchLeague(league, range, { get, signal: stop.signal, refresh }));
+      } catch (error) {
+        throwControl(null, signal);
+        if (!stop.signal.aborted) throwControl(error, signal);
+        failed.push(league);
+        if (["network", "timeout"].includes(errorKind(error))) networkFails++;
+        if (!results.size && networkFails >= Math.min(PARALLEL, asked.length)) stop.abort();
+      }
+      done++;
+    }
+  };
+  try {
+    await Promise.all(Array.from({ length: Math.min(PARALLEL, asked.length) }, worker));
+  } finally {
+    signal?.removeEventListener("abort", relay);
+  }
+  throwControl(null, signal);
+  if (!results.size) {
+    if (partial) return deliver(`${partial.text}
+\uFF08ESPN \u4E5F\u8FDE\u4E0D\u4E0A\uFF0C\u7F3A\u7684\u65E5\u671F\u7528 web_search \u8865\uFF09`, [{ source: "\u76F4\u64AD\u5427", events: partial.events }], "ESPN\u8865\u5145\u672A\u53D6\u5F97\uFF0C\u4EC5\u5C55\u793A\u76F4\u64AD\u5427\u90E8\u5206\u7ED3\u679C");
+    throw Object.assign(new Error(`\u8FDE\u4E0D\u4E0A ESPN \u6BD4\u5206\u63A5\u53E3\uFF08${asked.length} \u4E2A\u8D5B\u4E8B\u90FD\u6CA1\u53D6\u5230\uFF09\u3002\u6539\u7528 web_search \u67E5\uFF0C\u4E2D\u6587\u641C\u7D22\u8BCD\u5E26\u4E0A\u65E5\u671F\u548C\u8054\u8D5B\u540D\uFF0C\u5982\u201C${from} \u4E2D\u8D85 \u8D5B\u7A0B \u6BD4\u5206\u201D`), { code: "SPORTS_UNAVAILABLE", kind: "network" });
+  }
+  const team = String(args.team || "").trim().toLowerCase();
+  const seen = /* @__PURE__ */ new Set();
+  const events = [];
+  for (const league of asked) {
+    for (const e of results.get(league.code) ?? []) {
+      if (!Number.isFinite(e.time) || e.time < start || e.time >= end) continue;
+      if (e.id && seen.has(e.id)) continue;
+      if (team && !`${e.home.name} ${e.away.name}`.toLowerCase().includes(team)) continue;
+      seen.add(e.id);
+      if (inSportsWindow(e.time, e.state, window)) events.push(e);
+    }
+  }
+  const order = new Map(LEAGUES.map((l, i) => [l.name, i]));
+  events.sort((a, b) => (["around", "forward_live"].includes(window.period) ? Number(b.state === "in") - Number(a.state === "in") : 0) || (window.period !== "all" ? a.time - b.time : beijingDate(a.time).localeCompare(beijingDate(b.time)) || order.get(a.league) - order.get(b.league) || a.time - b.time));
+  progress?.(`\u67E5\u5230 ${events.length} \u573A\uFF08${done - failed.length}/${asked.length} \u4E2A\u8D5B\u4E8B\u6709\u6570\u636E\uFF09`);
+  const secondary = formatScores({ events, from, to, asked, failed, now, window });
+  const notice = partial ? "\u76F4\u64AD\u5427\u90E8\u5206\u65E5\u671F\u672A\u8986\u76D6\uFF0CESPN\u72EC\u7ACB\u8865\u5145\uFF0C\u53EF\u80FD\u91CD\u590D\uFF0C\u4E0D\u80FD\u76F4\u63A5\u76F8\u52A0\u573A\u6570" : primaryUnavailable ? "\u76F4\u64AD\u5427\u6682\u65F6\u53D6\u4E0D\u5230\uFF0C\u4EE5\u4E0B\u6765\u81EA ESPN" : "\u76F4\u64AD\u5427\u5F53\u524D\u5217\u8868\u672A\u8986\u76D6\u6240\u67E5\u65E5\u671F\uFF0C\u4EE5\u4E0B\u6765\u81EA ESPN";
+  return deliver(partial ? partial.text + "\n\n## ESPN\u8865\u5145\uFF08\u4E0E\u4E0A\u65B9\u4E3A\u72EC\u7ACB\u6765\u6E90\uFF0C\u53EF\u80FD\u91CD\u590D\uFF0C\u4E0D\u80FD\u628A\u4E24\u4EFD\u573A\u6570\u76F4\u63A5\u76F8\u52A0\uFF09\n" + secondary : notice + "\n" + secondary, [...partial ? [{ source: "\u76F4\u64AD\u5427", events: partial.events }] : [], { source: "ESPN", events }], notice);
+}
+function zhibo8Sports(args, asked, named) {
+  if (named.length) {
+    const set = /* @__PURE__ */ new Set();
+    for (const n of named) {
+      if (/CBA|NBA|WNBA|篮/i.test(n)) set.add("basketball");
+      else if (/网球|ATP|WTA/i.test(n)) set.add("tennis");
+      else set.add("football");
+    }
+    for (const l of asked) set.add(l.sport === "soccer" ? "football" : l.sport);
+    return [...set];
+  }
+  return { football: ["football"], basketball: ["basketball"], tennis: ["tennis"] }[args.sport] ?? null;
+}
+function createSportsScoresTool(ctx = {}) {
+  const get = ctx.fetchViaGateway ?? ctx.fetchImpl ?? ((...args) => fetch(...args));
+  return {
+    name: "get_sports_scores",
+    description: `\u67E5\u8D5B\u7A0B\u548C\u8D5B\u679C\uFF08\u6BD4\u5206\uFF09\uFF1A\u5317\u4EAC\u65F6\u95F4\u67D0\u4E00\u5929\uFF08\u6216\u6700\u591A ${MAX_DAYS} \u5929\uFF09\u7684\u8DB3\u7403\u3001\u7BEE\u7403\uFF08NBA\u3001CBA \u7B49\uFF09\u3001\u7F51\u7403\u6BD4\u8D5B\uFF0C\u6CA1\u5F00\u6253\u7684\u7ED9\u5F00\u7403\u65F6\u95F4\uFF0C\u8FDB\u884C\u4E2D\u7684\u7ED9\u7B2C\u51E0\u5206\u949F\u548C\u6BD4\u5206\uFF0C\u6253\u5B8C\u7684\u7ED9\u6BD4\u5206\uFF0C\u4E00\u6B21\u67E5\u9F50\u3002\u95EE\u201C\u4ECA\u5929 / \u6628\u665A / \u660E\u5929\u6709\u4EC0\u4E48\u6BD4\u8D5B\u201D\u201C\u67D0\u8054\u8D5B\u8D5B\u7A0B\u201D\u201C\u6BD4\u5206 / \u8D5B\u679C\u201D\u65F6\u5148\u7528\u8FD9\u4E2A\uFF0C\u4E0D\u8981\u5148\u641C\u7F51\u9875\u3001\u4E5F\u4E0D\u8981\u7528\u6280\u80FD\u3002\u5148\u67E5\u76F4\u64AD\u5427\uFF08\u4E2D\u6587\u961F\u540D\uFF0C\u5927\u7EA6\u6628\u5929\u5230\u660E\u5929\uFF09\uFF0C\u66F4\u65E9\u6216\u66F4\u665A\u7684\u67E5 ESPN\uFF08\u53EA\u6709\u4E3B\u8981\u8DB3\u7403\u8054\u8D5B\u548C NBA\uFF09\u3002\u201C\u6628\u665A\u201D\u7684\u6B27\u6D32\u6BD4\u8D5B\u5728\u5317\u4EAC\u65F6\u95F4\u662F\u4ECA\u5929\u51CC\u6668\uFF0Cdate \u586B\u6628\u5929\u3001end_date \u586B\u4ECA\u5929\u3002\u67E5\u4E0D\u5230\u7684\u518D\u7528 web_search\u3002\u754C\u9762\u5361\u7247\u4E0D\u80FD\u66FF\u4EE3\u6587\u5B57\u7B54\u590D\uFF1A\u56DE\u7B54\u4ECD\u8981\u5217\u51FA\u4E3B\u8981\u5BF9\u9635\u3001\u5317\u4EAC\u65F6\u95F4\u3001\u72B6\u6001\u53CA\u6BD4\u5206\uFF0C\u65B9\u4FBF\u5355\u72EC\u9605\u8BFB\u548C\u8BED\u97F3\u6717\u8BFB\u3002`,
+    input_schema: {
+      type: "object",
+      properties: {
+        period: { type: "string", enum: ["all", "upcoming", "remaining", "afternoon", "around", "forward_live"], description: "forward_live\u5F53\u524D\u8D77120\u5206\u949F\uFF0C\u53EA\u542B\u8FDB\u884C\u4E2D/\u4E2D\u573A\u53CA\u672A\u5F00\u8D5B\uFF1B\u666E\u901A\u4ECA\u5929\u8DB3\u7403/\u8DB3\u5F69\u8D5B\u7A0B\u7528forward_live\uFF1B\u660E\u786E\u524D\u540E\u6216\u73B0\u5728\u6709\u4EC0\u4E48\u7403\u7528around\u524D\u540E\u5404120\u5206\u949F\uFF1Ball\u5168\u5929\uFF1Bremaining\u4ECA\u5929\u5269\u4F59\u672A\u5F00\u8D5B\u4E0D\u965060\u5206\u949F\uFF1Bupcoming\u672A\u6765\u5206\u949F\u7A97\u53E3\uFF1Bafternoon12:00\u542B\u81F318:00\u4E0D\u542B" },
+        window_minutes: { type: "integer", minimum: 1, maximum: 360, description: "around\u524D\u540E\u5404\u591A\u5C11\u5206\u949F\uFF0C\u9ED8\u8BA4120\uFF1Bupcoming\u672A\u6765\u5206\u949F\u6570\uFF0C\u9ED8\u8BA460" },
+        date: { type: "string", description: "\u5317\u4EAC\u65F6\u95F4\u65E5\u671F YYYY-MM-DD\uFF0C\u9ED8\u8BA4\u4ECA\u5929" },
+        end_date: { type: "string", description: "\u53EF\u9009\uFF1A\u67E5\u5230\u54EA\u5929\uFF08\u542B\uFF09\uFF0C\u6700\u591A\u8DE8 3 \u5929" },
+        sport: { type: "string", enum: ["all", "football", "basketball", "tennis"], description: "\u7528\u6237\u6CA1\u8BF4\u54EA\u9879\u8FD0\u52A8\u5C31\u586B all" },
+        leagues: { type: "array", items: { type: "string" }, description: "\u53EF\u9009\uFF1A\u53EA\u67E5\u8FD9\u4E9B\u8D5B\u4E8B\uFF0C\u5199\u4E2D\u6587\u540D\uFF08\u4E2D\u8D85\u3001\u4E2D\u7532\u3001\u82F1\u8D85\u3001\u6B27\u51A0\u3001NBA\u3001CBA\u2026\u2026\uFF09\u6216\u201C\u4E94\u5927\u8054\u8D5B\u201D\u201C\u6B27\u6218\u201D" },
+        team: { type: "string", description: "\u53EF\u9009\uFF1A\u53EA\u770B\u67D0\u652F\u7403\u961F\uFF0C\u5199\u4E2D\u6587\u961F\u540D\u7684\u4E00\u90E8\u5206\uFF08\u5982 \u6D77\u6E2F\u3001\u963F\u68EE\u7EB3\u3001\u6E56\u4EBA\uFF09" }
+      },
+      additionalProperties: false
+    },
+    run: async (args, { signal, retrieval, progress, requestText = "", rawRequestText = "" } = {}) => {
+      if (sportsNewsIntent(requestText || rawRequestText)) throw Object.assign(new Error("\u7528\u6237\u8981\u4F53\u80B2\u65B0\u95FB\u8D44\u8BAF\uFF0C\u4E0D\u662F\u6BD4\u5206\u8D5B\u7A0B\uFF1B\u8BF7\u7528web_search\u67E5\u62A5\u9053\uFF0C\u4E0D\u80FD\u7528\u6BD4\u5206\u66FF\u4EE3\u3002"), { code: "SPORTS_NEWS_NOT_SCORES" });
+      const text2 = requestText || rawRequestText;
+      const intent = retrieval?.intentRequest === text2 && retrieval.intent ? retrieval.intent : lookupIntent(text2);
+      const policy = intent.kind === "sports_live" && intent.params.period === "forward_live" ? { period: "forward_live", window_minutes: intent.params.window_minutes, sport: intent.params.sport } : inferSportsWindow(text2);
+      return getSportsScores({ ...args, ...policy }, { get, signal, retrieval, progress, onScores: ctx.onSportsScores });
+    }
+  };
+}
+function sportsPreCall(text2, now = Date.now()) {
+  const t = String(text2 ?? "").trim();
+  if (sportsNewsIntent(t)) return null;
+  if (t.length < 4 || t.length > 120) return null;
+  if (!/赛程|赛果|比分|对阵|战报|开球|比赛|赛事|球赛|踢球|输赢|谁赢|现在有什么球/.test(t)) return null;
+  if (!/[？?]|什么|哪|几|吗|呢|查|有没有|怎么样|多少|安排|列|看|足彩赛程|竞彩足球赛程|前后/.test(t)) return null;
+  if (/排球|乒乓|羽毛球|F1|赛车|台球|高尔夫|棋|田径|游泳|写|生成|做一?[份个张]|文档|表格|PPT/i.test(t)) return null;
+  const today = beijingDate(now);
+  const args = inferSportsWindow(t);
+  const md = t.match(/(\d{1,2})\s*[月/-]\s*(\d{1,2})\s*[日号]?/);
+  if (/前天/.test(t)) args.date = shiftDate(today, -2);
+  else if (/昨晚|昨夜/.test(t)) Object.assign(args, { date: shiftDate(today, -1), end_date: today });
+  else if (/昨天|昨日/.test(t)) args.date = shiftDate(today, -1);
+  else if (/后天/.test(t)) args.date = shiftDate(today, 2);
+  else if (/明天|明日|明晚/.test(t)) args.date = shiftDate(today, 1);
+  else if (/今晚|今夜/.test(t)) Object.assign(args, { date: today, end_date: shiftDate(today, 1) });
+  else if (md) {
+    const mm = String(md[1]).padStart(2, "0");
+    const dd = String(md[2]).padStart(2, "0");
+    const guess = `${today.slice(0, 4)}-${mm}-${dd}`;
+    try {
+      args.date = checkDate(guess);
+    } catch {
+      return null;
+    }
+  }
+  const leagues = LEAGUES.filter((l) => t.includes(l.name)).map((l) => l.name);
+  for (const n of ["CBA", "\u4E2D\u7532", "\u4E2D\u4E59"]) if (t.toUpperCase().includes(n)) leagues.push(n);
+  for (const g of Object.keys(GROUPS)) if (t.includes(g)) leagues.push(g);
+  if (/国足|国家队/.test(t)) leagues.push("\u4E16\u9884\u8D5B\u4E9A\u6D32\u533A", "\u56FD\u9645\u53CB\u8C0A\u8D5B", "\u4E9A\u6D32\u676F");
+  if (leagues.length) args.leagues = [...new Set(leagues)];
+  else if (/篮球|nba/i.test(t)) args.sport = "basketball";
+  else if (/网球/.test(t)) args.sport = "tennis";
+  else if (/足球|足彩|竞彩|球队|英超|欧冠|现在有什么球/.test(t)) args.sport = "football";
+  else args.sport = "all";
+  return args;
+}
+
+// src/agent/lookup/prefetch.js
+var TOPIC = /比分|赛程|赛果|战报|对阵|开球|比赛|直播|新闻|热搜|头条|股价|收盘|开盘|涨跌|行情|大盘|汇率|油价|金价|币价|价格|多少钱|上映|票房|开奖|航班|列车|车次|限行|放假|调休|发布会/;
+var ASKING = /[？?]|什么|哪|几|多少|吗|呢|怎么样|如何|查|搜|有没有|是否/;
+var WEATHER = /天气|气温|下雨|下雪|带伞|温度|雾霾|空气质量/;
+var MAKING = /写|生成|做一?[份个张页]|制作|整理成|翻译|改写|总结|画|唱|记住|提醒|定时|文件|文档|表格|PPT|Word|Excel/i;
+var PRE_SEARCH_MS = 6e3;
+function wantsPreSearch(text2) {
+  const t = String(text2 ?? "").trim();
+  return t.length >= 4 && t.length <= 120 && !lookupComplaint(t) && (sportsNewsIntent(t) || TOPIC.test(t) && ASKING.test(t)) && !WEATHER.test(t) && !MAKING.test(t) && !/https?:\/\//.test(t);
+}
+function preSearchQuery(text2) {
+  return String(text2 ?? "").trim().replace(/^(?:请|麻烦|能不能|可以)?(?:帮我|给我|替我)?(?:查一?下|查询|搜一?下|搜索|看一?下|看看|找一?下|告诉我|问一?下)?[，,：:\s]*/, "").replace(/[？?。！!～~\s]+$/, "").slice(0, 80) || String(text2 ?? "").trim().slice(0, 80);
+}
+async function preSearch({ run, text: text2, signal, timeoutMs = PRE_SEARCH_MS, call = null }) {
+  const ctrl = new AbortController();
+  const stop = () => ctrl.abort(signal?.reason);
+  signal?.addEventListener("abort", stop, { once: true });
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const query = call ? call.name === "web_search" ? String(call.args?.query || "") : "" : preSearchQuery(text2);
+    const [result] = await withWebDeadline((activeSignal) => run([{ id: "pre-search", name: call?.name ?? "web_search", args: call?.args ?? { query } }], activeSignal), { signal: ctrl.signal, timeoutMs });
+    if (!result?.ok || !String(result.output || "").trim()) return null;
+    return { query, output: String(result.output), tool: call?.name ?? "web_search", args: call?.args ?? { query } };
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    return null;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", stop);
+  }
+}
+
+// src/agent/lookup/plan.js
+function weatherPlace(text2, params = {}) {
+  if (params.city) return params.city;
+  const value = String(text2).replace(/[，,。！？?!]+$/, "").trim();
+  const place = value.match(/^(?:请|麻烦)?(?:帮我|给我)?(?:查一?下|查询|看看|看一?下)?\s*(.{1,32}?)(?:今天|今日|明天|后天|现在|这周|本周|未来\d+天)?(?:的)?(?:天气|气温|空气质量)/)?.[1]?.trim();
+  if (!place || /^(?:今天|今日|明天|后天|现在|这里|这边|当地|附近|我这|我们这|这个|最近|未来|的|集团年)$/.test(place)) return null;
+  if (/天气|带伞|下雨|下雪|怎么|什么|请问|这几天|未来|小时|昨天/.test(place)) return null;
+  return place;
+}
+function lookupPlan(intent, { text: text2, getTool, now = Date.now() }) {
+  if (!intent.lookup || intent.kind === "meta") return null;
+  const params = intent.params || {};
+  if (["news", "sports_news"].includes(intent.kind)) {
+    const tool = getTool("get_today_news");
+    if (tool && params.dateMode !== "specified" && (intent.kind !== "sports_news" || supportsSportsNews(tool))) {
+      const categories = params.categories || [];
+      const limit = params.perCategory ? Math.min(24, params.perCategory * (categories.length || 5)) : /原文核实|逐条.*(?:原文|核实)|逐项核验/.test(text2) && !/[0-9一二三四五六七八九十]+\s*条/.test(text2) ? 8 : 12;
+      return { name: tool.name, args: { limit, ...categories.length && { categories }, ...tool.input_schema?.properties?.date_mode && { date_mode: params.dateMode === "recent24h" ? "recent24h" : "today" } }, timeoutMs: 9e3 };
+    }
+  } else if (intent.kind === "weather") {
+    const place = weatherPlace(text2, params);
+    return place && getTool("get_weather") ? { name: "get_weather", args: { place }, timeoutMs: 4e3 } : null;
+  } else if (intent.kind === "sports_live" && getTool("get_sports_scores")) {
+    const args = sportsPreCall(text2, now);
+    if (args || params.period === "forward_live") return { name: "get_sports_scores", args: { ...args, ...params.period === "forward_live" && { period: params.period, window_minutes: params.window_minutes, sport: params.sport } }, timeoutMs: 8e3 };
+  } else if (intent.kind === "market" && getTool("get_stock_kline")) {
+    const code = String(text2).match(/(?<![\dA-Za-z])((?:sh|sz|bj)?\d{6})(?!\d)/i)?.[1];
+    if (code && !/实时|分时|汇率|金价|油价|币价|港股|美股|分钟|去年|今年|历史|最高|最低|过去|近\d|20\d{2}/.test(text2)) return { name: "get_stock_kline", args: { code, adjustment: "none", limit: 3 }, timeoutMs: 8e3 };
+  }
+  return getTool("web_search") && (intent.sure || wantsPreSearch(text2)) ? { name: "web_search", args: { query: preSearchQuery(text2) }, timeoutMs: 6e3 } : null;
+}
+
+// src/agent/lookup/receipts.js
+function lookupReceiptItems(found, intent) {
+  if (!found) return [];
+  try {
+    const data = JSON.parse(found.output);
+    if (data.kind === "today_news") return data.items || [];
+    if (found.tool === "get_stock_kline" && data.sourceUrl) return [{
+      title: `${data.symbol}\u65E5K`,
+      url: data.sourceUrl,
+      source: data.source,
+      publishedAt: null,
+      fetchedAt: data.fetchedAt,
+      kind: intent.kind,
+      category: "\u65E5K",
+      summary: found.output,
+      verified: "api",
+      latestClose: data.latestClose,
+      previousClose: data.previousClose,
+      priceDate: data.priceDate,
+      previousPriceDate: data.previousPriceDate,
+      adjustment: data.adjustment
+    }];
+    if (Array.isArray(data)) return data.slice(0, 24).filter((row) => row.title && /^https?:\/\//.test(row.url)).map((row) => ({
+      title: row.title,
+      url: row.url,
+      source: row.source || "\u641C\u7D22\u6458\u8981",
+      publishedAt: row.publishedAt || null,
+      kind: intent.kind,
+      category: "\u641C\u7D22\u7ED3\u679C",
+      summary: row.snippet || "",
+      verified: "index"
+    }));
+  } catch {
+  }
+  const urls = [...String(found.output).matchAll(/https?:\/\/[^\s<>"）)]+/g)].map((match) => match[0]);
+  return [{
+    title: found.tool,
+    url: urls[0] || null,
+    source: String(found.output).match(/来源[：:]([^\n]+)/)?.[1] || found.tool,
+    publishedAt: null,
+    kind: intent.kind,
+    category: intent.kind,
+    summary: found.output,
+    verified: found.tool === "web_search" ? "index" : "api"
+  }];
+}
+
 // src/agent/lookup/runner.js
 function articleKey(value) {
   try {
@@ -932,7 +1775,19 @@ function articleKey(value) {
   }
 }
 async function runLookup(intent, options = {}) {
-  if (!["news", "sports_news"].includes(intent.kind)) throw Object.assign(new Error("\u672C\u6B65\u4EC5\u63A5\u65B0\u95FB\u548C\u4F53\u80B2\u8D44\u8BAF"), { code: "LOOKUP_KIND_PENDING" });
+  if (options.execute) {
+    const plan = lookupPlan(intent, { text: options.text, getTool: options.getTool, now: options.now });
+    if (!plan) return null;
+    const found = await preSearch({
+      text: options.text,
+      call: { name: plan.name, args: plan.args },
+      timeoutMs: Math.min(plan.timeoutMs, options.clock?.retrievalRemaining() ?? Infinity),
+      signal: options.signal,
+      run: options.execute
+    });
+    return found ? { ...found, kind: intent.kind, items: lookupReceiptItems(found, intent), failures: [] } : null;
+  }
+  if (!["news", "sports_news"].includes(intent.kind)) throw Object.assign(new Error("\u8BE5\u67E5\u8BE2\u9700\u8981\u6CE8\u5165\u5DF2\u914D\u7F6E\u7684\u5DE5\u5177\u9002\u914D\u5668\uFF1B\u672A\u53D1\u8D77\u7F51\u7EDC\u8BF7\u6C42"), { code: "LOOKUP_KIND_PENDING" });
   const { signal, retrieval, health, get, progress, now = Date.now() } = options;
   if (signal?.aborted) throw signal.reason;
   if (intent.params?.dateMode === "specified") throw Object.assign(new Error("\u6307\u5B9A\u5386\u53F2\u65E5\u671F\u6682\u8D70\u539F\u67E5\u8BE2\u8DEF\u5F84\uFF0C\u4E0D\u8F6C\u6362\u6210\u4ECA\u65E5"), { code: "LOOKUP_DATE_PENDING" });
@@ -1004,6 +1859,1013 @@ async function runLookup(intent, options = {}) {
   };
 }
 
+// src/core/qweather.js
+function qweatherCode(icon) {
+  const n = Number(icon);
+  if (n === 100 || n === 150) return 0;
+  if ([101, 102, 103, 151, 152, 153].includes(n)) return 2;
+  if (n === 104 || n === 154) return 3;
+  if (n >= 302 && n <= 304) return 95;
+  if ([307, 308, 310, 311, 312, 316, 317, 318].includes(n)) return 65;
+  if (n >= 300 && n < 400) return 61;
+  if (n >= 400 && n < 500) return 71;
+  if (n >= 500 && n < 600) return 45;
+  return 2;
+}
+var num = (v) => v === void 0 || v === null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v);
+var loc = (lat, lon) => `${Number(lon).toFixed(2)},${Number(lat).toFixed(2)}`;
+async function fetchQWeather({ key, host, latitude, longitude, fetchImpl = (...a) => fetch(...a), signal, timeoutMs = 8e3 }) {
+  const base = `https://${host}`;
+  const at = loc(latitude, longitude);
+  const lat = Number(latitude).toFixed(2), lon = Number(longitude).toFixed(2);
+  const get = async (path3) => {
+    const ctrl = new AbortController();
+    const stop = () => ctrl.abort();
+    signal?.addEventListener("abort", stop, { once: true });
+    const timer = setTimeout(stop, timeoutMs);
+    try {
+      const res = await fetchImpl(`${base}${path3}`, { signal: ctrl.signal, headers: { "X-QW-Api-Key": key, Accept: "application/json" } });
+      if (!res.ok) throw Object.assign(new Error(`\u548C\u98CE\u5929\u6C14\u8FD4\u56DE ${res.status}`), { status: res.status });
+      const j = await res.json();
+      if (j?.code && String(j.code) !== "200") throw Object.assign(new Error(`\u548C\u98CE\u5929\u6C14\u8FD4\u56DE ${j.code}`), { status: Number(j.code) });
+      return j;
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", stop);
+    }
+  };
+  const tryBoth = async (a, b) => {
+    try {
+      return await get(a);
+    } catch (e) {
+      if (signal?.aborted) throw e;
+      return get(b);
+    }
+  };
+  const [now, daily, hourly, air, indices, alerts, minutely] = await Promise.allSettled([
+    get(`/v7/weather/now?location=${at}`),
+    get(`/v7/weather/7d?location=${at}`),
+    get(`/v7/weather/24h?location=${at}`),
+    tryBoth(`/airquality/v1/current/${lat}/${lon}`, `/v7/air/now?location=${at}`),
+    get(`/v7/indices/1d?type=3,1,5,9,2,8&location=${at}`),
+    tryBoth(`/weatheralert/v1/current/${lat}/${lon}`, `/v7/warning/now?location=${at}`),
+    get(`/v7/minutely/5m?location=${at}`)
+  ]);
+  if (now.status !== "fulfilled") throw now.reason;
+  const ok = (r) => r.status === "fulfilled" ? r.value : null;
+  return { source: "qweather", now: ok(now), daily: ok(daily), hourly: ok(hourly), air: ok(air), indices: ok(indices), alerts: ok(alerts), minutely: ok(minutely) };
+}
+async function lookupQWeatherCity({ key, host, query, fetchImpl = (...a) => fetch(...a), signal }) {
+  const res = await fetchImpl(`https://${host}/geo/v2/city/lookup?location=${encodeURIComponent(String(query).trim().slice(0, 80))}&number=8&lang=zh`, { signal, headers: { "X-QW-Api-Key": key, Accept: "application/json" } });
+  if (!res.ok) throw Object.assign(new Error(`\u548C\u98CE\u5929\u6C14\u8FD4\u56DE ${res.status}`), { status: res.status });
+  const j = await res.json();
+  if (j?.code && String(j.code) !== "200") return [];
+  return (j.location ?? []).map((c) => ({ name: String(c.name || "").slice(0, 80), latitude: num(c.lat), longitude: num(c.lon), ...c.adm2 && c.adm2 !== c.name ? { city: String(c.adm2).slice(0, 60), district: String(c.name || "").slice(0, 60) } : {}, .../^https:\/\/www\.qweather\.com\//.test(c.fxLink || "") && { link: String(c.fxLink).slice(0, 300) }, region: [c.adm2 !== c.name ? c.adm2 : "", c.adm1, c.country].filter(Boolean).join(" \xB7 ").slice(0, 120) })).filter((c) => c.name && c.latitude !== null && c.longitude !== null).slice(0, 8);
+}
+function airOf(air) {
+  if (!air) return null;
+  const idx = air.indexes?.find((x) => x.code === "cn-mee") ?? air.indexes?.[0];
+  if (idx) return { aqi: num(idx.aqiDisplay ?? idx.aqi), category: idx.category || "", primary: idx.primaryPollutant?.name || "", pm25: num(air.pollutants?.find((p) => p.code === "pm2p5")?.concentration?.value) };
+  if (air.now) return { aqi: num(air.now.aqi), category: air.now.category || "", primary: air.now.primary && air.now.primary !== "NA" ? air.now.primary : "", pm25: num(air.now.pm2p5) };
+  return null;
+}
+function alertsOf(a) {
+  if (!a) return [];
+  if (Array.isArray(a.alerts)) return a.alerts.map((x) => ({ title: x.headline || x.eventType?.name || "", text: x.description || "", level: x.color?.code || x.severity || "" }));
+  if (Array.isArray(a.warning)) return a.warning.map((x) => ({ title: x.title || x.typeName || "", text: x.text || "", level: x.severityColor || x.level || "" }));
+  return [];
+}
+function parseQWeather(bundle, now = Date.now()) {
+  const n = bundle?.now?.now;
+  const temp = num(n?.temp);
+  if (!n || temp === null || temp < -120 || temp > 80) throw new Error("\u5929\u6C14\u6570\u636E\u4E0D\u5B8C\u6574\uFF0C\u8BF7\u7A0D\u540E\u5237\u65B0");
+  const daily = bundle.daily?.daily ?? [];
+  const days = daily.slice(0, 7).map((d) => ({
+    date: String(d.fxDate).slice(0, 10),
+    low: num(d.tempMin),
+    high: num(d.tempMax),
+    code: qweatherCode(d.iconDay),
+    rain: null,
+    text: d.textDay === d.textNight || !d.textNight ? d.textDay : `${d.textDay}\u8F6C${d.textNight}`,
+    wind: d.windDirDay ? `${d.windDirDay} ${d.windScaleDay}\u7EA7` : "",
+    uv: num(d.uvIndex),
+    precip: num(d.precip),
+    humidity: num(d.humidity),
+    sunrise: d.sunrise || "",
+    sunset: d.sunset || ""
+  })).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.date));
+  const obs = String(n.obsTime || "");
+  const offset = /([+-])(\d{2}):(\d{2})$/.exec(obs);
+  const hour = Number(obs.slice(11, 13));
+  const today = days[0];
+  const isDay = today?.sunrise && today?.sunset ? obs.slice(11, 16) >= today.sunrise && obs.slice(11, 16) < today.sunset : hour >= 6 && hour < 18;
+  return {
+    source: "qweather",
+    temp,
+    code: qweatherCode(n.icon),
+    text: n.text || "",
+    isDay,
+    at: obs.slice(0, 16),
+    offset: offset ? (offset[1] === "-" ? -1 : 1) * (Number(offset[2]) * 3600 + Number(offset[3]) * 60) : 28800,
+    days,
+    fetchedAt: now,
+    extra: {
+      feels: num(n.feelsLike),
+      humidity: num(n.humidity),
+      wind: n.windDir ? `${n.windDir} ${n.windScale}\u7EA7\uFF08${n.windSpeed} km/h\uFF09` : "",
+      pressure: num(n.pressure),
+      vis: num(n.vis),
+      precip: num(n.precip),
+      cloud: num(n.cloud),
+      dew: num(n.dew),
+      air: airOf(bundle.air),
+      hourly: (bundle.hourly?.hourly ?? []).slice(0, 24).map((h) => ({ time: String(h.fxTime).slice(11, 16), temp: num(h.temp), text: h.text || "", code: qweatherCode(h.icon), pop: num(h.pop) })),
+      indices: (bundle.indices?.daily ?? []).map((x) => ({ name: x.name || "", category: x.category || "", text: x.text || "" })).filter((x) => x.name),
+      alerts: alertsOf(bundle.alerts).filter((x) => x.title),
+      rainSoon: bundle.minutely?.summary || ""
+    }
+  };
+}
+function formatQWeather(placeName, data, days = 3, link2 = "") {
+  const x = data.extra ?? {};
+  const lines = [`\u5730\u70B9\uFF1A${placeName}`];
+  lines.push(`\u5B9E\u51B5\uFF08${data.at.replace("T", " ")}\uFF09\uFF1A${data.text}\uFF0C${Math.round(data.temp)}\xB0C${x.feels !== null ? `\uFF08\u4F53\u611F ${Math.round(x.feels)}\xB0C\uFF09` : ""}${x.humidity !== null ? `\uFF0C\u6E7F\u5EA6 ${x.humidity}%` : ""}${x.wind ? `\uFF0C${x.wind}` : ""}${x.pressure !== null ? `\uFF0C\u6C14\u538B ${x.pressure} hPa` : ""}${x.vis !== null ? `\uFF0C\u80FD\u89C1\u5EA6 ${x.vis} km` : ""}${x.precip ? `\uFF0C\u964D\u6C34 ${x.precip} mm` : ""}`);
+  if (x.rainSoon) lines.push(`\u672A\u6765\u4E24\u5C0F\u65F6\uFF1A${x.rainSoon}`);
+  if (x.air?.aqi !== null && x.air) lines.push(`\u7A7A\u6C14\u8D28\u91CF\uFF1AAQI ${x.air.aqi}\uFF08${x.air.category}\uFF09${x.air.primary ? `\uFF0C\u9996\u8981\u6C61\u67D3\u7269 ${x.air.primary}` : ""}`);
+  for (const a of x.alerts ?? []) lines.push(`\u9884\u8B66\uFF1A${a.title}${a.text ? `\u3002${a.text.slice(0, 120)}` : ""}`);
+  const next = (x.hourly ?? []).slice(0, 12).filter((_, i) => i % 3 === 0);
+  if (next.length) lines.push(`\u63A5\u4E0B\u6765\u51E0\u5C0F\u65F6\uFF1A${next.map((h) => `${h.time} ${h.text} ${h.temp}\xB0C${h.pop !== null ? ` \u964D\u6C34 ${h.pop}%` : ""}`).join("\uFF1B")}`);
+  const NAMES = ["\u4ECA\u5929", "\u660E\u5929", "\u540E\u5929"];
+  data.days.slice(0, days).forEach((d, i) => lines.push(`${NAMES[i] ?? d.date}\uFF08${d.date}\uFF09\uFF1A${d.text}\uFF0C${d.low}\uFF5E${d.high}\xB0C${d.wind ? `\uFF0C${d.wind}` : ""}${d.uv !== null ? `\uFF0C\u7D2B\u5916\u7EBF ${d.uv}` : ""}${d.sunrise ? `\uFF0C\u65E5\u51FA ${d.sunrise} \u65E5\u843D ${d.sunset}` : ""}`));
+  if (x.indices?.length) lines.push(`\u751F\u6D3B\u6307\u6570\uFF1A${x.indices.map((i) => `${i.name} ${i.category}`).join("\uFF1B")}`);
+  lines.push("\u6765\u6E90\uFF1A\u548C\u98CE\u5929\u6C14\uFF08qweather.com\uFF09");
+  if (link2) lines.push(`\u672C\u6B21\u6570\u636E\u94FE\u63A5\uFF08\u5F15\u7528\u6765\u6E90\u65F6\u7ED9\u8FD9\u4E2A\uFF0C\u4E0D\u8981\u53EA\u7ED9\u9996\u9875\uFF09\uFF1A${link2}`);
+  return lines.join("\n");
+}
+
+// src/agent/weather.js
+var WMO = {
+  0: "\u6674",
+  1: "\u5927\u81F4\u6674",
+  2: "\u591A\u4E91",
+  3: "\u9634",
+  45: "\u96FE",
+  48: "\u51BB\u96FE",
+  51: "\u5C0F\u6BDB\u6BDB\u96E8",
+  53: "\u6BDB\u6BDB\u96E8",
+  55: "\u5927\u6BDB\u6BDB\u96E8",
+  56: "\u51BB\u6BDB\u6BDB\u96E8",
+  57: "\u51BB\u6BDB\u6BDB\u96E8",
+  61: "\u5C0F\u96E8",
+  63: "\u4E2D\u96E8",
+  65: "\u5927\u96E8",
+  66: "\u51BB\u96E8",
+  67: "\u51BB\u96E8",
+  71: "\u5C0F\u96EA",
+  73: "\u4E2D\u96EA",
+  75: "\u5927\u96EA",
+  77: "\u96EA\u7C92",
+  80: "\u9635\u96E8",
+  81: "\u4E2D\u9635\u96E8",
+  82: "\u5F3A\u9635\u96E8",
+  85: "\u9635\u96EA",
+  86: "\u5F3A\u9635\u96EA",
+  95: "\u96F7\u9635\u96E8",
+  96: "\u96F7\u9635\u96E8\u4F34\u51B0\u96F9",
+  99: "\u5F3A\u96F7\u9635\u96E8\u4F34\u51B0\u96F9"
+};
+var wmoText = (code) => WMO[code] ?? `\u5929\u6C14\u4EE3\u7801 ${code}`;
+var DAY = ["\u4ECA\u5929", "\u660E\u5929", "\u540E\u5929"];
+var round = (v) => typeof v === "number" ? Math.round(v) : v;
+function formatOpenMeteo(place, fc, days = 3, dataUrl = "") {
+  const c = fc.current ?? {};
+  const where = [place.name, place.admin1, place.country].filter((x, i, a) => x && a.indexOf(x) === i).join("\uFF0C");
+  const lines = [`\u5730\u70B9\uFF1A${where}`];
+  if (c.time) lines.push(`\u5B9E\u51B5\uFF08${c.time.replace("T", " ")}\uFF09\uFF1A${wmoText(c.weather_code)}\uFF0C${round(c.temperature_2m)}\xB0C\uFF08\u4F53\u611F ${round(c.apparent_temperature)}\xB0C\uFF09\uFF0C\u6E7F\u5EA6 ${round(c.relative_humidity_2m)}%\uFF0C\u98CE\u901F ${round(c.wind_speed_10m)} km/h${c.precipitation ? `\uFF0C\u964D\u6C34 ${c.precipitation} mm` : ""}`);
+  const d = fc.daily ?? {};
+  for (let i = 0; i < Math.min(days, d.time?.length ?? 0); i++) {
+    const rain = d.precipitation_probability_max?.[i];
+    lines.push(`${DAY[i] ?? d.time[i]}\uFF08${d.time[i]}\uFF09\uFF1A${wmoText(d.weather_code?.[i])}\uFF0C${round(d.temperature_2m_min?.[i])}\uFF5E${round(d.temperature_2m_max?.[i])}\xB0C${rain != null ? `\uFF0C\u964D\u6C34\u6982\u7387 ${rain}%` : ""}`);
+  }
+  lines.push("\u6765\u6E90\uFF1AOpen-Meteo\uFF08open-meteo.com\uFF09");
+  if (dataUrl) lines.push(`\u672C\u6B21\u6570\u636E\u94FE\u63A5\uFF08\u5F15\u7528\u6765\u6E90\u65F6\u7ED9\u8FD9\u4E2A\uFF0C\u4E0D\u8981\u53EA\u7ED9\u9996\u9875\uFF09\uFF1A${dataUrl}`);
+  return lines.join("\n");
+}
+function formatWttr(placeName, j, days = 3, dataUrl = "") {
+  const c = j.current_condition?.[0] ?? {};
+  const desc = (x) => x?.lang_zh?.[0]?.value || x?.weatherDesc?.[0]?.value || "";
+  const area = j.nearest_area?.[0];
+  const where = [area?.areaName?.[0]?.value, area?.region?.[0]?.value, area?.country?.[0]?.value].filter(Boolean).join("\uFF0C") || placeName;
+  const lines = [`\u5730\u70B9\uFF1A${where}`, `\u5B9E\u51B5\uFF1A${desc(c)}\uFF0C${c.temp_C}\xB0C\uFF08\u4F53\u611F ${c.FeelsLikeC}\xB0C\uFF09\uFF0C\u6E7F\u5EA6 ${c.humidity}%\uFF0C\u98CE\u901F ${c.windspeedKmph} km/h`];
+  (j.weather ?? []).slice(0, days).forEach((w, i) => {
+    const noon = w.hourly?.[4] ?? w.hourly?.[0];
+    const rain = Math.max(0, ...(w.hourly ?? []).map((h) => Number(h.chanceofrain) || 0));
+    lines.push(`${DAY[i] ?? w.date}\uFF08${w.date}\uFF09\uFF1A${desc(noon)}\uFF0C${w.mintempC}\uFF5E${w.maxtempC}\xB0C\uFF0C\u964D\u6C34\u6982\u7387 ${rain}%`);
+  });
+  lines.push("\u6765\u6E90\uFF1Awttr.in");
+  if (dataUrl) lines.push(`\u672C\u6B21\u6570\u636E\u94FE\u63A5\uFF08\u5F15\u7528\u6765\u6E90\u65F6\u7ED9\u8FD9\u4E2A\uFF0C\u4E0D\u8981\u53EA\u7ED9\u9996\u9875\uFF09\uFF1A${dataUrl}`);
+  return lines.join("\n");
+}
+async function getWeather(place, { get, days = 3, signal, retrieval, qweather = null }) {
+  if (!String(place || "").trim()) throw Object.assign(new Error("\u7F3A\u5C11\u5730\u70B9\uFF0C\u8BF7\u63D0\u4F9B\u57CE\u5E02\u6216\u5B9A\u4F4D\u7ED3\u679C\uFF0C\u4E0D\u80FD\u9ED8\u8BA4\u731C\u6D4B\u57CE\u5E02"), { code: "WEATHER_LOCATION_REQUIRED", name: "ValidationError" });
+  const name = String(place || "").trim().replace(/(市|区|县)$/, "") || "\u5317\u4EAC";
+  const json = (url) => retryRead(async (requestSignal) => {
+    const response = await get(url, { signal: requestSignal });
+    if (!response.ok) throw httpError(response.status, "", "\u5929\u6C14\u670D\u52A1");
+    return response.json();
+  }, { signal, timeoutMs: 4e3, beforeAttempt: () => retrieval?.consume("read") });
+  let firstErr;
+  if (qweather) {
+    try {
+      retrieval?.consume("read");
+      const fetchImpl = (url, init) => get(`${url}${url.includes("?") ? "&" : "?"}key=${encodeURIComponent(qweather.key)}`, init);
+      const city = (await lookupQWeatherCity({ ...qweather, query: name, fetchImpl, signal }))[0];
+      if (!city) throw new Error(`\u6CA1\u627E\u5230\u5730\u70B9\u201C${name}\u201D`);
+      const data = parseQWeather(await fetchQWeather({ ...qweather, latitude: city.latitude, longitude: city.longitude, fetchImpl, signal }));
+      return formatQWeather([city.name, city.region].filter(Boolean).join("\uFF0C"), data, days, city.link);
+    } catch (e) {
+      throwControl(e, signal);
+      firstErr = e;
+    }
+  }
+  try {
+    const geo = await json(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=zh&format=json`);
+    const p = geo.results?.[0];
+    if (!p) throw new Error(`\u6CA1\u627E\u5230\u5730\u70B9\u201C${name}\u201D`);
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${p.latitude}&longitude=${p.longitude}&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,precipitation&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=${Math.min(7, Math.max(1, days))}`;
+    return formatOpenMeteo(p, await json(url), days, url);
+  } catch (e) {
+    throwControl(e, signal);
+    firstErr = e;
+  }
+  try {
+    return formatWttr(name, await json(`https://wttr.in/${encodeURIComponent(name)}?format=j1&lang=zh`), days, `https://wttr.in/${encodeURIComponent(name)}?lang=zh`);
+  } catch (e) {
+    throwControl(e, signal);
+    throw Object.assign(new Error("\u5929\u6C14\u670D\u52A1\u8BBF\u95EE\u5931\u8D25\uFF08" + firstErr?.message + "\uFF1B" + e.message + "\uFF09\uFF0C\u53EF\u4EE5\u6539\u7528web_search\u67E5\u8BE2"), { code: e.code || "WEATHER_FAILED", kind: errorKind(e) || "api", status: e.status, cause: e });
+  }
+}
+
+// src/agent/stockKline.js
+var invalid2 = (message) => Object.assign(new Error(message), { name: "ValidationError", code: "INVALID_STOCK_INPUT" });
+function stockSymbol(code) {
+  const value = String(code ?? "").trim().toLowerCase();
+  if (/^(sh|sz|bj)\d{6}$/.test(value)) return value;
+  if (!/^\d{6}$/.test(value)) throw invalid2("\u8BF7\u63D0\u4F9B\u516D\u4F4D\u8BC1\u5238\u4EE3\u7801\uFF0C\u4E0D\u51ED\u540D\u79F0\u731C\u6D4B\u4EE3\u7801");
+  if (/^6/.test(value)) return "sh" + value;
+  if (/^[03]/.test(value)) return "sz" + value;
+  if (/^[48]|^92/.test(value)) return "bj" + value;
+  throw invalid2("\u8BC1\u5238\u5E02\u573A\u4E0D\u660E\u786E\uFF0C\u8BF7\u63D0\u4F9Bsh/sz/bj\u524D\u7F00");
+}
+function day(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value)) || !Number.isFinite(Date.parse(value + "T00:00:00Z")) || (/* @__PURE__ */ new Date(value + "T00:00:00Z")).toISOString().slice(0, 10) !== value)
+    throw invalid2("\u65E5\u671F\u65E0\u6548\uFF0C\u9700\u8981YYYY-MM-DD");
+  return value;
+}
+function normalizeBars(rows) {
+  const seen = /* @__PURE__ */ new Set();
+  const bars = [];
+  for (const row of rows ?? []) {
+    const data = Array.isArray(row) ? { date: row[0], open: row[1], close: row[2], high: row[3], low: row[4], volume: row[5] } : { date: String(row.day ?? row.date).slice(0, 10), open: row.open, close: row.close, high: row.high, low: row.low, volume: row.volume };
+    day(data.date);
+    for (const key of ["open", "close", "high", "low", "volume"]) {
+      data[key] = Number(data[key]);
+      if (!Number.isFinite(data[key]) || data[key] < 0) throw invalid2("\u884C\u60C5\u5305\u542B\u975E\u6CD5\u6570\u503C");
+    }
+    if (data.low > Math.min(data.open, data.close) || data.high < Math.max(data.open, data.close) || data.high < data.low)
+      throw invalid2("\u884C\u60C5\u9AD8\u4F4E\u4EF7\u4E0E\u5F00\u6536\u76D8\u77DB\u76FE");
+    if (seen.has(data.date)) throw invalid2("\u884C\u60C5\u65E5\u671F\u91CD\u590D");
+    seen.add(data.date);
+    bars.push(data);
+  }
+  return bars.sort((left, right) => left.date.localeCompare(right.date));
+}
+function summarizeKline(rows, { start, end } = {}) {
+  const all = normalizeBars(rows);
+  const bars = all.filter((bar) => (!start || bar.date >= start) && (!end || bar.date <= end));
+  if (!bars.length) throw Object.assign(new Error("\u6307\u5B9A\u8303\u56F4\u6CA1\u6709\u53D6\u5F97\u65E5K\u6570\u636E\uFF0C\u4E0D\u4EE3\u8868\u8BE5\u8BC1\u5238\u6CA1\u6709\u4EA4\u6613"), { code: "NO_MARKET_DATA", kind: "api" });
+  const highest = Math.max(...bars.map((bar) => bar.high));
+  const lowest = Math.min(...bars.map((bar) => bar.low));
+  return {
+    bars,
+    count: bars.length,
+    highest,
+    highestDates: bars.filter((bar) => bar.high === highest).map((bar) => bar.date),
+    lowest,
+    lowestDates: bars.filter((bar) => bar.low === lowest).map((bar) => bar.date),
+    range: { first: bars[0].date, last: bars.at(-1).date },
+    coverage: start && all[0]?.date > start ? "start_not_covered_check_listing_or_provider_limit" : "returned_records_only"
+  };
+}
+function completedStockCloses(rows, { start, end, adjustment = "none", now = Date.now() } = {}) {
+  const all = normalizeBars(rows);
+  const today = new Date(now + 8 * 36e5).toISOString().slice(0, 10);
+  const completed = all.filter((bar) => bar.close > 0 && bar.date <= today && (bar.date < today || now >= Date.parse(bar.date + "T15:05:00+08:00")));
+  const latest = completed.filter((bar) => (!start || bar.date >= start) && (!end || bar.date <= end)).at(-1);
+  const previous = latest && completed.filter((bar) => bar.date < latest.date).at(-1);
+  return {
+    latestClose: latest?.close ?? null,
+    previousClose: previous?.close ?? null,
+    priceDate: latest?.date ?? null,
+    previousPriceDate: previous?.date ?? null,
+    priceState: latest ? "completed_daily_bar" : "missing_completed_bar",
+    holdingCompatible: Boolean(latest && adjustment === "none"),
+    marketTimeZone: "Asia/Shanghai",
+    closeCutoff: "15:05 Asia/Shanghai",
+    priceScope: "latest_completed_bar_in_requested_range",
+    previousCloseBasis: "previous_available_daily_bar_same_source_and_adjustment"
+  };
+}
+function createStockKlineTool(ctx = {}) {
+  const get = ctx.fetchViaGateway ?? ctx.fetchImpl ?? ((...args) => fetch(...args));
+  return {
+    name: "get_stock_kline",
+    description: "\u8BFB\u53D6A\u80A1\u5386\u53F2\u65E5K\u548C\u7A0B\u5E8F\u8BA1\u7B97\u7684\u6781\u503C\u3002\u56DE\u6267latestClose/previousClose/priceDate\u5206\u522B\u4E3A\u6700\u65B0\u5DF2\u7ED3\u675F\u65E5K\u6536\u76D8\u3001\u4E0A\u4E00\u6761\u65E5K\u6536\u76D8\u53CA\u65E5\u671F\uFF0C\u7F3A\u9879\u4E3Anull\uFF1B\u7ED9holding_profit\u6620\u5C04price/prevClose/priceDate\uFF0C\u6309\u73B0\u91D1\u6210\u672C\u7B97\u76C8\u4E8F\u987Badjustment=none\u3002\u4ECA\u65E5\u76D8\u4E2D\u65E5K\u4E0D\u5192\u5145\u6536\u76D8\uFF1B\u4E0D\u7B49\u4E8E\u5B9E\u65F6\u6210\u4EA4\u4EF7\u6216\u5B8C\u6574\u5386\u53F2\u3002",
+    input_schema: {
+      type: "object",
+      properties: {
+        code: { type: "string" },
+        start: { type: "string" },
+        end: { type: "string" },
+        adjustment: { type: "string", enum: ["none", "qfq", "hfq"] },
+        limit: { type: "integer", minimum: 1, maximum: 120 }
+      },
+      required: ["code"],
+      additionalProperties: false
+    },
+    run: async ({ code, start, end, adjustment = "none", limit = 60 }, { signal, retrieval } = {}) => {
+      const symbol = stockSymbol(code);
+      if (start) day(start);
+      if (end) day(end);
+      if (start && end && start > end) throw invalid2("\u5F00\u59CB\u65E5\u671F\u4E0D\u80FD\u665A\u4E8E\u7ED3\u675F\u65E5\u671F");
+      if (!["none", "qfq", "hfq"].includes(adjustment) || !Number.isInteger(limit) || limit < 1 || limit > 120) throw invalid2("\u590D\u6743\u65B9\u5F0F\u6216\u6761\u6570\u4E0D\u5408\u6CD5");
+      const mode = adjustment === "none" ? "" : adjustment;
+      const requestTime = typeof ctx.now === "function" ? ctx.now() : Date.now();
+      const providers = [
+        {
+          source: "\u817E\u8BAF\u884C\u60C5",
+          url: "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=" + encodeURIComponent([symbol, "day", start ?? "", end ?? "", Math.max(3, limit), mode].join(",")),
+          parse: (text2) => {
+            const response = JSON.parse(text2);
+            const data = response.data?.[symbol];
+            return data?.[mode ? mode + "day" : "day"] ?? [];
+          }
+        }
+      ];
+      if (adjustment === "none")
+        providers.push({
+          source: "\u65B0\u6D6A\u884C\u60C5",
+          url: "https://quotes.sina.cn/cn/api/jsonp_v2.php/var%20_k=/CN_MarketDataService.getKLineData?symbol=" + symbol + "&scale=240&ma=no&datalen=1023",
+          parse: (text2) => {
+            const array = text2.match(/\[[\s\S]*\]/)?.[0];
+            return array ? JSON.parse(array) : [];
+          }
+        });
+      let lastError;
+      const failedSources = [];
+      for (const provider of providers) {
+        try {
+          const rows = await retryRead(
+            async (requestSignal) => {
+              const response = await get(provider.url, { signal: requestSignal });
+              if (!response.ok) throw httpError(response.status, "", provider.source);
+              return provider.parse(await response.text());
+            },
+            { signal, timeoutMs: 5e3, beforeAttempt: () => retrieval?.consume("read") }
+          );
+          const result = summarizeKline(rows, { start, end });
+          const requested = result.bars.slice(-limit);
+          const trimmed = summarizeKline(requested, { start, end });
+          return JSON.stringify({
+            symbol,
+            source: provider.source,
+            sourceUrl: provider.url,
+            adjustment,
+            ...completedStockCloses(rows, { start, end, adjustment, now: requestTime }),
+            failedSources,
+            fetchedAt: (/* @__PURE__ */ new Date()).toISOString(),
+            ...trimmed,
+            providerRows: result.count,
+            truncated: result.count > limit,
+            note: "\u6781\u503C\u4EC5\u9488\u5BF9\u8FD4\u56DEbars\uFF1B\u505C\u724C\u3001\u4E0A\u5E02\u65E5\u671F\u3001\u6765\u6E90\u5386\u53F2\u4E0A\u9650\u5747\u53EF\u80FD\u5F71\u54CD\u8986\u76D6\u3002latestClose\u7B49\u5B57\u6BB5\u53EA\u7528\u540C\u6765\u6E90\u540C\u590D\u6743\u7684\u5DF2\u7ED3\u675F\u65E5K\uFF08\u5317\u4EAC\u65F6\u95F4\u5F53\u65E515:05\u524D\u4E0D\u91C7\u7528\u5F53\u65E5\u6761\u76EE\uFF09\uFF0C\u4E0D\u7B49\u4E8E\u5B9E\u65F6\u6210\u4EA4\u4EF7\uFF1BpreviousClose\u662F\u4E0A\u4E00\u6761\u53EF\u53D6\u5F97\u65E5K\uFF0C\u7F3A\u5931\u4E3Anull\u3002\u590D\u6743\u4EF7\u683C\u4E0D\u80FD\u76F4\u63A5\u548C\u672A\u590D\u6743\u73B0\u91D1\u6210\u672C\u6DF7\u7B97\u3002\u6210\u4EA4\u91CF\u6CBF\u7528\u6765\u6E90\u5355\u4F4D\uFF0C\u672A\u8DE8\u6E90\u6DF7\u5408\uFF1Bbars\u53EF\u80FD\u542B\u4ECA\u65E5\u76D8\u4E2D\u6761\u76EE\u3002"
+          });
+        } catch (error) {
+          throwControl(error, signal);
+          lastError = error;
+          failedSources.push({ source: provider.source, code: String(error.code || error.name || "MARKET_SOURCE_ERROR").slice(0, 80) });
+        }
+      }
+      throw lastError ?? Object.assign(new Error("\u884C\u60C5\u6682\u65F6\u4E0D\u53EF\u7528"), { code: "NO_MARKET_DATA", kind: "network" });
+    }
+  };
+}
+
+// shared/providers.js
+var PROVIDERS = [
+  { id: "mock", name: "\u5185\u7F6E\u6F14\u793A\uFF08\u79BB\u7EBF\uFF09", kind: "mock", baseURL: "", models: ["jarvis-demo"], needsKey: false, browser: true },
+  { id: "anthropic", name: "Anthropic Claude", kind: "anthropic", baseURL: "https://api.anthropic.com", models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"], keyUrl: "https://console.anthropic.com/", browser: true, webSearch: true },
+  { id: "openai", name: "OpenAI", kind: "openai", baseURL: "https://api.openai.com/v1", models: ["gpt-5", "gpt-5-mini", "gpt-4.1"], keyUrl: "https://platform.openai.com/api-keys", browser: true },
+  { id: "gemini", name: "Google Gemini", kind: "openai", baseURL: "https://generativelanguage.googleapis.com/v1beta/openai", models: ["gemini-2.5-pro", "gemini-2.5-flash"], keyUrl: "https://aistudio.google.com/apikey", browser: true },
+  { id: "deepseek", name: "DeepSeek \u6DF1\u5EA6\u6C42\u7D22", kind: "openai", baseURL: "https://api.deepseek.com/v1", models: ["deepseek-chat", "deepseek-reasoner"], keyUrl: "https://platform.deepseek.com/api_keys", browser: false },
+  { id: "qwen", name: "\u901A\u4E49\u5343\u95EE\uFF08\u963F\u91CC\u4E91\u767E\u70BC\uFF09", kind: "openai", baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", models: ["qwen-max", "qwen-plus", "qwen-turbo"], keyUrl: "https://bailian.console.aliyun.com/", browser: false },
+  { id: "moonshot", name: "Kimi\uFF08\u6708\u4E4B\u6697\u9762\uFF09", kind: "openai", baseURL: "https://api.moonshot.cn/v1", models: ["kimi-latest", "moonshot-v1-32k"], keyUrl: "https://platform.moonshot.cn/console/api-keys", browser: false },
+  { id: "zhipu", name: "\u667A\u8C31 GLM", kind: "openai", baseURL: "https://open.bigmodel.cn/api/paas/v4", models: ["glm-4.5", "glm-4-flash"], keyUrl: "https://open.bigmodel.cn/usercenter/apikeys", browser: false },
+  { id: "doubao", name: "\u8C46\u5305\uFF08\u706B\u5C71\u65B9\u821F\uFF09", kind: "openai", baseURL: "https://ark.cn-beijing.volces.com/api/v3", models: ["doubao-seed-1-6-250615"], keyUrl: "https://console.volcengine.com/ark", browser: false, note: "\u578B\u53F7\u5904\u53EF\u586B\u5199\u65B9\u821F\u63A7\u5236\u53F0\u91CC\u7684\u201C\u63A8\u7406\u63A5\u5165\u70B9 ID\u201D" },
+  { id: "siliconflow", name: "\u7845\u57FA\u6D41\u52A8 SiliconFlow", kind: "openai", baseURL: "https://api.siliconflow.cn/v1", models: ["deepseek-ai/DeepSeek-V3", "Qwen/Qwen2.5-72B-Instruct"], keyUrl: "https://cloud.siliconflow.cn/account/ak", browser: false },
+  { id: "openrouter", name: "OpenRouter\uFF08\u805A\u5408\uFF09", kind: "openai", baseURL: "https://openrouter.ai/api/v1", models: ["openai/gpt-5", "google/gemini-2.5-pro", "deepseek/deepseek-chat"], keyUrl: "https://openrouter.ai/keys", browser: true },
+  { id: "ollama", name: "Ollama\uFF08\u672C\u673A\u6A21\u578B\uFF09", kind: "openai", baseURL: "http://127.0.0.1:11434/v1", models: ["qwen3:8b", "qwen3:4b"], needsKey: false, browser: true, note: "\u6D4F\u89C8\u5668\u76F4\u8FDE\u9700\u4EE5 OLLAMA_ORIGINS=* \u542F\u52A8 Ollama\uFF1B\u7528\u5B8C\u6574\u7248\u7F51\u5173\u5219\u4E0D\u9700\u8981" },
+  // 多协议中转（如 TeamoRouter）：一个地址一个密钥，按模型名自动用原生格式——
+  // Claude → /v1/messages、GPT → /v1/responses（都能开模型自带的联网搜索），其他 → /v1/chat/completions
+  { id: "relay-multi", name: "\u591A\u534F\u8BAE\u4E2D\u8F6C\uFF08\u6309\u6A21\u578B\u7528\u539F\u751F\u683C\u5F0F\uFF0C\u5982 TeamoRouter\uFF09", kind: "multi", baseURL: "", models: ["gpt-6.1-sol", "claude-fable-5-1", "gemini-3.5-flash"], browser: true, custom: true, webSearch: true },
+  // 中转站的 Anthropic 原生接口（/v1/messages）：能用 Claude 和它的内置联网搜索（要看中转站是否支持）
+  { id: "claude-relay", name: "Claude \u4E2D\u8F6C\uFF08Anthropic \u539F\u751F\u683C\u5F0F\uFF09", kind: "anthropic", baseURL: "", models: ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"], browser: true, custom: true, webSearch: true },
+  { id: "custom", name: "\u81EA\u5B9A\u4E49\uFF08OpenAI \u517C\u5BB9\uFF09", kind: "openai", baseURL: "", models: [""], browser: true, custom: true },
+  // 有界的独立中转线路：同名模型也能分开保存地址、密钥和备用顺序。
+  ...Array.from({ length: 7 }, (_, index) => ({ id: `relay-${index + 2}`, name: `\u81EA\u5B9A\u4E49\u670D\u52A1\u5546 ${index + 2}\uFF08\u591A\u534F\u8BAE\uFF09`, kind: "multi", baseURL: "", models: [""], browser: true, custom: true, webSearch: true }))
+];
+function isPrivateHost(host) {
+  const h = host.replace(/^\[|\]$/g, "").toLowerCase();
+  return h === "localhost" || h.endsWith(".local") || h === "::1" || h === "0.0.0.0" || /^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^f[cd][0-9a-f]{2}:/.test(h) || /^fe80:/.test(h);
+}
+
+// src/agent/deepseekSearch.js
+var ORIGIN = "https://api.deepseek.com/v1/tools/";
+var secret = (value) => typeof value === "string" && !value.startsWith("\u2022\u2022\u2022\u2022") ? value.trim() : "";
+function publicUrl(address) {
+  let parsed;
+  try {
+    parsed = new URL(address);
+  } catch {
+    throw Object.assign(new Error("\u8BF7\u63D0\u4F9B\u6709\u6548\u7684\u516C\u7F51\u7F51\u9875\u5730\u5740"), { code: "INVALID_FETCH_URL", kind: "api" });
+  }
+  if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password || isPrivateHost(parsed.hostname.replace(/\.$/, "")) || parsed.hostname.endsWith(".internal") || !parsed.hostname.includes(".") || address.length > 8192)
+    throw Object.assign(new Error("\u79C1\u6709\u3001\u542B\u51ED\u636E\u6216\u65E0\u6548\u5730\u5740\u4E0D\u53D1\u9001\u5230\u516C\u5171\u6293\u53D6\u670D\u52A1"), { code: "PRIVATE_NETWORK_BLOCKED", kind: "api", status: 403 });
+  return parsed.href;
+}
+function createDeepseekSearch({ deepseekSearchEnabled, deepseekSearchKey, fetchViaGateway, fetchImpl = (...args) => globalThis.fetch(...args) } = {}) {
+  if (!deepseekSearchEnabled) return null;
+  const get = fetchViaGateway || fetchImpl;
+  const unavailableUntil = { search: 0, fetch: 0 };
+  async function request(kind, body, { signal, consume } = {}) {
+    if (unavailableUntil[kind] > Date.now())
+      throw Object.assign(new Error("DeepSeek " + (kind === "search" ? "\u641C\u7D22" : "\u8BFB\u7F51\u9875") + "\u63A5\u53E3\u521A\u521A\u8FDE\u7EED\u51FA\u9519\uFF0C3 \u5206\u949F\u5185\u5148\u8D70\u5176\u4ED6\u7EBF\u8DEF"), { code: "DEEPSEEK_UNAVAILABLE", kind: "api", skipped: true });
+    try {
+      return await requestOnce(kind, body, { signal, consume });
+    } catch (error) {
+      if (error.status >= 500 || ["network", "timeout"].includes(error.kind) || error.name === "TimeoutError") unavailableUntil[kind] = Date.now() + 3 * 6e4;
+      throw error;
+    }
+  }
+  async function requestOnce(kind, body, { signal, consume } = {}) {
+    if (!secret(deepseekSearchKey))
+      throw Object.assign(new Error("\u8BF7\u914D\u7F6EDeepSeek\u5B98\u65B9\u641C\u7D22Key\uFF0C\u6216\u8BE5\u4F4D\u7F6E\u7684DeepSeek\u5B98\u65B9\u6A21\u578BKey"), { code: "DEEPSEEK_SEARCH_KEY_MISSING", kind: "api" });
+    return retryRead(
+      async (activeSignal) => {
+        let response;
+        try {
+          response = await get(ORIGIN + kind, {
+            method: "POST",
+            signal: activeSignal,
+            redirect: "error",
+            headers: { "Content-Type": "application/json", Authorization: "Bearer " + deepseekSearchKey },
+            body: JSON.stringify(body)
+          });
+        } catch (error) {
+          throwControl(error, activeSignal);
+          if (error.kind === "api") throw error;
+          throw Object.assign(new Error("DeepSeek\u641C\u7D22\u670D\u52A1\u8FDE\u63A5\u5931\u8D25"), { kind: "network", name: "NetworkError", code: "DEEPSEEK_SEARCH_NETWORK" });
+        }
+        if (!response.ok) {
+          await response.body?.cancel?.();
+          const reason = response.status === 401 ? "\u5B98\u65B9Key\u65E0\u6548" : response.status === 402 ? "\u670D\u52A1\u5546\u8D26\u6237\u4F59\u989D\u4E0D\u8DB3" : response.status === 429 ? "\u8BF7\u6C42\u53D7\u5230\u9650\u6D41" : "\u63A5\u53E3\u6682\u4E0D\u53EF\u7528";
+          throw httpError(response.status, reason, "DeepSeek Search/Fetch");
+        }
+        const bytes = await webBody(response, 2 * 1024 * 1024, activeSignal);
+        try {
+          return JSON.parse(new TextDecoder().decode(bytes));
+        } catch {
+          throw Object.assign(new Error("DeepSeek\u641C\u7D22\u63A5\u53E3\u672A\u8FD4\u56DE\u6709\u6548JSON"), { kind: "api", code: "DEEPSEEK_SEARCH_FORMAT" });
+        }
+      },
+      {
+        signal,
+        timeoutMs: 1e4,
+        beforeAttempt: (attempt) => {
+          if (attempt) consume?.(kind === "search" ? "search" : "read");
+        }
+      }
+    );
+  }
+  return {
+    name: "DeepSeek Search\uFF08\u5B98\u65B9\uFF0C\u6309\u6210\u529F\u8BF7\u6C42\u8BA1\u8D39\uFF09",
+    async search(query, count = 6, options = {}) {
+      let value = String(query).trim();
+      if (options.freshness) {
+        const days = { day: 1, week: 7, month: 30, year: 365 }[options.freshness];
+        if (days && !/\bafter:/.test(value)) value += " after:" + new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
+      }
+      if (!value || [...value].length > 128)
+        throw Object.assign(new Error("DeepSeek\u641C\u7D22\u8BCD\u987B\u4E3A1\u5230128\u4E2A\u5B57\u7B26\uFF1B\u53EF\u7F29\u77ED\u6216\u4F7F\u7528\u514D\u8D39\u7EBF\u8DEF"), { code: "DEEPSEEK_QUERY_LIMIT", kind: "api" });
+      const data = await request("search", { query: value, count: Math.max(1, Math.min(10, Math.floor(count) || 6)), need_content: false }, options);
+      if (!Array.isArray(data?.results)) throw Object.assign(new Error("DeepSeek\u641C\u7D22\u7ED3\u679C\u7F3A\u5C11results\u5217\u8868"), { code: "DEEPSEEK_SEARCH_FORMAT", kind: "api" });
+      const rows = [];
+      for (const item2 of data.results.slice(0, 50)) {
+        try {
+          const url = publicUrl(String(item2.url || ""));
+          rows.push({
+            title: String(item2.title || "").slice(0, 200),
+            url,
+            snippet: String(item2.summary || item2.snippet || "").slice(0, 800),
+            source: "deepseek",
+            publishedAt: String(item2.date || "").slice(0, 50),
+            authority: Number.isFinite(item2.authority) ? item2.authority : null,
+            rerankScore: Number.isFinite(item2.rerank_score) ? item2.rerank_score : null
+          });
+        } catch (error) {
+          if (!["PRIVATE_NETWORK_BLOCKED", "INVALID_FETCH_URL"].includes(error.code)) throw error;
+        }
+        if (rows.length >= Math.min(10, count)) break;
+      }
+      return rows;
+    },
+    async read(url, options = {}) {
+      const data = await request("fetch", { url: publicUrl(String(url)) }, options);
+      if (typeof data?.content !== "string" || !data.content.trim())
+        throw Object.assign(new Error("DeepSeek Fetch\u672A\u53D6\u5F97\u6B63\u6587"), { code: "DEEPSEEK_FETCH_EMPTY", kind: "api" });
+      return "# " + String(data.title || "").slice(0, 200) + "\n\n" + data.content.slice(0, 6e4) + (data.content.length > 6e4 ? "\n\uFF08\u6B63\u6587\u5DF2\u622A\u65AD\uFF0C\u4E0D\u80FD\u5F53\u4F5C\u5168\u6587\u5DF2\u8BFB\u3002\uFF09" : "");
+    }
+  };
+}
+
+// src/agent/officialSources.js
+var REGISTERED = /* @__PURE__ */ new Set(["thecfa.cn", "china-coop.org", "sse.com.cn", "szse.cn", "cninfo.com.cn"]);
+var PROVINCES = { \u6C5F\u82CF: "jiangsu.gov.cn", \u6D59\u6C5F: "zj.gov.cn", \u5E7F\u4E1C: "gd.gov.cn", \u5317\u4EAC: "beijing.gov.cn", \u4E0A\u6D77: "shanghai.gov.cn", \u5C71\u4E1C: "shandong.gov.cn", \u56DB\u5DDD: "sc.gov.cn" };
+var under = (hostname, domain) => hostname === domain || hostname.endsWith("." + domain);
+function isOfficialSource(address) {
+  try {
+    const parsed = new URL(address);
+    if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) return false;
+    return under(parsed.hostname, "gov.cn") || [...REGISTERED].some((domain) => under(parsed.hostname, domain));
+  } catch {
+    return false;
+  }
+}
+function mergeSearchHits(hits) {
+  const unique = /* @__PURE__ */ new Map();
+  for (const hit of hits.slice(0, 300)) {
+    try {
+      const parsed = new URL(hit.url);
+      if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) continue;
+      parsed.hash = "";
+      for (const key2 of [...parsed.searchParams.keys()]) if (/^(utm_|spm$|from$)/i.test(key2)) parsed.searchParams.delete(key2);
+      const key = parsed.href.replace(/\/$/, "");
+      if (!unique.has(key)) unique.set(key, { ...hit, url: parsed.href });
+    } catch {
+    }
+  }
+  return [...unique.values()].map((hit, index) => ({ hit, index })).sort((a, b) => Number(isOfficialSource(b.hit.url)) - Number(isOfficialSource(a.hit.url)) || a.index - b.index).map(({ hit }) => hit);
+}
+function officialQueries(query, hits) {
+  if (/\bsite:/i.test(query) || !/机构|概况|职责|职能|政策|条例|办法|政府|官网|供销|合作总社|信息公开/.test(query)) return [];
+  const sites = ["gov.cn"];
+  for (const [province, domain] of Object.entries(PROVINCES)) if (query.includes(province)) sites.push(domain);
+  const candidate = hits.find((hit) => isOfficialSource(hit.url));
+  if (candidate) sites.push(new URL(candidate.url).hostname.replace(/^www\./, ""));
+  return [...new Set(sites)].slice(0, 3).map((site) => `${query} site:${site}`);
+}
+
+// src/agent/searchSources.js
+function sourceQueue(max = 4) {
+  let active = 0;
+  const waiting = [];
+  const acquire = (signal) => new Promise((resolve, reject) => {
+    const abort = () => {
+      const index = waiting.indexOf(ticket);
+      if (index >= 0) waiting.splice(index, 1);
+      reject(signal.reason);
+    };
+    const ticket = { resolve: () => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    } };
+    if (signal?.aborted) return reject(signal.reason);
+    if (active < max) {
+      active++;
+      resolve();
+      return;
+    }
+    if (waiting.length >= 64) return reject(Object.assign(new Error("\u641C\u7D22\u6392\u961F\u5DF2\u6EE1"), { code: "SEARCH_QUEUE_FULL", kind: "api" }));
+    waiting.push(ticket);
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+  return async (work, signal) => {
+    await acquire(signal);
+    try {
+      if (signal?.aborted) throw signal.reason;
+      return await work();
+    } finally {
+      active--;
+      const next = waiting.shift();
+      if (next) {
+        active++;
+        next.resolve();
+      }
+    }
+  };
+}
+async function collectSearchSources(plan, { get, headers, signal, describe, schedule = (work) => work() }) {
+  const results = new Array(plan.length);
+  let next = 0;
+  let lastError;
+  const worker = async () => {
+    for (let index = next++; index < plan.length; index = next++) {
+      if (signal?.aborted) throw signal.reason;
+      const [sourceName, url, parse] = plan[index];
+      try {
+        const result = await schedule(() => withWebDeadline((sourceSignal) => retryRead(async (activeSignal) => {
+          const response = await get(url, { headers, signal: activeSignal });
+          const body = new TextDecoder().decode(await webBody(response, 2 * 1024 * 1024, activeSignal));
+          if (body.length > 2 * 1024 * 1024) throw Object.assign(new Error("\u641C\u7D22\u9875\u9762\u8FC7\u5927"), { code: "SEARCH_PAGE_LIMIT", kind: "api" });
+          const hits = response.ok ? parse(body).slice(0, 20) : [];
+          return { hits, note: describe(sourceName, response.status, body, hits.length) };
+        }, { signal: sourceSignal, timeoutMs: 8e3 }), { signal, timeoutMs: 8e3 }), signal);
+        results[index] = result;
+      } catch (error) {
+        throwControl(error, signal);
+        lastError = error;
+        results[index] = { hits: [], note: `${sourceName}\uFF1A\u8FDE\u4E0D\u4E0A\uFF08${error.message}\uFF09` };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(2, plan.length) }, worker));
+  return { hits: mergeSearchHits(results.flatMap((result) => result.hits)), notes: results.map((result) => result.note), error: lastError };
+}
+
+// src/agent/webSearch.js
+var decode = (s) => String(s).replace(/<[^>]+>/g, "").replace(/&nbsp;|&#160;|&ensp;/g, " ").replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+function b64url(s) {
+  const t = s.replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(t + "=".repeat((4 - t.length % 4) % 4));
+  return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+}
+function unwrapBing(href) {
+  try {
+    const u = new URL(decode(href), "https://www.bing.com");
+    if (/bing\.com$/.test(u.hostname) && u.pathname.startsWith("/ck/")) {
+      const p = u.searchParams.get("u");
+      if (p?.startsWith("a1")) return b64url(p.slice(2));
+    }
+    return u.href;
+  } catch {
+    return null;
+  }
+}
+function parseBing(html) {
+  const out = [];
+  const blocks = String(html).split(/<li[^>]+class="[^"]*\bb_algo\b[^"]*"/).slice(1);
+  for (const b of blocks) {
+    const a = b.match(/<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/);
+    if (!a) continue;
+    const url = unwrapBing(a[1]);
+    if (!url || !/^https?:/.test(url)) continue;
+    const p = b.match(/<p[^>]*>([\s\S]*?)<\/p>/) || b.match(/class="[^"]*b_caption[^"]*"[^>]*>([\s\S]*?)<\/div>/);
+    out.push({ title: decode(a[2]), url, snippet: decode(p?.[1] ?? "").replace(/^(\d{4}年\d{1,2}月\d{1,2}日|[A-Z][a-z]{2} \d{1,2}, \d{4})\s*[·\-–]\s*/, "") });
+  }
+  return out;
+}
+function parseBingRss(xml) {
+  const out = [];
+  for (const m of String(xml).matchAll(/<item>([\s\S]*?)<\/item>/g)) {
+    const tag = (n) => decode((m[1].match(new RegExp(`<${n}>([\\s\\S]*?)</${n}>`))?.[1] ?? "").replace(/^<!\[CDATA\[|\]\]>$/g, ""));
+    const url = tag("link");
+    if (!/^https?:/.test(url)) continue;
+    out.push({ title: tag("title"), url, snippet: tag("description").slice(0, 300) });
+  }
+  return out;
+}
+function bingRssUrl(query, region, freshness = "", now = Date.now()) {
+  const q = encodeURIComponent(query);
+  const zh = /[\u4e00-\u9fff]/.test(query);
+  const host = region === "cn" || zh ? "cn.bing.com" : "www.bing.com";
+  const lang = zh ? "&setlang=zh-Hans" : region === "cn" ? "&ensearch=1" : "";
+  return `https://${host}/search?format=rss&q=${q}&count=10${lang}${freshParams(freshness, now).bing}`;
+}
+function describeSource(name, status, body, hits) {
+  const text2 = String(body ?? "");
+  const kb = `${Math.max(1, Math.round(text2.length / 1024))}KB`;
+  const title = decode(text2.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "").slice(0, 30);
+  if (/安全验证|验证码|人机验证|captcha|unusual traffic|异常访问|访问过于频繁/i.test(text2)) return `${name}\uFF1A\u88AB\u62E6\u622A\uFF08\u51FA\u73B0\u9A8C\u8BC1\u9875${title ? `\u201C${title}\u201D` : ""}\uFF09`;
+  if (status && status >= 400) return `${name}\uFF1AHTTP ${status}`;
+  return `${name}\uFF1A${hits} \u6761\uFF08HTTP ${status || 200}\uFF0C${kb}${title ? `\uFF0C\u9875\u9762\u6807\u9898\u201C${title}\u201D` : ""}\uFF09`;
+}
+function parseDuckDuckGo(html) {
+  const out = [];
+  const blocks = String(html).split(/class="[^"]*\bresult__body\b/).slice(1);
+  for (const b of blocks) {
+    const a = b.match(/<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/) || b.match(/<a[^>]+href="([^"]+)"[^>]+class="[^"]*result__a[^"]*"[^>]*>([\s\S]*?)<\/a>/);
+    if (!a) continue;
+    let url = decode(a[1]);
+    try {
+      const u = new URL(url, "https://duckduckgo.com");
+      url = u.searchParams.get("uddg") || u.href;
+    } catch {
+      continue;
+    }
+    if (!/^https?:/.test(url) || /duckduckgo\.com\/y\.js/.test(url)) continue;
+    const s = b.match(/class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/(a|td|div)>/);
+    out.push({ title: decode(a[2]), url, snippet: decode(s?.[1] ?? "") });
+  }
+  return out;
+}
+function parseBaidu(html) {
+  const out = [];
+  const outer = /(?=<div\b[^>]*\bclass="[^"]*\bresult(?:-op)?\b[^"]*\bc-container\b)/;
+  let blocks = String(html).split(outer).filter((b) => /^<div/.test(b));
+  if (!blocks.length) blocks = String(html).split(/(?=<div\b[^>]*\bclass="[^"]*\bc-container\b)/).filter((b) => /^<div/.test(b));
+  for (const b of blocks) {
+    const a = b.match(/<h3[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/);
+    if (!a) continue;
+    const head = b.slice(0, b.indexOf(">") + 1);
+    const mu = decode(head.match(/\bmu="([^"]+)"/)?.[1] ?? "");
+    const url = /^https?:/.test(mu) && !/nourl/.test(mu) ? mu : decode(a[1]);
+    if (!/^https?:/.test(url) || /tuiguang|e\.baidu\.com/.test(url + head)) continue;
+    const s = b.match(/class="[^"]*(?:c-abstract|content-right_[\w-]+|c-span-last|c-color-text)[^"]*"[^>]*>([\s\S]*?)<\/(?:div|span)>/);
+    const snippet = decode(s?.[1] ?? b.replace(a[0], "")).slice(0, 300);
+    out.push({ title: decode(a[2]), url, snippet: snippet.replace(/^(\d{4}年\d{1,2}月\d{1,2}日)\s*/, "") });
+  }
+  return out;
+}
+function parseSo360(html) {
+  const out = [];
+  const blocks = String(html).split(/<li[^>]+class="[^"]*\bres-list\b[^"]*"/).slice(1);
+  for (const b of blocks) {
+    const tag = b.match(/<h3[^>]*>[\s\S]*?(<a\b[^>]*>)([\s\S]*?)<\/a>/);
+    if (!tag) continue;
+    const attr = (n) => decode(tag[1].match(new RegExp(`\\b${n}="([^"]+)"`))?.[1] ?? "");
+    const url = [attr("data-mdurl"), attr("data-url"), attr("href")].find((u) => /^https?:/.test(u) && !/so\.com\/link/.test(u)) || attr("href");
+    if (!/^https?:/.test(url) || /e\.so\.com|ad\./.test(url)) continue;
+    const s = b.match(/class="[^"]*(?:res-desc|res-comm-con|res-rich)[^"]*"[^>]*>([\s\S]*?)<\/(?:p|div)>/);
+    out.push({ title: decode(tag[2]), url, snippet: decode(s?.[1] ?? "").slice(0, 300) });
+  }
+  return out;
+}
+var CN_TZ = /^Asia\/(Shanghai|Chongqing|Chungking|Harbin|Urumqi|Kashgar)$/;
+async function detectRegion(fetchImpl, { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone, timeoutMs = 3500 } = {}) {
+  const probe = Promise.race([
+    fetchImpl("https://www.google.com/generate_204").then((r) => r.status === 204 || r.ok),
+    new Promise((resolve) => setTimeout(() => resolve(false), timeoutMs))
+  ]).catch(() => false);
+  if (!await probe) return "cn";
+  return CN_TZ.test(timeZone || "") ? "cn" : "global";
+}
+var FRESH_DAYS = { day: 1, week: 7, month: 30, year: 365 };
+var DESKTOP_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"
+};
+function freshParams(freshness, now) {
+  const days = FRESH_DAYS[freshness];
+  if (!days) return { bing: "", baidu: "", so: "", ddg: "" };
+  const to = Math.floor(now / 1e3), from = to - days * 86400;
+  const d = (t) => Math.floor(t / 86400);
+  const bingCode = { day: "ez1", week: "ez2", month: "ez3" }[freshness] || `ez5_${d(from)}_${d(to)}`;
+  return {
+    bing: `&filters=${encodeURIComponent(`ex1:"${bingCode}"`)}`,
+    baidu: `&gpc=${encodeURIComponent(`stf=${from},${to}|stftype=1`)}`,
+    so: `&adv_t=${freshness[0]}`,
+    ddg: `&df=${freshness[0]}`
+  };
+}
+function searchPlan(query, region, freshness = "", now = Date.now()) {
+  const q = encodeURIComponent(query);
+  const zh = /[\u4e00-\u9fff]/.test(query);
+  const f = freshParams(freshness, now);
+  if (region === "cn") {
+    const baidu = ["\u767E\u5EA6", `https://www.baidu.com/s?wd=${q}&rn=10${f.baidu}`, parseBaidu];
+    const so = ["360", `https://www.so.com/s?q=${q}${f.so}`, parseSo360];
+    return zh ? [["\u5FC5\u5E94\u4E2D\u56FD", `https://cn.bing.com/search?q=${q}&count=10&setlang=zh-Hans${f.bing}`, parseBing], baidu, so] : [["\u5FC5\u5E94\u4E2D\u56FD\uFF08\u56FD\u9645\u7248\uFF09", `https://cn.bing.com/search?q=${q}&count=10&ensearch=1${f.bing}`, parseBing], baidu, so];
+  }
+  return [[zh ? "\u5FC5\u5E94\u4E2D\u56FD" : "\u5FC5\u5E94", `https://${zh ? "cn." : "www."}bing.com/search?q=${q}&count=10${zh ? "&setlang=zh-Hans" : ""}${f.bing}`, parseBing], ["DuckDuckGo", `https://html.duckduckgo.com/html/?q=${q}${f.ddg}`, parseDuckDuckGo]];
+}
+function createSearch(options = {}) {
+  const { bochaKey, tavilyKey, fetchViaGateway, searchRegion = "auto" } = options;
+  const deepseek = createDeepseekSearch(options);
+  const keyless = keylessSearch(fetchViaGateway, searchRegion);
+  const bocha = bochaKey ? bochaSearch(bochaKey, fetchViaGateway) : null;
+  const tavily = tavilyKey ? tavilySearch(tavilyKey, fetchViaGateway) : null;
+  const all = [deepseek, bocha, tavily, keyless].filter(Boolean);
+  if (all.length <= 1) return all[0] ?? null;
+  return {
+    get name() {
+      return all.map((e) => e.name).join(" + ");
+    },
+    regionNow: keyless?.regionNow,
+    async search(query, n = 6, opts = {}) {
+      if (opts.signal?.aborted) throw opts.signal.reason;
+      const zh = /[\u4e00-\u9fff]/.test(query);
+      const domestic = zh && (deepseek || !keyless || await keyless.regionNow() === "cn");
+      const order = [deepseek, ...domestic ? [bocha, keyless, tavily] : [tavily, bocha, keyless]].filter(Boolean);
+      return staggeredSearch(order, query, n, opts, deepseek);
+    }
+  };
+}
+var STAGGER_MS = 2500;
+function staggeredSearch(order, query, n, opts = {}, preferred = null, staggerMs = STAGGER_MS) {
+  const ctrl = new AbortController();
+  const outer = opts.signal;
+  const stop = () => ctrl.abort(outer.reason);
+  outer?.addEventListener("abort", stop, { once: true });
+  const hits = [];
+  const errors = [];
+  let started = 0, settled = 0, done = false, timer = null, preferredHit = false;
+  return new Promise((resolve, reject) => {
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      outer?.removeEventListener("abort", stop);
+      ctrl.abort();
+      if (outer?.aborted) reject(outer.reason ?? Object.assign(new Error("aborted"), { name: "AbortError" }));
+      else if (hits.length) resolve(hits.slice(0, n));
+      else if (errors.length) reject(Object.assign(new Error(errors.map((e) => e.message).join("\uFF1B")), { cause: errors.at(-1), kind: errors.at(-1)?.kind, status: errors.at(-1)?.status, code: errors.at(-1)?.code, name: errors.at(-1)?.name }));
+      else resolve([]);
+    };
+    if (outer?.aborted) return finish();
+    outer?.addEventListener("abort", finish, { once: true });
+    const launch = () => {
+      if (done || started >= order.length) return;
+      const e = order[started++];
+      if (e === preferred) opts.progress?.("\u6B63\u5728\u8C03\u7528DeepSeek\u641C\u7D22");
+      Promise.resolve().then(() => e.search(query, n, { ...opts, signal: ctrl.signal })).then((list) => {
+        for (const h of list ?? []) if (!hits.some((x) => x.url === h.url)) hits.push(h);
+        if (e === preferred) {
+          preferredHit = Boolean(list?.length);
+          opts.progress?.(list?.length ? `DeepSeek\u641C\u7D22\u8FD4\u56DE${list.length}\u6761\u7ED3\u679C` : "DeepSeek\u641C\u7D22\u65E0\u7ED3\u679C\uFF0C\u5C1D\u8BD5\u539F\u641C\u7D22\u7EBF\u8DEF");
+        }
+      }).catch((err) => {
+        if (done) return;
+        errors.push(err);
+        if (e === preferred) opts.progress?.("DeepSeek\u641C\u7D22\u672A\u53D6\u5F97\u7ED3\u679C\uFF0C\u5C1D\u8BD5\u539F\u641C\u7D22\u7EBF\u8DEF\uFF1A" + err.message);
+      }).finally(() => {
+        settled++;
+        if (done) return;
+        if (preferredHit || hits.length >= Math.min(3, n)) return finish();
+        if (settled === started) {
+          if (started < order.length) launch();
+          else finish();
+        }
+      });
+      clearTimeout(timer);
+      if (started < order.length) timer = setTimeout(launch, staggerMs);
+    };
+    launch();
+  });
+}
+var BOCHA_FRESH = { day: "oneDay", week: "oneWeek", month: "oneMonth", year: "oneYear" };
+function bochaSearch(key, fetchViaGateway) {
+  return {
+    name: "\u535A\u67E5",
+    async search(query, n = 6, { freshness = "", signal, consume } = {}) {
+      const url = "https://api.bochaai.com/v1/web-search";
+      const init = { method: "POST", signal, headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify({ query, count: Math.min(10, Math.max(n, 5)), summary: true, freshness: BOCHA_FRESH[freshness] ?? "noLimit" }) };
+      const res = await retryRead((s) => fetchViaGateway ? fetchViaGateway(url, { ...init, signal: s }) : fetch(url, { ...init, signal: s }), { signal, beforeAttempt: (attempt) => {
+        if (attempt) consume?.("search");
+      } });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.code && j.code !== 200) throw httpError(j.code || res.status, j.msg || "", "\u535A\u67E5");
+      return (j.data?.webPages?.value ?? []).map((r) => ({ title: r.name, url: r.url, snippet: String(r.summary || r.snippet || "").slice(0, 400) })).slice(0, n);
+    }
+  };
+}
+function tavilyError(status, body = "") {
+  const detail = String(body).match(/"(?:detail|error|message)"\s*:\s*(?:\{[^}]*"error"\s*:\s*)?"([^"]{1,120})"/)?.[1] ?? "";
+  const why = status === 401 || status === 403 ? "Key \u65E0\u6548\u6216\u6CA1\u751F\u6548\uFF08\u68C0\u67E5\u662F\u5426\u5B8C\u6574\u590D\u5236\u4E86 tvly- \u5F00\u5934\u7684 Key\uFF09" : status === 429 ? "\u8BF7\u6C42\u8FC7\u4E8E\u9891\u7E41\u6216\u9650\u6D41\uFF0C\u4E0D\u80FD\u636E\u6B64\u5224\u65AD\u4F59\u989D" : status === 432 || status === 433 ? "\u670D\u52A1\u8D26\u6237\u6216\u5957\u9910\u53D7\u9650\uFF0C\u8BF7\u6838\u5BF9\u670D\u52A1\u5546\u72B6\u6001" : status >= 500 ? "Tavily \u670D\u52A1\u6682\u65F6\u51FA\u9519" : "";
+  return `Tavily \u8FD4\u56DE ${status}${why ? `\uFF1A${why}` : ""}${detail ? `\uFF08${detail}\uFF09` : ""}`;
+}
+function tavilySearch(tavilyKey, fetchViaGateway) {
+  return {
+    name: "Tavily",
+    // deep：顺带要回网页正文（查证时不用再逐篇打开，手机上也不受跨域限制；仍是基础档，每次 1 个额度）
+    async search(query, n = 6, { deep = false, freshness = "", signal, consume } = {}) {
+      const url = "https://api.tavily.com/search";
+      const init = { method: "POST", signal, headers: { "Content-Type": "application/json", Authorization: `Bearer ${tavilyKey}` }, body: JSON.stringify({ api_key: tavilyKey, query, max_results: n, include_answer: false, ...deep && { include_raw_content: true }, ...FRESH_DAYS[freshness] && { time_range: freshness } }) };
+      const res = await retryRead((s) => fetchViaGateway ? fetchViaGateway(url, { ...init, signal: s }) : fetch(url, { ...init, signal: s }), { signal, beforeAttempt: (attempt) => {
+        if (attempt) consume?.("search");
+      } }).catch((error) => {
+        throwControl(error, signal);
+        throw Object.assign(new Error("\u8FDE\u4E0D\u4E0A Tavily\uFF08" + error.message + "\uFF09"), { kind: error.kind, code: error.code, name: error.name, cause: error });
+      });
+      if (!res.ok) throw httpError(res.status, tavilyError(res.status, await res.text().catch(() => "")), "Tavily");
+      const j = await res.json();
+      return (j.results ?? []).map((r) => ({ title: r.title, url: r.url, snippet: String(r.content || "").slice(0, 400), ...r.raw_content && { raw: String(r.raw_content).slice(0, 12e3) } }));
+    }
+  };
+}
+function keylessSearch(fetchViaGateway, searchRegion) {
+  if (!fetchViaGateway) return null;
+  const schedule = sourceQueue();
+  let region = searchRegion === "cn" || searchRegion === "global" ? searchRegion : null;
+  let checkedAt = 0;
+  const regionNow = async () => {
+    if (searchRegion === "cn" || searchRegion === "global") return searchRegion;
+    if (!region || Date.now() - checkedAt > 30 * 6e4) {
+      region = await detectRegion(fetchViaGateway);
+      checkedAt = Date.now();
+    }
+    return region;
+  };
+  return {
+    get name() {
+      return region === "cn" ? "\u5FC5\u5E94\u4E2D\u56FD\u3001\u767E\u5EA6\u3001360\uFF08\u56FD\u5185\uFF09" : region === "global" ? "\u5FC5\u5E94\u3001DuckDuckGo" : "\u6309\u7F51\u7EDC\u81EA\u52A8\u9009\u62E9\uFF08\u56FD\u5185\uFF1A\u5FC5\u5E94\u4E2D\u56FD\u3001\u767E\u5EA6\u3001360\uFF1B\u56FD\u5916\uFF1A\u5FC5\u5E94\u3001DuckDuckGo\uFF09";
+    },
+    regionNow,
+    async search(query, n = 6, { freshness = "", signal, consume } = {}) {
+      const region2 = await regionNow();
+      const plan = [["\u5FC5\u5E94 RSS", bingRssUrl(query, region2, freshness), parseBingRss], ...searchPlan(query, region2, freshness)];
+      const run = (selected) => collectSearchSources(selected, { get: fetchViaGateway, headers: DESKTOP_HEADERS, signal, describe: describeSource, schedule });
+      const chinese = /[\u4e00-\u9fff]/.test(query);
+      const primary = chinese ? [plan[0], ["\u767E\u5EA6", `https://www.baidu.com/s?wd=${encodeURIComponent(query)}&rn=10${freshParams(freshness, Date.now()).baidu}`, parseBaidu]] : [plan[0]];
+      const first = await run(primary);
+      let hits = first.hits;
+      const notes = first.notes;
+      let lastError = first.error;
+      if (hits.length < Math.min(4, n)) {
+        const fallback = await run(plan.slice(1).filter(([sourceName]) => !chinese || sourceName !== "\u767E\u5EA6"));
+        hits = mergeSearchHits([...hits, ...fallback.hits]);
+        notes.push(...fallback.notes);
+        lastError = fallback.error || lastError;
+      }
+      for (const restricted of officialQueries(query, hits)) {
+        if (signal?.aborted) throw signal.reason;
+        consume?.("search");
+        const extra = await run([["\u5FC5\u5E94 RSS", bingRssUrl(restricted, region2, freshness), parseBingRss], ["\u767E\u5EA6", `https://www.baidu.com/s?wd=${encodeURIComponent(restricted)}&rn=10`, parseBaidu]]);
+        hits = mergeSearchHits([...hits, ...extra.hits]);
+        notes.push(...extra.notes);
+        lastError = extra.error || lastError;
+      }
+      if (!hits.length) throw Object.assign(new Error("\u5404\u641C\u7D22\u6E90\u90FD\u6CA1\u62FF\u5230\u7ED3\u679C\u2014\u2014" + notes.join("\uFF1B") + "\u3002\u8BF7\u6362\u641C\u6CD5\u6216\u6765\u6E90\uFF1B\u514D\u5BC6\u94A5\u641C\u7D22\u4E0D\u9700\u8981\u8D2D\u4E70\u7B2C\u4E09\u65B9API"), { code: lastError?.code || "NO_SEARCH_RESULTS", kind: lastError?.kind, name: lastError?.name || "SearchError", cause: lastError });
+      return hits.slice(0, n);
+    }
+  };
+}
+
+// evals/lookup-public-query.mjs
+async function lookupPublicQuery(text2, intent, { service, signal, get = (...args) => fetch(...args) }) {
+  if (intent.kind === "general") return {
+    state: "requires_model",
+    items: [],
+    failures: [],
+    reads: 0,
+    searches: 0,
+    modelRequested: false,
+    note: "\u4E00\u822C\u95EE\u9898\u7531\u6A21\u578B\u51B3\u5B9A\u662F\u5426\u8C03\u7528web_search/fetch_url\uFF1B\u672C\u811A\u672C\u4E0D\u8C03\u7528\u6A21\u578B\uFF0C\u4E0D\u80FD\u5192\u5145\u5B8C\u6210\u95EE\u7B54\u9A8C\u6536"
+  };
+  const clock = createLookupClock({ totalMs: LOOKUP_TOTALS[intent.kind] || 45e3 });
+  const retrieval = createRetrievalBudget(text2, { clock });
+  retrieval.intent = intent;
+  retrieval.intentRequest = text2;
+  const engine = createSearch({ fetchViaGateway: get, searchRegion: "cn" });
+  const tools = connectLookupTools([
+    { name: "get_weather", run: ({ place }, execution) => getWeather(place, { ...execution, get }) },
+    createSportsScoresTool({ fetchImpl: get }),
+    createStockKlineTool({ fetchImpl: get }),
+    { name: "web_search", run: async ({ query }, execution) => {
+      retrieval.consume("search");
+      return JSON.stringify(await engine.search(query, 6, { ...execution, consume: (kind) => retrieval.consume(kind) }));
+    } }
+  ], service.options("cn"));
+  const failures = [];
+  const found = await runLookup(intent, {
+    text: text2,
+    clock,
+    signal,
+    getTool: (name) => tools.find((tool) => tool.name === name),
+    execute: async (calls, activeSignal) => Promise.all(calls.map(async (call) => {
+      try {
+        if (!retrieval.begin()) throw Error(retrieval.note);
+        const output = await tools.find((tool) => tool.name === call.name).run(call.args, { signal: activeSignal, retrieval, requestText: text2 });
+        retrieval.end(true);
+        return { ok: true, output: String(output) };
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        failures.push({ source: call.name, reason: String(error.message).slice(0, 160) });
+        retrieval.end(false);
+        return { ok: false, output: "" };
+      }
+    }))
+  });
+  return {
+    state: found ? "fetched" : intent.kind === "weather" && !weatherPlace(text2, intent.params) ? "needs_location" : "failed",
+    items: found?.items || [],
+    failures,
+    reads: retrieval.resources.read,
+    searches: retrieval.resources.search,
+    modelRequested: false,
+    note: "\u516C\u5F00\u65E0Key\u53D6\u6570\uFF0C\u4E0D\u8BFB\u53D6\u751F\u4EA7\u914D\u7F6E\uFF1B\u548C\u98CE\u5DF2\u914D\u7F6E\u8D26\u53F7\u3001\u6A21\u578B\u603B\u5B8C\u6210\u8017\u65F6\u4E0E\u771F\u673A\u6548\u679C\u987B\u6B63\u5F0F\u73AF\u5883\u53E6\u9A8C"
+  };
+}
+
 // evals/lookup-live-queries.mjs
 var LOOKUP_LIVE_CASES = [
   ["sports", "\u4F53\u80B2\u8D44\u8BAF", "sports_news"],
@@ -1032,18 +2894,25 @@ async function runLookupLiveQueries({ out, signal, declaredRegion, script, only 
   const selected = selectLiveLookupCases(only);
   const service = createLookupService({ storage: memoryLookupStorage() });
   const cases = [];
-  for (const [id, text, expected] of selected) {
+  for (const [id, text2, expected] of selected) {
     if (signal.aborted) throw signal.reason;
-    const intent = lookupIntent(text, id === "followup" ? { history: [{ role: "user", content: "\u4ECA\u65E5\u65B0\u95FB" }] } : {});
-    const row = { id, text, expected, actual: intent.kind, intentCorrect: expected === intent.kind };
+    const intent = lookupIntent(text2, id === "followup" ? { history: [{ role: "user", content: "\u4ECA\u65E5\u65B0\u95FB" }] } : {});
+    const row = { id, text: text2, expected, actual: intent.kind, intentCorrect: expected === intent.kind };
     if (!["news", "sports_news"].includes(intent.kind)) {
-      cases.push({ ...row, state: intent.kind === "meta" ? "not_lookup" : "pending_step2", modelRequested: false });
-      console.log(`${id}\uFF1A${intent.kind}\uFF1B${intent.kind === "meta" ? "\u4E0D\u8054\u7F51" : "\u7559\u7B2C2\u6B65\u63A5\u5165\uFF0C\u4E0D\u5192\u5145\u672C\u6B65\u9A8C\u6536"}`);
+      if (intent.kind === "meta") {
+        cases.push({ ...row, state: "not_lookup", modelRequested: false });
+        console.log(`${id}\uFF1Ameta\uFF1B\u4E0D\u8054\u7F51`);
+      } else {
+        const started2 = performance.now();
+        const result = await lookupPublicQuery(text2, intent, { service, signal });
+        cases.push({ ...row, ...result, elapsedMs: Math.round(performance.now() - started2) });
+        console.log(`${id}\uFF1A${result.state}\uFF1B${result.items.length}\u6761\uFF1B\u53D6\u6570${cases.at(-1).elapsedMs}ms`);
+      }
       continue;
     }
     console.log(`${id}\uFF1A\u5F00\u59CB\u771F\u5B9E\u8BFB\u53D6\uFF08\u6700\u591A8\u8BFB\uFF0C\u6BCF\u6E90\u603B8\u79D2\uFF09`);
     const started = performance.now();
-    const retrieval = createRetrievalBudget(text);
+    const retrieval = createRetrievalBudget(text2);
     retrieval.begin();
     try {
       const value = await runLookup(intent, { ...service.options("cn"), signal, retrieval });
@@ -1068,7 +2937,7 @@ async function runLookupLiveQueries({ out, signal, declaredRegion, script, only 
   }
   const summary = {
     version: 1,
-    scope: "step1_news_runner_no_model",
+    scope: "unified_lookup_public_no_model",
     strategyRegion: "cn",
     declaredRegion,
     regionVerified: false,
@@ -1079,7 +2948,7 @@ async function runLookupLiveQueries({ out, signal, declaredRegion, script, only 
     required: cases.filter((row) => ["sports", "world", "tech"].includes(row.id)).map((row) => ({ id: row.id, count: row.items?.length || 0, minimum: row.id === "tech" ? 1 : 5 })),
     productionChanged: false,
     modelRequested: false,
-    note: `\u65B0\u95FB\u771F\u5B9E\u53D6\u6570+\u6240\u9009${cases.length}/15\u6761\u610F\u56FE\uFF1B\u672A\u9009\u9898\u4E0D\u7B97\u901A\u8FC7\u3002\u5929\u6C14/\u8D5B\u7A0B/\u884C\u60C5/\u4E00\u822C\u67E5\u8BE2\u7559\u7B2C2\u6B65\uFF0C\u4E0D\u7B49\u4E8E\u6A21\u578B\u95EE\u7B54\u621630\u9898\u5B8C\u6210\u9A8C\u6536`
+    note: `\u7EDF\u4E00runner\u516C\u5F00\u53D6\u6570+\u6240\u9009${cases.length}/15\u6761\u610F\u56FE\uFF1B\u672A\u9009\u9898\u4E0D\u7B97\u901A\u8FC7\u3002\u7F3A\u57CE\u5E02\u5FC5\u987B\u8FFD\u95EE\uFF1B\u65E0Key\u63A2\u6D4B\u4E0D\u4EE3\u8868\u7528\u6237\u5DF2\u914D\u7F6E\u7684\u548C\u98CE/\u535A\u67E5\u670D\u52A1\u9A8C\u6536\uFF0C\u4E0D\u7B49\u4E8E\u542B\u6A21\u578B\u95EE\u7B54\u621630\u9898\u5B8C\u6210\u9A8C\u6536`
   };
   await fs.writeFile(path.join(out, "report.json"), JSON.stringify({ ...summary, cases }, null, 2), { mode: 384 });
   await fs.writeFile(path.join(out, "summary.json"), JSON.stringify(summary, null, 2), { mode: 384 });
@@ -1115,9 +2984,9 @@ async function runLookupLive(args = process.argv.slice(2)) {
     console.log("\u7F51\u7EDC\u5730\u533A\u4E3A\u6267\u884C\u8005\u58F0\u660E\uFF0C\u811A\u672C\u4E0D\u4F1A\u628A\u65F6\u533A\u6216HTTP200\u5F53\u4F5C\u56FD\u5185\u7F51\u7EDC\u8BC1\u660E\u3002");
     if (args.includes("--queries")) return await runLookupLiveQueries({ out, signal: ctrl.signal, declaredRegion, script: fileURLToPath(import.meta.url), only: args.find((a) => a.startsWith("--only="))?.slice(7) });
     await Promise.all(Array.from({ length: 3 }, worker));
-    const classification = LOOKUP_INTENT_EXAMPLES.map(({ text, kind }) => {
-      const actual = lookupIntent(text);
-      return { text, expected: kind, actual: actual.kind, ok: actual.kind === kind };
+    const classification = LOOKUP_INTENT_EXAMPLES.map(({ text: text2, kind }) => {
+      const actual = lookupIntent(text2);
+      return { text: text2, expected: kind, actual: actual.kind, ok: actual.kind === kind };
     });
     const scriptHash = crypto2.createHash("sha256").update(await fs2.readFile(fileURLToPath(import.meta.url))).digest("hex");
     const report = {

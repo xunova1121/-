@@ -4,6 +4,7 @@ import { withWebDeadline } from './retrievalBudget.js';
 import { errorKind } from '../core/suggest.js';
 import { fetchZhibo8, zhibo8Result } from './sportsZhibo8.js';
 import { sportsSnapshot } from './sportsSnapshot.js';
+import { lookupIntent } from './lookup/intent.js';
 import { sportsNewsIntent } from './newsIntent.js';
 /**
  * 赛程和赛果：按北京时间的某一天，把各联赛的比赛（没开打的给开球时间，打完的给比分）一次查齐。
@@ -239,9 +240,9 @@ export async function getSportsScores(args = {}, { get, signal, retrieval, now =
   let from = args.date ? checkDate(args.date) : beijingDate(now);
   const window = sportsWindow(args, now);
   let to = args.end_date ? checkDate(args.end_date) : from;
-  if (window.period === 'around') {
+  if (['around', 'forward_live'].includes(window.period)) {
     // 当前窗口跨午夜时同时读前后两天；不能先按“今天”裁掉昨晚仍在进行的比赛。
-    from = beijingDate(now - window.minutes * 60_000);
+    from = beijingDate(['around', 'forward_live'].includes(window.period) ? now - window.minutes * 60_000 : now);
     to = beijingDate(now + window.minutes * 60_000);
   }
   if (window.period === 'upcoming' && !args.end_date && from === beijingDate(now)) to = beijingDate(now + window.minutes * 60_000);
@@ -328,7 +329,7 @@ export async function getSportsScores(args = {}, { get, signal, retrieval, now =
   }
   // 按日期、赛事（按列表顺序：国内、亚洲在前）、开球时间排
   const order = new Map(LEAGUES.map((l, i) => [l.name, i]));
-  events.sort((a, b) => (window.period === 'around' ? Number(b.state === 'in') - Number(a.state === 'in') : 0) || (window.period !== 'all' ? a.time - b.time : beijingDate(a.time).localeCompare(beijingDate(b.time)) || order.get(a.league) - order.get(b.league) || a.time - b.time));
+  events.sort((a, b) => (['around', 'forward_live'].includes(window.period) ? Number(b.state === 'in') - Number(a.state === 'in') : 0) || (window.period !== 'all' ? a.time - b.time : beijingDate(a.time).localeCompare(beijingDate(b.time)) || order.get(a.league) - order.get(b.league) || a.time - b.time));
   progress?.(`查到 ${events.length} 场（${done - failed.length}/${asked.length} 个赛事有数据）`);
   const secondary = formatScores({ events, from, to, asked, failed, now, window });
   const notice = partial ? '直播吧部分日期未覆盖，ESPN独立补充，可能重复，不能直接相加场数' : primaryUnavailable ? '直播吧暂时取不到，以下来自 ESPN' : '直播吧当前列表未覆盖所查日期，以下来自 ESPN';
@@ -358,7 +359,7 @@ export function createSportsScoresTool(ctx = {}) {
     input_schema: {
       type: 'object',
       properties: {
-        period: { type: 'string', enum: ['all', 'upcoming', 'remaining', 'afternoon', 'around'], description: 'around当前前后各120分钟，只含进行中/中场及未开赛；足彩赛程/现在有什么球默认around；all全天；remaining今天剩余未开赛不限60分钟；upcoming未来分钟窗口；afternoon12:00含至18:00不含' },
+        period: { type: 'string', enum: ['all', 'upcoming', 'remaining', 'afternoon', 'around', 'forward_live'], description: 'forward_live当前起120分钟，只含进行中/中场及未开赛；普通今天足球/足彩赛程用forward_live；明确前后或现在有什么球用around前后各120分钟；all全天；remaining今天剩余未开赛不限60分钟；upcoming未来分钟窗口；afternoon12:00含至18:00不含' },
         window_minutes: { type: 'integer', minimum: 1, maximum: 360, description: 'around前后各多少分钟，默认120；upcoming未来分钟数，默认60' },
         date: { type: 'string', description: '北京时间日期 YYYY-MM-DD，默认今天' },
         end_date: { type: 'string', description: '可选：查到哪天（含），最多跨 3 天' },
@@ -370,7 +371,10 @@ export function createSportsScoresTool(ctx = {}) {
     },
     run: async (args, { signal, retrieval, progress, requestText = '', rawRequestText = '' } = {}) => {
       if (sportsNewsIntent(requestText || rawRequestText)) throw Object.assign(new Error('用户要体育新闻资讯，不是比分赛程；请用web_search查报道，不能用比分替代。'), { code: 'SPORTS_NEWS_NOT_SCORES' });
-      return getSportsScores({ ...args, ...inferSportsWindow(requestText || rawRequestText) }, { get, signal, retrieval, progress, onScores: ctx.onSportsScores });
+      const text = requestText || rawRequestText;
+      const intent = retrieval?.intentRequest === text && retrieval.intent ? retrieval.intent : lookupIntent(text);
+      const policy = intent.kind === 'sports_live' && intent.params.period === 'forward_live' ? { period: 'forward_live', window_minutes: intent.params.window_minutes, sport: intent.params.sport } : inferSportsWindow(text);
+      return getSportsScores({ ...args, ...policy }, { get, signal, retrieval, progress, onScores: ctx.onSportsScores });
     }
   };
 }

@@ -5,6 +5,7 @@ import { createLookupService, memoryLookupStorage } from '../src/agent/lookup/se
 import { lookupIntent } from '../src/agent/lookup/intent.js';
 import { runLookup } from '../src/agent/lookup/runner.js';
 import { createRetrievalBudget } from '../src/agent/retrievalBudget.js';
+import { lookupPublicQuery } from './lookup-public-query.mjs';
 
 export const LOOKUP_LIVE_CASES = [
   ['sports', '体育资讯', 'sports_news'], ['recent-sports', '最近体育资讯', 'sports_news'],
@@ -19,7 +20,7 @@ export function selectLiveLookupCases(only) {
   if (!selected.length) throw new Error('--only必须是问法表编号，例如tech；未发起网络请求');
   return selected;
 }
-/** 真实查询取数，不读取生产配置/健康/密钥、不请求模型；非新闻类别明确留第2步。 */
+/** 真实查询取数，不读取生产配置/健康/密钥、不请求模型。公开通道不冒充用户的和风/博查账号。 */
 export async function runLookupLiveQueries({ out, signal, declaredRegion, script, only }) {
   const selected = selectLiveLookupCases(only);
   const service = createLookupService({ storage: memoryLookupStorage() });
@@ -29,8 +30,15 @@ export async function runLookupLiveQueries({ out, signal, declaredRegion, script
     const intent = lookupIntent(text, id === 'followup' ? { history: [{ role: 'user', content: '今日新闻' }] } : {});
     const row = { id, text, expected, actual: intent.kind, intentCorrect: expected === intent.kind };
     if (!['news', 'sports_news'].includes(intent.kind)) {
-      cases.push({ ...row, state: intent.kind === 'meta' ? 'not_lookup' : 'pending_step2', modelRequested: false });
-      console.log(`${id}：${intent.kind}；${intent.kind === 'meta' ? '不联网' : '留第2步接入，不冒充本步验收'}`);
+      if (intent.kind === 'meta') {
+        cases.push({ ...row, state: 'not_lookup', modelRequested: false });
+        console.log(`${id}：meta；不联网`);
+      } else {
+        const started = performance.now();
+        const result = await lookupPublicQuery(text, intent, { service, signal });
+        cases.push({ ...row, ...result, elapsedMs: Math.round(performance.now() - started) });
+        console.log(`${id}：${result.state}；${result.items.length}条；取数${cases.at(-1).elapsedMs}ms`);
+      }
       continue;
     }
     console.log(`${id}：开始真实读取（最多8读，每源总8秒）`);
@@ -49,13 +57,13 @@ export async function runLookupLiveQueries({ out, signal, declaredRegion, script
       console.log(`${id}：失败；${error.code || error.name}`);
     }
   }
-  const summary = { version: 1, scope: 'step1_news_runner_no_model', strategyRegion: 'cn', declaredRegion, regionVerified: false,
+  const summary = { version: 1, scope: 'unified_lookup_public_no_model', strategyRegion: 'cn', declaredRegion, regionVerified: false,
     scriptSHA256: crypto.createHash('sha256').update(await fs.readFile(script)).digest('hex'),
     classifier: { total: cases.length, correct: cases.filter(row => row.intentCorrect).length },
     cases: cases.map(({ items, ...row }) => ({ ...row, count: items?.length || 0 })),
     selection: selected.map(row => row[0]),
     required: cases.filter(row => ['sports', 'world', 'tech'].includes(row.id)).map(row => ({ id: row.id, count: row.items?.length || 0, minimum: row.id === 'tech' ? 1 : 5 })),
-    productionChanged: false, modelRequested: false, note: `新闻真实取数+所选${cases.length}/15条意图；未选题不算通过。天气/赛程/行情/一般查询留第2步，不等于模型问答或30题完成验收` };
+    productionChanged: false, modelRequested: false, note: `统一runner公开取数+所选${cases.length}/15条意图；未选题不算通过。缺城市必须追问；无Key探测不代表用户已配置的和风/博查服务验收，不等于含模型问答或30题完成验收` };
   await fs.writeFile(path.join(out, 'report.json'), JSON.stringify({ ...summary, cases }, null, 2), { mode: 0o600 });
   await fs.writeFile(path.join(out, 'summary.json'), JSON.stringify(summary, null, 2), { mode: 0o600 });
   console.log(`意图判断：${summary.classifier.correct}/${cases.length}；` + summary.required.map(row => `${{ sports: '体育', world: '国际', tech: '科技' }[row.id]}${row.count}条`).join('；'));

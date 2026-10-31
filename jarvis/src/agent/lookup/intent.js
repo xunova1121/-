@@ -1,4 +1,5 @@
-/** 查询意图的单一规则表。第1步只接新闻/体育；其他类别供迁移测试，不改变旧工具行为。 */
+import { inferSportsWindow } from './sportsWindow.js';
+/** 查询意图的单一规则表。对话入口、工具调用和评测共用，不再按工具另判类别。 */
 export const LOOKUP_KINDS = ['weather', 'sports_live', 'sports_news', 'news', 'market', 'general', 'meta'];
 const META = /^(?:(?:未央|你|你的|这个|这|查个|发个|发|查|今日|今天|新闻|体育资讯|体育新闻|体坛动态|天气|行情|汇率|比分|赛程|查询))*?(?:(?:怎么|为什么|咋)(?:这么|那么)?慢|(?:这么|那么|太)慢|还没好|还没查完|还没结束|在干嘛|在做什么|到底在干什么|谁让你这么做的|谁让你查的|谁让你搜的|好了吗|做完了吗|进展如何|什么进度)$/;
 const ACTION = /(?:修复|重构|开发|实现|安装|部署|删除|移动|重命名|生成|制作|创作|写一?|画一?|唱一?|翻译|总结|改写|朗读|记住|设置|定时|提醒|架构图|流程图|PPT|Word|Excel|文档|论文|方案|代码|工具说明|功能设计|接口设计|新闻稿)/i;
@@ -19,13 +20,13 @@ function newsParams(text, sports = false) {
 }
 function sportsParams(text) {
   const football = /足球|足彩|竞彩|英超|欧冠|中超|球赛|现在有什么球/.test(text);
-  const params = { sport: /NBA|CBA|篮球/i.test(text) ? 'basketball' : /网球/.test(text) ? 'tennis' : football ? 'football' : 'all' };
+  const params = { ...inferSportsWindow(text), sport: /NBA|CBA|篮球/i.test(text) ? 'basketball' : /网球/.test(text) ? 'tennis' : football ? 'football' : 'all' };
   if (/全天|整天/.test(text)) params.period = 'all';
   else if (/下午/.test(text)) params.period = 'afternoon';
   else if (/剩余|剩下/.test(text)) params.period = 'remaining';
-  else if (/前后/.test(text)) Object.assign(params, { period: 'around', window_minutes: 120 });
+  else if (/前后/.test(text)) Object.assign(params, inferSportsWindow(text));
   else if (/^(?:今天|今日)?(?:足球|足彩|竞彩足球|比赛)赛程[？?。\s]*$/.test(text)) Object.assign(params, { sport: 'football', period: 'forward_live', window_minutes: 120, states: ['in', 'pre'], policy: 'user_football_forward_two_hours' });
-  else if (/接下来|未来/.test(text)) Object.assign(params, { period: 'upcoming', window_minutes: /两小时|二小时|2小时/.test(text) ? 120 : 60 });
+  else if (/接下来|未来/.test(text)) Object.assign(params, inferSportsWindow(text.replace('未来', '接下来')));
   return params;
 }
 export const LOOKUP_RULES = [

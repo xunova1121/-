@@ -1,3 +1,4 @@
+import { localLookup } from './lookup.js';
 import { createLookupModel } from '../agent/lookupModels.js';
 import { createAdapter as lookupAdapter } from '../llm/config.js';
 /**
@@ -346,6 +347,7 @@ export function createTurn(app) {
         effort,
         adapter,
         model,
+        lookupPreferences: remotePC ? null : () => localLookup(app).preferences(),
         lookupModel: remotePC ? null : createLookupModel(app.llmConfig, (cfg) => lookupAdapter(cfg, { gateway: app.gateway })),
         history: llmHistory,
         userText: team ? userText : await app.expandSlash(userText),
