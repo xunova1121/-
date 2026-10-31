@@ -1,3 +1,4 @@
+import { PPT_ICON_CATALOG } from './pptIconCatalog.js';
 import { planTablePages, tidyPresentationPunctuation } from './presentationLayoutPlan.js';
 import { summarizeTable, decorationData } from './presentationLocalVisuals.js';
 import { reserveImageColumn, placeSlideImages } from './presentationImages.js';
@@ -66,6 +67,7 @@ const UNIT = /(万元|亿元|千元|元|人天|人月|人|天|小时|%|个|台|�
 
 /** 按文字意思配图标（图标见 pptIcons.js）；同一页尽量不重复 */
 const ICON_RULES = [
+  [/足球|球场|比赛|赛程|赛事/, 'volleyball'], [/餐饮|餐厅|食堂|美食/, 'utensils'], [/医疗|诊疗|医院/, 'stethoscope'], [/交通|汽车|车流/, 'car'],
   [/风险|问题|隐患|短板|卡点|挑战|不足|瓶颈/, 'triangle-alert'], [/回款|现金|支付|金融|贷款|账期/, 'banknote'],
   [/营收|收入|资金|预算|投资|成本|费用|经费|利润/, 'wallet'], [/目标|定位|方向|聚焦|愿景/, 'target'],
   [/政策|指示|精神|引领|党建|方针|领导/, 'flag'], [/规划|计划|方案|部署|清单|任务|安排/, 'clipboard-list'],
@@ -90,12 +92,12 @@ const ICON_RULES = [
   [/知识|研究|调研|阅读|理论/, 'book-open'], [/查找|识别|排查|监测|发现/, 'search']
 ];
 const ICON_FALLBACK = ['sparkles', 'layers', 'target', 'lightbulb', 'badge-check', 'rocket'];
-export function iconPicker() {
+export function iconPicker(preferred = []) {
   const used = new Set();
   return (text) => {
     const t = String(text ?? '');
-    const hit = ICON_RULES.find(([re, name]) => re.test(t) && !used.has(name))?.[1]
-      ?? ICON_FALLBACK.find((name) => !used.has(name)) ?? 'sparkles';
+    const hit = preferred.find(name => Object.hasOwn(PPT_ICON_CATALOG, name) && !used.has(name)) ?? ICON_RULES.find(([re, name]) => re.test(t) && !used.has(name))?.[1]
+      ?? ICON_FALLBACK.find((name) => !used.has(name)) ?? Object.keys(PPT_ICON_CATALOG).find(name => !used.has(name)) ?? 'sparkles';
     used.add(hit);
     return hit;
   };
@@ -136,6 +138,10 @@ export function parseSlides(title, md) {
     if (b.type === 'heading' && b.level <= 2) { start(plain(b.inlines)); continue; }
     if (b.type === 'hr') { cur = null; continue; }
     if (!cur) start(slides.length ? '' : title);
+    if (b.type === 'paragraph' && /^图标[:：]/.test(plain(b.inlines))) {
+      cur.iconNames = plain(b.inlines).replace(/^图标[:：]\s*/, '').split(/[,，、\s]+/).filter(name => Object.hasOwn(PPT_ICON_CATALOG, name)).slice(0, 8);
+      continue;
+    }
     if (b.type === 'paragraph' && /^备注[:：]/.test(plain(b.inlines))) { cur.notes.push(plain(b.inlines).replace(/^备注[:：]\s*/, '')); continue; }
     // “版式：卡片”：记下来，不上屏（写成列表的一条、或和正文挤在一段里也认）
     if (b.type === 'paragraph') {
@@ -410,7 +416,8 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   };
 
   // ---------- 版式零件（白底、左上标题、右上章节标签、底部页脚；白色卡片带淡阴影和圆形图标）
-  const { ICON_PNG } = await import('./pptIcons.js');
+  const { ICON_PNG, ICON_DARK_PNG } = await import('./pptIcons.js');
+  let preferredIcons = [];
   const gold = T.gold; // 点缀色：重点关键词、封面短横线
   const ink2 = T.sub; // 说明文字
   const ink = T.text; // 正文
@@ -429,13 +436,14 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   /** 图标：商务是彩色圆 + 白色图标；叙事是细金框圆；数据是方块；留白风格不用图标，写编号 */
   const iconCircle = (sl, x, y, d, name, color, k = 0) => {
     if (T.icon === 'number') {
-      sl.addText(String(k + 1).padStart(2, '0'), { x: x - 0.05, y, w: d + 0.15, h: d, fontSize: Math.round(d * 30), bold: true, color: accent, fontFace: FONT, valign: 'middle' });
+      const png = ICON_DARK_PNG[name];
+      if (png) sl.addImage({ objectName: 'wy-icon-' + name, data: `image/png;base64,${png}`, x, y, w: d, h: d });
       return;
     }
     const shape = T.icon === 'square' ? pptx.ShapeType.rect : pptx.ShapeType.ellipse;
     const line = T.icon === 'ring' ? { color: gold, width: 1.25 } : { color };
-    sl.addShape(shape, { x, y, w: d, h: d, fill: { color }, line });
-    const png = ICON_PNG[name];
+    sl.addShape(shape, { x, y, w: d, h: d, fill: { color: T.icon === 'square' ? T.soft : color }, line });
+    const png = T.icon === 'square' ? ICON_DARK_PNG[name] : ICON_PNG[name];
     if (png) sl.addImage({ objectName: 'wy-icon-' + name, data: `image/png;base64,${png}`, x: x + d * 0.25, y: y + d * 0.25, w: d * 0.5, h: d * 0.5 });
   };
   /** 标题栏：plain 左上标题；rule 大标题 + 短线；band 顶部色带；story 楷体标题 + 金色细线 + 章节编号 */
@@ -536,7 +544,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     const d = inline ? 0.5 : 0.62;
     const descTop = inline ? 0.95 : 1.62;
     const descH = Math.max(0.5, h - descTop - 0.18);
-    const pick = iconPicker();
+    const pick = iconPicker(preferredIcons);
     const parsed = items.map(labelOf);
     // 同一页的卡片说明用同一个字号（取放得下的最小值），不要一张大一张小
     const descSize = Math.min(...parsed.map(({ text }) => {
@@ -572,7 +580,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   const iconRows = (sl, items, { top = 1.6, bottom = 6.85 } = {}) => {
     const gap = 0.25;
     const h = Math.min(1.25, (bottom - top - gap * (items.length - 1)) / items.length);
-    const pick = iconPicker();
+    const pick = iconPicker(preferredIcons);
     items.forEach(({ label, text }, k) => {
       const y = top + k * (h + gap);
       sl.addShape(box, { x: 0.6, y, w: W - 1.2, h, ...card });
@@ -587,7 +595,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     const [first, ...rest] = items;
     const pw2 = 4.3;
     sl.addShape(box, { x: 0.6, y: 1.55, w: pw2, h: 5.3, fill: { color: dark }, line: { color: T.id === 'story' ? gold : dark, width: 0.75 }, rectRadius: 0.06 });
-    iconCircle(sl, 0.95, 1.9, 0.62, iconPicker()(`${first.label} ${first.text}`), accent);
+    iconCircle(sl, 0.95, 1.9, 0.62, iconPicker(preferredIcons)(`${first.label} ${first.text}`), accent);
     sl.addText(first.label, { x: 0.95, y: 2.75, w: pw2 - 0.7, h: 0.6, fontSize: 20, bold: true, color: gold, fontFace: FONT, valign: 'middle', fit: 'shrink' });
     sl.addText(first.text, { x: 0.95, y: 3.45, w: pw2 - 0.7, h: 3.1, fontSize: 20, color: T.onStrong, fontFace: FONT, valign: 'top', lineSpacingMultiple: 1.35, fit: 'shrink' });
     cardGrid(sl, raw.slice(1), { left: 0.6 + pw2 + 0.3, width: W - 1.2 - pw2 - 0.3 });
@@ -674,7 +682,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
       return;
     }
     const gap = 0.25, top = 1.6, h = Math.min(1.2, (5.2 - gap * (n - 1)) / n);
-    const pick = iconPicker();
+    const pick = iconPicker(preferredIcons);
     items.forEach((it, i) => {
       const y = top + i * (h + gap);
       sl.addShape(box, { x: 0.6, y, w: W - 1.2, h, ...card });
@@ -786,6 +794,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   const cardVariants = []; // 连续卡片页各用了哪种版式；中间隔了别的版式就重新开始
   for (const [i, s] of slides.entries()) {
     const kind = kinds[i];
+    preferredIcons = s.iconNames || [];
     if (kind !== 'cards') cardVariants.length = 0;
     if (kind !== 'bullets') listRun = 0;
     layouts.push(kind);
@@ -861,7 +870,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
         const cw = (W - 1.2 - gap * (cols - 1)) / cols;
         const ch = rows === 1 ? 3.6 : foot.length ? 2.15 : 2.45;
         const top = rows === 1 ? 1.9 : 1.55;
-        const pick = iconPicker();
+        const pick = iconPicker(preferredIcons);
         items.forEach((m, k) => {
           const x = 0.6 + (k % cols) * (cw + gap);
           const y = top + Math.floor(k / cols) * (ch + gap);
@@ -1129,7 +1138,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
       sl.addChart(pptx.ChartType.bar, [{ name: '条数', labels: summary.labels, values: summary.values }], { x: 10.05, y: 2.25, w: 2.65, h: 3.6, catAxisLabelFontSize: 12, valAxisLabelFontSize: 12, showValue: true, showLegend: false, chartColors: [accent], showTitle: false });
       sl.addText(`由本页${summary.total}条记录汇总`, { x: 10.05, y: 6.1, w: 2.65, h: 0.5, fontSize: 12, color: muted, fontFace: FONT });
     }
-    if (['table', 'imageText', 'image'].includes(kind)) iconCircle(sl, W - 0.9, 0.35, 0.4, iconPicker()(s.title), accent);
+    if (['table', 'imageText', 'image'].includes(kind)) iconCircle(sl, W - 0.9, 0.35, 0.4, iconPicker(preferredIcons)(s.title), accent);
     await placeSlideImages(sl, images, kind, { load: imageData, missingImages });
     if (s.notes.length) sl.addNotes(s.notes.join('\n'));
   }
