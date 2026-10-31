@@ -1,3 +1,4 @@
+import { measureDocx } from './styleCheck.js';
 import { inspectPresentation, requiresEverySlideImage } from './presentationReceipt.js';
 import { inspectLength } from './documentLength.js';
 import { checkArtifact } from './artifactCheck.js';
@@ -49,6 +50,7 @@ export async function inspectDocument(blob, filePath, { info = {}, requiredText 
   const zip = office ? await openOfficePackage(blob) : null;
   const workbook = format === 'xlsx' ? await inspectWorkbook(blob) : null;
   const validation = await checkArtifact(blob, filePath);
+  if (office) validation.styleFacts = await measureDocx(blob);
   const issues = [...(info.formulaIssues || []), ...(info.layoutIssues || [])];
   const wordCount = format === 'docx' ? await inspectLength(zip, requirements) : null;
   if (wordCount) {

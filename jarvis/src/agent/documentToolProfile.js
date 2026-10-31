@@ -16,5 +16,6 @@ export function simpleDocumentTask(request) {
     && !/调研|研究|搜集|搜索|联网|补充资料|标书|论文|完整方案|逐条核实/.test(text);
 }
 export function documentRouteNote(request) {
+  if (/PPT|幻灯片|演示文稿|\.pptx/i.test(request) && /补图|每页.*(?:图|图片)|逐页.*配图/.test(request)) return '沿用现有PPT补图：优先一次create_document，format=pptx、source_path=原PPT、path=另存路径、content为空、requirements填原要求；工具从可核对底稿批量配图并复用缓存，不要逐张generate_image后重抄正文。旧文件没有底稿时如实报告，再核对页面，不覆盖原件。';
   return simpleDocumentTask(request) ? '本轮是把已有内容整理为文件，直接用create_document并保留原内容；不要重新调研或升级为write_professional_document，仍执行真实文件和交付检查。' : '';
 }

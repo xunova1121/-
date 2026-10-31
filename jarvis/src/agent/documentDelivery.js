@@ -21,7 +21,7 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
   }
   const validation = await inspectDocument(out.blob, target, { info: out.info, requiredText, signal, requirements });
   // 读回实际字号、横线、下划线：回答只能说文件里真的有的（见 styleCheck.js）
-  if (['docx','pptx','xlsx'].includes(out.ext)) validation.styleFacts = await measureDocx(out.blob);
+  if (['docx','pptx','xlsx'].includes(out.ext)) validation.styleFacts ??= await measureDocx(out.blob);
   if (lineRules.noRules && validation.styleFacts?.rules !== 0) issues.push({ level: 'error', text: '要求不要横线，但实际Word未确认横线为0；须修复后交付' });
   if (lineRules.noUnderline && validation.styleFacts?.underlines !== 0) issues.push({ level: 'error', text: '要求不要下划线，但实际Word未确认下划线为0；须修复后交付' });
   const effectiveStyle = validation.format === 'pptx' ? out.info?.style : validation.format === 'xlsx' ? out.info?.sheetStyle : null;

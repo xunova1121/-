@@ -22,16 +22,18 @@ export async function imagePool(items, run, signal) {
 const fingerprint = async value => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))), n => n.toString(16).padStart(2,'0')).join('');
 /** 只在明确要求配图时发请求；上传图片由正文显式引用，不擅自挑用户其他文件。 */
 export async function preparePresentationImages(ctx, content, options, execution = {}) {
-  const { title, requirements = '', style = 'business', expectedSlides, requireCover, forbidCover } = options;
+  const { title, requirements = '', style = 'business', expectedSlides, maxSlides, requireCover, forbidCover } = options;
   const { signal, retrieval, progress } = execution;
   const every = requiresEverySlideImage(requirements);
   if (!every && !/(?:补|加|配|生成).{0,6}(?:图片|配图)|带图/.test(requirements)) return {content, issues:[], plan:[]};
-  let sections = String(content).split(/(?=^#{1,2}\s)/m).filter(section=>section.trim());
+  const explicitPages = /^\s*---\s*$/m.test(content);
+  let sections = String(content).split(explicitPages ? /^\s*---\s*$/m : /(?=^#{1,2}\s)/m).map(section => section.trim()).filter(Boolean);
   const parsed = parseSlides(title, content);
-  const bodyCount = parsed.length - (parsed[0] && !parsed[0].blocks.length ? 1 : 0);
-  const budget = slideBudget(bodyCount, expectedSlides, requireCover, forbidCover);
+  const hasCoverSection = parsed[0] && (!parsed[0].blocks.length || parsed[0].title === title && parsed[0].blocks.every(block => block.type === 'image'));
+  const bodyCount = parsed.length - Number(Boolean(hasCoverSection));
+  const budget = slideBudget(bodyCount, expectedSlides, requireCover, forbidCover, maxSlides);
   if (!budget.cover && /^#\s+[^\n]+\s*$/.test(sections[0] || '')) sections.shift();
-  if (every && budget.cover && !/^#\s/.test(sections[0] || '')) sections.unshift(`# ${title}\n\n`);
+  if (every && budget.cover && !hasCoverSection) sections.unshift(`# ${title}\n\n`);
   const plan = sections.map((section,index) => {
     const heading = section.match(/^#{1,2}\s+([^\n]+)/)?.[1] || title;
     const isCover = index === 0 && budget.cover && /^#\s/.test(section);
@@ -81,5 +83,5 @@ export async function preparePresentationImages(ctx, content, options, execution
     sections[page.index] += `\n\n![${page.title.replace(/[\]\n]/g,'')}配图](${result.value.path})\n\n`;
     if(result.value.credit) sections[page.index] += `备注：图片来源 ${String(result.value.credit).slice(0,2000)}\n\n`;
   }
-  return {content:sections.join('\n'),issues,plan:plan.map(({text,...page})=>page)};
+  return {content:sections.join(explicitPages ? '\n\n---\n\n' : '\n'),issues,plan:plan.map(({text,...page})=>page)};
 }

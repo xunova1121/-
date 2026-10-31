@@ -17,3 +17,14 @@ describe('失败操作的提示（评测 baseline-21：文档交了却提示“�
     expect(notice).toMatch(/修改文档/);
   });
 });
+
+it('补充读回保留未修改文件的实测样式；编辑后不会沿用旧验收', () => {
+ const review = createExecutionReview('Word不要横线');
+ review.record({name:'write_file',args:{path:'a.docx'},ok:true});
+ review.artifact({path:'a.docx',validation:{format:'docx',readback:'passed',structure:'passed',styleFacts:{rules:0,underlines:0},errors:0}},1);
+ review.record({name:'read_file',args:{path:'a.docx'},ok:true});
+ expect(review.report().artifacts[0].styleFacts.rules).toBe(0);
+ review.record({name:'edit_file',args:{path:'a.docx'},ok:true});
+ review.record({name:'read_file',args:{path:'a.docx'},ok:true});
+ expect(review.report().artifacts[0].styleFacts).toBeUndefined();
+});

@@ -1,3 +1,4 @@
+import { exportDeliveryRecovery } from './delivery-recovery.mjs';
 /** 隔离真实模型三轮；只读生产配置。机械通过仍需人工查看总览与回答。 */
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -24,7 +25,7 @@ export function assessDelivery({step,status,elapsedMs,quality,rules,missing=[],r
  if(status!=='done')failures.push('任务未正常完成');
  if(!quality||quality.errors)failures.push('真实文件未通过结构检查');
  if(!rendered)failures.push('未取得真实Office PDF');
- if(missing.length)failures.push('缺少原始赛程条目：'+missing.join('、'));
+ if(missing.length)failures.push('未找到完整原编号（可能缩写，不能据此判定整条记录丢失）：'+missing.join('、'));
  if(step===1&&rules!==0)failures.push('Word仍有段落横线或尚未核对');
  if(step===1&&elapsedMs>=60000)failures.push('Word任务未达到60秒目标');
  if(step>1&&renderedPages!==quality?.slides)failures.push('真实PDF与PPT页数不一致或未核对');
@@ -54,7 +55,7 @@ export async function main(args=process.argv.slice(2)) {
  const redact=text=>secrets.reduce((s,key)=>s.split(key).join('[REDACTED]'),text);
  const save=()=>fs.writeFile(target,redact(JSON.stringify(report,null,2)),{mode:0o600});
  const display=console.log.bind(console),previous={log:console.log,warn:console.warn,error:console.error};
- let runner,active,stopped=false;const logs=[];let logSize=0;
+ let runner,active,workspaceReady=false,stopped=false;const logs=[];let logSize=0;
  const stop=()=>{stopped=true;if(active)runner.stop(active.id);};
  process.once('SIGINT',stop);process.once('SIGTERM',stop);
  try{
@@ -65,7 +66,7 @@ export async function main(args=process.argv.slice(2)) {
   if(createAdapter(cfg).problem)throw new Error('当前模型配置不完整');
   report.readiness=await architectureServerReadiness();
   if(report.readiness.state==='blocked'||!report.readiness.pdfRasterEngines.pdftoppm){report.state='blocked_readiness';report.reason='缺少LibreOffice或pdftoppm，尚未请求模型';return report;}
-  useBackend(createFileStore(path.join(requested,'state')));await seedBuiltins();
+  useBackend(createFileStore(path.join(requested,'state')));workspaceReady=true;await seedBuiltins();
   for(const key of Object.keys(previous))console[key]=(...args)=>{const line=redact(format(...args)).slice(0,4000);if(logs.length<1500&&logSize+line.length<2e6){logs.push(line);logSize+=line.length;}};
   const ids=Array.from({length:20},(_,i)=>'赛事'+String(i+1).padStart(2,'0'));
   const material='全部为虚构数据，不查询真实比赛。\n|编号|开赛时间|对阵|状态|\n|---|---|---|---|\n'+ids.map((id,i)=>`|${id}|${18+Math.floor(i/8)}:${i%2?'30':'00'}|队伍${i+1}—队伍${i+21}|未开赛|`).join('\n');
@@ -110,6 +111,7 @@ export async function main(args=process.argv.slice(2)) {
  finally{
   if(active&&!terminal(runner?.get(active.id)))runner.stop(active.id);
   process.removeListener('SIGINT',stop);process.removeListener('SIGTERM',stop);Object.assign(console,previous);
+  if(workspaceReady){try{report.recovery=await exportDeliveryRecovery(requested);}catch{report.recovery={state:'failed',note:'已有产物仍在隔离state目录，自动导出失败'};}}
   report.finishedAt=new Date().toISOString();await save();await fs.writeFile(path.join(requested,'runtime-private.log'),logs.join('\n'),{mode:0o600});
   display('状态：'+report.state+'；真实回答/视觉尚需复核；报告：'+target);display('正式服务与配置未修改；报告含模型回答，勿直接公开。');
  }

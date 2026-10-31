@@ -1,3 +1,5 @@
+import { wordTableSource, restoreTableIdentifiers, verifyPresentationTables } from './presentationSource.js';
+import { attachPresentationRecipe, readPresentationRecipe } from './presentationRecipe.js';
 import { reviewRealPresentation } from './presentationVisualReview.js';
 import { preparePresentationImages } from './presentationImagePlan.js';
 import { documentOutputPath } from './documentPath.js';
@@ -48,7 +50,7 @@ export function createDocumentGenerateTool(ctx) {
   sameRun.set(memoOwner, memo);
   return {
     name: 'create_document',
-    description: `生成 Office / 文档文件并保存到工作区；需要模板时先get_document_template。已有Word仅重排时用source_path保留原件结构，content可空；粘贴原文可用source_requirement_id绑定，不改写正文。生成后自动检查文件结构、读回内容，可用时由本机LibreOffice生成真实PDF预览。结构/估算检查不等于Office视觉验收。排版自动完成（A4、标题样式、编号列表、带表头底色的表格、页码；Word / PDF 的二级标题有 3 个以上时自动加目录）。
+    description: `生成 Office / 文档文件并保存到工作区；需要模板时先get_document_template。已有Word仅重排时用source_path保留原件结构，content可空；已有本工具生成的PPT补图时，format=pptx、source_path=原PPT、path=另存路径、content可空，requirements写配图要求；程序沿用底稿并最多两路批量配图，不要逐张调用generate_image或重写正文。粘贴原文可用source_requirement_id绑定，不改写正文。生成后自动检查文件结构、读回内容，可用时由本机LibreOffice生成真实PDF预览。结构/估算检查不等于Office视觉验收。排版自动完成（A4、标题样式、编号列表、带表头底色的表格、页码；Word / PDF 的二级标题有 3 个以上时自动加目录）。
 content 用 Markdown：
 - docx / pdf / html：开头一个“# 文档标题”，正文用 ## 一级标题、### 二级标题、#### 三级标题；支持多级列表（缩进两个空格）、| 表格 |（:--: 居中、--: 右对齐）、**粗体**、*斜体*、~~删除线~~、[链接](https://…)、> 引用、代码块、--- 分隔线、单独一行 [分页]、![图注](工作区里的图片路径)
   招租、出租、招聘、启事、寻物、海报、宣传单这类贴出去的一页告示：kind 填 poster（不填也会自动认），字号按页面自动取最大、上下铺满一页、不加横线。用户说“字大点 / 小点 / 不要横线 / 铺满”时照原话调用，程序会换算成真实字号；改刚做好的文件时 path 用原文件路径直接覆盖，不要另起新文件名。交付后按回执里“读回实际”的字号回答，不要自己说“已加大”
@@ -79,7 +81,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         title_font_size: { type: 'number', minimum: 8, maximum: 72, description: '标题字号，磅' },
         content: str('Markdown 内容'),
         source_requirement_id: str('只排版、内容不变时，绑定read_task_requirements中用户原文编号；不从助手旧稿重写正文'),
-        source_path: str('只排版已有Word时绑定工作区原DOCX路径；保留原文表格图片及关联，与source_requirement_id二选一'),
+        source_path: str('Word重排绑定原DOCX；PPT从Word制作时绑定原DOCX核对完整表格，补图绑定本工具制作的原PPT并另存；普通MD原文转Word也可绑定。其他跨格式材料用read_file读取后填content，不把原件重排参数用于PDF'),
         theme: { type: 'string', enum: THEME_IDS, description: '配色主题，不填自动选' },
         style: { type: 'string', enum: STYLE_IDS, description: 'PPT 设计风格（构图不同，不只是颜色）：business 稳重商务（汇报、方案）/ minimal 简洁留白（产品、设计、品牌）/ story 叙事氛围（剧情、人物、历史、文化、旅行）/ data 数据报告（经营、财务、统计）。不填按用户要求和内容自动选' },
         sheet_style: { type: 'string', enum: SHEET_STYLE_IDS, description: 'Excel视觉风格：business商务表格/minimal简洁留白/ledger紧凑台账/analysis分析报表；不填按用户原话、Excel偏好和kind选。样式不移动行列，不改公式数据' },
@@ -104,6 +106,31 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
     ) => {
       const { progress, signal, checkpoint, rawRequestText, requestText, executionScope, sessionId } = execution;
       path = await documentOutputPath(path, title, format, { signal });
+      let recipe = null;
+      let tableSource = null;
+      if (format === 'pptx' && sourcePath && /\.docx$/i.test(sourcePath)) {
+        tableSource = await wordTableSource(await ws.readBlob(sourcePath));
+        sourcePath = undefined;
+      }
+      if (format === 'pptx' && sourcePath && /\.pptx$/i.test(sourcePath)) {
+        if (sourceId) throw documentError('PPT补图不能同时绑定Word原文编号', 'DOCUMENT_SOURCE');
+        if (ws.normalize(path) === ws.normalize(sourcePath)) throw documentError('补图请另存PPT，保留原件', 'DOCUMENT_SOURCE');
+        recipe = await readPresentationRecipe(await ws.readBlob(sourcePath));
+        ({ content, title, theme, style, subtitle, author } = recipe);
+        bodySize ??= recipe.bodySize;
+        titleSize ??= recipe.titleSize;
+        sourcePath = undefined;
+      }
+      // 普通Markdown原文转Word不属于DOCX重排；确定性采用原材料，不用模型再抄一遍。
+      let markdownSource = false;
+      if (format === 'docx' && sourcePath && /\.(?:md|txt)$/i.test(sourcePath)) {
+        if (sourceId) throw documentError('原文编号与材料路径不能同时使用', 'DOCUMENT_SOURCE');
+        const material = await ws.readBlob(sourcePath);
+        if (material.size > 300000) throw documentError('原文超过300KB，请先分段读取', 'DOCUMENT_SIZE');
+        content = await material.text();
+        sourcePath = undefined;
+        markdownSource = true;
+      }
       if (format !== 'docx' && (sourceId || sourcePath)) throw documentError('原Word/原文绑定请使用docx输出；PDF使用该Word的真实Office预览，不能另写一份替代原稿', 'DOCUMENT_SOURCE');
       // 每轮独立作用域，跨轮不能以旧回执跳过检查。
       let cache = memo;
@@ -114,7 +141,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       const goal = requestText || rawRequestText || requirements || '';
       let typography = format === 'docx' ? await documentTypography(ctx, goal, signal) : ['pptx','xlsx'].includes(format) ? officeTypography(rawRequestText || goal, { body: bodySize, title: titleSize }) : {};
       if (format === 'docx' && (bodySize !== undefined || titleSize !== undefined)) { const supplied = officeTypography('', { body: bodySize, title: titleSize }); for (const role of ['body','title']) typography[role] = { ...supplied[role], ...typography[role] }; }
-      const source = format === 'docx' ? await formattingSource({ request: rawRequestText || goal, sessionId, sourceId, sourcePath, signal }) : null;
+      const source = markdownSource ? { content, id: null } : format === 'docx' ? await formattingSource({ request: rawRequestText || goal, sessionId, sourceId, sourcePath, signal }) : null;
       if (source?.kind === 'docx') {
         // 按原文件重新排版时也要换算“大点 / 小点 / 不要横线”（第三轮 30 题：这条路先走了，正文 16→16、横线没管）
         const restyleAsks = styleRequests(rawRequestText || goal);
@@ -137,9 +164,10 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       let scale = 0;
       if (asks.some((a) => a.id === 'bigger' || a.id === 'smaller'))
         ({ typography, scale } = relativeTypography(typography, asks, { kind: design.kind, previous: await lastStyle(sessionId, executionScope), format, request: rawRequestText || goal, explicit: typographyFromText(rawRequestText || goal) }));
-      const { forbidCover, requireCover } = presentationCover(goal);
-      const expectedSlides = format === 'pptx' ? requestedSlides('PPT ' + goal) : null;
-      const callKey = await keyOf({ format, path, title, content, theme, design, sheetDesign, kind, cover, subtitle, author, issuer, docNo, toc, template, templateId, requirements, goal, typography, noRules, scale, sessionId, sourceId: source?.id, workflow: ctx.documentContentReview?.workflowFile || null });
+      const { forbidCover, requireCover } = recipe ? { forbidCover: !recipe.hasCover, requireCover: recipe.hasCover } : presentationCover(goal);
+      const expectedSlides = recipe?.slides ?? (format === 'pptx' ? requestedSlides('PPT ' + goal) : null);
+      const maxSlides = format === 'pptx' ? requestedSlides('PPT ' + goal, true) : null;
+      const callKey = await keyOf({ format, path, title, content, theme, design, sheetDesign, kind, cover, subtitle, author, issuer, docNo, toc, template, templateId, requirements, goal, typography, noRules, scale, sessionId, sourceId: source?.id, tableSource, recipeDigest: recipe?.digest, expectedSlides, maxSlides, workflow: ctx.documentContentReview?.workflowFile || null });
       // 记住的结果只管 10 分钟（同一个任务里重复调用）；隔得久了照常重新生成
       const fresh = (m, key, ms) => m.has(key) && Date.now() - m.get(key).at < ms;
       const cached = cache.results.get(callKey);
@@ -171,13 +199,14 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         requirements: taskRules,
         quick,
         kind: design.kind,
-        llm: source || ctx.documentContentReview ? null : ctx.reasonLlm ?? ctx.llm ?? null,
+        llm: source || recipe || markdownSource || ctx.documentContentReview ? null : ctx.reasonLlm ?? ctx.llm ?? null,
         signal,
         onProgress: (t) => progress?.(t)
       });
       let imagePlan = [];
       const build = async (text) => {
-        const prepared = format === 'pptx' ? await preparePresentationImages(ctx, text, { title: title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''), requirements: goal, style: design.style, expectedSlides, requireCover, forbidCover }, execution) : { content: text, issues: [], plan: [] };
+        text = tableSource && /完整|全部|不删|不漏|保留/.test(goal) ? restoreTableIdentifiers(text, tableSource) : text;
+        const prepared = format === 'pptx' ? await preparePresentationImages(ctx, text, { title: title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''), requirements: goal, style: design.style, expectedSlides, maxSlides, requireCover, forbidCover }, execution) : { content: text, issues: [], plan: [] };
         imagePlan = prepared.plan;
         const generated = await generate(format, {
           // 文件名常带“_5页”：封面标题不要这个尾巴
@@ -187,6 +216,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
           noRules,
           scale,
           expectedSlides,
+          maxSlides,
           requireCover,
           forbidCover,
           theme: chosenTheme,
@@ -197,6 +227,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
           cover: cover ?? plan?.options.cover ?? false,
           subtitle,
           author,
+          date: recipe?.date,
           issuer,
           docNo,
           toc: chosenToc === 'yes' ? true : chosenToc === 'no' ? false : 'auto',
@@ -206,18 +237,21 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
           toPdf: ctx.toPdf ?? null,
           template: tpl
         });
+        if (tableSource && /完整|全部|不删|不漏|保留/.test(goal)) await verifyPresentationTables(generated.blob, tableSource);
         if (format === 'pptx') {
           generated.info.layoutIssues = [...(generated.info.layoutIssues || []), ...prepared.issues];
           generated.info.imagePlan = prepared.plan;
         }
         return generated;
       };
-      let finalContent = check.content;
+      const preserveTables = tableSource && /完整|全部|不删|不漏|保留/.test(goal);
+      const bindTables = text => preserveTables ? restoreTableIdentifiers(text, tableSource) : text;
+      let finalContent = bindTables(check.content);
       let out = await build(finalContent);
       // 生成后才查得出的问题：Excel 公式错、PPT 字放不下 / 互相压住；有硬伤请模型改一轮再生成
       const built = (o) => [...(o.info?.formulaIssues ?? []), ...(o.info?.layoutIssues ?? [])];
       let post = null;
-      if (built(out).length && !source) {
+      if (built(out).length && !source && !recipe && !markdownSource) {
         post = await fixAfterBuild({
           format,
           content: check.content,
@@ -274,6 +308,15 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         const real = await reviewRealPresentation(ctx, out, finalContent, { requirements: goal, signal, progress, retrieval: execution.retrieval, build });
         out = real.out; finalContent = real.content;
       }
+      finalContent = bindTables(finalContent);
+      if (preserveTables) await verifyPresentationTables(out.blob, tableSource);
+      if (format === 'pptx') {
+        out.blob = await attachPresentationRecipe(out.blob, {
+          content: out.info.editableContent || finalContent, date: out.info.coverMetadata?.date, title: title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''), theme: chosenTheme, style: design.style, subtitle: out.info.coverMetadata?.subtitle ?? subtitle, author: out.info.coverMetadata?.author ?? author,
+          bodySize: typography.body?.size, titleSize: typography.title?.size,
+          slides: out.info.slides, hasCover: out.info.layouts?.[0] === 'cover'
+        });
+      }
       const target = path.replace(/\.[a-z0-9]+$/i, '') + `.${out.ext}`;
       if (source && out.info?.missingImages?.length) throw Object.assign(new Error('只排版原文中的图片未完整载入，未覆盖目标文件'), { code: 'DOCUMENT_SOURCE', kind: 'validation' });
       const preservation = source ? {
@@ -313,7 +356,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       const left = [...lint(format, finalContent, { kind: design.kind }), ...built(out)];
       if (left.length) notes.push(`还需要注意：${left.map((x) => x.text).join('；')}`);
       // 用户指定了 PPT 字号又排不下：不能偷偷缩字，也别只报“可能溢出”就交差——精简那几页的字再生成一次（第二轮 30 题：24 磅第 3 页溢出）
-      const overflow = format === 'pptx' && typography.body?.size && (r.validation.issues || []).some((i) => /放不下/.test(i.text));
+      const overflow = format === 'pptx' && typography.body?.size && (r.validation.issues || []).some((i) => /放不下/.test(i.text) && !/放不下时按可读容量自动分页/.test(i.text));
       if (overflow) notes.push(`用户指定了正文 ${typography.body.size} 磅，不能靠缩小字号解决溢出：把检查提示放不下的那几页文字精简（每条一句短话，必要时少写一两条，页数不变），用同一路径再生成一次；精简后还放不下再照实告诉用户`);
       if (out.info?.toc) notes.push('已加目录（Word 打开时如提示更新域，点“是”即可填上页码；WPS 里右键目录 →“更新目录”）');
       if (out.info?.duplicatesRemoved) notes.push(`表格里有 ${out.info.duplicatesRemoved} 行和别的行重复，已自动去掉`);

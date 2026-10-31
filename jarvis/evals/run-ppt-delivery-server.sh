@@ -87,6 +87,7 @@ node "$TEST_APP/evals/ppt-delivery-live.mjs" --live "--data-dir=${JARVIS_PRODUCT
 if [ -f "$BASE_DIR/results/report.json" ]; then
   MEMBERS=(report.json runtime-private.log)
   [ ! -d "$BASE_DIR/results/artifacts" ] || MEMBERS+=(artifacts)
+  [ ! -d "$BASE_DIR/results/recovery" ] || MEMBERS+=(recovery)
   tar -czf "$BASE_DIR/ppt-results.tar.gz" -C "$BASE_DIR/results" "${MEMBERS[@]}"
   printf '私有结果包：%s/ppt-results.tar.gz\n' "$BASE_DIR"
 fi

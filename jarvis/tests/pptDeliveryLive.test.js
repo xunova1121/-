@@ -42,3 +42,26 @@ test("嵌套服务商keys中的值也会脱敏",()=>{expect(privateValues({keys:
  expect(new Set(calls.map(x=>x.requestId)).size).toBe(3);
  expect(()=>bindEvaluation(session,'another-evaluation')).toThrow('另一套评测');
  });
+
+test('停止后仍导出已有图片和Office，不复制配置/会话', async () => {
+ const {exportDeliveryRecovery}=await import('../evals/delivery-recovery.mjs');
+ const {createFileStore}=await import('../server/fileStore.mjs');
+ const {useBackend}=await import('../src/agent/store.js');
+ const ws=await import('../src/agent/workspace.js');
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'ppt-recovery-'));
+ useBackend(createFileStore(path.join(root,'state')));
+ try {
+  await ws.write('images/成功.png',new Blob(['image']));
+  await ws.write('outputs/原PPT.pptx',new Blob(['ppt']));
+  await ws.write('outputs/config.json','private-secret');
+  const result=await exportDeliveryRecovery(path.join(root,'export'));
+  expect(result.files.map(x=>x.path)).toEqual(['images/成功.png','outputs/原PPT.pptx']);
+  expect(await fs.readFile(path.join(root,'export/recovery/images/成功.png'),'utf8')).toBe('image');
+  await expect(fs.stat(path.join(root,'export/recovery/outputs/config.json'))).rejects.toThrow();
+ } finally {useBackend(null);await fs.rm(root,{recursive:true,force:true});}
+});
+test('结果包显式包含中间资产恢复目录，不包含隔离state',async()=>{
+ const launcher=await fs.readFile(new URL('../evals/run-ppt-delivery-server.sh',import.meta.url),'utf8');
+ expect(launcher).toContain('MEMBERS+=(recovery)');
+ expect(launcher).not.toMatch(/MEMBERS\+=\(state\)/);
+});

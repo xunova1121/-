@@ -122,7 +122,8 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     }
     if (ok && /^(?:read_file|computer_read_file)$/.test(toolName) && files.has(path)) files.get(path).verified = true;
     if (ok && /^(?:read_file|computer_read_file)$/.test(toolName) && files.has(path) && /\.(?:pptx|docx|xlsx)$/i.test(path)) {
-      artifact({ path, validation: { format: path.split('.').pop().toLowerCase(), readback: 'passed', structure: 'not_checked', render: 'not_checked' } }, sequence);
+      // 普通读回不抹掉同一未修改文件的真实Office检查；写入后的旧证据仍失效。
+      if (!verified(path)) artifact({ path, validation: { format: path.split('.').pop().toLowerCase(), readback: 'passed', structure: 'not_checked', render: 'not_checked' } }, sequence);
     }
     if (ok && repository?.workspaceId && path) {
       const key = repository.workspaceId + ':' + path;

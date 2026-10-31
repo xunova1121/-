@@ -1,3 +1,4 @@
+import { presentationMarkdown } from './presentationMarkdown.js';
 import { PPT_ICON_CATALOG } from './pptIconCatalog.js';
 import { planTablePages, combineExplanationPages, tidyPresentationPunctuation } from './presentationLayoutPlan.js';
 import { summarizeTable, decorationData } from './presentationLocalVisuals.js';
@@ -124,6 +125,12 @@ function takeDirective(inlines) {
 /** 按页拆开，每页保留原始块，供选版式 */
 export function parseSlides(title, md) {
   const blocks = parseDoc(md).flatMap(block => {
+    if (block.type === 'paragraph' && !block.inlines.some(run => run.image || run.link || run.code)) {
+      const parts = plain(block.inlines).split(/\u3000+| {2,}/).map(text => text.trim()).filter(Boolean);
+      if (parts.length >= 2 && parts.length <= 6 && parts.every(text => NUM_ITEM.test(text) && !DATE_ITEM.test(text))) {
+        return [{ type: 'list', ordered: false, items: parts.map(text => ({ inlines: [{ text }], children: [] })) }];
+      }
+    }
     if (block.type !== 'paragraph' || !block.inlines.some(run => run.image)) return [block];
     const parts=[]; let text=[];
     const flush=()=>{if(text.some(run=>run.text.trim())) parts.push({type:'paragraph',inlines:text});text=[];};
@@ -137,11 +144,16 @@ export function parseSlides(title, md) {
     for (const row of block.type === 'table' ? [block.header, ...block.rows] : []) for (let i = 0; i < row.length; i++) row[i] = row[i].map(run => ({ ...run, text: tidyPresentationPunctuation(run.text) }));
   };
   blocks.forEach(clean);
+  const explicitPages = blocks.some(block => block.type === 'hr');
   const slides = [];
   let cur = null;
   const start = (t) => { cur = { title: t, blocks: [], notes: [] }; slides.push(cur); };
   for (let b of blocks) {
-    if (b.type === 'heading' && b.level <= 2) { start(plain(b.inlines)); continue; }
+    if (b.type === 'heading' && b.level <= 2) {
+      // 显式分页时，页内副标题不是第二张幻灯片；保留文字而非删除来凑页数。
+      if (!explicitPages || !cur) { start(plain(b.inlines)); continue; }
+      b = { ...b, level: 3 };
+    }
     if (b.type === 'hr') { cur = null; continue; }
     if (!cur) start(slides.length ? '' : title);
     if (b.type === 'paragraph' && /^图标[:：]/.test(plain(b.inlines))) {
@@ -299,7 +311,8 @@ function autoLayout(slide, { first = false, last = false } = {}) {
   const dated = items.filter((t) => DATE_ITEM.test(t)).length;
   if (flat && dated >= 3 && dated <= 7 && fewOthers(dated) && dated >= items.length - 1) return 'timeline';
   const nums = items.filter((t) => numMatch(t)).length;
-  if (flat && nums >= 2 && nums <= 6 && fewOthers(nums)) return 'stats';
+  const statsFlat = entries.length === bs.filter(b => b.type !== 'heading').flatMap(blockLines).flatMap(line => line.split('\n')).map(line => line.trim()).filter(Boolean).length;
+  if (statsFlat && nums >= 2 && nums <= 6 && fewOthers(nums) && bs.filter(b => b.type === 'heading').length <= 1) return 'stats';
   const pcts = items.filter((t) => PCT_ITEM.test(t)).length;
   if (flat && pcts >= 3 && pcts <= 8 && fewOthers(pcts)) return 'progress';
   if (lines.some(isChain)) return 'flow';
@@ -336,7 +349,7 @@ function chartColumns(table) {
  * @param {{ title: string, content: string, theme: object, subtitle?: string, author?: string, date?: string, loadImage?: (src: string) => Promise<Uint8Array|null> }} o
  * @returns {Promise<{ blob: Blob, info: { slides: number, layouts: string[], missingImages: string[], preview: object[], layoutIssues: object[] } }>}
  */
-export async function makePptx({ title, content, theme, subtitle = '', author = '', date = '', loadImage = null, style = 'business', expectedSlides = null, requireCover = false, forbidCover = false, typography = {}, renderSvg = null, signal }) {
+export async function makePptx({ title, content, theme, subtitle = '', author = '', date = '', loadImage = null, style = 'business', expectedSlides = null, maxSlides = null, requireCover = false, forbidCover = false, typography = {}, renderSvg = null, signal }) {
   const PptxGenJS = (await import('pptxgenjs')).default;
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
@@ -408,7 +421,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     } else expanded.push(s);
   }
   slides = planTablePages(combineExplanationPages(expanded, { strict: expectedSlides != null }), { strict: expectedSlides != null });
-  const budget = slideBudget(slides.length, expectedSlides, requireCover, forbidCover);
+  const budget = slideBudget(slides.length, expectedSlides, requireCover, forbidCover, maxSlides);
 
   const imageData = async (src) => {
     try {
@@ -455,29 +468,29 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   /** 标题栏：plain 左上标题；rule 大标题 + 短线；band 顶部色带；story 楷体标题 + 金色细线 + 章节编号 */
   const titleBar = (sl, text) => {
     sl.background = { color: light };
-    const w = W - (sectionTag ? 3.9 : 1.2);
+    const w = W - (sectionTag ? 3.9 : 1.8);
     if (T.titleBar === 'band') {
       sl.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W, h: 1.1, fill: { color: C.primary }, line: { color: C.primary } });
       sl.addShape(pptx.ShapeType.rect, { x: 0, y: 1.1, w: W, h: 0.05, fill: { color: accent }, line: { color: accent } });
       sl.addText(text, { x: 0.6, y: 0.15, w, h: 0.8, fontSize: T.titleSize, bold: true, color: 'FFFFFF', fontFace: HFONT, valign: 'middle', fit: 'shrink' });
-      if (sectionTag) sl.addText(sectionTag, { x: W - 3.1, y: 0.35, w: 2.5, h: 0.45, fontSize: 10, color: mixSoft, fontFace: FONT, align: 'right', valign: 'middle' });
+      if (sectionTag) sl.addText(sectionTag, { x: W - 3.1, y: 0.35, w: 2.0, h: 0.45, fontSize: 10, color: mixSoft, fontFace: FONT, align: 'right', valign: 'middle' });
       return;
     }
     if (T.titleBar === 'story') {
       sl.addText(text, { x: 0.8, y: 0.42, w: w - 0.2, h: 0.8, fontSize: T.titleSize, bold: true, color: head, fontFace: HFONT, valign: 'middle', fit: 'shrink' });
       sl.addShape(pptx.ShapeType.line, { x: 0.8, y: 1.28, w: 1.6, h: 0, line: { color: gold, width: 1.5 } });
       sl.addShape(pptx.ShapeType.line, { x: 2.5, y: 1.28, w: W - 3.3, h: 0, line: { color: T.border, width: 0.5 } });
-      if (sectionTag) sl.addText(sectionTag, { x: W - 3.3, y: 0.55, w: 2.5, h: 0.45, fontSize: 11, color: gold, fontFace: HFONT, align: 'right', valign: 'middle' });
+      if (sectionTag) sl.addText(sectionTag, { x: W - 3.3, y: 0.55, w: 2.0, h: 0.45, fontSize: 11, color: gold, fontFace: HFONT, align: 'right', valign: 'middle' });
       return;
     }
     if (T.titleBar === 'rule') {
       sl.addText(text, { x: 0.6, y: 0.35, w, h: 0.9, fontSize: T.titleSize, bold: true, color: head, fontFace: HFONT, valign: 'middle', fit: 'shrink' });
       sl.addShape(pptx.ShapeType.rect, { x: 0.62, y: 1.3, w: 0.6, h: 0.05, fill: { color: accent }, line: { color: accent } });
-      if (sectionTag) sl.addText(sectionTag, { x: W - 3.1, y: 0.6, w: 2.5, h: 0.45, fontSize: 10, color: muted, fontFace: FONT, align: 'right', valign: 'middle' });
+      if (sectionTag) sl.addText(sectionTag, { x: W - 3.1, y: 0.6, w: 2.0, h: 0.45, fontSize: 10, color: muted, fontFace: FONT, align: 'right', valign: 'middle' });
       return;
     }
     sl.addText(text, { x: 0.6, y: 0.38, w, h: 0.8, fontSize: T.titleSize, bold: true, color: head, fontFace: HFONT, valign: 'middle', fit: 'shrink' });
-    if (sectionTag) sl.addText(sectionTag, { x: W - 3.1, y: 0.55, w: 2.5, h: 0.45, fontSize: 10, color: accent, fontFace: FONT, align: 'right', valign: 'middle' });
+    if (sectionTag) sl.addText(sectionTag, { x: W - 3.1, y: 0.55, w: 2.0, h: 0.45, fontSize: 10, color: accent, fontFace: FONT, align: 'right', valign: 'middle' });
   };
   const mixSoft = C.soft;
   const pageNo = (sl, n) => {
@@ -868,7 +881,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
         titleBar(sl, s.title);
         const all = entriesOf(s.blocks).map((it) => plain(it.inlines));
         const items = all.map(numMatch).filter(Boolean).slice(0, 6);
-        const foot = all.filter((t) => !numMatch(t));
+        const foot = [...all.filter((t) => !numMatch(t)), ...s.blocks.filter(b => b.type === 'heading').flatMap(blockLines)];
         // 4 个以内一行；5、6 个排两行（3 + 2 / 3 + 3）
         const gap = 0.3;
         const cols = items.length <= 4 ? items.length : 3;
@@ -947,7 +960,19 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
           valGridLine: { color: T.grid, size: 0.5 }, catAxisLineColor: T.grid,
           ...extra
         });
-        if (note.length) {
+        const numericNotes = s.blocks.filter(b => b.type === 'list').flatMap(blockLines).filter(text => NUM_ITEM.test(text) && !DATE_ITEM.test(text) && text.length < 30);
+        if (numericNotes.length >= 2 && numericNotes.length <= 4) {
+          // 同页有真实统计图和关键数字时，数字仍排成卡片，不缩成侧栏小字。
+          const cw = (W - 9.6 - 0.15) / 2;
+          numericNotes.forEach((text, index) => {
+            const m = NUM_ITEM.exec(text), x = 9.0 + index % 2 * (cw + 0.15), y = 1.7 + Math.floor(index / 2) * 1.65;
+            sl.addShape(box, { x, y, w: cw, h: 1.5, ...card });
+            sl.addText(m[1].trim(), { objectName: 'wy-stat-number', x, y: y + 0.2, w: cw, h: 0.6, fontSize: 28, bold: true, color: accent, align: 'center', fontFace: FONT });
+            sl.addText(m[2].trim(), { x: x + 0.1, y: y + 0.9, w: cw - 0.2, h: 0.4, fontSize: 14, color: ink, align: 'center', fontFace: FONT });
+          });
+          const rest = note.filter(text => !numericNotes.includes(text));
+          if (rest.length) sl.addText(rest.join('；'), { x: 9.0, y: 5.15, w: W - 9.6, h: 1.5, fontSize: 14, color: ink2, fontFace: FONT, valign: 'top', fit: 'shrink' });
+        } else if (note.length) {
           const noteH = Math.min(4.9, 0.5 + note.reduce((a, x) => a + Math.ceil(x.length / 14), 0) * 0.42);
           sl.addShape(box, { x: 9.0, y: 1.7, w: W - 9.6, h: noteH, ...card });
           sl.addText(note.map((x) => ({ text: x, options: { bullet: { code: '25CF', indent: 18 }, breakLine: true, paraSpaceAfter: 10 } })), { x: 9.2, y: 1.85, w: W - 10.0, h: noteH - 0.3, fontSize: 15, color: ink, fontFace: FONT, valign: 'top', fit: 'shrink' });
@@ -1150,7 +1175,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   }
   const blob = await pptx.write({ outputType: 'blob' });
   const preview = records.map(({ n, title: t, items, slide }) => ({ n, title: t, items, background: slide.background?.color }));
-  return { blob, info: { slides: records.length, expectedSlides, layouts, missingImages, preview, layoutIssues: [...layoutIssues(preview), ...monotony(pages, MONOTONY_RUN[T.id] ?? 3), ...ignored, ...localVisualIssues], style: T.id } };
+  return { blob, info: { slides: records.length, expectedSlides, layouts, coverMetadata: { subtitle, author, date: date || today() }, editableContent: presentationMarkdown(slides, { title, cover: budget.cover, coverImages, agenda: !budget.strict && sections.length >= 2 ? sections.map(s => s.title) : [] }), missingImages, preview, layoutIssues: [...layoutIssues(preview), ...monotony(pages, MONOTONY_RUN[T.id] ?? 3), ...ignored, ...localVisualIssues], style: T.id } };
 }
 
 /**
