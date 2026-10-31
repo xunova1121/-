@@ -90,21 +90,31 @@ it('预查超时会取消忽略signal的提供者，回执不冒充成功；再�
 it('原足球工具和卡片同窗：默认当前起两小时，跨午夜保留边界，窗口外/完场不混入', async () => {
   vi.spyOn(Date, 'now').mockReturnValue(now);
   const row = (id, offset, state = '1') => { const at = new Date(now + offset * 60000 + 8 * 3600000).toISOString(); return { id, type: 'football', leagueid: '1', sdate: at.slice(0, 10), time: at.slice(11, 16), state, home_team: id, visit_team: '客队', home_score: '1', visit_score: '0' }; };
-  const list = [row('早于窗口', -1, '2'), row('进行中', 0, '2'), row('次日边界', 120), row('超出', 121), row('完场', 10, '3')];
+  const list = [row('早于窗口', -1, '1'), row('进行中', 0, '2'), row('次日边界', 120), row('超出', 121), row('完场', 10, '3'), row('过期进行中', -121, '2'), row('未来进行中', 10, '2')];
   const onScores = vi.fn(), get = vi.fn(async () => ({ ok: true, json: async () => ({ list }) }));
   const text = await createSportsScoresTool({ fetchImpl: get, onSportsScores: onScores }).run({}, { requestText: '足彩赛程' });
   expect(get.mock.calls[0][0]).toBe(ZHIBO8_URL);
   expect(text).toContain('次日边界'); expect(text).toContain('进行中');
-  for (const bad of ['早于窗口', '超出', '完场']) expect(text).not.toContain(bad);
+  for (const bad of ['早于窗口', '超出', '完场', '过期进行中', '未来进行中']) expect(text).not.toContain(bad);
   expect(onScores.mock.calls[0][0].events.map(row => row.home)).toEqual(['进行中', '次日边界']);
   expect(onScores.mock.calls[0][0].query.period).toBe('forward_live');
 });
 
-it('源只有分钟精度，当前分钟的比赛不因本机秒数被裁掉，前一分钟和两小时外仍排除', () => {
+it('源只有分钟精度，当前分钟不因秒数被裁掉，过去的未赛和两小时外仍排除', () => {
   const window = sportsWindow({ period: 'forward_live' }, now + 38000);
   expect(inSportsWindow(now, 'in', window)).toBe(true); expect(inSportsWindow(now, 'pre', window)).toBe(true);
-  expect(inSportsWindow(now - 60000, 'in', window)).toBe(false);
+  expect(inSportsWindow(now - 60000, 'pre', window)).toBe(false);
+  expect(inSportsWindow(now - 60000, 'in', sportsWindow({ period: 'upcoming' }, now))).toBe(false);
   expect(inSportsWindow(now + 121 * 60000, 'pre', window)).toBe(false);
+});
+
+it('进行中按活动覆盖当前时刻判断，跨午夜中场不丢；陈旧in、未来in及完场仍排除', () => {
+  const window = sportsWindow({ period: 'forward_live' }, now);
+  expect(inSportsWindow(now - 60 * 60000, 'in', window)).toBe(true);
+  expect(inSportsWindow(now - 120 * 60000, '2', window)).toBe(true);
+  expect(inSportsWindow(now - 121 * 60000, 'in', window)).toBe(false);
+  expect(inSportsWindow(now + 60000, 'in', window)).toBe(false);
+  expect(inSportsWindow(now - 60000, 'post', window)).toBe(false);
 });
 
 it('通用查询操作最多四项并发，失败入健康记录；输入/用户停止不误判来源故障', async () => {
@@ -119,6 +129,13 @@ it('通用查询操作最多四项并发，失败入健康记录；输入/用户
   expect(record).not.toHaveBeenCalled();
   const ctrl = new AbortController(); ctrl.abort(Error('用户停止'));
   const run = vi.fn(); await expect(runLookupOperation({ name: 'web_search', run }, {}, { signal: ctrl.signal }, { health })).rejects.toThrow('用户停止'); expect(run).not.toHaveBeenCalled();
+});
+
+it('明确的长文档和逐项核验保留原工具期限，不叠普通查询8秒和整项查询冷却', async () => {
+  const health = { get: vi.fn(async () => ({ cooling: true })), record: vi.fn() };
+  const execution = { retrieval: { extensive: true } }; const run = vi.fn(async (_, options) => options);
+  expect(await runLookupOperation({ name: 'fetch_url', run }, { url: 'https://example.com/doc' }, execution, { health })).toBe(execution);
+  expect(health.get).not.toHaveBeenCalled(); expect(run).toHaveBeenCalledTimes(1);
 });
 
 it('回答只有一份查询说明和最多一处收尾，关键校验失败仍保留，重复提示不追加', () => {

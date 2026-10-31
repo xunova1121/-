@@ -28,7 +28,7 @@ export function lookupAnswerNote(intent, text = '') {
   if (['news', 'sports_news'].includes(intent.kind)) notes.push(newsLookupNote(text, intent));
   if (intent.kind === 'sports_news') notes.push(SPORTS_NEWS_NOTE);
   if (intent.kind === 'weather') notes.push('天气沿用真实回执的具体地点、数据提供者和更新时间，给出适合用户活动的建议；没有地点先简短问城市或区县，不猜定位。');
-  if (intent.kind === 'sports_live') notes.push('按工具的北京时区、时间窗口、状态及来源逐场回答；界面卡片不替代文字。默认今天足球/足彩赛程仅当前起两小时的进行中及未开赛，不列窗口外比赛，不编竞彩编号或赔率。明确全天、下午、前后或指定日期按该范围。');
+  if (intent.kind === 'sports_live') notes.push('按工具的北京时区、时间窗口、状态及来源逐场回答；界面卡片不替代文字。默认今天足球/足彩赛程保留当前进行中及未来两小时未开赛，已开场仍进行中的不能按过去的开球时间误删；来源陈旧状态的开球边界仍按回执，不列窗口外比赛，不编竞彩编号或赔率。明确全天、下午、前后或指定日期按该范围。');
   if (intent.kind === 'market') notes.push('收盘价、上一交易记录收盘价、价格日期和复权方式必须同源，日K不冒充实时价。股票代码不明先查证，持仓盈亏沿用holding_profit，不猜汇率或价格。');
   notes.push('结果足够就直接给答案，不先交检索计划。查到几条先给几条；没有结果时一句说清真实失败步骤和可行下一步。失败/覆盖不足的结尾说明最多一句，不叠免责声明；日期、来源、内容限制和关键计算校验仍必须满足。');
   return notes.join('\n');

@@ -24,7 +24,8 @@ export function createLookupQueue(limit = 4) {
 
 export async function runLookupOperation(tool, args, execution, lookup = {}) {
   const source = LOOKUP_OPERATIONS.find(row => row.tools.includes(tool.name));
-  if (!source) return tool.run(args, execution);
+  // 长文档、逐项核验和开发等继续使用原工具的请求上限，不套普通查询的8秒门槛。
+  if (!source || execution.retrieval?.extensive) return tool.run(args, execution);
   const { signal, retrieval } = execution;
   const started = performance.now();
   const work = async () => {

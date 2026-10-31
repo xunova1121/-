@@ -242,7 +242,7 @@ export async function getSportsScores(args = {}, { get, signal, retrieval, now =
   let to = args.end_date ? checkDate(args.end_date) : from;
   if (['around', 'forward_live'].includes(window.period)) {
     // 当前窗口跨午夜时同时读前后两天；不能先按“今天”裁掉昨晚仍在进行的比赛。
-    from = beijingDate(['around', 'forward_live'].includes(window.period) ? now - window.minutes * 60_000 : now);
+    from = beijingDate(now - window.minutes * 60_000);
     to = beijingDate(now + window.minutes * 60_000);
   }
   if (window.period === 'upcoming' && !args.end_date && from === beijingDate(now)) to = beijingDate(now + window.minutes * 60_000);

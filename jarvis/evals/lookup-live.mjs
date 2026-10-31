@@ -171,7 +171,7 @@ function sportsWindow(args = {}, now = Date.now()) {
   if (!["all", "upcoming", "remaining", "afternoon", "around", "forward_live"].includes(period) || !Number.isSafeInteger(minutes) || minutes < 1 || minutes > 360) throw Object.assign(new Error("\u65F6\u95F4\u7B5B\u9009\u9700all/upcoming/remaining/afternoon/around/forward_live\uFF0C\u7A97\u53E3\u4E3A1\u81F3360\u5206\u949F"), { code: "INVALID_SPORTS_INPUT", kind: "input" });
   const lastDate = args.end_date || args.date || new Date(now + 8 * 36e5).toISOString().slice(0, 10);
   const until = beijingTimestamp(lastDate, "00:00") + 24 * 36e5;
-  return { period, now, minutes, until, label: period === "forward_live" ? `\u5F53\u524D\u8D77${minutes}\u5206\u949F\uFF08\u542B\u8FB9\u754C\uFF09\uFF0C\u4EC5\u8FDB\u884C\u4E2D/\u4E2D\u573A\u53CA\u672A\u5F00\u8D5B\uFF0C\u8FDB\u884C\u4E2D\u4F18\u5148` : period === "around" ? `\u5F53\u524D\u524D\u540E\u5404${minutes}\u5206\u949F\uFF08\u542B\u8FB9\u754C\uFF09\uFF0C\u4EC5\u8FDB\u884C\u4E2D/\u4E2D\u573A\u53CA\u672A\u5F00\u8D5B\uFF0C\u8FDB\u884C\u4E2D\u4F18\u5148` : period === "upcoming" ? `\u63A5\u4E0B\u6765${minutes}\u5206\u949F\uFF0C\u4EC5\u672A\u5F00\u8D5B` : period === "remaining" ? "\u6307\u5B9A\u5317\u4EAC\u65E5\u671F\u5185\u5F53\u524D\u65F6\u523B\u4E4B\u540E\u7684\u672A\u5F00\u8D5B\uFF0C\u76F4\u5230\u5F53\u65E524:00\uFF1B\u4E0D\u9650\u5B9A60\u5206\u949F" : period === "afternoon" ? "\u5317\u4EAC\u65F6\u95F4\u4E0B\u534812:00\uFF08\u542B\uFF09\u81F318:00\uFF08\u4E0D\u542B\uFF09" : "" };
+  return { period, now, minutes, until, label: period === "forward_live" ? `\u5F53\u524D\u8FDB\u884C\u4E2D/\u4E2D\u573A\u53CA\u672A\u6765${minutes}\u5206\u949F\u672A\u5F00\u8D5B\uFF08\u542B\u8FB9\u754C\uFF09\uFF0C\u8FDB\u884C\u4E2D\u4F18\u5148\uFF1B\u8FDB\u884C\u4E2D\u4FDD\u7559\u8FD1${minutes}\u5206\u949F\u5F00\u7403\u8303\u56F4` : period === "around" ? `\u5F53\u524D\u524D\u540E\u5404${minutes}\u5206\u949F\uFF08\u542B\u8FB9\u754C\uFF09\uFF0C\u4EC5\u8FDB\u884C\u4E2D/\u4E2D\u573A\u53CA\u672A\u5F00\u8D5B\uFF0C\u8FDB\u884C\u4E2D\u4F18\u5148` : period === "upcoming" ? `\u63A5\u4E0B\u6765${minutes}\u5206\u949F\uFF0C\u4EC5\u672A\u5F00\u8D5B` : period === "remaining" ? "\u6307\u5B9A\u5317\u4EAC\u65E5\u671F\u5185\u5F53\u524D\u65F6\u523B\u4E4B\u540E\u7684\u672A\u5F00\u8D5B\uFF0C\u76F4\u5230\u5F53\u65E524:00\uFF1B\u4E0D\u9650\u5B9A60\u5206\u949F" : period === "afternoon" ? "\u5317\u4EAC\u65F6\u95F4\u4E0B\u534812:00\uFF08\u542B\uFF09\u81F318:00\uFF08\u4E0D\u542B\uFF09" : "" };
 }
 function beijingTimestamp(date, clock) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(clock)) return NaN;
@@ -180,7 +180,11 @@ function beijingTimestamp(date, clock) {
 function inSportsWindow(timestamp, state, window) {
   if (!window || window.period === "all") return true;
   if (!Number.isFinite(timestamp)) return false;
-  if (window.period === "forward_live") return ["pre", "in", "1", "2"].includes(String(state)) && timestamp >= Math.floor(window.now / 6e4) * 6e4 && timestamp <= window.now + window.minutes * 6e4;
+  if (window.period === "forward_live") {
+    const currentMinute = Math.floor(window.now / 6e4) * 6e4;
+    if (["in", "2"].includes(String(state))) return timestamp >= currentMinute - window.minutes * 6e4 && timestamp <= window.now;
+    return ["pre", "1"].includes(String(state)) && timestamp >= currentMinute && timestamp <= window.now + window.minutes * 6e4;
+  }
   if (window.period === "around") return ["pre", "in", "1", "2"].includes(String(state)) && timestamp >= window.now - window.minutes * 6e4 && timestamp <= window.now + window.minutes * 6e4;
   if (window.period === "upcoming") return ["pre", "1"].includes(String(state)) && timestamp >= window.now && timestamp < window.now + window.minutes * 6e4;
   if (window.period === "remaining") return ["pre", "1"].includes(String(state)) && timestamp >= window.now && timestamp < window.until;
@@ -789,7 +793,7 @@ function createLookupQueue(limit = 4) {
 }
 async function runLookupOperation(tool, args, execution, lookup = {}) {
   const source = LOOKUP_OPERATIONS.find((row) => row.tools.includes(tool.name));
-  if (!source) return tool.run(args, execution);
+  if (!source || execution.retrieval?.extensive) return tool.run(args, execution);
   const { signal, retrieval } = execution;
   const started = performance.now();
   const work = async () => {
@@ -1486,7 +1490,7 @@ async function getSportsScores(args = {}, { get, signal, retrieval, now = Date.n
   const window = sportsWindow(args, now);
   let to = args.end_date ? checkDate(args.end_date) : from;
   if (["around", "forward_live"].includes(window.period)) {
-    from = beijingDate(["around", "forward_live"].includes(window.period) ? now - window.minutes * 6e4 : now);
+    from = beijingDate(now - window.minutes * 6e4);
     to = beijingDate(now + window.minutes * 6e4);
   }
   if (window.period === "upcoming" && !args.end_date && from === beijingDate(now)) to = beijingDate(now + window.minutes * 6e4);

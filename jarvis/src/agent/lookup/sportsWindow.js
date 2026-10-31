@@ -5,7 +5,7 @@ export function sportsWindow(args = {}, now = Date.now()) {
   if (!['all', 'upcoming', 'remaining', 'afternoon', 'around', 'forward_live'].includes(period) || !Number.isSafeInteger(minutes) || minutes < 1 || minutes > 360) throw Object.assign(new Error('时间筛选需all/upcoming/remaining/afternoon/around/forward_live，窗口为1至360分钟'), { code: 'INVALID_SPORTS_INPUT', kind: 'input' });
   const lastDate = args.end_date || args.date || new Date(now + 8 * 3600_000).toISOString().slice(0, 10);
   const until = beijingTimestamp(lastDate, '00:00') + 24 * 3600_000;
-  return { period, now, minutes, until, label: period === 'forward_live' ? `当前起${minutes}分钟（含边界），仅进行中/中场及未开赛，进行中优先` : period === 'around' ? `当前前后各${minutes}分钟（含边界），仅进行中/中场及未开赛，进行中优先` : period === 'upcoming' ? `接下来${minutes}分钟，仅未开赛` : period === 'remaining' ? '指定北京日期内当前时刻之后的未开赛，直到当日24:00；不限定60分钟' : period === 'afternoon' ? '北京时间下午12:00（含）至18:00（不含）' : '' };
+  return { period, now, minutes, until, label: period === 'forward_live' ? `当前进行中/中场及未来${minutes}分钟未开赛（含边界），进行中优先；进行中保留近${minutes}分钟开球范围` : period === 'around' ? `当前前后各${minutes}分钟（含边界），仅进行中/中场及未开赛，进行中优先` : period === 'upcoming' ? `接下来${minutes}分钟，仅未开赛` : period === 'remaining' ? '指定北京日期内当前时刻之后的未开赛，直到当日24:00；不限定60分钟' : period === 'afternoon' ? '北京时间下午12:00（含）至18:00（不含）' : '' };
 }
 
 export function beijingTimestamp(date, clock) {
@@ -16,8 +16,14 @@ export function beijingTimestamp(date, clock) {
 export function inSportsWindow(timestamp, state, window) {
   if (!window || window.period === 'all') return true;
   if (!Number.isFinite(timestamp)) return false;
-  // 上游开球时间只有分钟精度；当前分钟的00秒不能因本机已到38秒被误筛掉。
-  if (window.period === 'forward_live') return ['pre', 'in', '1', '2'].includes(String(state)) && timestamp >= Math.floor(window.now / 60_000) * 60_000 && timestamp <= window.now + window.minutes * 60_000;
+  // 进行中的活动覆盖当前时刻，不能拿其过去的开球时间当作“窗口外”。
+  // 保留原近两小时开球边界防止旧in状态混入；未赛才比较未来开球窗口。
+  // 上游只有分钟精度，当前分钟00秒不能因本机已到38秒被裁掉。
+  if (window.period === 'forward_live') {
+    const currentMinute = Math.floor(window.now / 60_000) * 60_000;
+    if (['in', '2'].includes(String(state))) return timestamp >= currentMinute - window.minutes * 60_000 && timestamp <= window.now;
+    return ['pre', '1'].includes(String(state)) && timestamp >= currentMinute && timestamp <= window.now + window.minutes * 60_000;
+  }
   if (window.period === 'around') return ['pre', 'in', '1', '2'].includes(String(state)) && timestamp >= window.now - window.minutes * 60_000 && timestamp <= window.now + window.minutes * 60_000;
   if (window.period === 'upcoming') return ['pre', '1'].includes(String(state)) && timestamp >= window.now && timestamp < window.now + window.minutes * 60_000;
   if (window.period === 'remaining') return ['pre', '1'].includes(String(state)) && timestamp >= window.now && timestamp < window.until;
