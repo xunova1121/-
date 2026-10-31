@@ -43,28 +43,42 @@ const cfgPath=args.find(a=>a.startsWith('--config='))?.slice(9)||'/opt/jarvis/da
 let cfg={};try{cfg=JSON.parse(await fs.readFile(cfgPath,'utf8'));}catch{}
 const started=Date.now(),report={provider,network:'cn_declared',modelRequested:false,productionChanged:false};
 const dir=await fs.mkdtemp(path.join(os.tmpdir(),'weiyang-stock-probe-'));
+report.phase='configuration';
 async function limited(url,options,limit){
  const response=await fetch(url,{...options,redirect:'error',signal:AbortSignal.timeout(10000)});
+ report.httpStatus=response.status;
+ report.contentType=(response.headers.get('content-type')||'').split(';')[0].replace(/[^a-zA-Z0-9.+/-]/g,'').slice(0,80);
  if(!response.ok)throw new Error('HTTP '+response.status);
  if(Number(response.headers.get('content-length'))>limit)throw new Error('内容超过上限');
  const chunks=[];let size=0;for await(const chunk of response.body){size+=chunk.length;if(size>limit)throw new Error('内容超过上限');chunks.push(chunk);}return Buffer.concat(chunks);
 }
 try{
  if(provider!=='openverse'&&!cfg[provider+'Key'])throw new Error('服务器未配置所选图库Key；不要把Key发到对话');
+ report.phase='api';
  const request=stockRequest(provider,'empty football stadium',cfg),response=await limited(request.url,{headers:request.headers},1000000);
  report.apiMs=Date.now()-started;
  const candidate=stockCandidates(provider,JSON.parse(response.toString()))[0];
  if(!candidate)throw new Error('没有许可完整、域名受信的候选');
+ report.phase='image';delete report.httpStatus;delete report.contentType;
  const bytes=await limited(candidate.url,{},8000000);
  const png=bytes.subarray(0,8).toString('hex')==='89504e470d0a1a0a',jpg=bytes[0]===255&&bytes[1]===216;
  if(!png&&!jpg)throw new Error('下载不是PNG/JPEG');
  if(provider==='unsplash'){
   const tracking=new URL(candidate.download);if(tracking.origin!=='https://api.unsplash.com'||!/^\/photos\/[^/]+\/download$/.test(tracking.pathname))throw new Error('下载回报地址不合法');
+  report.phase='download_tracking';delete report.httpStatus;delete report.contentType;
   await limited(tracking.href,{headers:{Authorization:'Client-ID '+cfg.unsplashKey}},100000);
  }
  const file='sample.'+(png?'png':'jpg');await fs.writeFile(path.join(dir,file),bytes,{mode:0o600});
  Object.assign(report,{state:'passed_connectivity',bytes:bytes.length,sample:file,credit:stockCredit(candidate),note:'仅接口、下载和许可字段连通；PPT配图与视觉仍需验收'});
-}catch(error){report.state='failed';report.reason=/HTTP \d+|上限|Key|候选|PNG|回报/.test(error.message)?error.message:'请求失败或超时';process.exitCode=1;}
+}catch(error){
+ report.state='failed';
+ const code=error.cause?.code||error.code;
+ const knownCodes=['ENOTFOUND','EAI_AGAIN','ECONNREFUSED','ECONNRESET','ETIMEDOUT','UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','CERT_HAS_EXPIRED','UNABLE_TO_VERIFY_LEAF_SIGNATURE'];
+ if(knownCodes.includes(code))report.errorCode=code;
+ const controlled=['内容超过上限','服务器未配置所选图库Key；不要把Key发到对话','没有许可完整、域名受信的候选','下载不是PNG/JPEG','下载回报地址不合法'];
+ report.reason=error instanceof SyntaxError?'图库API未返回合法JSON（可能是HTML拦截页），不是已确认的超时':error.name==='TimeoutError'?'请求超过10秒时限':/^HTTP [1-5]\d{2}$/.test(error.message)||controlled.includes(error.message)?error.message:'连接失败；请结合阶段和错误码排查';
+ process.exitCode=1;
+}
 report.elapsedMs=Date.now()-started;
 await fs.writeFile(path.join(dir,'report.json'),JSON.stringify(report,null,2),{mode:0o600});
 console.log(JSON.stringify(report,null,2));console.log('报告目录：'+dir);
