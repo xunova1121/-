@@ -33,3 +33,19 @@ it('无识图能力不盲用第一张；取消不吞',async()=>{
  const controller=new AbortController();controller.abort();
  await expect(api.download({url:photo.src.large},{signal:controller.signal})).rejects.toBeDefined();
 });
+it('下载不带API密钥，真实资产和许可一起落盘；超限响应拒绝',async()=>{
+ const fs=await import('node:fs/promises'),os=await import('node:os'),path=await import('node:path');
+ const {useBackend}=await import('../src/agent/store.js'),{createFileStore}=await import('../server/fileStore.mjs'),ws=await import('../src/agent/workspace.js');
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'stock-asset-'));useBackend(createFileStore(dir));
+ try{
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=','base64');
+  const fetchImpl=vi.fn(async url=>url.startsWith('https://api.pexels.com')?new Response(JSON.stringify({photos:[photo]})):new Response(png));
+  const api=createStockImages({getConfig:()=>({pexelsKey:'private-key',stockVerified:{pexels:{ok:true}}}),fetchImpl,health});
+  const image=await api.forSlide({query:'football',visionLlm:async()=>'{"index":0}'});
+  expect(image.credit).toContain('Pexels License');expect(await ws.exists(image.path)).toBe(true);
+  expect(await (await ws.readBlob(image.path.replace(/\.png$/,'.license.json'))).text()).toContain('https://www.pexels.com/@author');
+  for(const [url,options]of fetchImpl.mock.calls.filter(([url])=>url.startsWith('https://images.pexels.com')))expect(options.headers).toBeUndefined();
+  const oversized=createStockImages({getConfig:()=>({}),health,fetchImpl:async()=>new Response(png,{headers:{'content-length':'9000000'}})});
+  await expect(oversized.download({url:photo.src.large})).rejects.toMatchObject({code:'STOCK_SIZE'});
+ }finally{useBackend(null);await fs.rm(dir,{recursive:true,force:true});}
+});

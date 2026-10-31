@@ -37,7 +37,7 @@ import { styleTokens, chapterMark, mix as mix2 } from './pptStyles.js';
 const W = 13.333;
 const H = 7.5;
 const FONT = '微软雅黑';
-const NUM_ITEM = /^(?:\*\*)?([-+]?\d[\d,.]*(?:\s*[/／]\s*\d[\d,.]*)?\s*(?:%|万亿元|亿元|万元|千元|万亿|亿|万|千|元|个|家|人次|人|倍|天|小时|分钟|项|台|套|支|次|集|章|回|段|件|部|篇|位|名|条|座|种|场)?)(?:\*\*)?(?:\s*[：:]\s*|\s+|(?=[\u4e00-\u9fff]))(.+)$/;
+const NUM_ITEM = /^(?:\*\*)?([-+]?\d[\d,.]*(?:\s*[/／]\s*\d[\d,.]*)?\s*(?:%|万亿元|亿元|万元|千元|万亿|亿|万|千|元|个|家|人次|人|倍|天|小时|分钟|项|台|套|支|次|集|章|回|段|件|部|篇|位|名|条|座|种|场)?)(?:\*\*)?(?:\s*[：:]\s*|\s+|(?<=[场支个家人倍项台套次件部篇位名条座种元万亿千])(?=[\u4e00-\u9fff]))(.+)$/;
 /** 以日期开头的一条：“10-19 支架到货”“11月1日：初验”“2026年3月 上线”“第 3 周：联调” */
 const DATE_ITEM = /^(?:\*\*)?(\d{1,2}\s*[-月]\s*\d{1,2}\s*日?|\d{4}\s*[-./年]\s*\d{1,2}(?:\s*[-./月]\s*\d{1,2}\s*日?)?\s*月?|\d{1,2}\s*月(?:上旬|中旬|下旬|底|初)?|第\s*\d+\s*(?:周|月|季度))(?:\*\*)?(?:\s*[：:]\s*|\s+)(.{2,})$/;
 /** “名称：85%”“集成测试 83.3%（回归）”：进度条 */
@@ -740,14 +740,14 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     cover.addShape(pptx.ShapeType.ellipse, { x: W / 2 - 0.09, y: 3.96, w: 0.18, h: 0.18, fill: { color: gold }, line: { color: gold } });
     cover.addShape(pptx.ShapeType.line, { x: W / 2 + 0.6, y: 4.05, w: 1.6, h: 0, line: { color: gold, width: 1 } });
     if (subtitle) cover.addText(subtitle, { x: 1.5, y: 4.35, w: W - 3, h: 1.1, fontSize: 16, color: ink2, fontFace: FONT, align: 'center', valign: 'top', fit: 'shrink' });
-    if (coverDate) cover.addText(coverDate, { x: 1.5, y: H - 1.25, w: W - 3, h: 0.4, fontSize: 12, color: muted, fontFace: FONT, align: 'center' });
+    if (coverDate) cover.addText(coverDate, { objectName: 'wy-cover-meta', x: 1.5, y: H - 1.25, w: W - 3, h: 0.4, fontSize: 12, color: muted, fontFace: FONT, align: 'center' });
   } else if (T.cover === 'airy') {
     cover.background = { color: light };
     cover.addShape(pptx.ShapeType.rect, { x: 0.9, y: 1.2, w: 0.08, h: 3.6, fill: { color: accent }, line: { color: accent } });
     if (author) cover.addText(author, { x: 1.3, y: 1.1, w: W - 2.6, h: 0.4, fontSize: 13, color: muted, fontFace: FONT });
     cover.addText(title, { x: 1.3, y: 1.6, w: W - 2.6, h: 2.2, fontSize: 44, bold: true, color: head, fontFace: HFONT, valign: 'bottom', fit: 'shrink' });
     if (subtitle) cover.addText(subtitle, { x: 1.3, y: 3.95, w: W - 2.6, h: 0.9, fontSize: 18, color: ink2, fontFace: FONT, valign: 'top', fit: 'shrink' });
-    if (coverDate) cover.addText(coverDate, { x: 1.3, y: H - 1.2, w: 6, h: 0.4, fontSize: 12, color: muted, fontFace: FONT });
+    if (coverDate) cover.addText(coverDate, { objectName: 'wy-cover-meta', x: 1.3, y: H - 1.2, w: 6, h: 0.4, fontSize: 12, color: muted, fontFace: FONT });
     cover.addShape(pptx.ShapeType.line, { x: 1.3, y: H - 1.35, w: W - 2.6, h: 0, line: { color: T.border, width: 0.75 } });
   } else if (T.cover === 'band') {
     cover.background = { color: light };
@@ -756,7 +756,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     if (author) cover.addText(author, { x: 0.8, y: 0.8, w: W - 1.6, h: 0.4, fontSize: 13, color: C.soft, fontFace: FONT });
     cover.addText(title, { x: 0.8, y: 1.4, w: W - 1.6, h: 2.0, fontSize: 40, bold: true, color: 'FFFFFF', fontFace: HFONT, valign: 'bottom', fit: 'shrink' });
     if (subtitle) cover.addText(subtitle, { x: 0.8, y: 3.5, w: W - 1.6, h: 0.9, fontSize: 17, color: C.soft, fontFace: FONT, valign: 'top', fit: 'shrink' });
-    if (coverDate) cover.addText(coverDate, { x: 0.8, y: 5.1, w: 6, h: 0.4, fontSize: 13, color: ink2, fontFace: FONT });
+    if (coverDate) cover.addText(coverDate, { objectName: 'wy-cover-meta', x: 0.8, y: 5.1, w: 6, h: 0.4, fontSize: 13, color: ink2, fontFace: FONT });
   } else {
     cover.background = { color: theme.official ? 'FFFFFF' : C.soft };
     cover.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: pw, h: H, fill: { color: dark }, line: { color: dark } });
@@ -765,7 +765,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     cover.addText(title, { x: 0.8, y: 1.6, w: pw - 1.4, h: 2.1, fontSize: 36, bold: true, color: 'FFFFFF', fontFace: HFONT, valign: 'bottom', fit: 'shrink' });
     cover.addShape(pptx.ShapeType.rect, { x: 0.8, y: 3.9, w: 1.0, h: 0.06, fill: { color: gold }, line: { color: gold } });
     if (subtitle) cover.addText(subtitle, { x: 0.8, y: 4.1, w: pw - 1.4, h: 1.0, fontSize: 16, color: C.soft, fontFace: FONT, valign: 'top', fit: 'shrink' });
-    if (coverDate) cover.addText(coverDate, { x: 0.8, y: H - 1.1, w: pw - 1.4, h: 0.4, fontSize: 12, color: C.soft, fontFace: FONT });
+    if (coverDate) cover.addText(coverDate, { objectName: 'wy-cover-meta', x: 0.8, y: H - 1.1, w: pw - 1.4, h: 0.4, fontSize: 12, color: C.soft, fontFace: FONT });
   }
   if (localDecoration && !coverImages.length) cover.addImage({ data: localDecoration, x: 10.7, y: 4.2, w: 2.7 * 560 / 960, h: 2.7, sizing: { type: 'cover', w: 2.0, h: 2.7 }, objectName: 'wy-decoration-cover' });
   layouts.push('cover');
@@ -1142,7 +1142,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     if (summary) {
       sl.addText(summary.title, { x: 10.05, y: 1.65, w: 2.65, h: 0.5, fontSize: 15, bold: true, color: head, fontFace: FONT });
       sl.addChart(pptx.ChartType.bar, [{ name: '条数', labels: summary.labels, values: summary.values }], { x: 10.05, y: 2.25, w: 2.65, h: 3.6, catAxisLabelFontSize: 12, valAxisLabelFontSize: 12, showValue: true, showLegend: false, chartColors: [accent], showTitle: false });
-      sl.addText(`由本页${summary.total}条记录汇总`, { x: 10.05, y: 6.1, w: 2.65, h: 0.5, fontSize: 12, color: muted, fontFace: FONT });
+      sl.addText(`由本页${summary.total}条记录汇总`, { objectName: 'wy-caption', x: 10.05, y: 6.1, w: 2.65, h: 0.5, fontSize: 12, color: muted, fontFace: FONT });
     }
     if (['table', 'imageText', 'image'].includes(kind)) iconCircle(sl, W - 0.9, 0.35, 0.4, iconPicker(preferredIcons)(s.title), accent);
     await placeSlideImages(sl, images, kind, { load: imageData, missingImages });

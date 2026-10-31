@@ -64,9 +64,20 @@ export async function inspectPresentation(zip, { signal } = {}) {
     const texts = shapes.filter(shape => /<a:t\b[^>]*>[^<]+<\/a:t>/.test(shape));
     for (const shape of texts) { const box = boxOf(shape); if (box) boxes.push(box); }
     for (const [frame] of xml.matchAll(/<p:graphicFrame\b[^>]*>[\s\S]*?<\/p:graphicFrame>/g)) {
-      const box = boxOf(frame); if (box) boxes.push(box);
+      const box = boxOf(frame);
+      if (box && /<a:tbl\b/.test(frame)) {
+        // 自动行高的表格frame可能只有1英寸；用逐行显式高度/字号估算，而非把其余行漏计为空白。
+        const rows=[...frame.matchAll(/<a:tr\b([^>]*)>([\s\S]*?)<\/a:tr>/g)];
+        const tableHeight=rows.reduce((sum,row)=>{
+          const explicit=Number(attribute(row[1],'h'));
+          const fonts=[...row[2].matchAll(/\bsz="(\d+)"/g)].map(match=>Number(match[1])/100);
+          return sum+(explicit>0?explicit:(Math.max(12,...fonts)*1.7/72+0.1)*914400);
+        },0);
+        if(tableHeight>0)box[3]=Math.max(box[3],tableHeight);
+      }
+      if (box) boxes.push(box);
     }
-    const bodyShapes = texts.filter(shape => { const box=boxOf(shape);return box && box[1]>=height*0.19 && box[1]+box[3]<=height*0.90; });
+    const bodyShapes = texts.filter(shape => { if (/name="wy-(?:caption|cover-meta)"/.test(shape)) return false; const box=boxOf(shape);return box && box[1]>=height*0.19 && box[1]+box[3]<=height*0.90; });
     const sizes = value => [...value.matchAll(/<(?:a:rPr|a:defRPr)\b[^>]*\bsz="(\d+)"/g)].map(match=>Number(match[1])/100).filter(n=>n>0);
     const bodyFonts = bodyShapes.flatMap(sizes);
     const tableFonts = [...xml.matchAll(/<a:tbl\b[^>]*>[\s\S]*?<\/a:tbl>/g)].flatMap(match=>sizes(match[0]));

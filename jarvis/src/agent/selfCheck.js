@@ -53,7 +53,7 @@ export function lint(format, content, { kind = '' } = {}) {
       const label = `第 ${i + 2} 页「${s.title || '无标题'}」`;
       if (chars > 350) add('error', `${label}字太多（约 ${chars} 字），会溢出页面，应拆成两页或精简到每页 7 条以内`);
       const t = s.blocks.find((b) => b.type === 'table');
-      if (t && t.rows.length > 8) add('warn', `${label}的表格有 ${t.rows.length} 行，将按可读容量自动分页；需核对真实页数与完整行数，不能删除行`);
+      if (t && t.rows.length > 8) add('warn', `${label}的表格有 ${t.rows.length} 行，一页放不下时按可读容量自动分页；需核对真实页数与完整行数，不能删除行`);
       if (t && t.header.length > 6) add('warn', `${label}的表格有 ${t.header.length} 列，字会很小`);
       if (s.title.length > 30) add('warn', `${label}标题太长（${s.title.length} 字），建议 20 字以内`);
     }

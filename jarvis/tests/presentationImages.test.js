@@ -45,3 +45,7 @@ it('紧邻正文的独立图片也保留；封面是明确背景，裁切比例�
  const xml=await zip.file('ppt/slides/slide2.xml').async('string');
  expect(xml).toMatch(/<a:srcRect l="[1-9]\d*"/);
 });
+it('无冒号场数支持数字卡，但年份句不误当数字卡',async()=>{
+ const stats=await generate('pptx',{title:'赛事',content:'## 概况\n- 20场未开赛\n- 7场进行中',forbidCover:true});expect(stats.info.layouts).toEqual(['stats']);
+ const timeline=await generate('pptx',{title:'计划',content:'## 进度\n- 2026年3月：启动建设\n- 2026年4月：完成施工\n- 2026年5月：完成验收',forbidCover:true});expect(timeline.info.layouts).toEqual(['timeline']);
+});

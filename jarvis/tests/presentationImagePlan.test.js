@@ -18,6 +18,7 @@ it('每页配图含封面、原图保留、重排不重画',async()=>{
  const first=await preparePresentationImages({imageGen},content,options);
  expect(first.plan).toHaveLength(3);expect(first.issues).toEqual([]);expect(first.content).toContain('uploads/own.png');expect(imageGen).toHaveBeenCalledTimes(2);
  await preparePresentationImages({imageGen},content,options);expect(imageGen).toHaveBeenCalledTimes(2);
+ await preparePresentationImages({imageGen},content,{...options,requirements:options.requirements+'，正文字号24磅'});expect(imageGen).toHaveBeenCalledTimes(2);
 });
 it('缺能力不虚报成功；普通无配图要求不额外请求',async()=>{
  const out=await preparePresentationImages({},'## 说明\n正文',{title:'说明',requirements:'每页都要图'});expect(out.issues.length).toBeGreaterThan(0);
