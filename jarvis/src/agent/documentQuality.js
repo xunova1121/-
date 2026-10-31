@@ -66,6 +66,12 @@ export async function inspectDocument(blob, filePath, { info = {}, requiredText 
     const paths = await orderedSlidePaths(zip);
     validation.slides = paths.length;
     validation.presentation = await inspectPresentation(zip, { signal });
+    for (const page of validation.presentation.pages) {
+      if (page.outside) issues.push({level:'warn',text:`第${page.page}页存在越过画布的内容框，请检查真实总览`});
+      if (page.minBodyFont != null && page.minBodyFont < 14) issues.push({level:'warn',text:`第${page.page}页内容区最小字号${page.minBodyFont}磅，低于14磅建议；需核对是否为脚注或用户指定字号`});
+      if (page.minTableFont != null && page.minTableFont < 12) issues.push({level:'warn',text:`第${page.page}页表格最小字号${page.minTableFont}磅，低于12磅建议`});
+      if (page.estimatedBlankRatio > 0.55) issues.push({level:'warn',text:`第${page.page}页内容框占比不足45%，请检查总览留白；不以背景装饰抵消`});
+    }
     if (info.imagePlan) validation.imagePlan = info.imagePlan.slice(0, 120);
     if (requiresEverySlideImage(requirements) && validation.presentation.missingImagePages.length) issues.push({ level: 'error', text: `缺少内容配图的页：${validation.presentation.missingImagePages.join('、')}；请补图后交付，图标不算配图` });
     for (const [index, slidePath] of paths.entries()) {

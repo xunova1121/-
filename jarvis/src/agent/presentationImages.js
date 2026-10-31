@@ -34,6 +34,6 @@ export async function placeSlideImages(slide, images, kind, { load, missingImage
     const pic = await load(img.src);
     if (!pic) continue;
     const area = slots[i];
-    slide.addImage({ data: pic.data, ...area, sizing: { type: 'cover', w: area.w, h: area.h }, objectName: `wy-content-${i + 1}`, altText: String(img.alt || '').slice(0, 240) });
+    slide.addImage({ data: pic.data, ...area, w: area.h * pic.ratio, h: area.h, sizing: { type: 'cover', w: area.w, h: area.h }, objectName: kind === 'cover' ? 'wy-content-cover' : `wy-content-${i + 1}`, altText: String(img.alt || '').slice(0, 240) });
   }
 }

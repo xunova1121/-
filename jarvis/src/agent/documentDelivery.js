@@ -44,6 +44,7 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
   }
   validation.contentReview = ctx.documentContentReview || { business: 'not_checked' };
   if (preservation) validation.contentPreservation = preservation;
+  if (out.officeVisual) validation.officeVisual = out.officeVisual;
   validation.generatorVisual = generatorReview ? 'generator_preview_reviewed' : 'not_checked';
   if (generatorReview?.problems?.length && !generatorReview.changed) {
     issues = [...issues, ...generatorReview.problems.slice(0, 10).map((text) => ({ level: 'warn', text: '生成器看图发现：' + String(text).slice(0, 160) }))];
@@ -76,6 +77,8 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
         pdfPageMatch: validation.pdfPageMatch,
         wordPageBudget: validation.wordPageBudget,
         styleFacts: validation.styleFacts,
+        officeVisual: validation.officeVisual,
+        overviewPaths: validation.overviewPaths,
         presentation: validation.presentation
       }
     });
@@ -94,6 +97,7 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
     const preview = await renderDocument(ctx, out, saved.path, { progress, signal });
     notes.push(...preview.notes);
     validation.render = preview.state;
+    if (preview.overviewPaths?.length) validation.overviewPaths = preview.overviewPaths;
     if (preview.path) validation.previewPath = preview.path;
     if (preview.pdfCheck) {
       validation.pdfCheck = preview.pdfCheck.state;
@@ -141,28 +145,36 @@ async function renderDocument(ctx, out, filePath, { progress, signal }) {
   try {
     progress?.('生成Office真实预览…');
     signal?.throwIfAborted();
-    const rendered = out.wordPreview || await ctx.officeRender(out.blob, out.ext, { signal });
+    const rendered = out.officePreview || out.wordPreview || await ctx.officeRender(out.blob, out.ext, { signal });
     signal?.throwIfAborted();
     if (!rendered.available) return { state: 'not_available', notes: [rendered.reason || '本端不支持Office真实渲染'] };
     if (!rendered.blob?.size || (await rendered.blob.slice(0, 5).text()) !== '%PDF-') throw documentError('Office未生成有效PDF', 'DOCUMENT_RENDER');
     const preview = await ws.write(filePath.slice(0, filePath.lastIndexOf('.')) + '.预览.pdf', rendered.blob);
     ctx.onFileChanged?.(preview.path);
+    const overviewPaths = [];
+    if (out.officeOverview) {
+      for (const [index, sheet] of out.officeOverview.sheets.entries()) {
+        const overview = await ws.write(filePath.replace(/\.[^.]+$/, '') + `.总览-${index + 1}.png`, sheet.blob);
+        overviewPaths.push(overview.path); ctx.onFileChanged?.(overview.path); ctx.onImage?.(null, overview.path);
+      }
+    }
     let pdfCheck;
     const inspectionNotes = [];
     try {
       pdfCheck = await inspectRenderedPdf(rendered.blob, { signal });
       inspectionNotes.push(
-        `真实PDF逐页检查${pdfCheck.pages}页；${pdfCheck.issues.length ? '发现可疑项，见检查报告' : '未发现可提取文字的页面边界问题'}；未进行视觉模型审稿`
+        `真实PDF逐页检查${pdfCheck.pages}页；${pdfCheck.issues.length ? '发现可疑项，见检查报告' : '未发现可提取文字的页面边界问题'}；${out.officeVisual?.state === 'reviewed' ? '已进行真实页面模型视觉检查，仍可打开总览核对' : '视觉检查未通过或未运行'}`
       );
     } catch (error) {
       throwControl(error, signal);
       inspectionNotes.push('PDF逐页检查未完成：' + String(error.message).slice(0, 160));
     }
     return {
-      state: 'converted_not_visual_reviewed',
+      state: out.officeVisual?.state === 'reviewed' ? 'office_visual_reviewed' : 'converted_not_visual_reviewed',
+      overviewPaths,
       path: preview.path,
       pdfCheck,
-      notes: ['已用LibreOffice真实转换为PDF：' + preview.path + '；可打开核对实际分页，未宣称人工视觉验收通过', ...inspectionNotes]
+      notes: [...overviewPaths.map(path => '真实页面总览：' + path), ...(out.officeVisual?.problems || []).map(text => '视觉待修：' + text), ...(out.officeVisual?.note ? [out.officeVisual.note] : []), '已用LibreOffice真实转换为PDF：' + preview.path + '；可打开核对实际分页，未宣称人工视觉验收通过', ...inspectionNotes]
     };
   } catch (error) {
     throwControl(error, signal);

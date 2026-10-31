@@ -66,7 +66,14 @@ export async function inspectPresentation(zip, { signal } = {}) {
     for (const [frame] of xml.matchAll(/<p:graphicFrame\b[^>]*>[\s\S]*?<\/p:graphicFrame>/g)) {
       const box = boxOf(frame); if (box) boxes.push(box);
     }
-    pages.push({ page: index + 1, pictures, contentImages, icons, decorations, tables: count(xml, 'a:tbl'), textBoxes: texts.length, estimatedBlankRatio: blankRatio(boxes, width, height) });
+    const bodyShapes = texts.filter(shape => { const box=boxOf(shape);return box && box[1]>=height*0.19 && box[1]+box[3]<=height*0.90; });
+    const sizes = value => [...value.matchAll(/<(?:a:rPr|a:defRPr)\b[^>]*\bsz="(\d+)"/g)].map(match=>Number(match[1])/100).filter(n=>n>0);
+    const bodyFonts = bodyShapes.flatMap(sizes);
+    const tableFonts = [...xml.matchAll(/<a:tbl\b[^>]*>[\s\S]*?<\/a:tbl>/g)].flatMap(match=>sizes(match[0]));
+    const outside = boxes.some(([x,y,w,h])=>x < -9144 || y < -9144 || x+w > width+9144 || y+h > height+9144);
+    const minBodyFont = bodyFonts.length ? Math.min(...bodyFonts) : null;
+    const minTableFont = tableFonts.length ? Math.min(...tableFonts) : null;
+    pages.push({ minBodyFont, minTableFont, outside, page: index + 1, pictures, contentImages, icons, decorations, tables: count(xml, 'a:tbl'), textBoxes: texts.length, estimatedBlankRatio: blankRatio(boxes, width, height) });
   }
   return { pages, imagePages: pages.filter(page => page.contentImages > 0).length, missingImagePages: pages.filter(page => !page.contentImages).map(page => page.page), scope: '真实页面引用的嵌入图片；图标/装饰单列；空白为包围框估算，不是视觉验收' };
 }

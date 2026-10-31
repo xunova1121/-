@@ -1,5 +1,5 @@
 import { PPT_ICON_CATALOG } from './pptIconCatalog.js';
-import { planTablePages, tidyPresentationPunctuation } from './presentationLayoutPlan.js';
+import { planTablePages, combineExplanationPages, tidyPresentationPunctuation } from './presentationLayoutPlan.js';
 import { summarizeTable, decorationData } from './presentationLocalVisuals.js';
 import { reserveImageColumn, placeSlideImages } from './presentationImages.js';
 import { throwControl } from '../core/networkRequest.js';
@@ -37,7 +37,7 @@ import { styleTokens, chapterMark, mix as mix2 } from './pptStyles.js';
 const W = 13.333;
 const H = 7.5;
 const FONT = '微软雅黑';
-const NUM_ITEM = /^(?:\*\*)?([-+]?\d[\d,.]*(?:\s*[/／]\s*\d[\d,.]*)?\s*(?:%|万亿元|亿元|万元|千元|万亿|亿|万|千|元|个|家|人次|人|倍|天|小时|分钟|项|台|套|次|集|章|回|段|件|部|篇|位|名|条|座|种|场)?)(?:\*\*)?(?:\s*[：:]\s*|\s+)(.+)$/;
+const NUM_ITEM = /^(?:\*\*)?([-+]?\d[\d,.]*(?:\s*[/／]\s*\d[\d,.]*)?\s*(?:%|万亿元|亿元|万元|千元|万亿|亿|万|千|元|个|家|人次|人|倍|天|小时|分钟|项|台|套|支|次|集|章|回|段|件|部|篇|位|名|条|座|种|场)?)(?:\*\*)?(?:\s*[：:]\s*|\s+|(?=[\u4e00-\u9fff]))(.+)$/;
 /** 以日期开头的一条：“10-19 支架到货”“11月1日：初验”“2026年3月 上线”“第 3 周：联调” */
 const DATE_ITEM = /^(?:\*\*)?(\d{1,2}\s*[-月]\s*\d{1,2}\s*日?|\d{4}\s*[-./年]\s*\d{1,2}(?:\s*[-./月]\s*\d{1,2}\s*日?)?\s*月?|\d{1,2}\s*月(?:上旬|中旬|下旬|底|初)?|第\s*\d+\s*(?:周|月|季度))(?:\*\*)?(?:\s*[：:]\s*|\s+)(.{2,})$/;
 /** “名称：85%”“集成测试 83.3%（回归）”：进度条 */
@@ -123,7 +123,13 @@ function takeDirective(inlines) {
 
 /** 按页拆开，每页保留原始块，供选版式 */
 export function parseSlides(title, md) {
-  const blocks = parseDoc(md);
+  const blocks = parseDoc(md).flatMap(block => {
+    if (block.type !== 'paragraph' || !block.inlines.some(run => run.image)) return [block];
+    const parts=[]; let text=[];
+    const flush=()=>{if(text.some(run=>run.text.trim())) parts.push({type:'paragraph',inlines:text});text=[];};
+    for(const run of block.inlines){if(run.image){flush();parts.push({type:'image',src:run.image,alt:run.text});}else text.push(run);}
+    flush(); return parts;
+  });
   const clean = block => {
     if (block.inlines) block.inlines = block.inlines.map(run => ({ ...run, text: tidyPresentationPunctuation(run.text) }));
     for (const child of block.blocks || []) clean(child);
@@ -401,7 +407,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
       for (let i = 0; i < items.length; i += 6) expanded.push({ ...s, title: i ? `${s.title}（续）` : s.title, blocks: [{ ...s.blocks[0], items: items.slice(i, i + 6) }], notes: i ? [] : s.notes });
     } else expanded.push(s);
   }
-  slides = planTablePages(expanded, { strict: expectedSlides != null });
+  slides = planTablePages(combineExplanationPages(expanded, { strict: expectedSlides != null }), { strict: expectedSlides != null });
   const budget = slideBudget(slides.length, expectedSlides, requireCover, forbidCover);
 
   const imageData = async (src) => {
@@ -761,7 +767,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     if (subtitle) cover.addText(subtitle, { x: 0.8, y: 4.1, w: pw - 1.4, h: 1.0, fontSize: 16, color: C.soft, fontFace: FONT, valign: 'top', fit: 'shrink' });
     if (coverDate) cover.addText(coverDate, { x: 0.8, y: H - 1.1, w: pw - 1.4, h: 0.4, fontSize: 12, color: C.soft, fontFace: FONT });
   }
-  if (localDecoration && !coverImages.length) cover.addImage({ data: localDecoration, x: 9.1, y: 1.4, w: 3.3, h: 4.8, sizing: { type: 'cover', w: 3.3, h: 4.8 }, objectName: 'wy-decoration-cover' });
+  if (localDecoration && !coverImages.length) cover.addImage({ data: localDecoration, x: 10.7, y: 4.2, w: 2.7 * 560 / 960, h: 2.7, sizing: { type: 'cover', w: 2.0, h: 2.7 }, objectName: 'wy-decoration-cover' });
   layouts.push('cover');
   }
 
@@ -953,7 +959,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
         titleBar(sl, s.title);
         const t = s.blocks.find((b) => b.type === 'table');
         const fs = t.rows.length > 10 ? 12 : t.rows.length > 6 ? 14 : 16;
-        const rowH = t.rows.length > 10 ? undefined : Math.min(0.75, 5.2 / (t.rows.length + 1)); // 行少时加高，不挤在页面顶上
+        const rowH = t.rows.length > 10 ? undefined : Math.min(t.rows.length <= 4 ? 1.1 : 0.75, 5.2 / (t.rows.length + 1)); // 行少时加高，不挤在页面顶上
         // 列宽按内容长短分，长文字的列宽一些
         const lens = t.header.map((h, ci) => Math.max(plain(h).length, ...t.rows.map((r) => plain(r[ci] ?? []).length)));
         const sum = lens.reduce((a, b) => a + Math.min(Math.max(b, 4), 40), 0);

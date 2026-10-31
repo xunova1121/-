@@ -1,3 +1,4 @@
+import { presentationOverview } from './presentationOverview.mjs';
 import { createStockImages } from './stockImages.mjs';
 import { createLookupModel } from '../src/agent/lookupModels.js';
 import { createLookupService, memoryLookupStorage } from '../src/agent/lookup/service.js';
@@ -300,6 +301,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       // 显示工作区里已有的图片：让手机按文件取回来显示
       onImage: (src, path) => { if (path) record(task, { type: 'file', path }); },
       officeRender:renderOffice,
+      presentationOverview,
       convertLegacyDoc,
       currentSessionId: () => session.id,
       scheduleHost: 'server'

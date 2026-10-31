@@ -37,3 +37,11 @@ it('赛程汇总只按明确数据计数，非法时间不造数字', async () =
   expect(decorationSvg('足球赛程','123456')).toContain('#123456');
   expect(decorationSvg('普通方案','bad')).toContain('#087E8B');
 });
+it('紧邻正文的独立图片也保留；封面是明确背景，裁切比例来自原图',async()=>{
+ const out=await generate('pptx',{title:'球场',content:'# 球场\n![自有](a.png)\n\n## 赛程\n![自有](a.png)\n版式：表格\n\n|开赛|对阵|\n|--|--|\n|18:00|甲乙|\n|19:00|丙丁|',loadImage:async()=>bytes});
+ const zip=await openOfficePackage(out.blob);const receipt=await inspectPresentation(zip);
+ expect(receipt.imagePages).toBe(2);
+ expect(out.info.layoutIssues.filter(issue=>/压到了图片/.test(issue.text))).toEqual([]);
+ const xml=await zip.file('ppt/slides/slide2.xml').async('string');
+ expect(xml).toMatch(/<a:srcRect l="[1-9]\d*"/);
+});

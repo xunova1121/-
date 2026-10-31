@@ -136,3 +136,5 @@
 - 同批补充：按基线joint-18/体育资讯失败，responseGuidance仅追加比较决策的推荐/改选条件；lookup/news仅在用户明确不要比分赛程时排除纯胜负标题（不增读取次数、不接回ESPN）；保留Claude既有情感表达、MORE_TIME_ASK及全部时限规则。
 
 - 2026-10-31 Codex：用户已确认逐项完成PPT配图与文档交付A—H后统一发版。先A真实交付回执和F生成器漏图，随后B/C/D/G/H/E；涉及Claude名下pptxWriter、documentDelivery、executionReview、文档偏好及必要服务器图片接入，仅修改本单接缝。架构受管文件、原生PPT门槛、正文保留、用户停止保持；所有提交[skip ci]，国内图库未实测不启用，不声称真实模型或真机已验收。
+
+- 2026-10-31 Codex：用户已确认A—H逐项后统一发版；H接入涉及serverMode/taskRunner/serverKeysPanel/modelWorkspace/serverClient，E接入documentDelivery/slidePreview；同版本diagramIconAssets仅扩素材不改架构算法。真实渲染补修PPT段内图片抽取与裁切，未碰writingRoles.js；国内图库与用户总览验收待完成，未发新版。

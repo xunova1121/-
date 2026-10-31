@@ -27,6 +27,20 @@ export function planTablePages(slides, { strict = false } = {}) {
     }));
   });
 }
+/** 相邻的来源/口径/限制短页合并成一页；显式页数不合并，正文和图片一字不删。 */
+export function combineExplanationPages(slides,{strict=false}={}) {
+ if(strict)return slides;
+ const result=[];
+ const eligible=slide=>/^(来源|数据来源|统计口径|口径|限制|注意事项|说明)$/.test(slide.title.trim()) && !slide.blocks.some(block=>block.type==='table');
+ for(const slide of slides){
+  const previous=result.at(-1);
+  if(eligible(slide)&&previous?.explanationGroup && JSON.stringify(previous.blocks).length+JSON.stringify(slide.blocks).length<1800){
+   previous.title += ' · '+slide.title;
+   previous.blocks.push(...slide.blocks.filter(block=>block.type!=='image'||!previous.blocks.some(old=>old.type==='image'&&old.src===block.src&&old.alt===block.alt)));previous.notes.push(...slide.notes);
+  }else result.push({...slide,blocks:[...slide.blocks],notes:[...slide.notes],explanationGroup:eligible(slide)});
+ }
+ return result;
+}
 /** 仅清理中文标点周围空格，时间转换为常规半角冒号，不触碰URL/代码。 */
 export function tidyPresentationPunctuation(text) {
   return String(text).replace(/(\d)\s*：\s*(?=\d)/g, '$1:').replace(/[ \t]*：[ \t]*/g, '：').replace(/[ \t]*（[ \t]*/g, '（').replace(/[ \t]*）/g, '）');

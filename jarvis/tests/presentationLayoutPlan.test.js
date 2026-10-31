@@ -26,3 +26,9 @@ it('封面图片实际嵌入且不多一页扉页',async()=>{
  expect(report.pages).toHaveLength(2); expect(report.pages[0].contentImages).toBe(1);
  expect(out.info.layouts).toEqual(['cover','statement']);
 });
+
+it('说明短页合并且全部正文保留；明确页数不合并',async()=>{
+ const {combineExplanationPages}=await import('../src/agent/presentationLayoutPlan.js');
+ const slides=['来源','口径','限制'].map(title=>({title,blocks:[{type:'paragraph',inlines:[{text:title+'必须保留'}]}],notes:[]}));
+ const merged=combineExplanationPages(slides);expect(merged).toHaveLength(1);expect(merged[0].blocks).toHaveLength(3);expect(combineExplanationPages(slides,{strict:true})).toHaveLength(3);
+});

@@ -1,3 +1,4 @@
+import { reviewRealPresentation } from './presentationVisualReview.js';
 import { preparePresentationImages } from './presentationImagePlan.js';
 import { documentOutputPath } from './documentPath.js';
 import { officeTypography } from './officeTypography.js';
@@ -241,7 +242,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       let looked = null;
       // 看图检查（十几秒）：第一次生成照样看；同一个文件重新生成、估算也没排版问题的不再看
       const wantLook = built(out).length > 0 || !fresh(cache.reviewed, pathKey, 1_800_000);
-      if (format === 'pptx' && ctx.visionLlm && out.info?.preview?.length && wantLook) {
+      if (format === 'pptx' && !ctx.presentationOverview && ctx.visionLlm && out.info?.preview?.length && wantLook) {
         try {
           const errors = (o) => built(o).filter((x) => x.level === 'error').length;
           const sheets = pickSheets(out.info.preview, built(out));
@@ -268,6 +269,10 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         } catch (e) {
           throwControl(e, signal);
         }
+      }
+      if (format === 'pptx' && ctx.presentationOverview) {
+        const real = await reviewRealPresentation(ctx, out, finalContent, { requirements: goal, signal, progress, retrieval: execution.retrieval, build });
+        out = real.out; finalContent = real.content;
       }
       const target = path.replace(/\.[a-z0-9]+$/i, '') + `.${out.ext}`;
       if (source && out.info?.missingImages?.length) throw Object.assign(new Error('只排版原文中的图片未完整载入，未覆盖目标文件'), { code: 'DOCUMENT_SOURCE', kind: 'validation' });

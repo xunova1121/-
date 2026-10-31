@@ -26,7 +26,7 @@ export function recordSlide(sl, { shrink = true } = {}) {
   };
   wrap('addText', (text, o = {}) => ({ kind: 'text', text, ...box(o), o }));
   wrap('addShape', (type, o = {}) => ({ kind: 'shape', type: String(type), ...box(o), fill: o.fill?.color, line: o.line?.color, lineWidth: o.line?.width ?? 0.75, radius: o.rectRadius }));
-  wrap('addImage', (o = {}) => ({ kind: 'image', ...box(o), data: o.data }));
+  wrap('addImage', (o = {}) => ({ kind: 'image', ...box({ ...o, ...(o.sizing && { w: o.sizing.w, h: o.sizing.h }) }), data: o.data, role: o.objectName, crop: o.sizing?.type === 'cover' }));
   wrap('addTable', (rows, o = {}) => ({ kind: 'table', rows, ...box(o), o }));
   wrap('addChart', (type, data, o = {}) => ({ kind: 'chart', data: JSON.parse(JSON.stringify(data ?? [])), ...box(o), colors: o.chartColors ?? [] })); // 库会改写传进去的数据，先拷一份
   // 套在记录外面：记下的是缩好之后的字号。“缩小字号以适应”（fit: 'shrink'）打开时不生效：生成时就按估算把字号调到放得下（最多缩到 60%）
@@ -152,7 +152,7 @@ export function layoutIssues(slides, { max = 12 } = {}) {
         if (near(a.it.x, b.it.x) && near(a.it.y, b.it.y)) continue;
         if (overlap(a.rect, b.rect)) { add('error', s, `有两段文字压在一起：“${a.snippet}”和“${b.snippet}”。应精简文字，让每段都在自己的位置放得下`); }
       }
-      for (const img of s.items.filter((x) => (x.kind === 'image' && x.w * x.h > 0.6) || x.kind === 'chart')) { // 小图标（叠在圆上、挨着标题）不算
+      for (const img of s.items.filter((x) => (x.kind === 'image' && x.w * x.h > 0.6 && !(x.role === 'wy-content-cover' && x.x === 0 && x.y === 0 && x.w >= 13.3 && x.h >= 7.5)) || x.kind === 'chart')) { // 小图标（叠在圆上、挨着标题）不算
         if (overlap(placed[i].rect, img)) add('error', s, `的文字“${placed[i].snippet}”压到了${img.kind === 'image' ? '图片' : '图表'}上`);
       }
     }
@@ -253,7 +253,7 @@ export function slideBody(s, P) {
     else if (it.kind === 'text') {
       if (it.o.fill?.color) out.push(`<rect x="${it.x * P}" y="${it.y * P}" width="${it.w * P}" height="${it.h * P}" fill="${color(it.o.fill.color)}"/>`);
       out.push(textSvg(it.text, it.o, it.x, it.y, it.w, it.h, P));
-    } else if (it.kind === 'image' && it.data) out.push(`<image x="${it.x * P}" y="${it.y * P}" width="${it.w * P}" height="${it.h * P}" preserveAspectRatio="none" href="data:${esc(String(it.data).replace(/^data:/, ''))}"/>`);
+    } else if (it.kind === 'image' && it.data) out.push(`<image x="${it.x * P}" y="${it.y * P}" width="${it.w * P}" height="${it.h * P}" preserveAspectRatio="${it.crop ? 'xMidYMid slice' : 'none'}" href="data:${esc(String(it.data).replace(/^data:/, ''))}"/>`);
     else if (it.kind === 'table') out.push(tableSvg(it, P));
     else if (it.kind === 'chart') out.push(chartSvg(it, P));
   }
