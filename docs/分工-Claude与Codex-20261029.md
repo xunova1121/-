@@ -129,3 +129,4 @@
 
 - 2026-10-31 用户明确要求去掉ESPN请求及数据：Codex移除sportsScores中的ESPN联网链，采用已接入直播吧的公开赛程页作为同站备用读取，失败后原搜索阶梯继续；只解析明确日期/对阵/联赛，不把网页计划当实时比分。sportsCards显示旧卡时过滤ESPN行，lastGood拒绝旧ESPN回执；历史对话文字不删除。旧专用ESPN网络测试迁移为国内备用链/日期/状态/取消等同业务保护，逐条记录，不保留测试专用后门或隐藏ESPN开关。
 - 同批用户追加“那六场答非所问”和“所有回答要有层次排版”：agent.js只在比分追问时跳过无范围预取并传递选定队名；responseGuidance只加通用排版指导，不改表达情绪/写作角色；sportsCards默认6场其余展开，历史停用来源过滤。新增独立手机组件验收接原CI，不放宽已有门槛。
+- 发布前回归：同批agent.js/responseGuidance接缝仅为基础常识questionProfile传compact，避免通用排版导致原Token守护失败；完整对话的light标记不等于compact。原小于300字测试与所有其他断言不改。
