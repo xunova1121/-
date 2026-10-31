@@ -1,3 +1,4 @@
+import { planTablePages, tidyPresentationPunctuation } from './presentationLayoutPlan.js';
 import { summarizeTable, decorationData } from './presentationLocalVisuals.js';
 import { reserveImageColumn, placeSlideImages } from './presentationImages.js';
 import { throwControl } from '../core/networkRequest.js';
@@ -121,6 +122,13 @@ function takeDirective(inlines) {
 /** 按页拆开，每页保留原始块，供选版式 */
 export function parseSlides(title, md) {
   const blocks = parseDoc(md);
+  const clean = block => {
+    if (block.inlines) block.inlines = block.inlines.map(run => ({ ...run, text: tidyPresentationPunctuation(run.text) }));
+    for (const child of block.blocks || []) clean(child);
+    for (const item of block.items || []) { clean(item); for (const child of item.children || []) clean(child); }
+    for (const row of block.type === 'table' ? [block.header, ...block.rows] : []) for (let i = 0; i < row.length; i++) row[i] = row[i].map(run => ({ ...run, text: tidyPresentationPunctuation(run.text) }));
+  };
+  blocks.forEach(clean);
   const slides = [];
   let cur = null;
   const start = (t) => { cur = { title: t, blocks: [], notes: [] }; slides.push(cur); };
@@ -338,6 +346,11 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   const addSlide = (title) => { const r = recordSlide(pptx.addSlide()); applyPresentationTypography(r.slide, typography, title); records.push({ n: records.length + 1, title, items: r.items, slide: r.slide }); return r.slide; };
 
   let slides = parseSlides(title, content);
+  let coverImages = [];
+  if (!forbidCover && slides[0]?.title === title && slides[0].blocks.length && slides[0].blocks.every(block => block.type === 'image')) {
+    coverImages = slides[0].blocks;
+    slides = slides.slice(1);
+  }
   // 第一页如果就是文档标题（# 标题后面没有内容），当作封面
   if (slides[0] && !slides[0].blocks.length) { title = slides[0].title || title; slides = slides.slice(1); }
   // 模型常把封面信息（汇报类型、单位、日期）写成第二页的要点：挪回封面
@@ -382,7 +395,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
       for (let i = 0; i < items.length; i += 6) expanded.push({ ...s, title: i ? `${s.title}（续）` : s.title, blocks: [{ ...s.blocks[0], items: items.slice(i, i + 6) }], notes: i ? [] : s.notes });
     } else expanded.push(s);
   }
-  slides = expanded;
+  slides = planTablePages(expanded, { strict: expectedSlides != null });
   const budget = slideBudget(slides.length, expectedSlides, requireCover, forbidCover);
 
   const imageData = async (src) => {
@@ -698,7 +711,13 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   const cover = addSlide(title);
   // 单位 / 署名里已经带了日期就不再重复写日期
   const coverDate = /\d{4}\s*年|\d{4}[-./]\d{1,2}/.test(author) ? '' : (date || today());
-  if (T.cover === 'centered') {
+  if (coverImages.length) {
+    await placeSlideImages(cover, coverImages, 'cover', { load: imageData, missingImages });
+    cover.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W, h: H, fill: { color: '101D35', transparency: 35 }, line: { transparency: 100 } });
+    cover.addText(title, { x: 0.9, y: 2.1, w: 11.5, h: 1.8, fontSize: 40, bold: true, color: 'FFFFFF', fontFace: HFONT, fit: 'shrink' });
+    if (subtitle) cover.addText(subtitle, { x: 0.9, y: 4.15, w: 11.5, h: 1.1, fontSize: 20, color: 'FFFFFF', fontFace: FONT });
+    cover.addText([author, coverDate].filter(Boolean).join(' · '), { x: 0.9, y: 6.1, w: 11.5, h: 0.5, fontSize: 14, color: 'FFFFFF', fontFace: FONT });
+  } else if (T.cover === 'centered') {
     cover.background = { color: light };
     ornament(cover, pw, true);
     if (author) cover.addText(author, { x: 1.5, y: 1.15, w: W - 3, h: 0.4, fontSize: 13, color: gold, fontFace: HFONT, align: 'center' });
@@ -734,10 +753,11 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     if (subtitle) cover.addText(subtitle, { x: 0.8, y: 4.1, w: pw - 1.4, h: 1.0, fontSize: 16, color: C.soft, fontFace: FONT, valign: 'top', fit: 'shrink' });
     if (coverDate) cover.addText(coverDate, { x: 0.8, y: H - 1.1, w: pw - 1.4, h: 0.4, fontSize: 12, color: C.soft, fontFace: FONT });
   }
-  if (localDecoration) cover.addImage({ data: localDecoration, x: 9.1, y: 1.4, w: 3.3, h: 4.8, sizing: { type: 'cover', w: 3.3, h: 4.8 }, objectName: 'wy-decoration-cover' });
+  if (localDecoration && !coverImages.length) cover.addImage({ data: localDecoration, x: 9.1, y: 1.4, w: 3.3, h: 4.8, sizing: { type: 'cover', w: 3.3, h: 4.8 }, objectName: 'wy-decoration-cover' });
   layouts.push('cover');
   }
 
+  if (!budget.cover && coverImages.length) for (const image of coverImages) missingImages.push(`${image.src}（当前页数约束未包含封面）`);
   // ---------- 汇报提纲：有两个以上“第 X 部分”时自动加
   const kinds = slides.map((s, i) => layoutOf(s, { last: i === slides.length - 1 }));
   const sections = slides.filter((s, i) => kinds[i] === 'section');
