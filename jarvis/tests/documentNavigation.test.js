@@ -90,3 +90,12 @@ it('旧工具原文过期时允许一次真实整页恢复，恢复也不能用o
  expect(JSON.parse(await nav.page(doc,{offset:1,recover:true},segment)).state).toBe('already_read');
  expect(doc.recoveries).toEqual([{start:0,end:20000}]);
 });
+
+it('read_file严格Schema补空query时仍读章节正文；真实关键词与章节冲突仍拒绝',async()=>{
+ await ws.write('空关键词.md','第一章 赛程\n赛事01，18:00，队伍1—队伍21。');
+ const tool=createTools({}).find(item=>item.name==='read_file');
+ const catalog=JSON.parse(await tool.run({path:'空关键词.md',view:'sections',query:''}));
+ const sectionId=catalog.sections[0].sectionId;
+ expect(await tool.run({path:'空关键词.md',view:'text',query:'',sectionId})).toContain('赛事01');
+ await expect(tool.run({path:'空关键词.md',view:'text',query:'赛事01',sectionId})).rejects.toHaveProperty('code','DOCUMENT_NAVIGATION');
+});

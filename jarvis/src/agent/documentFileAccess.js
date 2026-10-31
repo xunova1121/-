@@ -6,6 +6,8 @@ const invalid=message=>Object.assign(new Error(message),{code:'DOCUMENT_NAVIGATI
 export function createDocumentFileAccess(navigation,segment,{legacyDoc=false}={}){
  return {
   async read({path,offset=0,query,view='text',sectionId,catalogOffset=0,limit=8,recover=false},{signal}={}){
+   // 工具严格Schema常把未使用的可选关键词补成空字符串；这表示读正文，不是执行空关键词搜索。
+   if(typeof query==='string'&&!query.trim())query=undefined;
    if(sectionId&&(query||view==='sections'))throw invalid('章节正文、关键词和目录模式请分别读取');
    const doc=await navigation.read(path,{signal});
    if(view==='sections')return JSON.stringify(await navigation.catalog(doc,{query:query||'',offset:catalogOffset,limit}));
