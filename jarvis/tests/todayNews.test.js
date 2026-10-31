@@ -36,7 +36,9 @@ it('全部失败仍明确给每个来源的原因；不捏造任何新闻', asyn
   expect(result.items).toEqual([]); expect(result.sources.every(s => /403/.test(s.error))).toBe(true);
   const delivery = createLookupDelivery('今日新闻', () => now);
   delivery.record({ name: 'get_today_news', ok: true, output: JSON.stringify(result) });
-  expect(delivery.text()).toContain('新华财经'); expect(delivery.text()).toContain('403');
+  expect(delivery.text()).toContain('新华财经'); expect(delivery.text()).toContain('可以稍后再试');
+  for (const source of result.sources) expect(delivery.text()).toContain(source.source);
+  expect(delivery.text()).not.toMatch(/403|HTTP|get_today_news/);
 });
 it('用户停止及预算用完继续上抛，不伪装成来源失败', async () => {
   const ctrl = new AbortController(); ctrl.abort(Object.assign(new Error('已停止'), { name: 'AbortError' }));

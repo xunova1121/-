@@ -7,7 +7,7 @@ import { lookupIntent } from './lookup/intent.js';
 import { weatherFallback, marketFallback } from './lookup/fallback.js';
 /** 本轮最多12条短证据，只存于执行期；不用模型旧回复填补失败，不把正文放入检查点。 */
 export function createLookupDelivery(request, now = Date.now) {
-  const rows = new Map(), failures = [], direct = [];
+  const rows = new Map(), failures = [], direct = [], failedSources = [];
   let recovery = null, recoveredText = '';
   const safe = text => !answerConstraintIssues(request, text, now()).length;
   function add(row) {
@@ -38,7 +38,11 @@ export function createLookupDelivery(request, now = Date.now) {
             const at = Date.parse(item.publishedAt);
             if (item.publishedAt?.startsWith(result.date) && at <= now() || recent && result.range?.mode === 'recent24h' && at >= now() - 86400000 && at <= now()) add(item);
           }
-          for (const source of result.sources || []) if (source.error && failures.length < 4) failures.push(source.source + '：' + source.error);
+          for (const source of result.sources || []) if (source.error && failures.length < 4) {
+            failures.push(source.source + '：' + source.error);
+            const label = String(source.source || '新闻来源').replace(/[^\p{L}\p{N} ·.-]/gu, '').slice(0, 40);
+            failedSources.push(label + '暂未取得有效内容');
+          }
         } catch { /* 非结构化结果不能当作已读当天新闻。 */ }
       } else if (toolName === 'web_search') {
         if (todayNewsIntent(request) || answerConstraints(request).todayNews) return; // 未知日期摘要不能混入今日新闻。
@@ -78,7 +82,7 @@ export function createLookupDelivery(request, now = Date.now) {
         const text = direct.map(row => row.name === 'get_weather' ? weatherFallback(row.output, request, now()).text : row.name === 'get_stock_kline' ? marketFallback(row.output) : row.output.replace(/^球队名是英文[^\n]*$/m, '')).filter(Boolean).join('\n\n');
         return safe(text) ? text : '';
       }
-      if (!rows.size) return failures.length ? '查询来源暂时未能提供可用资料，可以稍后再试。' : '';
+      if (!rows.size) return failures.length ? `本轮还没有确切结果（${failedSources.length ? failedSources.join('、') : '查询来源暂时未能提供可用资料'}），可以稍后再试。` : '';
       const text = '先给你已经取得的内容：\n\n' + [...rows.values()].map(item => `- **${item.title}**\n${item.summary || '来源只提供了这一标题，未取得报道正文，不补写细节。'}\n${item.publishedAt ? (item.timeBasis || '发布时间') + '：' + item.publishedAt.replace('T', ' ').replace('+08:00', '') + '（北京时间）；' : ''}来源：${item.source || ''} ${item.url}\n${['page_read', 'json_read'].includes(item.verification) ? '已读取该来源，未做独立交叉核验。' : '待核实：尚未读取报道原文。'}`).join('\n\n');
       return safe(text) ? text : '';
     },
