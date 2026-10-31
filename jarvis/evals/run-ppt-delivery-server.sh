@@ -66,7 +66,8 @@ await prepareRuntime(manifest, production, target, {fetchFile: async (url, outpu
   const raw = new URL(url);
   if (raw.origin !== 'https://raw.githubusercontent.com' || !raw.pathname.startsWith(prefix)) throw new Error('固定版本源码地址不符');
   const api = 'https://api.github.com/repos/xunova1121/-/contents/jarvis/' + raw.pathname.slice(prefix.length) + '?ref=' + manifest.revision;
-  await promisify(execFile)('curl', ['-fsSL','--connect-timeout','15','--max-time','60','--retry','2','--max-filesize',String(Math.max(1,maximum)),'-H','Accept: application/vnd.github.raw+json',api,'-o',output], {timeout:200000,maxBuffer:64000});
+  const seconds=maximum>=1000000?300:60;
+  await promisify(execFile)('curl', ['-fsSL','--connect-timeout','15','--max-time',String(seconds),'--retry','2','--max-filesize',String(Math.max(1,maximum)),'-H','Accept: application/vnd.github.raw+json',api,'-o',output], {timeout:seconds*3000+60000,maxBuffer:64000});
 },progress: item => console.log(`代码 ${item.done}/${item.total}；复用${item.reused}；下载${item.downloaded}`)});
 await fs.writeFile(path.join(target,'runtime-revision.txt'),manifest.revision,{mode:0o600});
 NODE
