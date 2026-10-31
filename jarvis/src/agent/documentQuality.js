@@ -1,3 +1,4 @@
+import { inspectPresentation, requiresEverySlideImage } from './presentationReceipt.js';
 import { inspectLength } from './documentLength.js';
 import { checkArtifact } from './artifactCheck.js';
 import { openOfficePackage, orderedSlidePaths, xmlUnescape } from './officePackage.js';
@@ -64,6 +65,8 @@ export async function inspectDocument(blob, filePath, { info = {}, requiredText 
   if (format === 'pptx') {
     const paths = await orderedSlidePaths(zip);
     validation.slides = paths.length;
+    validation.presentation = await inspectPresentation(zip, { signal });
+    if (requiresEverySlideImage(requirements) && validation.presentation.missingImagePages.length) issues.push({ level: 'error', text: `缺少内容配图的页：${validation.presentation.missingImagePages.join('、')}；请补图后交付，图标不算配图` });
     for (const [index, slidePath] of paths.entries()) {
       const xml = await zip.file(slidePath).async('string');
       const text = [...xml.matchAll(/<a:t\b[^>]*>([^<]*)<\/a:t>/g)].map((match) => xmlUnescape(match[1])).join('');

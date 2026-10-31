@@ -1,3 +1,4 @@
+import { presentationAnswerIssues } from './presentationReceipt.js';
 import { repositoryReceipt, repositoryRepair, repositoryDeliveryIssue, correctRepositoryLinks, repositoryTextStream } from './codeRepositoryReview.js';
 import { IMAGE_RECHECK } from './imageReading.js';
 import { newsCandidates } from './newsDelivery.js';
@@ -154,6 +155,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
       pages: Number.isSafeInteger(data.pages) ? data.pages : null,
       pdfPageMatch: data.pdfPageMatch === 'passed' ? 'passed' : data.pdfPageMatch === 'failed' ? 'failed' : null,
       ...(data.styleFacts && { styleFacts: data.styleFacts }),
+      ...(data.presentation && { presentation: { imagePages: data.presentation.imagePages, missingImagePages: (data.presentation.missingImagePages || []).slice(0, 300) } }),
       // 同一文件第二次回执（渲染后）没带上一版时，沿用第一次的基准
       previousStyle: event.previousStyle ?? artifacts.get(event.path.slice(0, 400))?.previousStyle ?? null,
       at
@@ -277,7 +279,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   const lastDocument = () => [...artifacts.values()].filter((item) => /^(?:docx|pptx|xlsx)$/.test(item.format)).sort((a, b) => a.at - b.at).at(-1) ?? null;
   const checkAnswer = (text, now) => {
     selectedNews = new Set((String(text).match(/https?:\/\/[^\s)）\]，。]+/g) || []).filter(url => newsOriginals.has(url)));
-    answerIssues = answerConstraintIssues(request, text, now);
+    answerIssues = [...answerConstraintIssues(request, text, now), ...presentationAnswerIssues(request, text, lastDocument())];
     if (repositoryChanged) {
       const issue = repositoryDeliveryIssue(text, [...new Set([...files.values()].map(file => file.workspaceId).filter(Boolean))]);
       if (issue) answerIssues.push(issue);
@@ -291,7 +293,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   };
   const guardsAnswer = () => {
     const rules = answerConstraints(request);
-    return visualEvidence.active() || (styleRequests(request).length > 0 && Boolean(lastDocument())) || rules.noTime || rules.literals.length > 0 || rules.todayNews || rules.care || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
+    return lastDocument()?.format === 'pptx' || visualEvidence.active() || (styleRequests(request).length > 0 && Boolean(lastDocument())) || rules.noTime || rules.literals.length > 0 || rules.todayNews || rules.care || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
   };
   /** 改写一次后仍对不上：不吞掉回答（文件链接要留着），末尾补一句读回的实际情况 */
   const styleCorrection = () => (styleProblems.length ? '（读回文件核对：' + styleNote(request, lastDocument()).replace(/^用户要的调整，读回文件的实际结果：/, '').replace(/。回答照这个说$/, '') + '。）' : '');

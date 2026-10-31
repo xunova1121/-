@@ -1,3 +1,4 @@
+import { documentLinePreferences, stripDocumentLines } from './documentLineRules.js';
 import * as ws from './workspace.js';
 import { inspectDocument, qualitySummary } from './documentQuality.js';
 import { throwControl } from '../core/networkRequest.js';
@@ -10,7 +11,10 @@ import { measureDocx } from './styleCheck.js';
 
 /** 把短检查报告与真实产物放一起；正文只在工作区文件中，不进会话/检查点。 */
 export async function deliverDocument(ctx, out, target, { progress, signal, checkpoint, issues = [], plan, generatorReview, requiredText = [], requirements = '', preservation = null, design = null } = {}) {
+  let lineRules = {};
   if (out.ext === 'docx') {
+    lineRules = await documentLinePreferences(ctx, requirements, signal);
+    if (lineRules.noRules || lineRules.noUnderline) out = { ...out, blob: await stripDocumentLines(out.blob, { ...lineRules, signal }), wordPreview: null };
     out = await coordinateWordLayout(ctx, out, requirements, { signal, progress });
     const typographyIssues = await directTypographyConflicts(out.blob, out.info?.typographyProfile || {}, { signal });
     issues = [...issues, ...typographyIssues];
@@ -18,6 +22,8 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
   const validation = await inspectDocument(out.blob, target, { info: out.info, requiredText, signal, requirements });
   // 读回实际字号、横线、下划线：回答只能说文件里真的有的（见 styleCheck.js）
   if (['docx','pptx','xlsx'].includes(out.ext)) validation.styleFacts = await measureDocx(out.blob);
+  if (lineRules.noRules && validation.styleFacts?.rules !== 0) issues.push({ level: 'error', text: '要求不要横线，但实际Word未确认横线为0；须修复后交付' });
+  if (lineRules.noUnderline && validation.styleFacts?.underlines !== 0) issues.push({ level: 'error', text: '要求不要下划线，但实际Word未确认下划线为0；须修复后交付' });
   const effectiveStyle = validation.format === 'pptx' ? out.info?.style : validation.format === 'xlsx' ? out.info?.sheetStyle : null;
   if (design?.style && effectiveStyle) {
     const conflict = design.style !== effectiveStyle;
@@ -69,7 +75,8 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
         pages: validation.pages,
         pdfPageMatch: validation.pdfPageMatch,
         wordPageBudget: validation.wordPageBudget,
-        styleFacts: validation.styleFacts
+        styleFacts: validation.styleFacts,
+        presentation: validation.presentation
       }
     });
   const saveReport = async () => {
@@ -122,6 +129,7 @@ export async function deliverDocument(ctx, out, target, { progress, signal, chec
   }
   checkedPath = await saveReport();
   if (validation.wordCount) notes.push(`实际文件字数${validation.wordCount.count}，要求${validation.wordCount.min}至${validation.wordCount.max}；${validation.wordCount.scope}；${validation.wordCount.passed ? '在范围内' : '不在范围内，须修改'}`);
+  if (validation.presentation) notes.push(`真实逐页配图：${validation.presentation.imagePages}/${validation.slides}页有内容图片；缺图页：${validation.presentation.missingImagePages.join('、') || '无'}；图标和装饰不冒充配图；逐页表格/文本框及估算空白见报告`);
   const facts = validation.styleFacts;
   if (facts) notes.push(`读回实际：标题${facts.title}磅、正文${facts.body}磅；横线${facts.rules == null ? '未自动量取' : facts.rules + '条'}、下划线${facts.underlines}处`);
   notes.push(qualitySummary(validation), `检查报告：${checkedPath}`);

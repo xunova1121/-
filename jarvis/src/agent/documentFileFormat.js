@@ -1,4 +1,4 @@
-import { openOfficePackage } from './officePackage.js';
+import { stripDocumentLines } from './documentLineRules.js';
 import { generate } from './docs.js';
 import { restyleDocx } from './docxRestyle.js';
 import { deliverDocument } from './documentDelivery.js';
@@ -8,20 +8,8 @@ import { normalize } from './workspace.js';
 import { documentTypography } from './documentTypography.js';
 
 /** 原文件排版只换样式部件；不进入Markdown扩写，也不重建图片、表格或关系。 */
-/** 去掉 Word 正文段落和样式里的上下边框（横线）；表格边框、左边框不动 */
 export async function withoutParagraphRules(blob, { signal } = {}) {
-  const zip = await openOfficePackage(blob);
-  signal?.throwIfAborted();
-  const strip = (xml) => xml.replace(/<w:pBdr\b[^>]*>[\s\S]*?<\/w:pBdr>/g, (bdr) => {
-    const kept = bdr.replace(/<w:(?:top|bottom)\b[^>]*\/>/g, '').replace(/<w:(?:top|bottom)\b[^>]*>[\s\S]*?<\/w:(?:top|bottom)>/g, '');
-    return /<w:(?:left|right|between|bar)\b/.test(kept) ? kept : '';
-  });
-  for (const name of ['word/document.xml', 'word/styles.xml']) {
-    const xml = await zip.file(name)?.async('string');
-    if (xml) zip.file(name, strip(xml));
-  }
-  const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
-  return new Blob([bytes], { type: blob.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+  return stripDocumentLines(blob, { noRules: true, signal });
 }
 
 export async function formatDocumentFile(ctx, source, args, execution = {}) {
