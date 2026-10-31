@@ -2,7 +2,7 @@ import { marketFallback } from './fallback.js';
 /** 失败分类只使用结构化状态；原始报错只留在工具日志。 */
 export function failureKind(error = {}) {
   if (error.name === 'ValidationError' || ['WEATHER_LOCATION_REQUIRED', 'INVALID_STOCK_INPUT'].includes(error.code)) return 'input';
-  if ([401, 403, 429].includes(Number(error.status)) || /AUTH|QUOTA|RATE_LIMIT/.test(error.code || '')) return 'auth';
+  if ([401, 402, 403, 429].includes(Number(error.status)) || /AUTH|QUOTA|RATE_LIMIT/.test(error.code || '')) return 'auth';
   if (error.code === 'LOOKUP_SOURCE_COOLING') return 'cooling';
   if (['TimeoutError', 'TypeError'].includes(error.name) || ['timeout', 'network'].includes(error.kind) || Number(error.status) >= 500 || /TIMEOUT|ECONN|ENOTFOUND|EAI_AGAIN|NETWORK/.test(error.code || '') || error instanceof TypeError) return 'transient';
   return 'unavailable';

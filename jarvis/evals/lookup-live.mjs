@@ -335,7 +335,7 @@ function marketFallback(output) {
 // src/agent/lookup/recoveryData.js
 function failureKind(error = {}) {
   if (error.name === "ValidationError" || ["WEATHER_LOCATION_REQUIRED", "INVALID_STOCK_INPUT"].includes(error.code)) return "input";
-  if ([401, 403, 429].includes(Number(error.status)) || /AUTH|QUOTA|RATE_LIMIT/.test(error.code || "")) return "auth";
+  if ([401, 402, 403, 429].includes(Number(error.status)) || /AUTH|QUOTA|RATE_LIMIT/.test(error.code || "")) return "auth";
   if (error.code === "LOOKUP_SOURCE_COOLING") return "cooling";
   if (["TimeoutError", "TypeError"].includes(error.name) || ["timeout", "network"].includes(error.kind) || Number(error.status) >= 500 || /TIMEOUT|ECONN|ENOTFOUND|EAI_AGAIN|NETWORK/.test(error.code || "") || error instanceof TypeError) return "transient";
   return "unavailable";
@@ -994,7 +994,7 @@ function createLookupHealth({ storage = collection("kv"), now = Date.now } = {})
           connected: result.state !== "failed",
           state: result.state,
           elapsedMs: Math.max(0, Math.min(6e4, Number(result.elapsedMs) || 0)),
-          code: String([401, 403, 429].includes(result.status) ? "LOOKUP_AUTH" : result.code || "").slice(0, 60)
+          code: String([401, 402, 403, 429].includes(result.status) ? "LOOKUP_AUTH" : result.code || "").slice(0, 60)
         }].slice(-10);
         const failures = samples.slice(-3);
         const cooling = failures.length === 3 && failures.every((s) => !s.connected);
@@ -1188,7 +1188,7 @@ async function runLookupOperation(tool, args, execution, lookup = {}) {
       return result;
     } catch (error) {
       if (!signal?.aborted && !["AbortError", "ValidationError"].includes(error.name) && !["RETRIEVAL_BUDGET", "LOOKUP_SOURCE_COOLING", "UNTRUSTED_JSON_HOST", "INVALID_STOCK_INPUT"].includes(error.code)) {
-        await lookup.health?.record(source.id, { state: "failed", code: [401, 403, 429].includes(error.status) ? "LOOKUP_AUTH" : error.code || error.name, elapsedMs: performance.now() - started }, { signal });
+        await lookup.health?.record(source.id, { state: "failed", code: [401, 402, 403, 429].includes(error.status) ? "LOOKUP_AUTH" : error.code || error.name, elapsedMs: performance.now() - started }, { signal });
       }
       throw error;
     }
@@ -2566,6 +2566,7 @@ async function lookupQWeatherCity({ key, host, query, fetchImpl = (...a) => fetc
   const res = await fetchImpl(`https://${host}/geo/v2/city/lookup?location=${encodeURIComponent(String(query).trim().slice(0, 80))}&number=8&lang=zh`, { signal, headers: { "X-QW-Api-Key": key, Accept: "application/json" } });
   if (!res.ok) throw Object.assign(new Error(`\u548C\u98CE\u5929\u6C14\u8FD4\u56DE ${res.status}`), { status: res.status });
   const j = await res.json();
+  if ([401, 402, 403, 429].includes(Number(j?.code))) throw Object.assign(new Error("\u548C\u98CE\u5929\u6C14\u6388\u6743\u6216\u989D\u5EA6\u4E0D\u8DB3"), { status: Number(j.code), code: "QWEATHER_AUTH" });
   if (j?.code && String(j.code) !== "200") return [];
   return (j.location ?? []).map((c) => ({ name: String(c.name || "").slice(0, 80), latitude: num(c.lat), longitude: num(c.lon), ...c.adm2 && c.adm2 !== c.name ? { city: String(c.adm2).slice(0, 60), district: String(c.name || "").slice(0, 60) } : {}, .../^https:\/\/www\.qweather\.com\//.test(c.fxLink || "") && { link: String(c.fxLink).slice(0, 300) }, region: [c.adm2 !== c.name ? c.adm2 : "", c.adm1, c.country].filter(Boolean).join(" \xB7 ").slice(0, 120) })).filter((c) => c.name && c.latitude !== null && c.longitude !== null).slice(0, 8);
 }

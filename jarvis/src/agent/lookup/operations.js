@@ -47,7 +47,7 @@ export async function runLookupOperation(tool, args, execution, lookup = {}) {
     } catch (error) {
       // 输入不合法、用户取消或次数耗尽不属于提供者故障，不能因此冷却整个查询入口。
       if (!signal?.aborted && !['AbortError', 'ValidationError'].includes(error.name) && !['RETRIEVAL_BUDGET', 'LOOKUP_SOURCE_COOLING', 'UNTRUSTED_JSON_HOST', 'INVALID_STOCK_INPUT'].includes(error.code)) {
-        await lookup.health?.record(source.id, { state: 'failed', code: [401, 403, 429].includes(error.status) ? 'LOOKUP_AUTH' : error.code || error.name, elapsedMs: performance.now() - started }, { signal });
+        await lookup.health?.record(source.id, { state: 'failed', code: [401, 402, 403, 429].includes(error.status) ? 'LOOKUP_AUTH' : error.code || error.name, elapsedMs: performance.now() - started }, { signal });
       }
       throw error;
     }

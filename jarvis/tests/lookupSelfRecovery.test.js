@@ -190,3 +190,9 @@ it('赛程自救拒绝客服/百科错题，不能把HTTP200和有链接当作�
   const found = await recoverLookup(...args);
   expect(found.recovery.state).toBe('failed'); expect(found.output).not.toMatch(/大疆|https:/);
 });
+
+it('和风GeoAPI的HTTP200鉴权JSON不能被当作城市不存在', async () => {
+  const { lookupQWeatherCity } = await import('../src/core/qweather.js');
+  for (const code of ['401', '402', '403', '429']) await expect(lookupQWeatherCity({ key: 'fixture', host: 'weather.example.com', query: '南京', fetchImpl: async () => new Response(JSON.stringify({ code })) })).rejects.toMatchObject({ status: Number(code), code: 'QWEATHER_AUTH' });
+  expect(await lookupQWeatherCity({ key: 'fixture', host: 'weather.example.com', query: '不存在的城市', fetchImpl: async () => new Response('{"code":"404"}') })).toEqual([]);
+});

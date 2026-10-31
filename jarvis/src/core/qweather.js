@@ -75,6 +75,7 @@ export async function lookupQWeatherCity({ key, host, query, fetchImpl = (...a) 
   const res = await fetchImpl(`https://${host}/geo/v2/city/lookup?location=${encodeURIComponent(String(query).trim().slice(0, 80))}&number=8&lang=zh`, { signal, headers: { 'X-QW-Api-Key': key, Accept: 'application/json' } });
   if (!res.ok) throw Object.assign(new Error(`和风天气返回 ${res.status}`), { status: res.status });
   const j = await res.json();
+  if ([401, 402, 403, 429].includes(Number(j?.code))) throw Object.assign(new Error('和风天气授权或额度不足'), { status: Number(j.code), code: 'QWEATHER_AUTH' });
   if (j?.code && String(j.code) !== '200') return [];
   return (j.location ?? []).map((c) => ({ name: String(c.name || '').slice(0, 80), latitude: num(c.lat), longitude: num(c.lon), ...(c.adm2 && c.adm2 !== c.name ? { city: String(c.adm2).slice(0, 60), district: String(c.name || '').slice(0, 60) } : {}), ...(/^https:\/\/www\.qweather\.com\//.test(c.fxLink || '') && { link: String(c.fxLink).slice(0, 300) }), region: [c.adm2 !== c.name ? c.adm2 : '', c.adm1, c.country].filter(Boolean).join(' · ').slice(0, 120) })).filter((c) => c.name && c.latitude !== null && c.longitude !== null).slice(0, 8);
 }

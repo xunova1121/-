@@ -124,3 +124,5 @@
 - 2026-10-31 Codex按新交接修查询总时限：已同步4e0a39b。速度目标与硬期限分离；普通查询模型请求单独等待首字，保留连续写作宽限、再查、长任务解除与取消。仅接agentModelRequest/agent.js、lookup/clock/turn、lookupDelivery及shared/taskTiming统计；完整简单天气回执可读兜底不误判部分完成，原数值/来源/内容守护不放宽。按用户本轮授权测试全过后发布，提交均[skip ci]；旧5/10秒数字断言变更逐项登记。
 
 - 2026-10-31 用户追加合并交接已同步be6be2b：统一查询自救与时限同批发布。扩充lookup/recovery、lastGood、source health及来源设置；agentToolExecution仅传递结构化恢复元数据，agentCompletion/lookupClosingNote仅去重已解释的网络警告，数值/内容/文件/视觉守护保留。tools.js只向天气传健康实例，server评测沿用已有独立memoryLookupStorage，不改持仓/表达/架构/提醒逻辑。
+
+- 2026-10-31 自救最终复核补充：core/qweather.js仅纠正GeoAPI以HTTP200返回401/402/403/429时被当成“城市没找到”的分类；保留真正404/无地点处理和全部解析字段。对应测试新增，不改首页天气设计。
