@@ -18,6 +18,7 @@ import { validateLiveConfig } from './baseline.mjs';
 import { fileDownloader, turnFileFacts, fileProblems, turnEvidence } from './joint-files.mjs';
 import { runMetrics, stability, jointSummary, compareRounds } from './joint-report.mjs';
 import { rubricVersion } from './joint-rubric.mjs';
+import { evidenceDownloader, searchEvidence } from './joint-evidence.mjs';
 import { speedQualityCases } from './speed-quality-cases.mjs';
 
 const bj = (t = Date.now()) => new Date(t + 8 * 3600_000).toISOString().replace('T', ' ').slice(0, 19) + '（北京时间）';
@@ -31,23 +32,26 @@ export function readiness(item, env) {
 }
 
 /** 一题跑一次（含追问）：每轮结束量一次文件 */
-export async function runJointOnce(api, item, { download, runId, attempt, signal, prices = {}, cleanup }) {
+export async function runJointOnce(api, item, { download, runId, attempt, signal, prices = {}, cleanup, archiveRoot }) {
   const turns = [];
-  const fileFacts = [];
+  const fileFacts = [], evidence = [];
+  const capture = async (turn, index) => {
+    const snapshot = evidenceDownloader(download, archiveRoot && path.join(archiveRoot, `turn-${index}`));
+    if (item.file) fileFacts.push(await turnFileFacts(turn, snapshot));
+    evidence.push({ tools: Object.entries(turn.timing?.tools || {}).map(([name, v]) => ({ name, calls: v.calls, failed: v.failed })), ...searchEvidence(turn), files: await turnEvidence(turn, snapshot).catch(() => []), outcome: turn.review?.outcome ?? null, artifactDirectory: archiveRoot ? `artifacts/${item.id}-r${attempt}/turn-${index}` : null });
+  };
   // 服务器在评测会话里不给代码工具（安全隔离），代码题只能用普通会话：会出现在对话列表里，报告标 isolated:false
   const evaluationId = item.requires.includes('repo') ? null : runId;
   const first = await runCase(api, { ...item, id: `${item.id}-r${attempt}` }, { runId, evaluationId, signal });
   turns.push(first);
-  if (item.file) fileFacts.push(await turnFileFacts(first, download));
+  await capture(first, 1);
   if (item.followup && first.status === 'done' && !signal?.aborted) {
     const next = await runCase(api, { ...item, id: `${item.id}-r${attempt}`, prompt: item.followup }, { runId, evaluationId, signal, sessionId: first.sessionId });
     turns.push(next);
-    if (item.file) fileFacts.push(await turnFileFacts(next, download));
+    await capture(next, 2);
   }
   const createdSchedules = cleanup ? await cleanup().catch(() => []) : null;
   // 给评审员的证据：每轮用了哪些工具（次数 / 失败）、交付文件读回、建了哪些提醒（第一轮实测评审员看不到这些，误判了一批题）
-  const evidence = [];
-  for (const t of turns) evidence.push({ tools: Object.entries(t.timing?.tools || {}).map(([name, v]) => ({ name, calls: v.calls, failed: v.failed })), files: await turnEvidence(t, download).catch(() => []), outcome: t.review?.outcome ?? null });
   const last = turns.at(-1);
   const mechanical = checkResult(item, last);
   if (item.followup && turns.length !== 2) mechanical.failures.push('追问没跑成');
@@ -151,7 +155,7 @@ export async function main(args = process.argv.slice(2), env = process.env) {
           continue;
         }
         const before = item.requires.includes('schedule') ? new Set(((await api('/api/server/schedules')) || []).map((s) => s.id)) : null;
-        const run = await runJointOnce(api, item, { download, runId: report.runId, attempt, signal: controller.signal, prices, cleanup: before && scheduleCleaner(api, remove, before) });
+        const run = await runJointOnce(api, item, { download, runId: report.runId, attempt, signal: controller.signal, prices, archiveRoot: path.join(directory, "artifacts", `${item.id}-r${attempt}`), cleanup: before && scheduleCleaner(api, remove, before) });
         entry.runs.push(run);
         console.log(`${item.id} 第${attempt}次：${run.status}；${Math.round(run.metrics.totalMs / 1000)}秒；模型调用${run.metrics.allCalls ?? run.metrics.mainCalls ?? '?'}次${run.fileProblems.length ? '；文件不符' : ''}`);
         await save();

@@ -85,6 +85,7 @@ export function jointSummary(results) {
     runs: list.length,
     passed: list.filter(passed).length,
     judged: list.filter((r) => r.judgement && !r.judgement.error).length,
+    pendingReview: list.filter((r) => !r.judgement || r.judgement.error).length,
     avgTotal: mean(list.map((r) => r.judgement?.total)),
     avgMs: mean(list.map((r) => r.metrics.totalMs)),
     avgCalls: mean(list.map((r) => r.metrics.allCalls ?? r.metrics.mainCalls)),
@@ -96,7 +97,7 @@ export function jointSummary(results) {
   for (const r of scored) (models[r.metrics.mainModel || '未知'] ??= []).push(r);
   const reasons = {};
   for (const r of scored.filter((r) => !passed(r))) {
-    const key = r.judgement?.failureReason || (r.fileProblems?.length ? 'format' : r.status !== 'done' ? 'tool_failed' : 'unknown');
+    const key = r.fileProblems?.length ? 'format' : r.status !== 'done' ? 'tool_failed' : r.judgement?.error || !r.judgement ? '评审缺失或失败（待复核）' : r.judgement.failureReason || 'unknown';
     reasons[key] = (reasons[key] || 0) + 1;
   }
   const rewrites = {};

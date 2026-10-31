@@ -14,7 +14,7 @@ mkdir "$STAGE/app"
 cp "$APP/package.json" "$STAGE/app/package.json"
 cp -a "$APP/evals" "$STAGE/app/evals"
 for part in src shared server node_modules; do ln -s "$APP/$part" "$STAGE/app/$part"; done
-for file in joint.mjs speed-quality-cases.mjs speed-quality-report.mjs run-joint.sh; do
+for file in joint.mjs joint-evidence.mjs joint-files.mjs joint-rubric.mjs joint-report.mjs speed-quality-cases.mjs speed-quality-report.mjs run-joint.sh; do
   curl -fsSL --retry 2 --connect-timeout 10 --max-time 60 --max-filesize 1000000 -H 'Accept: application/vnd.github.raw+json' "https://api.github.com/repos/xunova1121/-/contents/jarvis/evals/$file?ref=$REVISION" -o "$STAGE/app/evals/$file"
 done
 node --check "$STAGE/app/evals/joint.mjs"
@@ -24,7 +24,7 @@ cat > "$STAGE/run.sh" <<'RUN'
 set -uo pipefail
 umask 077
 BASE="$(cd -- "$(dirname -- "$0")" && pwd)"
-export JOINT_EXPECT_VERSION=1.0.351 JOINT_SPEED_QUALITY=1 JOINT_OUT="$BASE/results"
+export JOINT_EXPECT_VERSION="${JOINT_EXPECT_VERSION:-1.0.351}" JOINT_SPEED_QUALITY=1 JOINT_OUT="$BASE/results"
 bash "$BASE/app/evals/run-joint.sh"
 RESULT=$?
 if [ -f "$BASE/results/report.json" ]; then

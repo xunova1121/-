@@ -3,7 +3,8 @@
  * 4 个维度各 1～5 分，每个分数有“长什么样”的样例，评审员和用户按同一把尺子打分，免得每轮标准漂移。
  * 自动评审只看题目、检查点、回答原文和程序读回的文件事实；不给评审员看工具内部日志、密钥或用户其他对话。
  */
-export const rubricVersion = 'joint-rubric-v1';
+import { searchEvidence } from './joint-evidence.mjs';
+export const rubricVersion = 'joint-rubric-v2';
 
 export const DIMENSIONS = {
   onPoint: {
@@ -60,11 +61,12 @@ export function judgePrompt(item, run) {
   const turns = run.turns.map((t, i) => `【第${i + 1}轮用户】${t.prompt}\n【第${i + 1}轮回答】${String(t.answer || '（无回答）').slice(0, 6000)}`).join('\n\n');
   const facts = run.fileFacts ? `\n【程序读回的文件事实（以此为准，回答说的和它不一致就是说做到没做到）】\n${JSON.stringify(run.fileFacts).slice(0, 3000)}` : '';
   // 程序记录的证据：用了哪些工具、交付文件读回（内容、页数、公式、检查报告）、建了哪些提醒。检查点要求的“用工具核对 / 文件里有什么”以这里为准
-  const evidence = run.evidence ? `\n【程序记录的证据（每轮用了哪些工具、交付文件读回、生成时的检查报告）】\n${JSON.stringify(run.evidence).slice(0, 6000)}` : '';
+  const evidence = run.evidence ? `\n【程序记录的证据（每轮用了哪些工具、交付文件读回、生成时的检查报告）】\n${JSON.stringify(run.evidence.map((row, i) => ({ ...row, ...searchEvidence(run.turns[i] || {}), files: (row.files || []).map(file => ({ ...file, text: file.text?.slice(0, 12000), judgeTextTruncated: Boolean(file.textTruncated || file.text?.length > 12000) })) })))}` : '';
   const schedules = run.createdSchedules ? `\n【这一轮实际建的提醒（测完已删）】${JSON.stringify(run.createdSchedules)}` : '';
   const mech = run.mechanical?.failures?.length ? `\n【程序检查发现的问题】${run.mechanical.failures.join('；')}` : '';
   return {
     system: `你是严格、公正的中文评审员。只根据下面给出的题目、检查点、回答原文和程序读回的事实打分，不要脑补没给出的内容。检查点里要求“用工具核对”“文件里有什么”“真的建了提醒”“用了哪个画图工具”时，以【程序记录的证据】为准：证据里有就算做到，证据里明确没有才算没做到；证据没覆盖的，不要仅因“无法确认”判不过，按回答本身是否合理打分并在 evidence 里写明“证据未覆盖”。实时信息（天气、新闻、股价、汇率）你无法联网核实时，只看回答是否给了今天的日期、原文链接和自洽的数字，不要因为你不知道今天的数据就判错。
+证据缺失不能当事实不存在。内置搜索次数大于0时，不得因普通tools为空声称完全没有联网；搜索次数不等于原文已核实。文件只给部分正文或图片元数据时，不能声称完整内容或视觉已验收。用户只要求复述已给的虚构材料、且没有声称实时核实，不得因未重复“虚构”二字判事实错误。不擅自增加题面未要求的磅数汇报等硬条件。否定式检查点按真实语义判断，例如“不能顺着改错”在坚持正确数字时应通过。检查点布尔值、证据和总评必须一致；发现矛盾先纠正JSON。
 评分维度（每项1～5分，整数，可以给2和4）：
 ${dims}
 失败主因只能从这些里选一个：${Object.keys(FAILURE_REASONS).join(' / ')}。
@@ -87,8 +89,9 @@ export function parseJudgement(text, item) {
   const checkpoints = Array.isArray(data.checkpoints) ? data.checkpoints : [];
   if (checkpoints.length !== item.rubric.length || !checkpoints.every((c) => typeof c?.passed === 'boolean' && typeof c?.evidence === 'string' && c.evidence.trim().length >= 4))
     return { error: '检查点数量或格式不对' };
+  if (checkpoints.some(c => !c.passed && /应判过|应判通过|应通过|误把.{0,20}判为未通过/.test(c.evidence)) || /误把.{0,30}判为未通过/.test(String(data.comment))) return { error: '评审结论与证据自相矛盾，需复核，未自动改成通过' };
   const failureReason = data.failureReason && FAILURE_REASONS[data.failureReason] ? data.failureReason : null;
-  const allPassed = checkpoints.every((c) => c.passed) && Object.values(scores).every((v) => v >= 3);
+  const allPassed = data.overclaim !== true && checkpoints.every((c) => c.passed) && Object.values(scores).every((v) => v >= 3);
   return {
     scores,
     total: Object.values(scores).reduce((a, b) => a + b, 0),

@@ -111,12 +111,13 @@ export async function pptxContent(bytes) {
     return null;
   }
 }
-/** Word 正文前 600 字 */
+/** Word 正文有界读回，明确截断状态 */
 export async function docxContent(bytes) {
   try {
     const zip = await JSZip.loadAsync(bytes);
     const xml = (await zip.file('word/document.xml')?.async('string')) || '';
-    return { text: unescape([...xml.matchAll(/<w:p\b[\s\S]*?<\/w:p>/g)].map((p) => [...p[0].matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g)].map((t) => t[1]).join('')).filter(Boolean).join('\n')).slice(0, 600) };
+    const fullText = unescape([...xml.matchAll(/<w:p\b[\s\S]*?<\/w:p>/g)].map((p) => [...p[0].matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g)].map((t) => t[1]).join('')).filter(Boolean).join('\n'));
+    return { text: fullText.slice(0, 20000), textChars: fullText.length, textTruncated: fullText.length > 20000 };
   } catch {
     return null;
   }
@@ -133,7 +134,7 @@ export async function turnEvidence(turn, download) {
     const format = path.match(DELIVERABLE)[1].toLowerCase();
     const bytes = await download(path).catch(() => null);
     if (!bytes) { out.push({ path, format, readable: false }); continue; }
-    const row = { path, format, readable: true, bytes: bytes.byteLength };
+    const row = { path, format, readable: true, bytes: bytes.byteLength, snapshot: download.artifact?.(path) || null };
     if (OFFICE.test(path)) {
       const facts = await measureDocx(new Blob([bytes]));
       Object.assign(row, facts ? { body: facts.body, title: facts.title, rules: facts.rules, underlines: facts.underlines } : {});
