@@ -636,7 +636,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     // 文档尚有可补救缺口时，先修再发表最终答复，避免“没做成”与后续“已完成”拼在一起。
     const deliveryState = review.report();
     const deliveryGap = deliveryState.pendingFormats.length || deliveryState.failures.length || deliveryState.pendingReadback.length || deliveryState.artifacts.some(item => item.errors > 0);
-    const deliveryRepair = makingFile && canReview && deliveryGap && !r.toolCalls.length && !closing && !signal?.aborted && checks < 1 && cur.adapter.kind !== 'mock' ? review.guidance() : '';
+    const deliveryRepair = makingFile && canReview && deliveryGap && r.stop !== 'pause_turn' && !r.toolCalls.length && !closing && !signal?.aborted && checks < 1 && cur.adapter.kind !== 'mock' ? review.guidance() : '';
     if (deliveryRepair) {
       checks++;
       convo.push({ role: 'assistant', content: held, toolCalls: [], raw: r.raw });

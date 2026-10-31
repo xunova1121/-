@@ -124,3 +124,21 @@ it('方案选择先给推荐并说明反向选择条件，不以计算工具过�
   const { responseGuidance } = await import('../src/agent/responseGuidance.js');
   expect(responseGuidance('A方案投入20万，B方案不用投入，选哪个')).toContain('什么条件变化会改选另一项');
 });
+it('服务端工具pause_turn是续传，不当成文档提前收尾插入补救指令', async () => {
+  const { runAgent } = await import('../src/agent/agent.js');
+  let requests = 0;
+  const adapter = { async stream({ messages }) {
+    requests++;
+    if (requests === 1) return { text: '', toolCalls: [], stop: 'pause_turn', raw: [{ type: 'server_tool_use', id: 'native' }] };
+    expect(messages.some(m => String(m.content).includes('前一段暂未展示'))).toBe(false);
+    if (requests === 2) return { text: '', toolCalls: [{ id: 'doc', name: 'create_document', args: {} }], stop: 'tool_use' };
+    return { text: '文件已保存：交付/续传.docx', toolCalls: [], stop: 'end_turn' };
+  } };
+  const tool = { name: 'create_document', input_schema: { type: 'object', properties: {} }, run: async (_, execution) => {
+    await execution.checkpoint({ type: 'artifact_validation', path: '交付/续传.docx', validation: { format: 'docx', readback: 'passed', errors: 0 } });
+    return '已生成';
+  } };
+  const result = await runAgent({ adapter, model: 'fixture', userText: '写Word周报', history: [], context: { dynamic: '' }, tools: [tool], quiet: true, emit() {} });
+  expect(result.text).toContain('交付/续传.docx');
+  expect(requests).toBe(3);
+});
