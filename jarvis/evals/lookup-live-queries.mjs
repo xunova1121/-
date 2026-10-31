@@ -13,11 +13,18 @@ export const LOOKUP_LIVE_CASES = [
   ['weather', '今天天气', 'weather'], ['football', '足彩赛程', 'sports_live'], ['market', '今天大盘怎么样', 'market'],
   ['weather-alias', '集团年天气', 'weather'], ['general', 'gpt-sol 最便宜的中转平台', 'general'], ['followup', '各三条', 'news']
 ];
+export function selectLiveLookupCases(only) {
+  if (!only) return LOOKUP_LIVE_CASES;
+  const selected = LOOKUP_LIVE_CASES.filter(row => row[0] === only);
+  if (!selected.length) throw new Error('--only必须是问法表编号，例如tech；未发起网络请求');
+  return selected;
+}
 /** 真实查询取数，不读取生产配置/健康/密钥、不请求模型；非新闻类别明确留第2步。 */
-export async function runLookupLiveQueries({ out, signal, declaredRegion, script }) {
+export async function runLookupLiveQueries({ out, signal, declaredRegion, script, only }) {
+  const selected = selectLiveLookupCases(only);
   const service = createLookupService({ storage: memoryLookupStorage() });
   const cases = [];
-  for (const [id, text, expected] of LOOKUP_LIVE_CASES) {
+  for (const [id, text, expected] of selected) {
     if (signal.aborted) throw signal.reason;
     const intent = lookupIntent(text, id === 'followup' ? { history: [{ role: 'user', content: '今日新闻' }] } : {});
     const row = { id, text, expected, actual: intent.kind, intentCorrect: expected === intent.kind };
@@ -46,11 +53,12 @@ export async function runLookupLiveQueries({ out, signal, declaredRegion, script
     scriptSHA256: crypto.createHash('sha256').update(await fs.readFile(script)).digest('hex'),
     classifier: { total: cases.length, correct: cases.filter(row => row.intentCorrect).length },
     cases: cases.map(({ items, ...row }) => ({ ...row, count: items?.length || 0 })),
-    required: ['sports', 'world'].map(id => ({ id, count: cases.find(row => row.id === id)?.items?.length || 0, minimum: 5 })),
-    productionChanged: false, modelRequested: false, note: '新闻真实取数+15条意图表；天气/赛程/行情/一般查询留第2步，不等于15题模型问答或30题完成验收' };
+    selection: selected.map(row => row[0]),
+    required: cases.filter(row => ['sports', 'world', 'tech'].includes(row.id)).map(row => ({ id: row.id, count: row.items?.length || 0, minimum: row.id === 'tech' ? 1 : 5 })),
+    productionChanged: false, modelRequested: false, note: `新闻真实取数+所选${cases.length}/15条意图；未选题不算通过。天气/赛程/行情/一般查询留第2步，不等于模型问答或30题完成验收` };
   await fs.writeFile(path.join(out, 'report.json'), JSON.stringify({ ...summary, cases }, null, 2), { mode: 0o600 });
   await fs.writeFile(path.join(out, 'summary.json'), JSON.stringify(summary, null, 2), { mode: 0o600 });
-  console.log(`意图判断：${summary.classifier.correct}/${cases.length}；体育${summary.required[0].count}条；国际${summary.required[1].count}条`);
+  console.log(`意图判断：${summary.classifier.correct}/${cases.length}；` + summary.required.map(row => `${{ sports: '体育', world: '国际', tech: '科技' }[row.id]}${row.count}条`).join('；'));
   console.log('查询摘要：' + path.join(out, 'summary.json'));
   console.log('私有查询报告：' + path.join(out, 'report.json'));
   return summary;

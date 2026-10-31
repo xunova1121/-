@@ -78,28 +78,42 @@ function safeLink(value, source) {
   }
 }
 var item = (source, values) => ({ source: source.label, sourceId: source.id, sourceFamily: source.family || source.id, kind: source.kind, category: source.category, verified: "index", verification: "index_only", ...values });
+function technologyHeadline(title, column) {
+  if (!column || /体育|文娱|娱乐|文化|图片|视频/.test(column)) return false;
+  return /科技|算力|人工智能|大模型|芯片|半导体|量子|机器人|航天|卫星|火箭|核聚变|超导|光子|科研|科学家|太空|脑机接口|集成电路|(?<![a-z0-9])(?:AI|5G|6G)(?![a-z0-9])/i.test(title);
+}
 function parseCnsRolling(html, source, { now = Date.now(), params = {} } = {}) {
   const range = lookupTimeRange(params, now);
   const out = [], seen = /* @__PURE__ */ new Set();
+  const techOnly = source.kind === "news" && params.categories?.length === 1 && params.categories[0] === "\u79D1\u6280";
   const clean = String(html).slice(0, 1024 * 1024).replace(/<!--[\s\S]*?-->/g, "").replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
   for (const match of clean.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)) {
     if (out.length >= 36) break;
     const row = match[1].slice(0, 16e3);
     const column = newsPlain(row.match(/class=["']dd_lm["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] || "");
     const category = /体育/.test(column) ? "\u4F53\u80B2" : /国际/.test(column) ? "\u56FD\u9645" : /财经/.test(column) ? "\u8D22\u7ECF" : /科技/.test(column) ? "\u79D1\u6280" : /国内|时政|社会/.test(column) ? "\u56FD\u5185" : "\u5176\u4ED6";
-    if (source.kind === "sports_news" ? category !== "\u4F53\u80B2" : category === "\u4F53\u80B2" || category === "\u5176\u4ED6") continue;
-    if (params.categories?.length && !params.categories.includes(category)) continue;
+    if (source.kind === "sports_news" ? category !== "\u4F53\u80B2" : category === "\u4F53\u80B2" || category === "\u5176\u4ED6" && !techOnly) continue;
+    if (!techOnly && params.categories?.length && !params.categories.includes(category)) continue;
     const stamp = row.match(/class=["']dd_time["'][^>]*>\s*(\d{2}-\d{2})\s+(\d{2}:\d{2})/i);
     if (!stamp) continue;
     for (const anchor of row.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
       const url = safeLink(anchor[1], source);
       const title = newsPlain(anchor[2]);
       if (!url || title.length < 8 || title.length > 180 || seen.has(url)) continue;
+      const topicMatch = techOnly && category !== "\u79D1\u6280" && technologyHeadline(title, column);
+      if (techOnly && category !== "\u79D1\u6280" && !topicMatch) continue;
       const year = url.match(/\/(20\d{2})\/\d{2}-\d{2}\//)?.[1];
       const publishedAt = year && `${year}-${stamp[1]}T${stamp[2]}:00+08:00`;
       if (!publishedAt || !validBeijingStamp(publishedAt) || !inRange(Date.parse(publishedAt), range)) continue;
       seen.add(url);
-      out.push(item(source, { title, url, publishedAt, category, summary: "" }));
+      out.push(item(source, {
+        title,
+        url,
+        publishedAt,
+        category: topicMatch ? "\u79D1\u6280" : category,
+        summary: "",
+        ...topicMatch ? { publisherColumn: column, categoryBasis: "title_topic" } : {}
+      }));
       break;
     }
   }
@@ -1008,10 +1022,17 @@ var LOOKUP_LIVE_CASES = [
   ["general", "gpt-sol \u6700\u4FBF\u5B9C\u7684\u4E2D\u8F6C\u5E73\u53F0", "general"],
   ["followup", "\u5404\u4E09\u6761", "news"]
 ];
-async function runLookupLiveQueries({ out, signal, declaredRegion, script }) {
+function selectLiveLookupCases(only) {
+  if (!only) return LOOKUP_LIVE_CASES;
+  const selected = LOOKUP_LIVE_CASES.filter((row) => row[0] === only);
+  if (!selected.length) throw new Error("--only\u5FC5\u987B\u662F\u95EE\u6CD5\u8868\u7F16\u53F7\uFF0C\u4F8B\u5982tech\uFF1B\u672A\u53D1\u8D77\u7F51\u7EDC\u8BF7\u6C42");
+  return selected;
+}
+async function runLookupLiveQueries({ out, signal, declaredRegion, script, only }) {
+  const selected = selectLiveLookupCases(only);
   const service = createLookupService({ storage: memoryLookupStorage() });
   const cases = [];
-  for (const [id, text, expected] of LOOKUP_LIVE_CASES) {
+  for (const [id, text, expected] of selected) {
     if (signal.aborted) throw signal.reason;
     const intent = lookupIntent(text, id === "followup" ? { history: [{ role: "user", content: "\u4ECA\u65E5\u65B0\u95FB" }] } : {});
     const row = { id, text, expected, actual: intent.kind, intentCorrect: expected === intent.kind };
@@ -1054,14 +1075,15 @@ async function runLookupLiveQueries({ out, signal, declaredRegion, script }) {
     scriptSHA256: crypto.createHash("sha256").update(await fs.readFile(script)).digest("hex"),
     classifier: { total: cases.length, correct: cases.filter((row) => row.intentCorrect).length },
     cases: cases.map(({ items, ...row }) => ({ ...row, count: items?.length || 0 })),
-    required: ["sports", "world"].map((id) => ({ id, count: cases.find((row) => row.id === id)?.items?.length || 0, minimum: 5 })),
+    selection: selected.map((row) => row[0]),
+    required: cases.filter((row) => ["sports", "world", "tech"].includes(row.id)).map((row) => ({ id: row.id, count: row.items?.length || 0, minimum: row.id === "tech" ? 1 : 5 })),
     productionChanged: false,
     modelRequested: false,
-    note: "\u65B0\u95FB\u771F\u5B9E\u53D6\u6570+15\u6761\u610F\u56FE\u8868\uFF1B\u5929\u6C14/\u8D5B\u7A0B/\u884C\u60C5/\u4E00\u822C\u67E5\u8BE2\u7559\u7B2C2\u6B65\uFF0C\u4E0D\u7B49\u4E8E15\u9898\u6A21\u578B\u95EE\u7B54\u621630\u9898\u5B8C\u6210\u9A8C\u6536"
+    note: `\u65B0\u95FB\u771F\u5B9E\u53D6\u6570+\u6240\u9009${cases.length}/15\u6761\u610F\u56FE\uFF1B\u672A\u9009\u9898\u4E0D\u7B97\u901A\u8FC7\u3002\u5929\u6C14/\u8D5B\u7A0B/\u884C\u60C5/\u4E00\u822C\u67E5\u8BE2\u7559\u7B2C2\u6B65\uFF0C\u4E0D\u7B49\u4E8E\u6A21\u578B\u95EE\u7B54\u621630\u9898\u5B8C\u6210\u9A8C\u6536`
   };
   await fs.writeFile(path.join(out, "report.json"), JSON.stringify({ ...summary, cases }, null, 2), { mode: 384 });
   await fs.writeFile(path.join(out, "summary.json"), JSON.stringify(summary, null, 2), { mode: 384 });
-  console.log(`\u610F\u56FE\u5224\u65AD\uFF1A${summary.classifier.correct}/${cases.length}\uFF1B\u4F53\u80B2${summary.required[0].count}\u6761\uFF1B\u56FD\u9645${summary.required[1].count}\u6761`);
+  console.log(`\u610F\u56FE\u5224\u65AD\uFF1A${summary.classifier.correct}/${cases.length}\uFF1B` + summary.required.map((row) => `${{ sports: "\u4F53\u80B2", world: "\u56FD\u9645", tech: "\u79D1\u6280" }[row.id]}${row.count}\u6761`).join("\uFF1B"));
   console.log("\u67E5\u8BE2\u6458\u8981\uFF1A" + path.join(out, "summary.json"));
   console.log("\u79C1\u6709\u67E5\u8BE2\u62A5\u544A\uFF1A" + path.join(out, "report.json"));
   return summary;
@@ -1091,7 +1113,7 @@ async function runLookupLive(args = process.argv.slice(2)) {
   try {
     console.log("\u53EA\u8BFB\u6765\u6E90\u5B9E\u6D4B\uFF1A\u4E0D\u8BFB\u53D6\u672A\u592E\u914D\u7F6E\u3001\u4E0D\u8C03\u7528\u6A21\u578B\u3001\u4E0D\u66F4\u65B0\u6B63\u5F0F\u670D\u52A1\u3002");
     console.log("\u7F51\u7EDC\u5730\u533A\u4E3A\u6267\u884C\u8005\u58F0\u660E\uFF0C\u811A\u672C\u4E0D\u4F1A\u628A\u65F6\u533A\u6216HTTP200\u5F53\u4F5C\u56FD\u5185\u7F51\u7EDC\u8BC1\u660E\u3002");
-    if (args.includes("--queries")) return await runLookupLiveQueries({ out, signal: ctrl.signal, declaredRegion, script: fileURLToPath(import.meta.url) });
+    if (args.includes("--queries")) return await runLookupLiveQueries({ out, signal: ctrl.signal, declaredRegion, script: fileURLToPath(import.meta.url), only: args.find((a) => a.startsWith("--only="))?.slice(7) });
     await Promise.all(Array.from({ length: 3 }, worker));
     const classification = LOOKUP_INTENT_EXAMPLES.map(({ text, kind }) => {
       const actual = lookupIntent(text);

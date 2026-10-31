@@ -16,27 +16,36 @@ function safeLink(value, source) {
   } catch { return null; }
 }
 const item = (source, values) => ({ source: source.label, sourceId: source.id, sourceFamily: source.family || source.id, kind: source.kind, category: source.category, verified: 'index', verification: 'index_only', ...values });
+/** 栏目不等于主题：时政/财经也会发布算力、芯片等科技消息，只作标题召回，不生成新事实。 */
+function technologyHeadline(title, column) {
+  if (!column || /体育|文娱|娱乐|文化|图片|视频/.test(column)) return false;
+  return /科技|算力|人工智能|大模型|芯片|半导体|量子|机器人|航天|卫星|火箭|核聚变|超导|光子|科研|科学家|太空|脑机接口|集成电路|(?<![a-z0-9])(?:AI|5G|6G)(?![a-z0-9])/i.test(title);
+}
 
 /** 中新滚动的真实栏目+明确MM-DD HH:mm；链接只补年份，不把URL日期当发布时间。 */
 export function parseCnsRolling(html, source, { now = Date.now(), params = {} } = {}) {
   const range = lookupTimeRange(params, now); const out = [], seen = new Set();
+  const techOnly = source.kind === 'news' && params.categories?.length === 1 && params.categories[0] === '科技';
   const clean = String(html).slice(0, 1024 * 1024).replace(/<!--[\s\S]*?-->/g, '').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
   for (const match of clean.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)) {
     if (out.length >= 36) break;
     const row = match[1].slice(0, 16000);
     const column = newsPlain(row.match(/class=["']dd_lm["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] || '');
     const category = /体育/.test(column) ? '体育' : /国际/.test(column) ? '国际' : /财经/.test(column) ? '财经' : /科技/.test(column) ? '科技' : /国内|时政|社会/.test(column) ? '国内' : '其他';
-    if (source.kind === 'sports_news' ? category !== '体育' : category === '体育' || category === '其他') continue;
-    if (params.categories?.length && !params.categories.includes(category)) continue;
+    if (source.kind === 'sports_news' ? category !== '体育' : category === '体育' || category === '其他' && !techOnly) continue;
+    if (!techOnly && params.categories?.length && !params.categories.includes(category)) continue;
     const stamp = row.match(/class=["']dd_time["'][^>]*>\s*(\d{2}-\d{2})\s+(\d{2}:\d{2})/i);
     if (!stamp) continue;
     for (const anchor of row.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
       const url = safeLink(anchor[1], source); const title = newsPlain(anchor[2]);
       if (!url || title.length < 8 || title.length > 180 || seen.has(url)) continue;
+      const topicMatch = techOnly && category !== '科技' && technologyHeadline(title, column);
+      if (techOnly && category !== '科技' && !topicMatch) continue;
       const year = url.match(/\/(20\d{2})\/\d{2}-\d{2}\//)?.[1];
       const publishedAt = year && `${year}-${stamp[1]}T${stamp[2]}:00+08:00`;
       if (!publishedAt || !validBeijingStamp(publishedAt) || !inRange(Date.parse(publishedAt), range)) continue;
-      seen.add(url); out.push(item(source, { title, url, publishedAt, category, summary: '' })); break;
+      seen.add(url); out.push(item(source, { title, url, publishedAt, category: topicMatch ? '科技' : category, summary: '',
+        ...(topicMatch ? { publisherColumn: column, categoryBasis: 'title_topic' } : {}) })); break;
     }
   }
   return { items: out, candidates: [] };

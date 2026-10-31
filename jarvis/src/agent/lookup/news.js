@@ -24,5 +24,5 @@ export async function runNewsLookup(ctx, args = {}, execution = {}) {
     range: result.range, region: result.region, items: result.items,
     sources: result.sources.map(({ items, label, reason, source, ...row }) => ({ ...row, id: source, source: label, count: items.length, ...(reason ? { error: reason } : {}) })),
     failures: result.failures, skipped: result.skipped, coverage: newsCoverage(result.items),
-    note: '仅按明确发布时间和本次时间范围交付，不把最近24小时称作今日；RSS不等于已读报道原文，路透转载只证明署名及转载时间，仍非Reuters官网独立核实。按事件展示来源与补充，转载按原始机构归组，不编交叉核验。' });
+    note: '仅按明确发布时间和本次时间范围交付，不把最近24小时称作今日；RSS不等于已读报道原文，路透转载只证明署名及转载时间，仍非Reuters官网独立核实。按事件展示来源与补充，转载按原始机构归组，不编交叉核验。categoryBasis为title_topic时只是按原标题主题召回，publisherColumn保留原站栏目，不声称原站归为科技或已读正文。' });
 }
