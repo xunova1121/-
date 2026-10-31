@@ -35,6 +35,7 @@ export async function readLookupSource(source, { get = (...args) => fetch(...arg
       return { items: items.slice(0, 36).map(row => ({ ...row, kind: source.kind, sourceId: source.id, verified: row.verified || 'index', source: row.source || source.label })), failures };
     }, { signal, timeoutMs: Math.min(8000, source.timeoutMs || 8000) });
     return { source: source.id, label: source.label, url: source.url, state: value.items.length ? 'ok' : 'empty', items: value.items,
+      warnings: value.failures.slice(0, 5),
       reason: value.items.length ? '' : value.failures.length ? value.failures.slice(0, 2).join('；') : '当前时间范围无可验证内容，或列表没有明确发布时间', elapsedMs: Math.round(performance.now() - started), requests };
   } catch (error) {
     if (signal?.aborted || error.code === 'RETRIEVAL_BUDGET' || error.name === 'AbortError') throw error;

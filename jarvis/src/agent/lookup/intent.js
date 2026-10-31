@@ -48,9 +48,9 @@ export function lookupIntent(text = '', { history = [], preferences = [] } = {})
     }
     return { kind: 'general', params: { continuation: true }, sure: false, lookup: true, rule: 'missing_context' };
   }
-  if (!value || value.length > 1500 || ACTION.test(value) || /^(?:不要|取消|停止|不用)(?:查|搜|再|发|看|今天|今日|的)*(?:新闻|资讯|体育)/.test(value)) return { kind: 'general', params: {}, sure: false, lookup: false, rule: 'non_lookup' };
   const preference = preferences.slice(0, 20).find(p => p.phrases?.slice(0, 12).includes(value) && LOOKUP_KINDS.includes(p.kind));
   if (preference) return { kind: preference.kind, params: { ...preference.params }, sure: true, lookup: true, rule: 'user_preference' };
+  if (!value || value.length > 1500 || ACTION.test(value) || /^(?:不要|取消|停止|不用)(?:查|搜|再|发|看|今天|今日|的)*(?:新闻|资讯|体育)/.test(value)) return { kind: 'general', params: {}, sure: false, lookup: false, rule: 'non_lookup' };
   const rule = LOOKUP_RULES.find(r => r.test(value));
   return rule ? { kind: rule.kind, params: rule.params(value), sure: true, lookup: true, rule: rule.id } : { kind: 'general', params: {}, sure: false, lookup: true, rule: 'general' };
 }

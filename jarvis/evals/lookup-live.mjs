@@ -200,9 +200,9 @@ function lookupIntent(text = "", { history = [], preferences = [] } = {}) {
     }
     return { kind: "general", params: { continuation: true }, sure: false, lookup: true, rule: "missing_context" };
   }
-  if (!value || value.length > 1500 || ACTION.test(value) || /^(?:不要|取消|停止|不用)(?:查|搜|再|发|看|今天|今日|的)*(?:新闻|资讯|体育)/.test(value)) return { kind: "general", params: {}, sure: false, lookup: false, rule: "non_lookup" };
   const preference = preferences.slice(0, 20).find((p) => p.phrases?.slice(0, 12).includes(value) && LOOKUP_KINDS.includes(p.kind));
   if (preference) return { kind: preference.kind, params: { ...preference.params }, sure: true, lookup: true, rule: "user_preference" };
+  if (!value || value.length > 1500 || ACTION.test(value) || /^(?:不要|取消|停止|不用)(?:查|搜|再|发|看|今天|今日|的)*(?:新闻|资讯|体育)/.test(value)) return { kind: "general", params: {}, sure: false, lookup: false, rule: "non_lookup" };
   const rule = LOOKUP_RULES.find((r) => r.test(value));
   return rule ? { kind: rule.kind, params: rule.params(value), sure: true, lookup: true, rule: rule.id } : { kind: "general", params: {}, sure: false, lookup: true, rule: "general" };
 }
@@ -392,6 +392,7 @@ async function readLookupSource(source, { get = (...args) => fetch(...args), now
       url: source.url,
       state: value.items.length ? "ok" : "empty",
       items: value.items,
+      warnings: value.failures.slice(0, 5),
       reason: value.items.length ? "" : value.failures.length ? value.failures.slice(0, 2).join("\uFF1B") : "\u5F53\u524D\u65F6\u95F4\u8303\u56F4\u65E0\u53EF\u9A8C\u8BC1\u5185\u5BB9\uFF0C\u6216\u5217\u8868\u6CA1\u6709\u660E\u786E\u53D1\u5E03\u65F6\u95F4",
       elapsedMs: Math.round(performance.now() - started),
       requests
