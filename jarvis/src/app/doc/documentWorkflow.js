@@ -6,6 +6,7 @@ import { boundedText, LIMITS, workflowError } from './workflowSchema.js';
 import { documentDepth, WRITING_RULES } from './workflowPolicy.js';
 import { detectRole, roleGuide, roleKey, ROLES } from './writingRoles.js';
 import { createWorkflowStore } from './workflowStore.js';
+import { documentWordBudget } from '../../agent/documentWordBudget.js';
 import { writeLongDocument } from '../../agent/longDoc.js';
 import { STYLE_IDS } from '../../agent/pptStyles.js';
 import { SHEET_STYLE_IDS } from '../../agent/spreadsheetDesign.js';
@@ -139,7 +140,7 @@ function createAsk(app, state, execution, save) {
         (signal) =>
           llm({
             ...request,
-            prompt: request.prompt + (research ? `\n${research}` : ''),
+            prompt: request.prompt + `\n${documentWordBudget(state.input.task).note}` + (research ? `\n${research}` : ''),
             system: request.system + `\n任务建立时的北京时间：${state.input.referenceTime || '未记录，不猜当前日期'}`,
             signal,
             allowWebSearch: false,
@@ -159,6 +160,8 @@ function createAsk(app, state, execution, save) {
 /** 长文（Word / PDF / 网页 / Markdown）按推演出的章节分节写：整篇一次写完，长方案在时限内写不完、写不深 */
 function sectionOutline(state) {
   const structure = state.plan?.scenarios?.structure || [];
+  // 约两千字的短方案仍做底稿/审查，但整篇起草，避免逐节重复展开。
+  if (documentWordBudget(state.input.task).compact) return null;
   if (state.depth !== 'expert' || !['docx', 'pdf', 'md', 'html'].includes(state.input.format) || structure.length < 3) return null;
   return structure.slice(0, 10).map((item) => {
     const text = String(item).trim();
@@ -177,6 +180,7 @@ async function draftBySections(state, outline, ask, execution) {
     task,
     material: state.input.material,
     outline,
+    words: documentWordBudget(state.input.task).target,
     review: false,
     llm,
     onProgress: (t) => execution.progress?.(t),

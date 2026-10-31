@@ -1,3 +1,4 @@
+import { documentWordBudget, budgetSections } from './documentWordBudget.js';
 import { WRITING_JUDGMENT } from '../app/doc/writingJudgment.js';
 /**
  * 长文档写作流程（报告、方案、总结、标书……）：一次写完的长文常常前后脱节、后半截草草收尾，所以分步写。
@@ -78,6 +79,8 @@ export async function writeLongDocument({ task, title = '', material = '', words
   // 材料长时：列大纲给开头一段加材料里的标题结构；逐节写时给和这一节最相关的段落（见 relevantMaterial）
   const mat = material ? `\n\n用户提供的材料（必须用上，不要编造材料以外的数据）：\n${material.length > MAT_LIMIT ? `${clip(material, MAT_LIMIT - 3000)}\n\n【材料里的标题结构】\n${clip(skeleton(material), 3000)}` : material}` : '';
   // 给了长材料又没说字数：按材料篇幅定，不要比材料还短
+  const requestedBudget = documentWordBudget(task, words);
+  words = requestedBudget.target;
   if (!words && material.length > 6000) words = Math.min(40000, Math.round(material.replace(/\s/g, '').length * 1.1));
 
   const genre = detectGenre(task, title);
@@ -99,8 +102,10 @@ export async function writeLongDocument({ task, title = '', material = '', words
     plan = { title: String(j.title || title || '未命名文档'), sections };
   }
   plan.sections = plan.sections.map((s) => ({ heading: String(s.heading).replace(/^#+\s*/, '').trim(), points: (s.points ?? []).map(String), words: Number(s.words) || 0 }));
+  plan.sections = budgetSections(plan.sections, words, plan.title || title);
   if (outlineOnly) return { title: plan.title, outline: plan.sections };
 
+  task = `${task}\n${documentWordBudget(task, words).note}`;
   const outlineText = plan.sections.map((s, i) => `${i + 1}. ${s.heading}${s.points.length ? `：${s.points.join('；')}` : ''}${s.words ? `（约 ${s.words} 字）` : ''}`).join('\n');
 
   // ---------- 2. 分节写：第一节先写（定下术语和口径），其余各节 3 节一起写——一节一节排队写，十几节要半小时以上。
@@ -196,7 +201,7 @@ ${METHOD}
 要求：
 - 每个要点都要展开写，不要压成一句话：先写观点，再写依据（政策文件全称和文号、具体条款、数据、事实），再说明对本项目意味着什么；需要时用一个通俗的比方帮读者理解。
 - 材料里有的细节（数字、文件名称和文号、系统和模块名称、流程步骤、表格）尽量完整保留并用上；材料里的表格照样做成表格。
-- 字数宁多勿少，至少写到上面要求的字数。
+- 按本节分配的字数写作，含本节标题与表格；不要超额扩写，不重复其他节，不把全文字数当成本节要求。
 - 不重复前面各节已经写过的内容，不写本节以外的内容，不写空话套话；材料没有的事实数字不得编造；可以提出标明假设的业务建议，未知事项集中说明影响，不得擅自降级明确要求。
 写完后另起一行写 ${SUMMARY_MARK}，后面用一两句话概括这一节写了什么（给后面的节参考，不会出现在文档里）。`
   }));

@@ -129,6 +129,16 @@ export function documentWorkflowCases(test) {
     assert.ok(mixed.includes('扣除皮重后确认净重'));
     assert.equal(report.skipped, 1);
   });
+  test('有明确短篇预算的专业方案整篇起草，底稿和内容审查仍执行', async () => {
+    const plan = fixture();
+    plan.scenarios.structure = ['一、背景', '二、系统', '三、实施', '四、验收'];
+    const h = harness([plan, draft, review()]);
+    const result = await h.workflow.run({ task: task + '全文1500至2500字。', format: 'docx' }, h.execution);
+    assert.equal(result.calls, 3);
+    assert.equal(result.business, 'model_reviewed');
+    assert.ok(h.prompts[1].prompt.includes('起草目标2000字'));
+    assert.ok(!h.prompts[1].prompt.includes('现在只写第'));
+  });
   test('长方案按推演章节分节起草：同时写 3 节，每节单独计数和限时，顺序不乱', async () => {
     const plan = fixture();
     plan.scenarios.structure = ['一、建设背景：现状痛点', '二、业务流程：称重和结算', '三、系统建设：设备与平台', '四、实施计划：阶段与验收', '五、风险与对策：异常处理'];
