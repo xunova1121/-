@@ -193,6 +193,8 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
           docNo,
           toc: chosenToc === 'yes' ? true : chosenToc === 'no' ? false : 'auto',
           loadImage,
+          renderSvg: ctx.renderSvg,
+          signal,
           toPdf: ctx.toPdf ?? null,
           template: tpl
         });

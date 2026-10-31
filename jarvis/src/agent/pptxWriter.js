@@ -1,3 +1,6 @@
+import { summarizeTable, decorationData } from './presentationLocalVisuals.js';
+import { reserveImageColumn, placeSlideImages } from './presentationImages.js';
+import { throwControl } from '../core/networkRequest.js';
 import { applyPresentationTypography } from './officeTypography.js';
 import { slideBudget } from './documentPageBudget.js';
 /**
@@ -32,7 +35,7 @@ import { styleTokens, chapterMark, mix as mix2 } from './pptStyles.js';
 const W = 13.333;
 const H = 7.5;
 const FONT = '微软雅黑';
-const NUM_ITEM = /^(?:\*\*)?([-+]?\d[\d,.]*(?:\s*[/／]\s*\d[\d,.]*)?\s*(?:%|万亿元|亿元|万元|千元|万亿|亿|万|千|元|个|家|人次|人|倍|天|小时|分钟|项|台|套|次|集|章|回|段|件|部|篇|位|名|条|座|种)?)(?:\*\*)?(?:\s*[：:]\s*|\s+)(.+)$/;
+const NUM_ITEM = /^(?:\*\*)?([-+]?\d[\d,.]*(?:\s*[/／]\s*\d[\d,.]*)?\s*(?:%|万亿元|亿元|万元|千元|万亿|亿|万|千|元|个|家|人次|人|倍|天|小时|分钟|项|台|套|次|集|章|回|段|件|部|篇|位|名|条|座|种|场)?)(?:\*\*)?(?:\s*[：:]\s*|\s+)(.+)$/;
 /** 以日期开头的一条：“10-19 支架到货”“11月1日：初验”“2026年3月 上线”“第 3 周：联调” */
 const DATE_ITEM = /^(?:\*\*)?(\d{1,2}\s*[-月]\s*\d{1,2}\s*日?|\d{4}\s*[-./年]\s*\d{1,2}(?:\s*[-./月]\s*\d{1,2}\s*日?)?\s*月?|\d{1,2}\s*月(?:上旬|中旬|下旬|底|初)?|第\s*\d+\s*(?:周|月|季度))(?:\*\*)?(?:\s*[：:]\s*|\s+)(.{2,})$/;
 /** “名称：85%”“集成测试 83.3%（回归）”：进度条 */
@@ -265,7 +268,7 @@ function autoLayout(slide, { first = false, last = false } = {}) {
     return cols.length && table.rows.filter((r) => !TOTAL_ROW.test(plain(r[0] ?? []))).length <= 8 && chartReadable(table, cols) ? 'chart' : 'table';
   }
   const imgs = bs.filter((b) => b.type === 'image');
-  if (imgs.length) return lines.length ? 'imageText' : 'image';
+  if (imgs.length && !lines.length) return 'image';
   if (bs.filter((b) => b.type === 'heading' && b.level >= 3).length === 2) return 'compare';
   // 列表的每一项、每段话都算一条（模型常把要点写成一段一段的话，不带“- ”）
   const entries = entriesOf(bs);
@@ -286,6 +289,7 @@ function autoLayout(slide, { first = false, last = false } = {}) {
   if (flat && labeled >= 3 && labeled <= 8 && fewOthers(labeled, 2)) {
     return STEP_TITLE.test(slide.title) && labeled >= 4 && labeled <= 7 ? 'steps' : 'cards';
   }
+  if (imgs.length) return 'imageText';
   // 一两句话；或一句话 + 一两条“标签：说明”：大字重点页
   const total = items.join('').length;
   if (flat && items.length && ((items.length <= 2 && total <= 90) || (items.length <= 3 && !LABEL.test(items[0]) && items.slice(1).every((t) => LABEL.test(t)) && total <= 170))) return 'statement';
@@ -312,7 +316,7 @@ function chartColumns(table) {
  * @param {{ title: string, content: string, theme: object, subtitle?: string, author?: string, date?: string, loadImage?: (src: string) => Promise<Uint8Array|null> }} o
  * @returns {Promise<{ blob: Blob, info: { slides: number, layouts: string[], missingImages: string[], preview: object[], layoutIssues: object[] } }>}
  */
-export async function makePptx({ title, content, theme, subtitle = '', author = '', date = '', loadImage = null, style = 'business', expectedSlides = null, requireCover = false, forbidCover = false, typography = {} }) {
+export async function makePptx({ title, content, theme, subtitle = '', author = '', date = '', loadImage = null, style = 'business', expectedSlides = null, requireCover = false, forbidCover = false, typography = {}, renderSvg = null, signal }) {
   const PptxGenJS = (await import('pptxgenjs')).default;
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
@@ -389,7 +393,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
       let bin = '';
       for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
       return { data: `image/${info.type === 'jpg' ? 'jpeg' : info.type};base64,${btoa(bin)}`, ratio: info.width / info.height };
-    } catch { missingImages.push(src); return null; }
+    } catch (error) { throwControl(error); missingImages.push(src); return null; }
   };
 
   // ---------- 版式零件（白底、左上标题、右上章节标签、底部页脚；白色卡片带淡阴影和圆形图标）
@@ -419,7 +423,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     const line = T.icon === 'ring' ? { color: gold, width: 1.25 } : { color };
     sl.addShape(shape, { x, y, w: d, h: d, fill: { color }, line });
     const png = ICON_PNG[name];
-    if (png) sl.addImage({ data: `image/png;base64,${png}`, x: x + d * 0.25, y: y + d * 0.25, w: d * 0.5, h: d * 0.5 });
+    if (png) sl.addImage({ objectName: 'wy-icon-' + name, data: `image/png;base64,${png}`, x: x + d * 0.25, y: y + d * 0.25, w: d * 0.5, h: d * 0.5 });
   };
   /** 标题栏：plain 左上标题；rule 大标题 + 短线；band 顶部色带；story 楷体标题 + 金色细线 + 章节编号 */
   const titleBar = (sl, text) => {
@@ -684,6 +688,10 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     });
   };
 
+  let localDecoration = null;
+  const localVisualIssues = [];
+  try { localDecoration = await decorationData(title + content.slice(0, 500), accent, renderSvg, signal); }
+  catch (error) { throwControl(error, signal); localVisualIssues.push({ level: 'warn', text: '本地装饰未生成：' + String(error.message).slice(0, 120) }); }
   // ---------- 封面：商务是左边深色块 + 右边装饰；留白是大字 + 细线；叙事是居中大字 + 金框；数据是顶部色带
   const pw = 7.4;
   if (budget.cover) {
@@ -726,6 +734,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     if (subtitle) cover.addText(subtitle, { x: 0.8, y: 4.1, w: pw - 1.4, h: 1.0, fontSize: 16, color: C.soft, fontFace: FONT, valign: 'top', fit: 'shrink' });
     if (coverDate) cover.addText(coverDate, { x: 0.8, y: H - 1.1, w: pw - 1.4, h: 0.4, fontSize: 12, color: C.soft, fontFace: FONT });
   }
+  if (localDecoration) cover.addImage({ data: localDecoration, x: 9.1, y: 1.4, w: 3.3, h: 4.8, sizing: { type: 'cover', w: 3.3, h: 4.8 }, objectName: 'wy-decoration-cover' });
   layouts.push('cover');
   }
 
@@ -765,6 +774,9 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     pages.push({ n, kind });
     const why = ignoredLayout(s, kind);
     if (why) ignored.push({ level: 'warn', slide: n, text: `第 ${n} 页${why}` });
+    const images = s.blocks.filter(block => block.type === 'image');
+    const summary = kind === 'table' && !images.length ? summarizeTable(s.blocks.find(block => block.type === 'table')) : null;
+    const restoreImageSpace = (images.length || summary) && !['image', 'imageText'].includes(kind) ? reserveImageColumn(sl) : () => {};
     const lines = s.blocks.flatMap(blockLines).filter(Boolean);
     switch (kind) {
       case 'section': {
@@ -926,19 +938,6 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
       case 'imageText':
       case 'image': {
         titleBar(sl, s.title);
-        const img = s.blocks.find((b) => b.type === 'image');
-        const pic = await imageData(img.src);
-        const area = kind === 'image' ? { x: 0.6, y: 1.5, w: W - 1.2, h: 5.3 } : { x: 7.0, y: 1.55, w: 5.7, h: 5.2 };
-        if (pic) {
-          let w = area.w;
-          let h = w / pic.ratio;
-          if (h > area.h) { h = area.h; w = h * pic.ratio; }
-          sl.addImage({ data: pic.data, x: area.x + (area.w - w) / 2, y: area.y + (area.h - h) / 2, w, h });
-        } else {
-          sl.addShape(box, { ...area, fill: { color: T.soft }, line: { color: T.soft }, rectRadius: 0.06 });
-          sl.addText(`［图片：${img.alt || img.src}］`, { ...area, fontSize: 16, color: muted, align: 'center', fontFace: FONT });
-        }
-        if (img.alt) sl.addText(img.alt, { x: area.x, y: area.y + area.h - 0.05, w: area.w, h: 0.4, fontSize: 12, color: muted, align: 'center', fontFace: FONT });
         if (kind === 'imageText') {
           const items = textOf(s.blocks.filter((b) => b.type !== 'image')).flatMap((b) => b.items);
           const size = fontFor(items.length, lines.join('').length) - 2;
@@ -1104,11 +1103,19 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
         pageNo(sl, n);
       }
     }
+    restoreImageSpace();
+    if (summary) {
+      sl.addText(summary.title, { x: 10.05, y: 1.65, w: 2.65, h: 0.5, fontSize: 15, bold: true, color: head, fontFace: FONT });
+      sl.addChart(pptx.ChartType.bar, [{ name: '条数', labels: summary.labels, values: summary.values }], { x: 10.05, y: 2.25, w: 2.65, h: 3.6, catAxisLabelFontSize: 12, valAxisLabelFontSize: 12, showValue: true, showLegend: false, chartColors: [accent], showTitle: false });
+      sl.addText(`由本页${summary.total}条记录汇总`, { x: 10.05, y: 6.1, w: 2.65, h: 0.5, fontSize: 12, color: muted, fontFace: FONT });
+    }
+    if (['table', 'imageText', 'image'].includes(kind)) iconCircle(sl, W - 0.9, 0.35, 0.4, iconPicker()(s.title), accent);
+    await placeSlideImages(sl, images, kind, { load: imageData, missingImages });
     if (s.notes.length) sl.addNotes(s.notes.join('\n'));
   }
   const blob = await pptx.write({ outputType: 'blob' });
   const preview = records.map(({ n, title: t, items, slide }) => ({ n, title: t, items, background: slide.background?.color }));
-  return { blob, info: { slides: records.length, expectedSlides, layouts, missingImages, preview, layoutIssues: [...layoutIssues(preview), ...monotony(pages, MONOTONY_RUN[T.id] ?? 3), ...ignored], style: T.id } };
+  return { blob, info: { slides: records.length, expectedSlides, layouts, missingImages, preview, layoutIssues: [...layoutIssues(preview), ...monotony(pages, MONOTONY_RUN[T.id] ?? 3), ...ignored, ...localVisualIssues], style: T.id } };
 }
 
 /**

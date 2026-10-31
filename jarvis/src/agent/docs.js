@@ -214,7 +214,7 @@ function toBase64(bytes) {
  * @param {Uint8Array|ArrayBuffer} [o.template]  Word 模板（沿用它的样式）
  * @returns {Promise<{blob: Blob, ext: string, note?: string, theme: object, info?: object}>}
  */
-export async function generate(format, { title = '未命名', content = '', theme: themeName = '', cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, toPdf = null, template = null, layout = 'report', issuer = '', docNo = '', style = 'business', sheetStyle = '', kind = '', expectedSlides = null, requireCover = false, forbidCover = false, typography = {}, noRules = false, scale = 0 } = {}) {
+export async function generate(format, { title = '未命名', content = '', theme: themeName = '', cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, toPdf = null, template = null, layout = 'report', issuer = '', docNo = '', style = 'business', sheetStyle = '', kind = '', expectedSlides = null, requireCover = false, forbidCover = false, typography = {}, renderSvg = null, signal, noRules = false, scale = 0 } = {}) {
   const theme = resolveTheme(themeName, `${title}\n${content}`);
   const page = { theme, cover, subtitle, author, date, toc, layout };
   switch (format) {
@@ -240,7 +240,7 @@ export async function generate(format, { title = '未命名', content = '', them
       return { blob: r.blob, ext: 'docx', theme, info: r.info };
     }
     case 'pptx': {
-      const r = await makePptx({ title, content, theme, subtitle, author, date, loadImage, style, expectedSlides, requireCover, forbidCover, typography });
+      const r = await makePptx({ title, content, theme, subtitle, author, date, loadImage, style, expectedSlides, requireCover, forbidCover, typography, renderSvg, signal });
       return { blob: r.blob, ext: 'pptx', theme, info: r.info };
     }
     case 'xlsx': {
