@@ -1,0 +1,82 @@
+.wy-mascot{position:relative;display:inline-block;flex:none;width:calc(var(--mascot-size,40px)*.75);height:var(--mascot-size,40px);vertical-align:middle;background:url('./mascot-states.webp') 0 0/400% 200% no-repeat;transform-origin:50% 75%;animation:wy-float 3.6s ease-in-out infinite}
+.wy-mascot[data-state=idle]{animation:wy-float 3.6s ease-in-out infinite,wy-blink 5.5s steps(1,end) infinite}
+.wy-mascot[data-state=wink]{background-position:33.333333% 0}
+.wy-mascot[data-state=rub]{background-position:66.666667% 0;animation:wy-rub .65s ease-in-out infinite}
+.wy-mascot[data-state=think],.wy-mascot[data-state=listen]{background-position:100% 0;animation:wy-think 2.5s ease-in-out infinite}
+.wy-mascot[data-state=sleep]{background-position:0 100%;animation:wy-breathe 3.6s ease-in-out infinite}
+.wy-mascot[data-state=run]{background-position:33.333333% 100%;animation:wy-run .32s ease-in-out infinite}
+.wy-mascot[data-state=happy]{background-position:66.666667% 100%;animation:wy-happy 1.5s ease-in-out infinite}
+.wy-mascot[data-state=spin]{background-position:100% 100%;animation:wy-spin 3s ease-in-out infinite}
+.who-mood.wy-mascot{--mascot-size:36px;margin:-9px 0 -8px 6px;position:relative}
+.transcript .msg.agent:not(:last-child) .wy-mascot{animation:none}
+.wy-brand{display:inline-grid!important;place-items:center;position:relative;background:none!important;border:0!important;box-shadow:none!important;animation:none!important;overflow:visible}
+.wy-brand::before{display:none!important}
+.wy-brand::after{content:'';display:block!important;position:absolute;inset:10%;border:1px solid #edce7d88;border-radius:50%;pointer-events:none;animation:wy-orbit 5s linear infinite}
+.wy-brand .wy-mascot{--mascot-size:48px}
+.brand-mark.wy-brand{width:42px!important;height:44px!important}
+.as-logo.wy-brand{width:170px!important;height:195px!important;aspect-ratio:auto!important}
+.as-logo.wy-brand .wy-mascot{--mascot-size:195px}
+.welcome-hero .cloud.wy-brand{width:144px;aspect-ratio:3/4}
+.welcome-hero .cloud.wy-brand .wy-mascot{--mascot-size:176px}
+.drawer-logo.wy-brand .wy-mascot{--mascot-size:48px}
+.drawer-item-icon{background-image:url('./logo.svg')!important}
+.wb-mark,.wb-hero-mark{filter:drop-shadow(0 3px 8px #87ddec55);animation:wy-float 3.6s ease-in-out infinite}
+#app-splash .as-glow{background:radial-gradient(circle,#a3e8fa70,#fff0b138 55%,transparent 72%)}
+#app-splash .as-sub{color:#597eaf}#app-splash .as-dots i{background:#83cfee}#app-splash .as-dots i:nth-child(2){background:#f0d782}
+@keyframes wy-float{50%{transform:translateY(-3px)}}
+@keyframes wy-blink{0%,94%,100%{background-position:0 0}95%,98%{background-position:33.333333% 0}}
+@keyframes wy-rub{50%{transform:translateY(-1px) rotate(3deg) scale(1.04)}}
+@keyframes wy-think{50%{transform:rotate(-8deg) translateY(-2px)}}
+@keyframes wy-breathe{50%{transform:scale(1.035,.975)}}
+@keyframes wy-run{0%,100%{transform:translateX(-2px) rotate(-4deg)}50%{transform:translate(2px,-4px) rotate(4deg)}}
+@keyframes wy-happy{0%,25%,100%{transform:translateY(0)}12%,38%{transform:translateY(-5px) rotate(5deg)}}
+@keyframes wy-spin{0%,35%,100%{transform:rotateY(0)}75%{transform:rotateY(360deg)}}
+@keyframes wy-orbit{0%{transform:rotate(-25deg) scaleX(1.2) scaleY(.65);opacity:.3}50%{opacity:.85}100%{transform:rotate(335deg) scaleX(1.2) scaleY(.65);opacity:.3}}
+@media(prefers-reduced-motion:reduce){.wy-mascot,.wy-brand::after,.wb-mark,.wb-hero-mark{animation:none!important}}
+body.reduced-motion .wy-mascot,body.reduced-motion .wy-brand::after,body.reduced-motion .wb-mark,body.reduced-motion .wb-hero-mark{animation:none!important}
+body.wy-paused .wy-mascot,body.wy-paused .wy-brand::after{animation-play-state:paused}
+/* 二维轻量动作：不使用 rotateY 或持续的模糊滤镜。 */
+.wy-mascot[data-state=wave]{background-position:0 0;animation:wy-wave 1.4s ease-in-out infinite}
+.wy-mascot[data-state=shy]{background-position:33.333333% 0;animation:wy-shy 2s ease-in-out infinite}
+.wy-mascot[data-state=love]{background-position:66.666667% 100%;animation:wy-love 1.8s ease-in-out infinite}
+.wy-mascot[data-state=dance]{background-position:100% 100%;animation:wy-dance 1.2s ease-in-out infinite}
+.wy-mascot[data-state=love]::after{content:'♡';position:absolute;right:-6%;top:12%;color:#ee719c;font-size:calc(var(--mascot-size,40px)*.18)}
+.wy-mascot[data-state=sleep]::after{content:'zZ';position:absolute;right:0;top:10%;color:#8d84d0;font-size:calc(var(--mascot-size,40px)*.12)}
+@keyframes wy-wave{25%{transform:rotate(-8deg) translateY(-3px)}60%{transform:rotate(8deg)}}
+@keyframes wy-shy{50%{transform:rotate(-7deg) scale(.96) translateY(2px)}}
+@keyframes wy-love{50%{transform:scale(1.06)}}
+@keyframes wy-dance{25%{transform:translate(-5px,-3px) rotate(-8deg)}75%{transform:translate(5px,-3px) rotate(8deg)}}
+@keyframes wy-spin{0%,100%{transform:rotate(0)}75%{transform:rotate(360deg)}}
+.brand-mark.wy-brand{cursor:pointer;align-self:center;transform:translateY(-3px)}
+.brand-mark.wy-brand .wy-mascot{--mascot-size:52px}
+.welcome-hero .cloud.wy-brand{width:132px;height:166px;aspect-ratio:auto;transform:translateY(-10px);filter:none}
+.welcome-hero .cloud.wy-brand .wy-mascot{--mascot-size:156px}
+.compact .welcome-hero{height:160px;margin-top:0}
+.compact .welcome-hero .halo{width:155px;height:155px;animation:none}
+.compact .welcome-hero .halo.b{width:194px;height:194px;animation:none}
+.wy-brand::after{animation:none;transform:rotate(-20deg) scaleY(.7);opacity:.5}
+.wy-companion{box-sizing:border-box;width:min(420px,calc(100vw - 28px));max-height:calc(100dvh - 28px);padding:18px;border:1px solid #e1dcf3;border-radius:28px;background:linear-gradient(150deg,#f8fbff,#f2edff);color:#252d49;overflow:auto;box-shadow:0 18px 60px #30255c33}
+.wy-companion::backdrop{background:#25263f66}
+.wy-companion:not([open]){display:none}
+.wy-companion[open]{animation:wy-appear .22s ease-out}
+.wy-companion-head{display:flex;align-items:center;justify-content:space-between}
+.wy-companion button{font:inherit;cursor:pointer;border:1px solid #ded7f0;background:#fff9;color:#6555b2;border-radius:14px;padding:9px 12px}
+.wy-companion .wy-close{border:0;font-size:24px;line-height:1;padding:4px 9px;background:none}
+.wy-companion-stage{height:220px;display:grid;place-items:center;background:radial-gradient(ellipse at 50% 70%,#bce8f844,transparent 65%)}
+.wy-companion-stage .wy-mascot{--mascot-size:218px}
+.wy-companion-say{max-height:120px;overflow:auto;font-size:14px;line-height:1.6;text-align:center;min-height:44px;margin:4px 0 14px}
+.wy-actions{display:flex;flex-wrap:wrap;gap:7px;justify-content:center}
+.wy-actions button{font-size:12px;padding:7px 10px}
+.wy-companion-form{display:flex;gap:8px;margin-top:16px}
+.wy-companion-form input{min-width:0;flex:1;padding:11px 12px;border:1px solid #dad3ef;border-radius:14px;background:#fff;font:inherit;font-size:13px;color:inherit}
+.wy-companion .wy-companion-voice{width:100%;margin-top:10px;background:#7864df;color:#fff}
+.wy-companion button:disabled{opacity:.55}
+@keyframes wy-appear{from{opacity:0;transform:translateY(12px) scale(.94)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.wy-companion[open]{animation:none}}
+body.reduced-motion .wy-companion[open]{animation:none}
+.mobile-app .wy-mascot{animation-duration:4s;animation-iteration-count:3}
+.mobile-app .wy-companion .wy-mascot{animation-iteration-count:infinite}
+.mobile-app.wy-paused .wy-mascot,.mobile-app.wy-paused .welcome-hero *{animation-play-state:paused!important}
+/* 点击区域保持稳定，光感变化交给透明度；避免图标一直移动影响点击。 */
+.wb-mark,.wb-hero-mark{animation:wy-logo-glow 3.6s ease-in-out infinite;cursor:pointer}
+@keyframes wy-logo-glow{50%{opacity:.78}}

@@ -1,0 +1,217 @@
+# 测试文件单独改动时也运行完整单测，不重复打包安装包。
+name: 未央单元回归
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'jarvis/tests/**'
+      - '.github/workflows/jarvis-unit.yml'
+  workflow_dispatch:
+    inputs:
+      webgl_only:
+        description: '只验证WebGL恢复，不打包、不发布'
+        type: boolean
+        default: false
+      p7_only:
+        description: '只验证P7及固定评测运行时，不打包、不发布'
+        type: boolean
+        default: false
+      skill_only:
+        description: '技能构建与Archify真实出图验收，不打包、不发布'
+        type: boolean
+        default: false
+      weather_only:
+        description: '天气原主题门禁与多字体短屏专项，不打包、不发布'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  unit:
+    if: inputs.webgl_only != true && inputs.p7_only != true && inputs.skill_only != true && inputs.weather_only != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: 原SVG测试所需系统依赖
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg
+      - run: npm test
+  skill-build:
+    if: github.event_name == 'workflow_dispatch' && inputs.skill_only == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - run: npm run lint
+      - run: npm test
+      - run: node evals/code-runtime.mjs --from-source evals/code-runtime-manifest.json .
+      - name: Fetch fixed public Apache-2.0 skill
+        run: |
+          git init "$RUNNER_TEMP/archify"
+          git -C "$RUNNER_TEMP/archify" fetch --depth 1 https://github.com/tt-a1i/archify.git d6059331abbddb49bca380ff46dca8ce33158b04
+          git -C "$RUNNER_TEMP/archify" checkout --detach FETCH_HEAD
+      - name: Build isolated browser test image
+        run: docker build --build-arg BASE=node:22-bookworm-slim -f deploy/skill-runner/Dockerfile.browser -t weiyang-skill-browser:test deploy/skill-runner
+      - name: Real skill generation, cache, ordinary skill and cancellation
+        env:
+          JARVIS_SKILL_RUNNER_IMAGE: weiyang-skill-browser:test
+        run: node e2e/skill-build.mjs "$RUNNER_TEMP/archify" "$RUNNER_TEMP/skill-build"
+      - run: npm run build
+      - name: Original browser regression (unchanged thresholds)
+        run: |
+          mkdir -p "$RUNNER_TEMP/skill-build/smoke"
+          node server/server.mjs > "$RUNNER_TEMP/skill-build/gateway.log" 2>&1 &
+          gateway_pid=$!
+          trap 'kill "$gateway_pid" 2>/dev/null || true' EXIT
+          node --input-type=module -e 'for(let i=0;i<100;i++){try{if((await fetch("http://127.0.0.1:8787")).ok)process.exit(0)}catch{}await new Promise(r=>setTimeout(r,100))}process.exit(1)'
+          node e2e/smoke.mjs "$RUNNER_TEMP/skill-build/smoke"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: skill-build-${{ github.run_id }}
+          path: ${{ runner.temp }}/skill-build
+  p7:
+    if: github.event_name == 'workflow_dispatch' && inputs.p7_only == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - run: npx vitest run tests/codeRuntime.test.js tests/codeLiveReadiness.test.js tests/codeShell.test.js tests/serverSkillState.test.js tests/codeServerAcceptance.test.js tests/codeTaskWork.test.js tests/codeWorkspaceRecovery.test.js
+      - run: node evals/code-runtime.mjs --from-source evals/code-runtime-manifest.json .
+      - run: npm run build
+      - name: Original browser regression (unchanged thresholds)
+        run: |
+          mkdir -p "$RUNNER_TEMP/p7/smoke"
+          node server/server.mjs > "$RUNNER_TEMP/p7/gateway.log" 2>&1 &
+          gateway_pid=$!
+          trap 'kill "$gateway_pid" 2>/dev/null || true' EXIT
+          node --input-type=module -e 'for(let i=0;i<100;i++){try{if((await fetch("http://127.0.0.1:8787")).ok)process.exit(0)}catch{}await new Promise(r=>setTimeout(r,100))}process.exit(1)'
+          node e2e/smoke.mjs "$RUNNER_TEMP/p7/smoke"
+      - run: node e2e/code-repos.mjs "${{ runner.temp }}/p7/code-repos"
+      - run: node e2e/code-work.mjs "${{ runner.temp }}/p7/code-work"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p7-regression-${{ github.run_id }}
+          path: ${{ runner.temp }}/p7
+  webgl:
+    if: github.event_name == 'workflow_dispatch' && inputs.webgl_only == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: 原始smoke和连续20次恢复（保留两份退出码，不因前者失败丢失诊断）
+        run: |
+          mkdir -p "$RUNNER_TEMP/webgl/smoke"
+          node server/server.mjs > "$RUNNER_TEMP/webgl/gateway.log" 2>&1 &
+          WEBGL_SERVER_PID=$!
+          trap 'kill "$WEBGL_SERVER_PID" 2>/dev/null || true' EXIT
+          SMOKE_RESULT=0
+          node e2e/smoke.mjs "$RUNNER_TEMP/webgl/smoke" > "$RUNNER_TEMP/webgl/smoke.log" 2>&1 || SMOKE_RESULT=$?
+          RECOVERY_RESULT=0
+          node e2e/webgl-recovery.mjs "$RUNNER_TEMP/webgl/recovery" > "$RUNNER_TEMP/webgl/recovery.log" 2>&1 || RECOVERY_RESULT=$?
+          cat "$RUNNER_TEMP/webgl/smoke.log"
+          cat "$RUNNER_TEMP/webgl/recovery.log"
+          test "$SMOKE_RESULT" -eq 0 && test "$RECOVERY_RESULT" -eq 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: webgl-recovery-${{ github.run_id }}
+          path: ${{ runner.temp }}/webgl
+
+  weather:
+    if: github.event_name == 'workflow_dispatch' && inputs.weather_only == true
+    runs-on: ubuntu-latest
+    # 增加全量单测和原smoke/standalone顺序验收；不改任何测试内部阈值。
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - name: 与完整验证相同的浏览器和字体
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fonts-wqy-microhei fonts-noto-cjk ffmpeg
+          mkdir -p "$RUNNER_TEMP/weather-check"
+          ffmpeg -version > "$RUNNER_TEMP/weather-check/environment.log"
+          node --version >> "$RUNNER_TEMP/weather-check/environment.log"
+      - name: 天气数据与显示守护
+        run: npx vitest run tests/homepageWeather.test.js tests/qweather.test.js tests/weatherPresentation.test.js tests/homeWeatherRouting.test.js
+      - name: 同源码全量检查（只读，不打包发版）
+        run: |
+          npm run lint
+          npm test
+      - name: 原浏览器与独立版门禁（不放宽阈值）
+        run: |
+          npm run build
+          mkdir -p "$RUNNER_TEMP/weather-check/smoke"
+          node server/server.mjs > "$RUNNER_TEMP/weather-check/gateway.log" 2>&1 &
+          WEATHER_SERVER_PID=$!
+          trap 'kill "$WEATHER_SERVER_PID" 2>/dev/null || true' EXIT
+          node e2e/smoke.mjs "$RUNNER_TEMP/weather-check/smoke"
+          kill "$WEATHER_SERVER_PID"
+          wait "$WEATHER_SERVER_PID" || true
+          npm run build:standalone
+          node e2e/standalone.mjs "$RUNNER_TEMP/weather-check"
+      - name: 构建实际手机版
+        run: npm run build:mobile
+      - name: 原主题门禁与多字体天气专项
+        run: |
+          node e2e/mobile-theme.mjs "$RUNNER_TEMP/weather-check/theme"
+          node e2e/weather-card.mjs "$RUNNER_TEMP/weather-check/weather"
+          node e2e/weather-server.mjs "$RUNNER_TEMP/weather-check/server"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: weather-check
+          path: ${{ runner.temp }}/weather-check
+          if-no-files-found: error

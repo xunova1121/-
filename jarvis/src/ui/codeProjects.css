@@ -1,0 +1,165 @@
+/* 项目入口放进导航，输入区只保留写消息相关操作。 */
+.drawer-project-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 60px;
+  padding: 12px 15px;
+  margin: 0 0 16px;
+  border: 1px solid var(--border, #e6e1ef);
+  border-radius: 16px;
+  background: var(--surface-2, #fff);
+  color: var(--text, #34323e);
+  text-align: left;
+  cursor: pointer;
+}
+.drawer-project-entry > svg {
+  width: 23px;
+  height: 23px;
+  fill: none;
+  stroke: var(--accent, #9270dd);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+.drawer-project-entry > span {
+  flex: 1;
+  min-width: 0;
+}
+.drawer-project-entry strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.drawer-project-entry small {
+  display: block;
+  color: var(--muted, #817b8f);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.drawer-project-entry > i {
+  font-style: normal;
+  font-size: 22px;
+  color: var(--muted, #817b8f);
+}
+.code-project-dialog {
+  box-sizing: border-box;
+  width: min(560px, calc(100vw - 24px));
+  max-height: 88dvh;
+  padding: 24px;
+  border: 1px solid #ddd8e8;
+  border-radius: 22px;
+  background: var(--bg, #f8f7fb);
+  color: var(--text, #32313a);
+  box-shadow: 0 24px 80px #241b3630;
+  overflow: auto;
+}
+.code-project-dialog::backdrop,
+.code-project-preview::backdrop {
+  background: #18112466;
+}
+.code-project-dialog header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+}
+.code-project-dialog h2 {
+  margin: 5px 0 14px;
+  font-size: 23px;
+}
+.code-project-dialog h3 {
+  font-size: 15px;
+  margin: 12px 0 8px;
+}
+.code-project-dialog small {
+  font-size: 11px;
+  color: var(--muted, #77717e);
+  letter-spacing: 0.04em;
+}
+.code-project-dialog p {
+  font-size: 13px;
+  line-height: 1.65;
+}
+.code-project-dialog details {
+  padding: 14px 0;
+  border-top: 1px solid #b9b1ca44;
+}
+.code-project-dialog summary {
+  cursor: pointer;
+  font-size: 14px;
+}
+.code-project-dialog label {
+  display: block;
+  margin: 12px 0;
+  font-size: 13px;
+}
+.code-project-dialog input:not([type='checkbox']) {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 42px;
+  margin-top: 6px;
+  padding: 9px 11px;
+  border: 1px solid #c8bfd866;
+  border-radius: 10px;
+  background: var(--input-bg, #fff);
+  color: inherit;
+}
+.code-project-dialog button,
+.code-project-preview > button {
+  min-height: 40px;
+  padding: 8px 12px;
+  margin: 4px 5px 4px 0;
+  border: 1px solid #b6aace66;
+  border-radius: 10px;
+  background: var(--chip-bg, #ece8f5);
+  color: inherit;
+  cursor: pointer;
+}
+.code-project-dialog a {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  color: #8161c9;
+}
+.code-project-workspace {
+  margin: 12px 0;
+  padding: 10px;
+  border-radius: 12px;
+  background: #9480bf10;
+}
+.code-project-workspace small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.code-project-request {
+  padding: 12px;
+  margin: 12px 0;
+  border: 1px solid #a68bce66;
+  border-radius: 14px;
+}
+.code-project-request pre {
+  max-height: 180px;
+  overflow: auto;
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.code-project-preview {
+  width: min(1200px, 96vw);
+  height: 90dvh;
+  padding: 12px;
+  border: 0;
+  border-radius: 18px;
+  background: #faf9fc;
+}
+.code-project-preview iframe {
+  display: block;
+  width: 100%;
+  height: calc(100% - 52px);
+  border: 1px solid #ddd8e8;
+  border-radius: 10px;
+  background: #fff;
+}

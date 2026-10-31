@@ -1,0 +1,9 @@
+# 目前只统一格式化拆出来的新模块（src/app、src/main.js）；老文件以后改到哪个再格式化哪个，免得一次改动太大
+*
+!src/
+!src/app/
+!src/app/*.js
+!src/main.js
+
+!src/app/doc/
+!src/app/doc/*.js

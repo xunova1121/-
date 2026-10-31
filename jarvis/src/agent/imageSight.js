@@ -1,0 +1,79 @@
+import { IMAGE_TEXT_TASK, IMAGE_READING_RULES, independentImageQuestion } from './imageReading.js';
+/**
+ * 主模型看不了图（如 DeepSeek 官方的文字模型）时，图片先交给看图模型写成文字，再交给主模型思考、回答。
+ *
+ *   - 以前图片硬塞给文字模型：接口把图换成一句 “Unsupported Image”，模型就以为图片格式坏了，让用户换 PNG 重发
+ *   - 用户发的图、历史里的图、工具读出来的图（read_file、截屏）都按这个处理
+ *   - 没有看图模型时图片照旧发过去；已知只认文字的模型（DeepSeek 等）附一句：看不到就如实说、教用户去设看图模型
+ *   - 要的是图里的字（提取、识别、整理成表格……）且有文字识别（GLM-OCR）：先把字原样抄出来附上，比看图模型读字准
+ */
+import { visualFields } from './visualFields.js';
+import { throwControl } from '../core/networkRequest.js';
+import { imageFingerprint, scoreRows } from './visualEvidence.js';
+import { seesImages } from '../llm/router.js';
+
+export const NO_SIGHT_NOTE =
+  '（如果你看不到这张图片的内容，或者图片显示成 Unsupported Image：说明当前模型不能看图，不是图片格式的问题。直接告诉用户“当前模型看不了图：请在 模型 页给正在用的那一端（本机或云服务器）添加百炼（通义千问）或 DeepSeek 的 Key，未央会自动用它们的看图模型；也可以在模型分工里指定看图模型”，不要让用户换格式重发。）';
+
+/** 已知只认文字的模型系列：没有看图模型时才提醒它如实说（认不出的名字可能其实能看，不打扰） */
+const TEXT_ONLY = /deepseek|kimi|moonshot|glm-4(?!v|\.\dv)|glm-[5-9](?!v)|qwen-(max|plus|turbo|long)|qwen3-(max|coder|\d+b)|minimax|abab|ernie/i;
+
+/** 这句话要的是图里的字 */
+export const WANTS_TEXT = /识别|提取|抄下|抄录|摘录|文字|文本|表格|整理成|转成|转为|做成.{0,6}(表|Excel|Word|文档)|OCR|录入|写了什么|上面写|里面写/i;
+
+const SYSTEM = `你是看图助手，替一个看不到图片的模型看图。把图片内容如实、具体地写成文字，让它不看图也能回答用户：
+- 先一句话说整体：这是什么图（照片 / 截图 / 表格 / 图表 / 插画……）、什么场景
+- 再写主体和细节：人物（动作、表情、穿着）、物体、位置关系、颜色、光线、氛围
+- 图里的文字、数字、表格按原样抄录；看不清的写“看不清”，不要猜
+- 只写图里有的，不加评论，不替用户回答问题；有多张图时分别标“图1”“图2”`;
+
+/**
+ * @param {{ model: string, describe?: ((o: { system: string, prompt: string, images: object[], signal?: AbortSignal }) => Promise<string>) | null, label?: string, emit?: Function, readText?: Function | null }} o
+ *   describe：看图模型的单次问答（createHelperLlm 的结果）；label：显示用的看图模型名
+ *   readText：文字识别（ocr.recognizeText），(image, { signal }) → { text, model }
+ * @returns {(message: object, o?: { hint?: string, signal?: AbortSignal, ocr?: boolean }) => Promise<void>}  就地把消息里的图片换成文字
+ *   ocr：这条消息要不要做文字识别（只给这次发的图和工具读到的图做，历史里的不重复做）
+ */
+export function createImageSight({ model, describe = null, label = '看图模型', emit = () => {}, readText = null, onEvidence = () => {} }) {
+  const blind = !seesImages(model);
+  return async function see(message, { hint = '', signal, ocr = false } = {}) {
+    if (!message?.images?.length) return;
+    if (ocr && readText && (WANTS_TEXT.test(hint) || IMAGE_TEXT_TASK.test(hint)) && !message.textRead) {
+
+      const parts = [];
+      for (const [i, image] of message.images.slice(0, 4).entries()) {
+        emit({ type: 'seeing', text: '正在识别图里的文字…', model: 'GLM-OCR' });
+        try {
+          const r = await readText(image, { signal });
+          message.textRead = true;
+          onEvidence({ kind: 'ocr', ok: true, model: r.model, imageHash: await imageFingerprint(image), rows: scoreRows(r.text), fields: visualFields(r.text) });
+          parts.push(`${message.images.length > 1 ? `图${i + 1}：` : ''}${r.text}`);
+        } catch (e) {
+          throwControl(e, signal);
+          onEvidence({ kind: 'ocr', ok: false, model: 'GLM-OCR' });
+        }
+      }
+      if (parts.length) message.content = `${message.content ?? ''}\n\n【图片里的文字（OCR识别结果，可能有错字或串行；与原图逐行核对，不自动视为已核实）】\n${parts.join('\n\n')}`;
+    }
+    if (!blind) return;
+    if (!describe) {
+      if (TEXT_ONLY.test(String(model)) && !String(message.content ?? '').includes(NO_SIGHT_NOTE)) message.content = `${message.content ?? ''}\n\n${NO_SIGHT_NOTE}`;
+      return;
+    }
+    const images = message.images;
+    emit({ type: 'seeing', text: `正在看图（${label}）…`, model: label });
+    let text = '';
+    try {
+      text = String(await describe({ system: SYSTEM + (IMAGE_TEXT_TASK.test(hint) ? "\n" + IMAGE_READING_RULES : ""), prompt: `${images.length > 1 ? `一共 ${images.length} 张图。` : ''}用户这次说的是：${independentImageQuestion(hint).slice(0, 1000) || '（没说，按图片本身描述）'}\n请描述图片。`, images, signal })).trim();
+    } catch (e) {
+      throwControl(e, signal);
+      onEvidence({ kind: 'vision', ok: false, model: label });
+      text = '';
+    }
+    if (text) onEvidence({ kind: 'vision', ok: true, model: label });
+    delete message.images;
+    message.content = text
+      ? `${message.content ?? ''}\n\n【图片内容：你本身看不到图片，下面是${label}看图后写的描述，按它回答；描述里没有的细节不要编】\n${text}`
+      : `${message.content ?? ''}\n\n（这里有 ${images.length} 张图片，但${label}这次没看成功。如实告诉用户没看到图，请他稍后再发一次或检查看图模型的 Key；不要说图片格式有问题，也不要编图片内容。）`;
+  };
+}
