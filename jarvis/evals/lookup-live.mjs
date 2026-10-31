@@ -1924,7 +1924,8 @@ async function getSportsScores(args = {}, { get, signal, retrieval, now = Date.n
   }
   if (primary?.covered) return deliver(primary.text, [{ source: "\u76F4\u64AD\u5427", events: primary.events }]);
   if (primary?.count) partial = primary;
-  if (!asked.length) {
+  const domesticOnly = args.sport === "tennis" || named.some((name) => /CBA|中甲|中乙|女足|网球|ATP|WTA/i.test(name));
+  if (!asked.length && !domesticOnly) {
     if (partial) return deliver(partial.text, [{ source: "\u76F4\u64AD\u5427", events: partial.events }]);
     throw invalid(`\u6CA1\u8BA4\u51FA\u8981\u67E5\u7684\u8D5B\u4E8B\u3002\u80FD\u67E5\uFF1A${LEAGUES.map((l) => l.name).join("\u3001")}\uFF1B\u67E5\u4E0D\u4E86\uFF1A${NOT_COVERED}\uFF08\u7528 web_search\uFF09`);
   }

@@ -153,7 +153,8 @@ export async function getSportsScores(args = {}, { get, signal, retrieval, now =
   }
   if (primary?.covered) return deliver(primary.text, [{ source: '直播吧', events: primary.events }]);
   if (primary?.count) partial = primary;
-  if (!asked.length) {
+  const domesticOnly = args.sport === 'tennis' || named.some(name => /CBA|中甲|中乙|女足|网球|ATP|WTA/i.test(name));
+  if (!asked.length && !domesticOnly) {
     if (partial) return deliver(partial.text, [{ source: '直播吧', events: partial.events }]);
     throw invalid(`没认出要查的赛事。能查：${LEAGUES.map((l) => l.name).join('、')}；查不了：${NOT_COVERED}（用 web_search）`);
   }

@@ -83,3 +83,9 @@ it('多球队刷新参数保留，通用排版不破坏文章和短答', () => {
     expect(note).toContain('所有答复按内容清晰排版'); expect(note).toContain('短问题简短答'); expect(note).toContain('保留其自然文体');
   }
 });
+it('不在旧联赛代码表的CBA也能走国内网页备用，不误报输入错误', async () => {
+  const get = vi.fn(async url => url === ZHIBO8_URL ? new Response('{"list":[]}') : new Response(pageMatch('1', '2026-10-31 19:30', '测试篮球队', '另一篮球队', 'CBA常规赛', 'basketball')));
+  const result = await getSportsScores({ leagues: ['CBA'] }, { get, now });
+  expect(result).toContain('测试篮球队'); expect(result).toContain('CBA常规赛');
+  expect(get.mock.calls.map(([u]) => u)).toEqual([ZHIBO8_URL, SCHEDULE_URL]);
+});
