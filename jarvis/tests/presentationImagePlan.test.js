@@ -23,3 +23,11 @@ it('缺能力不虚报成功；普通无配图要求不额外请求',async()=>{
  const out=await preparePresentationImages({},'## 说明\n正文',{title:'说明',requirements:'每页都要图'});expect(out.issues.length).toBeGreaterThan(0);
  const imageGen=vi.fn();await preparePresentationImages({imageGen},'## 说明\n正文',{title:'说明',requirements:'做PPT'});expect(imageGen).not.toHaveBeenCalled();
 });
+it('普通图库失败可回退AI；用户禁止AI时不能回退',async()=>{
+ const imageGen=vi.fn(async()=>({blob:new Blob([bytes],{type:'image/png'})}));
+ const stockImageForSlide=vi.fn(async()=>{throw new Error('source unavailable');});
+ const first=await preparePresentationImages({imageGen,stockImageForSlide},'## 球场\n介绍',{title:'球场',requirements:'每页都要图'});
+ expect(first.issues).toEqual([]);expect(imageGen).toHaveBeenCalled();imageGen.mockClear();
+ const second=await preparePresentationImages({imageGen,stockImageForSlide},'## 球场\n介绍',{title:'球场',requirements:'每页都要图，不要AI'});
+ expect(second.issues.length).toBeGreaterThan(0);expect(imageGen).not.toHaveBeenCalled();
+});

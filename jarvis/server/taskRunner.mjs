@@ -1,3 +1,4 @@
+import { createStockImages } from './stockImages.mjs';
 import { createLookupModel } from '../src/agent/lookupModels.js';
 import { createLookupService, memoryLookupStorage } from '../src/agent/lookup/service.js';
 import { convertLegacyDoc } from './officeRender.mjs';
@@ -122,6 +123,7 @@ export function serverApproves(ask, text) {
 }
 
 export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now, skillRunner = null, codeRepos = null, codeProjects = null, projectBaseDir, codeMaxSteps = 80, codeTaskMs = CODE_TASK_MS, lookupService = createLookupService({ get: publicFetch }) }) {
+  const stockImages = createStockImages({ getConfig, fetchImpl: publicFetch });
   const tasks = new Map();
   const waiting = [];
   let running = 0;
@@ -286,6 +288,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       onFileChanged: (p) => { if (!/^skills\//.test(p)) { task.files.add(p); record(task, { type: 'file', path: p }); } },
       onSportsScores: (value) => { task.sports = value; record(task, { type: 'sports_scores', value }); },
       // 画图、做视频：用服务器上的模型设置；生成的文件照常存进工作区，手机按文件下载后显示在对话里
+      stockImageForSlide: (o) => stockImages.forSlide({ ...o, visionLlm: sight(cfg, task).describeImages }),
       imageGen: (o) => generateImage(cfg, { ...o, download: publicFetch }),
       imageEdit: (o) => editImage(cfg, { ...o, download: publicFetch }),
       cropImage: cropImageRegion,

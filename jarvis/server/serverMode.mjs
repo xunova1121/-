@@ -1,3 +1,5 @@
+import { createStockImages } from './stockImages.mjs';
+import { STOCK_KEY_FIELDS, STOCK_PROVIDERS } from '../src/agent/stockImageSources.js';
 import { publicDataHosts } from '../src/agent/publicJson.js';
 import { createLookupService } from '../src/agent/lookup/service.js';
 import { LOOKUP_REGIONS } from '../src/agent/lookup/sources.js';
@@ -76,12 +78,12 @@ export const tokenFor = (password) => createHash('sha256').update(`jarvis-server
 export function maskConfig(cfg) {
   cfg = withoutCodeCredentials(cfg);
   const mask = (v) => (v ? `••••${String(v).slice(-4)}` : '');
-  return { ...cfg, keys: Object.fromEntries(Object.entries(cfg.keys ?? {}).map(([k, v]) => [k, mask(v)])), tavilyKey: mask(cfg.tavilyKey), bochaKey: mask(cfg.bochaKey), deepseekSearchKey: mask(cfg.deepseekSearchKey), falKey: mask(cfg.falKey), qweatherKey: mask(cfg.qweatherKey) };
+  return { ...cfg, ...Object.fromEntries(STOCK_KEY_FIELDS.map(key => [key, mask(cfg[key])])), keys: Object.fromEntries(Object.entries(cfg.keys ?? {}).map(([k, v]) => [k, mask(v)])), tavilyKey: mask(cfg.tavilyKey), bochaKey: mask(cfg.bochaKey), deepseekSearchKey: mask(cfg.deepseekSearchKey), falKey: mask(cfg.falKey), qweatherKey: mask(cfg.qweatherKey) };
 }
 /** 保存时：密钥没改（还是 •••• 或留空）就沿用原来的 */
 export function mergeConfig(old, next) {
   // GitHub凭据只在专用仓库设置接口更新，模型面板的旧快照不能清空或覆盖。
-  const { codeRepos: ignored, codeAccount: ignoredAccount, ...modelSettings } = next;
+  const { codeRepos: ignored, codeAccount: ignoredAccount, stockVerified: ignoredStockVerified, ...modelSettings } = next;
   next = modelSettings;
   if (Object.hasOwn(next, 'publicDataHosts')) next = { ...next, publicDataHosts: publicDataHosts(next.publicDataHosts) };
   if (Object.hasOwn(next, 'lookupRegion') && !LOOKUP_REGIONS.includes(next.lookupRegion)) throw Object.assign(new Error('查询地区只接受auto、cn或global'), { status: 400, code: 'LOOKUP_REGION' });
@@ -90,6 +92,11 @@ export function mergeConfig(old, next) {
   for (const [k, v] of Object.entries(next.keys ?? {})) keys[k] = keep(v, old.keys?.[k]);
   const maps = Object.fromEntries(['models', 'baseURLs', 'providerNames', 'modelLists', 'serviceTiers'].map((field) => [field, { ...old[field], ...next[field] }]));
   const merged = { ...old, ...next, ...maps, keys, tavilyKey: keep(next.tavilyKey, old.tavilyKey), bochaKey: keep(next.bochaKey, old.bochaKey), deepseekSearchKey: keep(next.deepseekSearchKey, old.deepseekSearchKey), falKey: keep(next.falKey, old.falKey), qweatherKey: keep(next.qweatherKey, old.qweatherKey) };
+  merged.stockVerified = { ...old.stockVerified };
+  for (const key of STOCK_KEY_FIELDS) {
+    merged[key] = keep(next[key], old[key]);
+    if (merged[key] !== old[key]) delete merged.stockVerified[key.replace(/Key$/, '')];
+  }
   // 字典合并不能把前端淘汰的旧地址缓存重新带回来；服务器也必须执行同一上限。
   if (next.modelLists || next.baseURLs) merged.modelLists = boundedCatalogs(merged);
   // 前端删掉的服务商：字典合并不会自己少掉，照着标记删
@@ -233,6 +240,19 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     if (pathname === '/api/server/search-test' && req.method === 'POST') {
       await searchTest(req, res);
       return true;
+    }
+    if (pathname === '/api/server/stock-images/probe' && req.method === 'POST') {
+      if (!authorized(req)) { json(res, 401, { error: '服务器登录已失效' }); return true; }
+      const body = await readJson(req);
+      if (body.network !== 'cn') { json(res, 400, { error: '请确认执行服务器位于国内网络' }); return true; }
+      if (!STOCK_PROVIDERS.includes(body.provider)) { json(res, 400, { error: '图库名称不支持' }); return true; }
+      const original = loadConfig();
+      const service = createStockImages({ getConfig: () => original, fetchImpl: publicFetch });
+      const result = await service.probe(body.provider, { signal: AbortSignal.timeout(25000) });
+      const cfg = loadConfig();
+      if (cfg[body.provider + 'Key'] !== original[body.provider + 'Key']) { json(res, 409, { error: '检测期间密钥已改变，请重新检测' }); return true; }
+      saveConfig({ ...cfg, stockVerified: { ...cfg.stockVerified, [body.provider]: result } });
+      json(res, 200, result); return true;
     }
     if (pathname === '/api/server/config') {
       if (req.method === 'GET') { json(res, 200, maskConfig(loadConfig())); return true; }

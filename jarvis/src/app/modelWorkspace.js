@@ -63,6 +63,11 @@ export function createModelWorkspace(app) {
       if (!client) throw Object.assign(new Error('请先登录云服务器'), { kind: 'api', code: 'SERVER_NOT_CONNECTED' });
       return client.memoryStatus();
     },
+    async probeStockImages(provider, signal) {
+      const client = scope === 'server' && getClient();
+      if (!client) throw new Error('请在已登录的云服务器设置中检测图库');
+      return client.probeStockImages(provider, signal);
+    },
     async lookupHealth(probe = false, target = scope, signal) {
       if (target === 'local') {
         const service = localLookup(app);

@@ -18,6 +18,25 @@ export function serverKeysPanel({ cfg, workspace, node }) {
     tavilyKey: field('Tavily 搜索 Key', cfg.tavilyKey, '国外资料多时用（英文结果好）。申请：app.tavily.com'),
     qweatherKey: field('和风天气 Key', cfg.qweatherKey, '填了以后天气用和风（国内快，有空气质量、逐小时、7 天、生活指数、预警）；不填用免费的 Open-Meteo。申请：console.qweather.com →“项目管理”创建项目和 API KEY')
   };
+  if (workspace.scope === 'server') {
+    for (const name of ['pexels', 'pixabay', 'unsplash']) fields[name + 'Key'] = field(name + ' 图库 Key', cfg[name + 'Key'], '仅保存在服务器；保存后需通过国内连接检测才启用，图片按来源许可署名。');
+  }
+  const stockControls = [];
+  if (workspace.scope === 'server') {
+    const confirmed = node('input', { type: 'checkbox', ariaLabel: '服务器位于国内网络' });
+    stockControls.push(node('label', {}, confirmed, node('span', { textContent: '确认服务器位于国内网络（用于图库实测）' })));
+    for (const provider of ['pexels', 'pixabay', 'unsplash', 'openverse']) {
+      const button = node('button', { type: 'button', className: 'ml-button', textContent: '检测 ' + provider });
+      button.addEventListener('click', async () => {
+        if (!confirmed.checked) { result.textContent = '请先确认服务器网络地区'; return; }
+        button.disabled = true;
+        try { const checked = await workspace.probeStockImages(provider); result.textContent = `${provider} API与图片下载通过：${checked.width}×${checked.height}；已启用`; }
+        catch (error) { result.textContent = error.message; }
+        finally { button.disabled = false; }
+      });
+      stockControls.push(button);
+    }
+  }
   // API Host 不是密钥：明文显示，方便核对
   const hostInput = node('input', { type: 'text', autocomplete: 'off', ariaLabel: '和风天气 API Host', maxLength: 120, placeholder: '如 abc123xyz.re.qweatherapi.com', value: cfg.qweatherHost || '' });
   const hostRow = node('label', { className: 'ml-field' }, node('span', { textContent: '和风天气 API Host' }), hostInput, node('small', { className: 'ml-muted', textContent: '控制台“设置”页里的 API Host，每个账号不一样' }));
@@ -42,5 +61,5 @@ export function serverKeysPanel({ cfg, workspace, node }) {
       save.disabled = false;
     }
   });
-  return node('details', { className: 'ml-copy ml-service-keys' }, node('summary', { textContent: `其他服务的 Key：搜索、唱歌、天气 · ${where}` }), ...Object.values(fields).map((f) => f.row), hostRow, save, result);
+  return node('details', { className: 'ml-copy ml-service-keys' }, node('summary', { textContent: `其他服务的 Key：搜索、唱歌、天气 · ${where}` }), ...Object.values(fields).map((f) => f.row), hostRow, save, ...stockControls, result);
 }

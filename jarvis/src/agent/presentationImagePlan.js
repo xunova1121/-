@@ -45,17 +45,23 @@ export async function preparePresentationImages(ctx, content, options, execution
   const results = await imagePool(selected, async page => {
     signal?.throwIfAborted();
     const imagePrompt = `为同一套${style}风格PPT制作配图，保持统一配色和视觉语言。主题：${page.title}。内容线索：${page.text}。位置${page.slot}，比例${page.size}。只画通用场景或概念插画，不画文字、数字或假新闻现场，不改变原文事实。`;
-    const key = await fingerprint(imagePrompt);
+    const key = await fingerprint(imagePrompt + '\n来源要求：' + requirements);
     const imagePath = `images/ppt/${key}.png`;
     if (await ws.exists(imagePath)) {
       const cached = await ws.readBlob(imagePath);
       if (cached.size <= 8e6 && imageInfo(new Uint8Array(await cached.arrayBuffer()))) return {path:imagePath,source:'cache'};
     }
+    const ownOnly = /只(?:用|使用).{0,8}(?:上传|原图|自有|提供)/.test(requirements);
+    const noAI = ownOnly || /不要AI|不用AI|禁止AI|只(?:用|使用).{0,6}图库/i.test(requirements);
+    if (ownOnly) throw new Error('本页没有引用用户指定图片，请补齐原图路径');
     // 已接入且通过国内探测的图库可在这里提供真实工作区图片；未配置时不伪造来源。
-    if (ctx.stockImageForSlide) {
-      const stock = await ctx.stockImageForSlide({query:page.title,slot:page.slot,signal});
-      if (stock?.path) return {path:stock.path,source:'stock',credit:stock.credit};
+    if (ctx.stockImageForSlide && !/只(?:用|使用).{0,6}AI/i.test(requirements)) {
+      try {
+        const stock = await ctx.stockImageForSlide({query:page.title,slot:page.slot,signal,retrieval});
+        if (stock?.path) return {path:stock.path,source:'stock',credit:stock.credit};
+      } catch(error) { throwControl(error,signal); }
     }
+    if (noAI) throw new Error('未取得符合指定来源的图片，未用AI替代');
     if (!ctx.imageGen) throw new Error('画图能力未配置，保留本页内容；配图未完成');
     progress?.(`生成配图：${page.title}（最多2路并发）`);
     const result = await ctx.imageGen({prompt:imagePrompt,size:page.size,outputFormat:'png',signal,beforeRequest:()=>retrieval?.consume('model')});
@@ -72,7 +78,7 @@ export async function preparePresentationImages(ctx, content, options, execution
     if (result.error) { issues.push({level:'error',text:`第${page.index+1}段「${page.title}」配图失败：${result.error}`}); continue; }
     Object.assign(page,result.value);
     sections[page.index] += `\n\n![${page.title.replace(/[\]\n]/g,'')}配图](${result.value.path})\n\n`;
-    if(result.value.credit) sections[page.index] += `备注：图片来源 ${String(result.value.credit).slice(0,500)}\n\n`;
+    if(result.value.credit) sections[page.index] += `备注：图片来源 ${String(result.value.credit).slice(0,2000)}\n\n`;
   }
   return {content:sections.join('\n'),issues,plan:plan.map(({text,...page})=>page)};
 }
