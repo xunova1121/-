@@ -18,6 +18,7 @@ import { validateLiveConfig } from './baseline.mjs';
 import { fileDownloader, turnFileFacts, fileProblems, turnEvidence } from './joint-files.mjs';
 import { runMetrics, stability, jointSummary, compareRounds } from './joint-report.mjs';
 import { rubricVersion } from './joint-rubric.mjs';
+import { speedQualityCases } from './speed-quality-cases.mjs';
 
 const bj = (t = Date.now()) => new Date(t + 8 * 3600_000).toISOString().replace('T', ' ').slice(0, 19) + '（北京时间）';
 const configError = (message) => Object.assign(new Error(message), { code: 'EVAL_CONFIG', kind: 'api' });
@@ -81,8 +82,11 @@ export function scheduleCleaner(api, remove, before) {
 
 export async function main(args = process.argv.slice(2), env = process.env) {
   const arg = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
+  const supplement = args.includes('--speed-quality');
+  const selectedCases = supplement ? [...jointCases, ...speedQualityCases] : jointCases;
+  const suiteVersion = supplement ? jointSuiteVersion + '+speed-quality-v1' : jointSuiteVersion;
   if (!args.includes('--live')) {
-    console.log(JSON.stringify({ mode: 'plan_only', suiteVersion: jointSuiteVersion, repeats: JOINT_REPEATS, cases: jointCases.map(({ id, group, prompt, followup, requires, carriedFrom }) => ({ id, group, prompt, followup, requires, carriedFrom })) }, null, 2));
+    console.log(JSON.stringify({ mode: 'plan_only', suiteVersion, repeats: JOINT_REPEATS, cases: selectedCases.map(({ id, group, prompt, followup, requires, carriedFrom }) => ({ id, group, prompt, followup, requires, carriedFrom })) }, null, 2));
     return;
   }
   if (!env.JARVIS_EVAL_URL || !env.JARVIS_EVAL_TOKEN) throw configError('缺少服务器地址或登录令牌');
@@ -98,6 +102,7 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   if (status.running || status.tasks?.length) throw configError('服务器有其他任务，请单独评测');
   if (!status.features?.evaluationMemoryIsolation || !status.features?.taskRequestIds) throw configError('服务器版本太旧（缺评测隔离），请先更新服务器');
   const update = await api('/api/server/update').catch(() => null);
+  if (arg('expected-version') && update?.version !== arg('expected-version')) throw configError('服务器版本与本次固定基线不一致，未提交评测任务');
   const repos = await api('/api/server/code-repos').catch(() => null);
   const envState = { repoConnected: repos?.connected === true && repos?.repository === 'xunova1121/weiyang-code-sandbox', browserConfigured: repos?.capabilities?.browserConfigured === true };
   const prices = arg('prices') ? JSON.parse(await fs.readFile(arg('prices'), 'utf8')) : {};
@@ -108,7 +113,7 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   await fs.mkdir(directory, { mode: 0o700 });
   const report = {
     schemaVersion: 1,
-    suiteVersion: jointSuiteVersion,
+    suiteVersion,
     rubricVersion,
     repeats,
     runId: randomUUID(),
@@ -134,7 +139,7 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
   try {
-    for (const item of jointCases.filter((c) => !only || only.includes(c.id))) {
+    for (const item of selectedCases.filter((c) => !only || only.includes(c.id))) {
       if (controller.signal.aborted) break;
       const entry = { id: item.id, group: item.group, category: item.category, carriedFrom: item.carriedFrom || null, prompt: item.prompt, followup: item.followup || null, rubric: item.rubric, runs: [] };
       report.results.push(entry);

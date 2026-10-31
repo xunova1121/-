@@ -15,6 +15,8 @@ unset PASSWORD
 trap 'unset JARVIS_EVAL_TOKEN' EXIT
 OUT="${JOINT_OUT:-/root/weiyang-joint-$(date +%Y%m%d-%H%M)}"
 EXTRA=()
+[ -n "${JOINT_EXPECT_VERSION:-}" ] && EXTRA+=("--expected-version=$JOINT_EXPECT_VERSION")
+[ "${JOINT_SPEED_QUALITY:-0}" = "1" ] && EXTRA+=("--speed-quality")
 [ -n "${JOINT_PREVIOUS:-}" ] && EXTRA+=("--previous=$JOINT_PREVIOUS")
 [ -n "${JOINT_BASELINE:-}" ] && EXTRA+=("--baseline=$JOINT_BASELINE")
 [ -n "${JOINT_PRICES:-}" ] && EXTRA+=("--prices=$JOINT_PRICES")
