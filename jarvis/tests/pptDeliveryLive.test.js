@@ -2,7 +2,7 @@ import {test,expect} from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {assessDelivery,main,privateValues} from '../evals/ppt-delivery-live.mjs';
+import {assessDelivery,main,privateValues,deliverySequence} from '../evals/ppt-delivery-live.mjs';
 
 test('done、图标或部分配图不能冒充逐页配齐；耗时超目标仍失败',()=>{
  const value={step:3,status:'done',elapsedMs:1000,rendered:true,renderedPages:5,quality:{slides:5,errors:0,presentation:{imagePages:4}}};
@@ -31,3 +31,14 @@ test('未配置真实模型不请求模型，不修改生产数据，报告不�
 });
 
 test("嵌套服务商keys中的值也会脱敏",()=>{expect(privateValues({keys:{custom:"private-provider-key"},model:"public-model",nested:{token:"private-token"}})).toEqual(["private-provider-key","private-token"]);});
+
+ test('真实隔离绑定规则允许同会话连续三步，仍拒绝跨评测接入',async()=>{
+ const {bindEvaluation}=await import('../server/evaluation.mjs');
+ const session={messages:[]},calls=[];
+ const runner={start:async input=>{bindEvaluation(session,input.evaluationId);session.messages.push({role:'user',content:input.text});calls.push(input);return {id:'t'+calls.length,sessionId:'c_delivery'};}};
+ const next=deliverySequence(runner);
+ for(const text of ['制作Word','沿用Word做PPT','逐页补图'])await next(text);
+ expect(calls.map(x=>x.sessionId)).toEqual([null,'c_delivery','c_delivery']);
+ expect(new Set(calls.map(x=>x.requestId)).size).toBe(3);
+ expect(()=>bindEvaluation(session,'another-evaluation')).toThrow('另一套评测');
+ });

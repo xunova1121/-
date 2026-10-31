@@ -36,6 +36,11 @@ export function assessDelivery({step,status,elapsedMs,quality,rules,missing=[],r
 export function privateValues(value, inherited=false) {
  return Object.entries(value||{}).flatMap(([key,item])=>{const secret=inherited||/key|token|secret|password/i.test(key);return item&&typeof item==='object'?privateValues(item,secret):secret&&typeof item==='string'&&item.length>=8?[item]:[];});
 }
+/** 同一批同一隔离会话固定evaluationId；每轮请求仍有独立幂等编号。 */
+export function deliverySequence(runner) {
+ const evaluationId=randomUUID();let sessionId=null;
+ return async text=>{const accepted=await runner.start({text,sessionId,evaluationId,requestId:'ppt_'+randomUUID()});sessionId=accepted.sessionId;return accepted;};
+}
 export async function main(args=process.argv.slice(2)) {
  if(!args.includes('--live')){console.log('加--live才读取服务器配置并请求当前模型；隔离执行Word→PPT→逐页补图，不更新正式服务。');return;}
  const option=(key,fallback)=>args.find(x=>x.startsWith(key+'='))?.slice(key.length+1)||fallback;
@@ -70,11 +75,11 @@ export async function main(args=process.argv.slice(2)) {
    '沿用刚才的Word outputs/赛程.docx，制作清爽PPT，保留完整20条赛程，最多6页，封面有设计，使用数字卡、体育图标和基于真实表格的时段统计。交付 outputs/赛程.pptx 及真实预览。',
    '沿用 outputs/赛程.pptx，给每页补一张与球场或体育概念相关的内容配图（图标不算），不删20条赛程，不超过6页。不要真实球员和赛事照片。可用已验证图库或图片生成工具；没有可用能力要明确报告，不假称配齐。另存 outputs/赛程配图.pptx，保留之前Word和PPT，输出真实总览并核对页数与配图数。'
   ];
-  runner=createTaskRunner({getConfig:async()=>cfg,maxRunning:1});let sessionId=null;
+  runner=createTaskRunner({getConfig:async()=>cfg,maxRunning:1});const startTurn=deliverySequence(runner);
   for(let i=0;i<3&&!stopped;i++){
    const step=i+1,file=['outputs/赛程.docx','outputs/赛程.pptx','outputs/赛程配图.pptx'][i],started=Date.now();
-   active=await runner.start({text:prompts[i],sessionId,evaluationId:randomUUID(),requestId:'ppt_'+randomUUID()});sessionId=active.sessionId;
-   const item={step,file,status:'running'};report.cases.push(item);report.state='running';let lastSave=0;
+   active=await startTurn(prompts[i]);
+   const item={step,file,status:'running',taskId:active.id,sessionId:active.sessionId};report.cases.push(item);report.state='running';let lastSave=0;
    while(!terminal(runner.get(active.id))){
     if(Date.now()-started>600000||stopped){runner.stop(active.id);stopped=true;break;}
     if(Date.now()-lastSave>15000){item.elapsedMs=Date.now()-started;await save();display(`第${step}/3步：running；${Math.round(item.elapsedMs/1000)}秒`);lastSave=Date.now();}
@@ -82,7 +87,7 @@ export async function main(args=process.argv.slice(2)) {
    }
    if(stopped)await Promise.race([runner.settled(),pause(30000)]);
    const task=runner.get(active.id);Object.assign(item,{status:task?.status||'missing',elapsedMs:Date.now()-started,timing:task?.timing,events:runner.events(active.id)||[]});
-   const session=await sessions.get(sessionId);item.answer=[...(session?.messages||[])].reverse().find(x=>x.role==='assistant')?.content||'';
+   const session=await sessions.get(active.sessionId);item.answer=[...(session?.messages||[])].reverse().find(x=>x.role==='assistant')?.content||'';
    if(stopped){item.assessment={state:'failed',failures:['任务停止或超过10分钟上限']};break;}
    try{
     const blob=await ws.readBlob(file);if(!blob||blob.size>20e6)throw new Error('未取得有效交付文件');
