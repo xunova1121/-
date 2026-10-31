@@ -1513,6 +1513,14 @@ function createLookupService({ storage, get, now = Date.now } = {}) {
   };
 }
 
+// src/agent/newsDelivery.js
+function newsMatchesRequest(item2, request = "") {
+  if (!/(?:不要|不看|别给|不需要)[^。\n]{0,12}(?:比分|赛程|赛果)/.test(request)) return true;
+  const title = String(item2.title || "");
+  const resultOnly = /(?:\d{1,3}\s*[:：-]\s*\d{1,3}|主场不敌|客场不敌|赛程公布|对阵表)/.test(title);
+  return !resultOnly || Boolean(item2.verified === "page" && String(item2.summary || "").length >= 80);
+}
+
 // src/core/suggest.js
 var NET_CODES = /^(ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EPIPE|ENETUNREACH|EHOSTUNREACH|UND_ERR_SOCKET|UND_ERR_CONNECT_TIMEOUT)$/;
 function errorKind(error) {
@@ -2346,6 +2354,7 @@ async function runNewsLookup(ctx, args = {}, execution = {}) {
     retrieval: execution.retrieval,
     progress: execution.progress
   });
+  result.items = result.items.filter((item2) => newsMatchesRequest(item2, execution.requestText));
   if (execution.signal?.aborted) throw execution.signal.reason;
   if (execution.sessionId && result.items.length) await evidence.put(execution.sessionId, {
     sources: result.items.map((item2) => ({
