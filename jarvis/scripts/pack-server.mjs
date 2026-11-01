@@ -8,12 +8,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { SERVER_DEPS, serverImports } from './serverDeps.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const version = process.argv[2] || 'dev';
 const out = path.resolve(process.argv[3] || path.join(ROOT, 'release-server'));
-/** 服务器上用到的依赖（网关、智能体、生成 / 读取文档）；浏览器才用的语音、三维、人脸识别等不装 */
-export const SERVER_DEPS = ['@anthropic-ai/sdk', '@modelcontextprotocol/sdk', 'docx', 'exceljs', 'jszip', 'mammoth', 'marked', 'pdfjs-dist', 'pptxgenjs', 'xlsx', 'ws'];
+/** 服务器上用到的依赖见 serverDeps.mjs；打包前再核对一次，少列就不打包（少一个包服务器启动即挂，用户看到 502） */
+const unlisted = [...serverImports(ROOT)].filter(([d]) => !SERVER_DEPS.includes(d));
+if (unlisted.length) { console.error(`服务器代码用到但 SERVER_DEPS 没列：${unlisted.map(([d, f]) => `${d}（${f}）`).join('、')}`); process.exit(1); }
 
 if (!fs.existsSync(path.join(ROOT, 'dist', 'index.html'))) { console.error('请先 npm run build'); process.exit(1); }
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
