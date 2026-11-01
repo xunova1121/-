@@ -262,6 +262,7 @@
   height: 148px;
   min-height: 0;
   padding: 0;
+  justify-content: flex-start;
 }
 :root body.compact.companion-edition .home-reference .home-pet .wy-mascot {
   --mascot-size: 116px;
@@ -437,13 +438,16 @@
 }
 /* 低矮屏幕保留三项建议和文件入口：压缩装饰区，不隐藏操作或缩小点击目标。 */
 @media (max-height: 700px) and (max-width: 720px) {
-  :root body.compact.companion-edition .welcome.home-reference {
+  :root body.compact.companion-edition #homepage-weather {
+    min-height: 48px;
+  }
+  :root body.compact.companion-edition .welcome.wy-home.home-reference:has(#homepage-weather) {
     gap: 0;
     padding-bottom: 6px;
   }
   :root body.compact.companion-edition .home-reference .home-hero {
-    height: 84px;
-    margin-bottom: 8px;
+    height: 116px;
+    margin-bottom: 4px;
   }
   :root body.compact.companion-edition .home-reference .home-hero-copy {
     top: 16px;
@@ -452,11 +456,14 @@
     font-size: 20px;
   }
   :root body.compact.companion-edition .home-reference .home-pet {
-    height: 80px;
-    top: 0;
+    height: 112px;
+    top: 4px;
   }
   :root body.compact.companion-edition .home-reference .home-pet .wy-mascot {
     --mascot-size: 72px;
+  }
+  :root body.compact.companion-edition .home-reference .home-pet-hint {
+    padding: 3px 6px;
   }
   :root body.compact.companion-edition .home-reference .home-files {
     min-height: 44px;
@@ -481,8 +488,9 @@
   }
   :root body.compact.companion-edition .home-reference .home-pet {
     height: 132px;
+    top: 4px;
   }
   :root body.compact.companion-edition .home-reference .home-pet .wy-mascot {
-    --mascot-size: 112px;
+    --mascot-size: 90px;
   }
 }

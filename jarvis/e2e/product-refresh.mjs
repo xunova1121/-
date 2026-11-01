@@ -170,6 +170,38 @@ try {
     }
     await page.close();
   }
+  for (const [width, height] of [[320, 640], [390, 640], [390, 740], [412, 740]]) {
+    const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 2 });
+    await page.addInitScript(() => localStorage.setItem('jarvis.settings.v1', JSON.stringify({ theme: 'day', speechOutput: false })));
+    await page.goto(base);
+    await page.waitForFunction(() => window.__jarvis && document.querySelector('.home-reference .wy-mascot'));
+    const compact = await page.evaluate(() => {
+      const rect = (s) => document.querySelector(s).getBoundingClientRect();
+      const weather = rect('.home-weather'), mascot = rect('.home-pet .wy-mascot'), hint = rect('.home-pet-hint');
+      return {
+        weatherClear: weather.bottom <= mascot.top + 1,
+        suggestionsClear: hint.bottom <= rect('.home-suggestions-head').top + 1,
+        filesFit: rect('.home-files').bottom <= rect('#inputbar').top && document.documentElement.scrollWidth <= innerWidth,
+        filesBottom: rect('.home-files').bottom,
+        inputTop: rect('#inputbar').top
+      };
+    });
+    assert.ok(compact.weatherClear, `${width}×${height} 角色不能越过天气，含漂浮动画留白`);
+    checks++;
+    assert.ok(compact.suggestionsClear, `${width}×${height} 角色对白不能盖住换一换`);
+    checks++;
+    assert.ok(compact.filesFit, `${width}×${height} 文件入口保持在输入区之上：${JSON.stringify(compact)}`);
+    checks++;
+    await page.locator('.home-weather-location').click();
+    assert.equal(await page.locator('#homepage-weather-dialog').isVisible(), true);
+    checks++;
+    await page.getByRole('button', { name: '关闭天气', exact: true }).click();
+    await page.locator('.home-pet').click();
+    assert.ok((await page.locator('.home-pet-hint').textContent()).includes('收到你的温柔'));
+    checks++;
+    await page.screenshot({ path: path.join(output, `compact-${width}x${height}.png`) });
+    await page.close();
+  }
   console.log(`柔和渐变UI：${checks}/${checks}`);
 } finally {
   await browser.close();
