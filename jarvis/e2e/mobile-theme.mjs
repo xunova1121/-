@@ -122,6 +122,8 @@ try {
     if (width === 390) {
       // 真实构建的启动样式：夜间设置下也保持浅底，素材可读取，角色不旋转。
       await page.emulateMedia({ reducedMotion: 'no-preference' });
+      // matchMedia先变化，应用的change回调下一帧才同步body；等真实状态再检查动画。
+      await page.waitForFunction(() => !document.body.classList.contains('reduced-motion'));
       const startup = await page.evaluate(async () => {
         const root = document.documentElement;
         const previous = root.dataset.theme;
@@ -179,6 +181,7 @@ try {
       await page.screenshot({ path: path.join(output, 'theme-startup-390.png') });
       await page.evaluate(() => document.querySelector('#app-splash')?.remove());
       await page.emulateMedia({ reducedMotion: 'reduce' });
+      await page.waitForFunction(() => document.body.classList.contains('reduced-motion'));
     }
     const metrics = await page.evaluate(() => {
       const home = document.querySelector('.home-reference');
