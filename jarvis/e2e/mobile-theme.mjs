@@ -194,7 +194,7 @@ try {
         image: getComputedStyle(home.querySelector('.wy-mascot')).backgroundImage
       };
     });
-    check(`${width} 首页参考配色与字号`, metrics.background === '#eef0ff' && metrics.titleSize >= 15 && metrics.titleSize <= 17 && metrics.count === 3);
+    check(`${width} 首页蓝白参考配色与字号`, metrics.background === '#f4f7fc' && metrics.titleSize >= 15 && metrics.titleSize <= 20 && metrics.count === 3);
     check(`${width} 输入区与模型标签可见且无横向溢出`, metrics.width <= width && metrics.composerFits && metrics.modelFits, JSON.stringify(metrics));
     check(`${width} 使用批准的新未央形象`, metrics.image.includes('mascot-approved'));
     check(

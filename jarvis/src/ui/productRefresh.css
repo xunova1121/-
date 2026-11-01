@@ -403,3 +403,23 @@
     padding-block: 10px;
   }
 }
+/* 原生可用高度约740px时也保留首屏入口，角色适度缩小而非裁切内容。 */
+@media (min-height: 701px) and (max-height: 780px) and (max-width: 720px) {
+  :root body.compact.companion-edition .welcome.home-reference {
+    gap: 0;
+    padding-bottom: 6px;
+    background: linear-gradient(180deg, #173873 0, #2154ad 204px, var(--surface) 205px);
+  }
+  :root body.compact.companion-edition .home-reference .home-hero {
+    height: 140px;
+  }
+  :root body.compact.companion-edition .home-reference .home-hero-copy {
+    top: 30px;
+  }
+  :root body.compact.companion-edition .home-reference .home-pet {
+    height: 132px;
+  }
+  :root body.compact.companion-edition .home-reference .home-pet .wy-mascot {
+    --mascot-size: 112px;
+  }
+}
