@@ -1,5 +1,5 @@
 import { sportsAnswerTable } from './sportsPresentation.js';
-import { recoveryText } from './lookup/recoveryData.js';
+import { readableRecovery } from './lookup/recoveryData.js';
 import { newsCandidates } from './newsDelivery.js';
 import { answerConstraintIssues, answerConstraints } from './answerRequirements.js';
 import { todayNewsIntent } from './newsIntent.js';
@@ -19,7 +19,7 @@ export function createLookupDelivery(request, now = Date.now) {
       if (lookupRecovery && lookupRecovery.state !== 'fresh') {
         recovery = lookupRecovery;
         const raw = lookupRecovery.output || String(output).replace(/^错误：/, '');
-        recoveredText = recoveryText({ output: raw, recovery });
+        recoveredText = readableRecovery({ output: raw, recovery });
         if (!safe(recoveredText)) recoveredText = '这次取得的资料尚未满足你指定的范围，可以补充具体地点、日期或来源后再查。';
         if (lookupRecovery.state === 'failed' || lookupRecovery.state === 'input' || lookupRecovery.state === 'cached' || lookupRecovery.tool !== toolName) return;
       }

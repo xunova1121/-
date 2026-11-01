@@ -31,7 +31,8 @@ export async function finishAgentRun({
 }) {
   const query = lookupIntent(userText);
   const unifiedQuery = query.lookup && query.kind !== 'meta' && (query.sure || retrieval.active || nativeSearchCalls > 0);
-  if (lookupFallback && (!finalText.trim() || finalText.trim().length < 200 && /没有可靠结果|没有确切结果|未能生成符合|未找到可靠|只找到候选|无法提供|没有查到/.test(finalText))) {
+  // 模型已经写了回答（哪怕是“没查到”）就不再在后面贴资料堆：用户 2026-11-01 看到模型刚说“那条不可靠”，后面又贴出同一批微博摘要
+  if (lookupFallback && (!finalText.trim() || finalText.trim().length < 60 && /^(?:本轮)?(?:没有可靠结果|没有确切结果|未能生成符合|未找到可靠|只找到候选|无法提供|没有查到)/.test(finalText.trim()))) {
     const delta = (finalText.trim() ? '\n\n' : '') + lookupFallback;
     finalText += delta;
     emit({ type: 'text', delta });

@@ -38,3 +38,26 @@ export function recoveryText(found) {
   } catch { /* 保留真实文本与来源。 */ }
   return [found.recovery?.note, text].filter(Boolean).join('\n\n');
 }
+
+/**
+ * 给用户看的资料摘要（用户 2026-11-01：问玉昆比分，界面直接甩出整段搜索回执和网页导航栏、ICP备案号）。
+ * 只在模型没来得及写答案时兜底：每条一行“标题：摘要首句 + 链接”，最多5条；不贴网页原文，不贴检索器内部标注。
+ */
+export function readableRecovery(found) {
+  const full = recoveryText(found);
+  if (found.recovery?.state === 'failed' || found.recovery?.state === 'input') return full;
+  const [head, page] = String(full).split(/\n\n来源原文：/);
+  const pageUrl = page ? page.split('\n')[0].trim() : '';
+  const note = found.recovery?.note || '';
+  const body = note && head.startsWith(note) ? head.slice(note.length).trim() : head.trim();
+  const clean = text => String(text).replace(/（[^（）]{0,20}检索摘要[^（）]{0,10}）/g, '').replace(/发布时间：\S+/g, '').replace(/\s+/g, ' ').trim();
+  const items = body.split(/\n{2,}/).map(block => {
+    const lines = block.split('\n').map(s => s.trim()).filter(Boolean);
+    const url = (block.match(/https?:\/\/[^\s<>"）)]+/) || [])[0] || '';
+    const title = clean(lines[0] || '').replace(/^#+\s*/, '').slice(0, 60);
+    const summary = clean(lines.slice(1).filter(line => !line.includes(url) || !url).join(' ')).replace(/^#+\s*/, '').replace(title, '').replace(/^[\s.…。]+/, '').slice(0, 120);
+    return title && url ? `- **${title}**${summary ? `：${summary}` : ''} [来源](${url})` : '';
+  }).filter(Boolean).slice(0, 5);
+  if (!items.length) return full;
+  return [note, items.join('\n'), `（以上是搜到的资料摘要${pageUrl ? '，已打开其中一篇原文' : ''}，其余未逐条核实；比分、时间以最新报道为准。）`].filter(Boolean).join('\n\n');
+}

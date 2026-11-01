@@ -5,6 +5,8 @@
  * 程序只管：总时长上限（SELF_DRIVE_MS）、安全网关和域名白名单、用户随时可停。
  */
 export const SELF_DRIVE_MS = 2 * 60_000;
+/** 程序换来源取到资料后，再给模型写答案的时间 */
+export const RECOVERED_ANSWER_MS = 30_000;
 export const SELF_DRIVE_PROGRESS = '快查没查到，换办法接着查…';
 
 const LABEL = { get_weather: '天气接口', get_sports_scores: '赛程接口', get_today_news: '新闻汇总', get_stock_kline: '行情接口', web_search: '搜索', fetch_url: '打开网页', fetch_json: '公开数据接口' };

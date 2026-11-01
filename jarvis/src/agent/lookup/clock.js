@@ -71,14 +71,19 @@ export const WRITING_GRACE_MS = 30_000;
 export const WRITING_GAP_MS = 6_000;
 const RECHECK_MS = 1_000;
 
-export function createLookupClock({ totalMs, now = Date.now, disabled = () => false, phased = false }) {
+export function createLookupClock({ totalMs: initialMs, now = Date.now, disabled = () => false, phased = false }) {
   const started = now();
+  let totalMs = initialMs, bonusMs = 0;
   let lastText = -Infinity;
   let retrievalStarted = null;
   const reserve = phased ? SUMMARY_RESERVE_MS : Math.min(SUMMARY_RESERVE_MS, Math.max(1, totalMs / 4));
   const remaining = () => (disabled() ? Infinity : Math.max(0, totalMs - (now() - started)));
   return {
-    startedAt: started, totalMs, phased,
+    startedAt: started, phased,
+    get totalMs() { return totalMs; },
+    /** 程序换了来源才取到资料：多给模型一些时间写答案，别把原始回执直接甩给用户（用户 2026-11-01） */
+    extend: (ms) => { totalMs += Math.max(0, ms); bonusMs += Math.max(0, ms); },
+    get bonusMs() { return bonusMs; },
     remaining,
     beginRetrieval: () => { retrievalStarted ??= now(); },
     retrievalRemaining: () => {
@@ -105,7 +110,7 @@ export function modelWindow(control, closing, controller) {
     controller.signal.addEventListener('abort', onAbort, { once: true });
     if (controller.signal.aborted) onAbort();
     // 普通查询：取数收住后仍给模型独立首字窗口，不能拿取数期限截断正常回答。
-    const delay = control?.phased ? Math.min(FIRST_OUTPUT_MS, control.remaining() - 1000) : closing ? control?.remaining() - 1000 : control?.retrievalRemaining();
+    const delay = control?.phased ? Math.min(FIRST_OUTPUT_MS + (control.bonusMs || 0), control.remaining() - 1000) : closing ? control?.remaining() - 1000 : control?.retrievalRemaining();
     if (!Number.isFinite(delay)) return;
     const expire = () => {
       if (!Number.isFinite(control.remaining())) return;

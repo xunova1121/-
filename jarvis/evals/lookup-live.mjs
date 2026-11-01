@@ -498,16 +498,27 @@ function createRetrievalBudget(text2, { now = Date.now, timeBudgetMs, clock = nu
 var SUMMARY_RESERVE_MS = 15e3;
 var WRITING_GRACE_MS = 3e4;
 var WRITING_GAP_MS = 6e3;
-function createLookupClock({ totalMs, now = Date.now, disabled = () => false, phased = false }) {
+function createLookupClock({ totalMs: initialMs, now = Date.now, disabled = () => false, phased = false }) {
   const started = now();
+  let totalMs = initialMs, bonusMs = 0;
   let lastText = -Infinity;
   let retrievalStarted = null;
   const reserve = phased ? SUMMARY_RESERVE_MS : Math.min(SUMMARY_RESERVE_MS, Math.max(1, totalMs / 4));
   const remaining = () => disabled() ? Infinity : Math.max(0, totalMs - (now() - started));
   return {
     startedAt: started,
-    totalMs,
     phased,
+    get totalMs() {
+      return totalMs;
+    },
+    /** 程序换了来源才取到资料：多给模型一些时间写答案，别把原始回执直接甩给用户（用户 2026-11-01） */
+    extend: (ms) => {
+      totalMs += Math.max(0, ms);
+      bonusMs += Math.max(0, ms);
+    },
+    get bonusMs() {
+      return bonusMs;
+    },
     remaining,
     beginRetrieval: () => {
       retrievalStarted ??= now();

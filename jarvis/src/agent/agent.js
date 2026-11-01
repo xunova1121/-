@@ -8,7 +8,7 @@ import { classifyLookupIntent } from './lookup/classify.js';
 import { LOOKUP_DEFAULT_PREFERENCES } from './lookup/preferences.js';
 import { withWebDeadline } from './lookup/request.js';
 import { lookupAnswerNote, lookupReceiptData } from './lookup/answer.js';
-import { SELF_DRIVE_MS, SELF_DRIVE_PROGRESS, selfDriveNote, triedSummary } from './lookup/selfDrive.js';
+import { RECOVERED_ANSWER_MS, SELF_DRIVE_MS, SELF_DRIVE_PROGRESS, selfDriveNote, triedSummary } from './lookup/selfDrive.js';
 import { createLookupDelivery } from './lookupDelivery.js';
 import { lookupPhase } from './lookupModels.js';
 import { codeWorkBlock, CODE_TASK_CORE } from './codeDevelopment.js';
@@ -460,6 +460,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       }
     });
     if (found && intent.kind === 'general' && lookupControl && !fallbacks.length && !['failed', 'input'].includes(found.recovery?.state)) lookupControl.phased = true;
+    if (found && ['recovered', 'cached'].includes(found.recovery?.state)) lookupControl?.extend?.(RECOVERED_ANSWER_MS);
     if (found) { if (found.recovery && found.recovery.state !== 'fresh') lookupDelivery.record({ name: found.tool, args: found.args, ok: !['failed', 'input'].includes(found.recovery.state), output: found.output, lookupRecovery: found.recovery }); preFound = found; convo.at(-1).content = `${convo.at(-1).content}\n\n${found.recovery?.state === 'failed' && !signal?.aborted ? selfDrive(found.recovery) : lookupReceiptData(found)}`; }
     toolHint = loader.hint();
   }

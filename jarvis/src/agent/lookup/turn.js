@@ -73,6 +73,8 @@ export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_
   if (profiles && intent.lookup) options.emit?.({ type: 'diagnostic', phase: 'lookup_budget', kind: intent.kind, targetMs: LOOKUP_TARGETS[intent.kind], hardLimitMs: totalMs });
   // 模型自己判断这不是一问一答（need_more_time），或调用了画图等工具：解除时限
   control.release = release;
+  const extendClock = control.extend;
+  control.extend = (ms) => { extendClock(ms); if (timer) { clearTimeout(timer); timer = setTimeout(expire, Math.max(0, control.remaining())); } };
   control.released = () => deadlineDisabled;
   const forwarded = {
     ...options, signal: ctrl.signal,
