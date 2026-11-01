@@ -34,6 +34,7 @@ export function createConversations(app) {
     if (role === 'user' && asked && agentMemory.DECLINE_OPEN.test(String(content).trim())) agentMemory.resolveOpen([asked.openItem]).catch(() => {});
     target.messages.push({ role, content, ts: Date.now(), ...extra });
     target.updatedAt = Date.now();
+    if (target.id === app.session.id) app.drawer?.markRead(target);
     persistSession(target);
   }
   function persistSession(target = app.session) {
@@ -81,6 +82,7 @@ export function createConversations(app) {
     return transcriptWindow(app.history.length, { mobile: MOBILE, safe: document.documentElement.classList.contains('safe-render'), end });
   }
   function replayTranscript(end = app.history.length, { fromTop = false } = {}) {
+    app.drawer?.markRead(app.session);
     showChatTitle();
     const root = $('#transcript'),
       range = visibleHistory(end);

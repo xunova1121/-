@@ -99,6 +99,16 @@ describe('服务器模式接口', () => {
     expect(tail).toHaveLength(1);
     const list = await (await api('/api/sessions')).json();
     expect(list[0]).toMatchObject({ id: sessionId, count: 2, taskId: null });
+    expect(list[0].taskStatus).toBeNull();
+    expect(list[0].lastReplyAt).toBeGreaterThan(0);
+    const originalList = mode.runner.list;
+    try {
+      for (const taskStatus of ['queued', 'running']) {
+        mode.runner.list = () => [{ id: 'test-active', sessionId, status: taskStatus }];
+        const activeRows = await (await api('/api/sessions')).json();
+        expect(activeRows.find((s) => s.id === sessionId)).toMatchObject({ taskId: 'test-active', taskStatus });
+      }
+    } finally { mode.runner.list = originalList; }
     expect(list[0].messages).toBeUndefined();
     const one = await (await api(`/api/sessions/${sessionId}`)).json();
     expect(one.messages.map((m) => m.role)).toEqual(['user', 'assistant']);

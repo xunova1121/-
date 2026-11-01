@@ -373,7 +373,7 @@ export function remoteSessions(client, { storage = globalThis.localStorage } = {
   };
   const remember = (s) => {
     if (!s?.id) return s;
-    const { taskId, taskReceipts, recoveryCheckpoints, ...rest } = s;
+    const { taskId, taskStatus, taskReceipts, recoveryCheckpoints, ...rest } = s;
     cache.sessions[s.id] = { ...rest, messages: (s.messages ?? []).slice(-CACHE_MESSAGES), cachedAt: Date.now() };
     persist();
     return s;
@@ -385,7 +385,7 @@ export function remoteSessions(client, { storage = globalThis.localStorage } = {
   return {
     list() {
       listing ??= client.listSessions().then((rows) => {
-        cache.list = rows.map(({ taskId, ...x }) => x);
+        cache.list = rows.map(({ taskId, taskStatus, ...x }) => x);
         persist();
         return rows.map((x) => ({ ...x, messages: [] }));
       }).finally(() => { setTimeout(() => { listing = null; }, 1500); });

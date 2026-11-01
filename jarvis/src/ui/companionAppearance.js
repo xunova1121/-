@@ -2,6 +2,7 @@ import './companionRefresh.css';
 import './mobileTheme.css';
 import './productRefresh.css';
 import './focusedComposer.css';
+import './homeAndHistory.css';
 import { initProductNavigation } from './productNavigation.js';
 import { initMobileStartup } from './mobileStartup.js';
 
