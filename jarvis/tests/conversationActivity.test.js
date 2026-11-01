@@ -57,5 +57,17 @@ describe('历史对话的真实状态', () => {
     expect(restored.cachedList()[0].taskStatus).toBeUndefined();
     expect(restored.cachedGet('a').taskId).toBeUndefined();
     expect(restored.cachedGet('a').taskStatus).toBeUndefined();
+    // 先更新服务器、后更新客户端：旧客户端可能把新增字段按未知元数据缓存。
+    const old = JSON.parse(storage.getItem('jarvis.server.cache.v1'));
+    Object.assign(old.list[0], { taskId: 'old-task', taskStatus: 'running' });
+    Object.assign(old.sessions.a, { taskId: 'old-task', taskStatus: 'queued' });
+    storage.setItem('jarvis.server.cache.v1', JSON.stringify(old));
+    const upgraded = remoteSessions(client, { storage });
+    expect(upgraded.cachedList()[0].taskId).toBeUndefined();
+    expect(upgraded.cachedList()[0].taskStatus).toBeUndefined();
+    expect(upgraded.cachedGet('a').taskId).toBeUndefined();
+    expect(upgraded.cachedGet('a').taskStatus).toBeUndefined();
+    expect(upgraded.cachedList()[0].lastReplyAt).toBe(8);
+    expect(createConversationActivity({ storage }).state(upgraded.cachedList()[0]).label).toBe('');
   });
 });

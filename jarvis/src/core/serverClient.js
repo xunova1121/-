@@ -393,8 +393,12 @@ export function remoteSessions(client, { storage = globalThis.localStorage } = {
     },
     get: (id) => client.getSession(id).then((s) => (s ? remember(s) : (delete cache.sessions[id], persist(), s))),
     /** 副本里的列表 / 某段对话（没有就是 null），马上能拿到 */
-    cachedList: () => cache.list?.map((x) => ({ ...x, messages: [] })) ?? null,
-    cachedGet: (id) => (cache.sessions[id] ? { ...cache.sessions[id], cached: true } : null),
+    cachedList: () => cache.list?.map(({ taskId, taskStatus, ...x }) => ({ ...x, messages: [] })) ?? null,
+    cachedGet: (id) => {
+      if (!cache.sessions[id]) return null;
+      const { taskId, taskStatus, ...saved } = cache.sessions[id];
+      return { ...saved, cached: true };
+    },
     /** 马上把副本写进存储（App 切到后台前用；平时攒一下再写） */
     flush: () => { clearTimeout(saveTimer); writeNow(); },
     save: async (s) => s,
