@@ -41,23 +41,64 @@ try {
     const page = await browser.newPage({ viewport: { width, height: 844 }, deviceScaleFactor: 2 });
     await page.addInitScript(() => localStorage.setItem('jarvis.settings.v1', JSON.stringify({ theme: 'day', speechOutput: false })));
     await page.goto(base);
-    await page.waitForFunction(() => window.__jarvis && document.querySelector('.product-navigation'));
-    assert.equal(await page.locator('.product-navigation button').count(), 3);
+    await page.waitForFunction(() => window.__jarvis && document.querySelector('.product-page-title'));
+    assert.equal(await page.locator('.product-navigation').count(), 0);
     checks++;
-    await page.locator('.product-navigation [data-page="workspace"]').click();
+    await page.click('#btn-menu');
+    await page.locator('.drawer-grid button').filter({ hasText: '工作区' }).click();
     await page.waitForFunction(() => document.body.classList.contains('side-open') && !document.querySelector('[data-pane="workspace"]').hidden);
-    assert.equal(await page.locator('.product-navigation [data-page="workspace"]').getAttribute('aria-current'), 'page');
+    assert.equal(await page.locator('.product-page-title').textContent(), '工作区');
     checks++;
     await page.screenshot({ path: path.join(output, `workspace-${width}.png`) });
-    await page.locator('.product-navigation [data-page="settings"]').click();
+    await page.click('#btn-side-back');
+    await page.click('#btn-menu');
+    await page.locator('.drawer-grid button').filter({ hasText: '设置' }).click();
     assert.equal(await page.locator('[data-pane="settings"]').isVisible(), true);
     checks++;
-    await page.locator('.product-navigation [data-page="chat"]').click();
+    await page.click('#btn-side-back');
     await page.waitForFunction(() => !document.body.classList.contains('side-open'));
     assert.equal(await page.locator('.home-reference').isVisible(), true);
     checks++;
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     checks++;
+    assert.equal(await page.locator('#model-chip').isVisible(), false, '未编辑时不展示第二排模型');
+    checks++;
+    assert.ok(await page.evaluate(() => {
+      const boxes = ['#btn-attach', '#prompt', '#btn-mic', '#btn-call'].map((s) => document.querySelector(s).getBoundingClientRect());
+      const centers = boxes.map((r) => (r.top + r.bottom) / 2);
+      return Math.max(...centers) - Math.min(...centers) <= 3 && document.querySelector('#inputbar').getBoundingClientRect().height <= 64;
+    }), '空闲输入区为单行');
+    checks++;
+    await page.fill('#prompt', '多行草稿\n第二行保留');
+    assert.equal(await page.locator('#model-chip').isVisible(), true);
+    checks++;
+    assert.ok(await page.evaluate(() => {
+      const bar = document.querySelector('#inputbar').getBoundingClientRect();
+      const model = document.querySelector('#model-chip').getBoundingClientRect();
+      return model.top >= bar.top && model.bottom <= bar.bottom && model.right <= bar.right &&
+        document.querySelector('#prompt').getBoundingClientRect().bottom <= model.top + 1;
+    }), '展开后的模型仍在输入栏内，与正文分层');
+    checks++;
+    const expandedHeight = await page.locator('#inputbar').evaluate((e) => e.getBoundingClientRect().height);
+    await page.screenshot({ path: path.join(output, `editing-${width}.png`) });
+    const anchor = await page.locator('#model-chip').boundingBox();
+    await page.mouse.move(anchor.x + anchor.width / 2, anchor.y + anchor.height / 2);
+    await page.mouse.down();
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    assert.equal(await page.locator('#inputbar').evaluate((e) => e.getBoundingClientRect().height), expandedHeight, '点击模型失焦期间不能折叠');
+    checks++;
+    await page.mouse.up();
+    await page.waitForSelector('.ml-picker:not([hidden])');
+    assert.equal(await page.locator('#model-chip').isVisible(), true);
+    checks++;
+    await page.locator('.ml-picker .ml-dismiss').click();
+    await page.locator('.home-suggestions-head > span').click();
+    await page.waitForFunction(() => !document.querySelector('#inputbar').classList.contains('composer-editing'));
+    assert.equal(await page.inputValue('#prompt'), '多行草稿\n第二行保留', '收起不丢草稿');
+    checks++;
+    await page.fill('#prompt', '');
+    await page.locator('.home-suggestions-head > span').click();
+    await page.waitForFunction(() => !document.querySelector('#inputbar').classList.contains('composer-editing'));
     const atmosphere = await page.evaluate(() => {
       const style = (s) => getComputedStyle(document.querySelector(s));
       const clear = (s) => style(s).backgroundImage === 'none' && style(s).backgroundColor === 'rgba(0, 0, 0, 0)';
@@ -66,9 +107,9 @@ try {
         backdrop: body.backgroundImage,
         size: body.backgroundSize,
         repeat: body.backgroundRepeat,
-        unified: ['.app', '.main', '.transcript', '.topbar', '.welcome.home-reference', '.product-navigation'].every(clear),
+        unified: ['.app', '.main', '.transcript', '.topbar', '.welcome.home-reference'].every(clear),
         colors: ['--text', '--muted', '--dim', '--accent'].map((key) => body.getPropertyValue(key).trim()),
-        touch: [...document.querySelectorAll('.product-navigation button')].every((b) => {
+        touch: [...document.querySelectorAll('.topbar #btn-menu, .topbar #btn-theme')].every((b) => {
           const r = b.getBoundingClientRect();
           return r.height >= 44 && r.width >= 44;
         }),
@@ -94,7 +135,7 @@ try {
     checks++;
     assert.equal(
       await page.evaluate(
-        () => document.querySelector('#inputbar').getBoundingClientRect().bottom <= document.querySelector('.product-navigation').getBoundingClientRect().top
+        () => document.querySelector('#inputbar').getBoundingClientRect().bottom <= innerHeight
       ),
       true
     );
@@ -106,8 +147,22 @@ try {
     checks++;
     assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.side-back')).backgroundColor), 'rgba(0, 0, 0, 0)');
     checks++;
+    const fixed = await page.locator('#btn-side-back').boundingBox();
+    await page.evaluate(() => {
+      const panel = document.querySelector('#panel'); panel.scrollTop = panel.scrollHeight;
+      const pane = panel.querySelector('.pane:not([hidden])'); pane.scrollTop = pane.scrollHeight;
+    });
+    assert.deepEqual(await page.locator('#btn-side-back').boundingBox(), fixed, '滚动时返回按钮固定在独立顶栏');
+    checks++;
+    assert.ok(await page.evaluate(() => {
+      const back = document.querySelector('#btn-side-back'), r = back.getBoundingClientRect();
+      return back.closest('.topbar') && !document.querySelector('#panel #btn-side-back') &&
+        document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('#btn-side-back') === back &&
+        document.querySelector('#panel').getBoundingClientRect().top >= document.querySelector('.topbar').getBoundingClientRect().bottom - 1;
+    }), '返回按钮可点击，内容不会进入顶栏范围');
+    checks++;
     if (width === 390) {
-      await page.locator('.product-navigation [data-page="chat"]').click();
+      await page.click('#btn-side-back');
       await page.fill('#prompt', '你好，记住这是界面恢复测试');
       await page.click('#btn-send');
       await page.waitForFunction(() => document.querySelector('.msg.agent') && !document.querySelector('.msg.agent.streaming'));

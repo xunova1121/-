@@ -71,10 +71,10 @@ try{
   check('手动城市备用入口仍可用',await page.locator('.home-city b').textContent().then(t=>t.includes('杭州')));
   await page.setViewportSize({width:320,height:640});check('320窄屏首页不横向溢出',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:path.join(OUT,'mobile-weather-home-narrow.png')});await page.setViewportSize({width:390,height:844});
   await page.click('.home-suggestions-head button');check('推荐可轮换而不重复天气入口',await page.locator('.home-suggestions').textContent().then(t=>t.includes('创作灵感')));
-  await page.click('.home-start');check('创作卡片填写任务，继续复用原发送入口',await page.inputValue('#prompt').then(t=>t.includes('目标')));await page.fill('#prompt','');await page.locator('#prompt').blur();
+  await page.click('.home-start');check('创作卡片填写任务，继续复用原发送入口',await page.inputValue('#prompt').then(t=>t.includes('目标')));await page.fill('#prompt','');await page.locator('#prompt').blur();await page.waitForFunction(()=>!document.querySelector('#inputbar').classList.contains('composer-editing'));
   check('手机版实际产物启用陪伴感布局',await page.evaluate(()=>document.body.classList.contains('compact')&&!document.body.classList.contains('workbench')&&window.__jarvis.stage===null));
   check('手机蓝白底色，保留清楚的未央图标',await page.evaluate(()=>{const r=document.querySelector('.brand-mark').getBoundingClientRect();return r.width>=44&&r.height>=44&&getComputedStyle(document.body).getPropertyValue('--bg').trim()==='#f4f7fc';}));
-  check('手机空白输入栏显示＋、模型、转文字和电话，发送收起',await page.evaluate(()=>['btn-attach','model-chip','btn-mic','btn-call'].every(id=>{const r=document.getElementById(id).getBoundingClientRect();return r.width>=32&&r.height>=36;})&&document.getElementById('btn-send').hidden));
+  check('手机空白输入栏一排显示＋、转文字和电话，模型与发送收起',await page.evaluate(()=>['btn-attach','btn-mic','btn-call'].every(id=>{const r=document.getElementById(id).getBoundingClientRect();return r.width>=32&&r.height>=36;})&&document.getElementById('btn-send').hidden&&!document.querySelector('#inputbar').classList.contains('composer-editing')));
   await page.click('#btn-attach');
   check('拍照、相册、文件和常用指令收在＋菜单中',await page.isVisible('#composer-more')&&await page.isVisible('#btn-camera')&&await page.isVisible('#btn-composer-file'));
   await page.click('#btn-attach');
@@ -132,7 +132,7 @@ try{
   check('对话正文两侧保留至少 20px 阅读留白',await page.locator('.msg.agent').last().evaluate(el=>{const r=el.getBoundingClientRect();return r.left>=20&&r.right<=innerWidth-20;}));
   check('手机完成后的短回复使用紧凑单头像，不留大块空白或固定的话',await page.locator('.msg.agent').last().evaluate(el=>{const who=el.querySelector('.who');return who.querySelectorAll('.wy-mascot').length===1&&who.querySelector('.wy-mascot').getBoundingClientRect().height>=30&&who.querySelector('.wy-mascot').getBoundingClientRect().height<=36&&!who.querySelector('.wy-reply-greeting');}));
   check('手机消息角色不遮昵称，正文在标题下方且没有横向溢出',await page.locator('.msg.agent').last().evaluate(el=>{const r=x=>x.getBoundingClientRect(),head=r(el.querySelector('.who')),avatar=r(el.querySelector('.who-mood')),name=r(el.querySelector('.who-name')),body=r(el.querySelector('.body'));return avatar.right<=name.left+1&&head.bottom<=body.top+1&&body.left>=20&&body.right<=innerWidth-20&&document.querySelector('#transcript').scrollWidth<=document.querySelector('#transcript').clientWidth+1;}));
-  await page.fill('#prompt','需要补充的要求');await page.focus('#prompt');await page.evaluate(()=>window.__resizeKeyboard(444));await page.waitForTimeout(80);
+  await page.fill('#prompt','需要补充的要求');await page.click('#prompt');await page.evaluate(()=>window.__resizeKeyboard(444));await page.waitForTimeout(80);
   check('键盘弹出时角色缩小且发送按钮保持可见',await page.evaluate(()=>{const r=document.querySelector('.msg.agent:last-child .who .wy-mascot').getBoundingClientRect(),send=document.getElementById('btn-send').getBoundingClientRect();return document.body.classList.contains('wy-keyboard-open')&&r.height<=60&&send.bottom<=445&&send.top>=0;}));
   await page.evaluate(()=>document.activeElement.blur());await page.waitForTimeout(50);
   check('输入失焦后键盘未收起时保持布局，避免发送按钮跳动',await page.evaluate(()=>document.body.classList.contains('wy-keyboard-open')));
@@ -154,7 +154,8 @@ try{
   await page.fill('.wy-companion input','眨眨眼');await page.locator('.wy-companion form button').click();
   check('陪伴面板文字动作指令正常执行',await page.locator('.wy-companion-stage .wy-mascot').getAttribute('data-state')==='wink',await page.locator('.wy-companion-stage .wy-mascot').getAttribute('data-state'));
   await page.getByRole('button',{name:'关闭未央',exact:true}).click();await page.evaluate(()=>window.__resizeKeyboard(844));
-  check('移除底部声音跳转入口，显示当前模型',await page.isVisible('#model-chip')&&await page.locator('.wy-composer-options').count()===0);
+  await page.click('#prompt');
+  check('输入时显示当前模型，保留原选择入口',await page.isVisible('#model-chip')&&await page.locator('.wy-composer-options').count()===0);
   await page.evaluate(base=>window.__jarvis.panels.patchConfig(c=>({...c,provider:'custom',models:{...c.models,custom:'ui-test-a'},keys:{...c.keys,custom:'sk-test'},baseURLs:{...c.baseURLs,custom:base+'/v1'},modelLists:{...c.modelLists,['custom|'+base+'/v1']:{ids:['ui-test-a','ui-test-b'],at:Date.now()}},favoriteModels:[{provider:'custom',model:'ui-test-b'}],routing:{...c.routing,enabled:false}})),BASE);
   await page.click('#model-chip');
   check('当前模型直接展开常用模型底部面板，无页面跳转',await page.evaluate(()=>{const sheet=document.querySelector('.ml-picker'),r=sheet.getBoundingClientRect();return !sheet.hidden&&r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight+1&&!document.body.classList.contains('side-open')&&sheet.textContent.includes('自定义');}));
@@ -299,7 +300,8 @@ try{
   for(const width of [320,360,390,412]){
     const narrow=await browser.newPage({viewport:{width,height:780}});await narrow.goto(BASE);await narrow.waitForSelector('body.companion-edition');
     await narrow.waitForFunction(()=>window.__jarvis?.send);await narrow.evaluate(()=>{document.documentElement.style.fontSize='18px';document.getElementById('model-chip-text').textContent='服务器 · claude-sonnet-very-long-model-name';});
-    check(`${width}px 手机空白输入区保持同排、不溢出`,await narrow.evaluate(()=>{const r=id=>document.getElementById(id).getBoundingClientRect(),model=r('model-chip'),mic=r('btn-mic'),call=r('btn-call');return document.documentElement.scrollWidth<=innerWidth&&model.width>=50&&model.right<=innerWidth-12&&Math.abs(model.top-mic.top)<=3&&model.right<=mic.left&&mic.right<=call.left&&Math.abs(mic.top-call.top)<=3&&document.getElementById('btn-send').hidden;}));
+    await narrow.click('#prompt');
+    check(`${width}px 手机编辑区模型与操作同排、不溢出`,await narrow.evaluate(()=>{const r=id=>document.getElementById(id).getBoundingClientRect(),model=r('model-chip'),mic=r('btn-mic'),call=r('btn-call');return document.documentElement.scrollWidth<=innerWidth&&model.width>=50&&model.right<=innerWidth-12&&Math.abs(model.top-mic.top)<=3&&model.right<=mic.left&&mic.right<=call.left&&Math.abs(mic.top-call.top)<=3&&document.getElementById('btn-send').hidden;}));
     await narrow.fill('#prompt','生成中继续补充要求');await narrow.evaluate(()=>document.body.classList.add('generating'));
     await narrow.waitForFunction(()=>document.getElementById('inputbar').classList.contains('is-working'));
     check(`${width}px 生成中发送和停止同时可用、不挤到下一行`,await narrow.evaluate(()=>{const r=id=>document.getElementById(id).getBoundingClientRect(),stop=r('btn-stop'),send=r('btn-send'),model=r('model-chip');return stop.width>=36&&send.width>=36&&Math.abs(stop.top-send.top)<=3&&Math.abs(model.top-stop.top)<=3&&model.right<=stop.left&&model.right<=innerWidth-12&&stop.right<=send.left&&send.right<=innerWidth-12&&!document.getElementById('btn-send').disabled;}));

@@ -190,12 +190,12 @@ try {
         count: home.querySelectorAll('.home-suggestion').length,
         width: document.documentElement.scrollWidth,
         composerFits: input.left >= 0 && input.right <= innerWidth && input.bottom <= innerHeight,
-        modelFits: model.top >= input.top && model.bottom <= input.bottom,
+        modelFits: model.width === 0 && !document.querySelector('#inputbar').classList.contains('composer-editing'),
         image: getComputedStyle(home.querySelector('.wy-mascot')).backgroundImage
       };
     });
     check(`${width} 首页渐变参考配色与字号`, metrics.background === '#f4f7fc' && metrics.titleSize >= 15 && metrics.titleSize <= 26 && metrics.count === 3);
-    check(`${width} 输入区与模型标签可见且无横向溢出`, metrics.width <= width && metrics.composerFits && metrics.modelFits, JSON.stringify(metrics));
+    check(`${width} 输入栏单行、模型收起且无横向溢出`, metrics.width <= width && metrics.composerFits && metrics.modelFits, JSON.stringify(metrics));
     check(`${width} 使用批准的新未央形象`, metrics.image.includes('mascot-approved'));
     check(
       `${width} 原生可用高度下首页一屏完整、无内容被输入区遮挡`,

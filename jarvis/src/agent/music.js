@@ -11,6 +11,7 @@
  *   - 每次请求都有等待上限：被拦时请求不报错、一直挂着，以前要等到“10 分钟没有进展”才中断
  */
 import * as ws from './workspace.js';
+import { songInfoPath, songDigest } from '../../shared/musicAsset.js';
 import { sleep } from '../llm/openai.js';
 
 export const MUSIC_MODEL = 'fal-ai/minimax-music/v2';
@@ -173,9 +174,16 @@ export function createSongTool(ctx = {}) {
       const ext = /wav/.test(blob.type) ? 'wav' : /flac/.test(blob.type) ? 'flac' : 'mp3';
       const name = String(title || words.split('\n').find((l) => l.trim() && !/^\[/.test(l.trim())) || '歌曲').replace(/[\\/:*?"<>|\s[\]]+/g, '').slice(0, 20) || '歌曲';
       const w = await ws.write(`音乐/${name}-${now().toString(36)}.${ext}`, blob.type ? blob : new Blob([blob], { type: 'audio/mpeg' }));
+      let lyricNote = '';
+      try {
+        await ws.write(songInfoPath(w.path), JSON.stringify({ version: 1, path: w.path, title: String(title || name).slice(0, 100), lyrics: words, sha256: await songDigest(blob) }));
+      } catch (error) {
+        if (error?.name === 'AbortError') throw error;
+        lyricNote = '歌词信息保存失败，音频已保留，可打开原文件。';
+      }
       ctx.onFileChanged?.(w.path);
       ctx.onAudio?.(URL.createObjectURL(blob), w.path);
-      return `已经唱好了，保存在工作区 ${w.path}，对话里可以直接播放（fal.ai · MiniMax Music 2.0，这次按一次计费）。`;
+      return `已经唱好了，保存在工作区 ${w.path}，对话里可以直接播放（fal.ai · MiniMax Music 2.0，这次按一次计费）。${lyricNote}`;
     }
   };
 }

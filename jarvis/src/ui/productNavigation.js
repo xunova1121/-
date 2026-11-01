@@ -1,31 +1,23 @@
-/** 只连接原有页面入口，不复制配置、任务或会话状态。 */
+/** 内页返回并入顶栏，沿用原按钮/关闭事件；全部功能继续从原抽屉进入。 */
 export function initProductNavigation({ showPanel, closePanel }) {
-  if (!showPanel || !closePanel || document.querySelector('.product-navigation')) return;
-  const nav = document.createElement('nav');
-  nav.className = 'product-navigation';
-  nav.setAttribute('aria-label', '主要页面');
-  const entries = [
-    ['chat', '对话', 'M4 4h16v12H9l-5 4z', closePanel],
-    ['workspace', '工作区', 'M3 6h7l2 2h9v12H3z', () => showPanel('workspace')],
-    ['settings', '我的', 'M8 7a4 4 0 1 0 8 0 4 4 0 0 0-8 0M4 21v-2a8 8 0 0 1 16 0v2', () => showPanel('settings')]
-  ];
-  for (const [id, label, path, action] of entries) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.dataset.page = id;
-    button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${path}"/></svg><span>${label}</span>`;
-    button.onclick = action;
-    nav.append(button);
-  }
-  document.body.append(nav);
+  if (!showPanel || !closePanel || document.querySelector('.product-page-title')) return;
+  const bar = document.querySelector('.topbar');
+  const back = document.querySelector('#btn-side-back');
+  if (!bar || !back) return;
+  back.setAttribute('aria-label', '返回对话');
+  back.lastChild.textContent = '返回';
+  bar.prepend(back);
+  const title = document.createElement('span');
+  title.className = 'product-page-title';
+  title.setAttribute('role', 'heading');
+  title.setAttribute('aria-level', '1');
+  bar.insertBefore(title, bar.querySelector('.top-actions'));
   const sync = () => {
-    const closed = !document.body.classList.contains('side-open');
-    const panel = document.querySelector('.pane:not([hidden])')?.dataset.pane;
-    const selected = closed ? 'chat' : panel === 'workspace' ? 'workspace' : 'settings';
-    for (const button of nav.children) {
-      if (button.dataset.page === selected) button.setAttribute('aria-current', 'page');
-      else button.removeAttribute('aria-current');
-    }
+    const open = document.body.classList.contains('side-open');
+    const panel = document.querySelector('.pane:not([hidden])');
+    document.body.classList.toggle('product-page-open', open);
+    title.hidden = !open;
+    title.textContent = panel?.dataset.pane === 'models' ? '模型设置' : panel?.querySelector('h2')?.textContent || '设置';
   };
   const observer = new MutationObserver(sync);
   observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });

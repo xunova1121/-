@@ -54,6 +54,7 @@ try {
 
     // 模型名弹窗切到本机
     await closeSide();
+    await page.click('#prompt');
     await page.click('#model-chip');
     await Promise.all([page.waitForEvent('load'), page.locator('.ml-picker .ml-tabs button', { hasText: '本机' }).click()]);
     await ready();
@@ -76,10 +77,12 @@ try {
 
     // 再从弹窗切到本机、切回云服务器
     await closeSide();
+    await page.click('#prompt');
     await page.click('#model-chip');
     await Promise.all([page.waitForEvent('load'), page.locator('.ml-picker .ml-tabs button', { hasText: '本机' }).click()]);
     await ready();
     await closeSide();
+    await page.click('#prompt');
     await page.click('#model-chip');
     await Promise.all([page.waitForEvent('load'), page.locator('.ml-picker .ml-tabs button', { hasText: '云服务器' }).click()]);
     await ready();

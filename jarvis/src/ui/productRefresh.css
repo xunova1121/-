@@ -87,8 +87,8 @@
   display: none;
 }
 :root body.compact.companion-edition .app {
-  height: calc(var(--wy-viewport-height, 100dvh) - 58px - env(safe-area-inset-bottom, 0px));
-  max-height: calc(100dvh - 58px - env(safe-area-inset-bottom, 0px));
+  height: var(--wy-viewport-height, 100dvh);
+  max-height: 100dvh;
 }
 :root body.compact.companion-edition .product-navigation {
   position: fixed;
@@ -366,7 +366,7 @@
   --ml-surface: var(--surface);
 }
 :root body.compact.companion-edition .side {
-  bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+  bottom: 0;
 }
 /* 全屏面板的同一渐变按视口对齐；返回栏透明，不会重画一段颜色。 */
 :root[data-theme='light'] body.compact.companion-edition .side {

@@ -14,9 +14,14 @@ import * as agentMemory from '../agent/memory.js';
 import * as sessionsApi from '../agent/sessions.js';
 import { $, DESKTOP, COMPACT, toast } from './env.js';
 import { sportsCardRefresh } from './sportsCards.js';
+import { loadSongAsset } from '../../shared/musicAsset.js';
 
 export function createConversations(app) {
-  const transcript = new Transcript($('#transcript'), { progress: COMPACT, refreshSports: sportsCardRefresh(app) });
+  const transcript = new Transcript($('#transcript'), {
+    progress: COMPACT,
+    refreshSports: sportsCardRefresh(app),
+    loadSong: (path) => loadSongAsset(path, app.server ? app.server.download.bind(app.server) : ws.readBlob)
+  });
   // 当前会话；app.history 就是它的消息列表（换对话只改 app.session）
   app.session = sessionsApi.create();
   /** 记一条消息：默认记进当前会话；后台任务记进它自己的会话（切到别的对话后仍然记对地方） */

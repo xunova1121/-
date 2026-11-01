@@ -5,6 +5,7 @@
 import { imageButton, previewWorkspaceImage, showImagePreview } from './imagePreview.js';
 import { PROCESS_FILE } from './workspaceCatalog.js';
 import { createSportsCard } from './sportsCard.js';
+import { createSongCard } from './songCard.js';
 import './mobileImprovements.css';
 import { parseMarkdown, inline, toPlainText } from '../core/markdown.js';
 import { stripEmotionTags } from '../../shared/emotionTag.js';
@@ -284,11 +285,12 @@ const hhmm = (ts) => new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit',
 
 export class Transcript {
   /** @param {HTMLElement} root  @param {{ progress?: boolean }} [o] progress：工具调用合并成一张“工作进展”卡片（手机） */
-  constructor(root, { progress = false, refreshSports } = {}) {
+  constructor(root, { progress = false, refreshSports, loadSong } = {}) {
     this.root = root;
     this.interimEl = null;
     this.progress = progress;
     this.refreshSports = refreshSports;
+    this.loadSong = loadSong;
     this.follow = true;
     root.addEventListener('scroll', () => {
       this.follow = root.scrollHeight - root.scrollTop - root.clientHeight < 140;
@@ -671,6 +673,7 @@ export class Transcript {
         b.append(Object.assign(document.createElement('span'), { className: 'fl-ext', textContent: ext.slice(0, 4) || '文件' }), Object.assign(document.createElement('span'), { className: 'fl-name', textContent: name }), Object.assign(document.createElement('span'), { className: 'fl-go', textContent: '打开 ›' }));
         b.addEventListener('click', () => onOpen(path));
         files.append(b);
+        if (/^(mp3|wav|flac|ogg|m4a)$/i.test(ext) && self.loadSong) files.before(createSongCard(path, self.loadSong));
         self.#scroll();
       },
       /** 生成的图片：显示在当前文字段之前 */
