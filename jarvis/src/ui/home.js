@@ -59,7 +59,7 @@ export function createHome({ weather, fill, openPanel, configureWeather, recentS
   pet.type = 'button';
   pet.setAttribute('aria-label', '摸摸未央的头');
   const mascot = createMascot('wave');
-  const bubble = element('span', '点点我，打个招呼', 'home-pet-hint');
+  const bubble = element('span', '摸摸我的头，和我打个招呼。', 'home-pet-hint');
   bubble.setAttribute('role', 'status');
   bubble.setAttribute('aria-live', 'polite');
   pet.append(mascot, bubble);
