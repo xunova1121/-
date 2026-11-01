@@ -36,9 +36,30 @@ export async function locateWeatherCity() {
   return { name: city?.name || '当前位置', latitude: Math.round(lat * 100) / 100, longitude: Math.round(lon * 100) / 100, source: 'location' };
 }
 
+// 只查权限、不弹授权框：没授权就不做后台定位（用户 2026-11-01：天气刷新和定位要无感）
+export async function locationGranted() {
+  try {
+    if (globalThis.Capacitor?.isNativePlatform?.()) {
+      const { registerPlugin } = await import('@capacitor/core');
+      const p = await registerPlugin('WeatherLocation').checkPermissions();
+      return p?.location === 'granted';
+    }
+    const p = await navigator.permissions?.query?.({ name: 'geolocation' });
+    return p?.state === 'granted';
+  } catch {
+    return false;
+  }
+}
+// 两个坐标相距多少公里（城市范围内够用的近似）
+export const distanceKm = (a, b) =>
+  Math.hypot(a.latitude - b.latitude, (a.longitude - b.longitude) * Math.cos((a.latitude * Math.PI) / 180)) * 111;
+export const WEATHER_AUTO_REFRESH = 15 * 60 * 1000;
+export const WEATHER_RELOCATE_GAP = 30 * 60 * 1000;
+export const WEATHER_RELOCATE_KM = 2;
+
 let sessionLocation;
 const locateOnce = () => (sessionLocation ??= locateWeatherCity());
-export function createHomeWeather({ client, onAdvice, onConfigure, locate = locateOnce } = {}) {
+export function createHomeWeather({ client, onAdvice, onConfigure, locate = locateOnce, checkLocation = locationGranted, quietLocate = locateWeatherCity, now = () => Date.now() } = {}) {
   const root = node('section', undefined, 'home-weather');
   root.id = 'homepage-weather';
   root.setAttribute('aria-label', '日期与天气');
@@ -149,7 +170,9 @@ export function createHomeWeather({ client, onAdvice, onConfigure, locate = loca
     if (e.key === 'Escape') e.stopPropagation();
   });
   const unsubscribe = client.subscribe((state) => {
-    const { city, data, status, stale, error } = state,
+    // 后台刷新时照常显示上次的数据，不提“缓存”；只有真的没刷新成功才标出来
+    const { city, data, status, error } = state,
+      stale = !!(state.stale && error),
       kind = weatherKind(data?.code);
     root.querySelector('.home-city b').textContent = city ? (city.district || city.name).replace(/市$/, '') : '选择城市';
     root.querySelector('.home-city b').title = city?.name || '';
@@ -197,12 +220,41 @@ export function createHomeWeather({ client, onAdvice, onConfigure, locate = loca
         if (!autoCancelled && !client.state.city) root.querySelector('.home-weather-summary').textContent = '定位暂不可用，可以手动选城市';
       });
   }
+  // 后台定位：只对“当前位置”定位来的城市，已授权才做，30 分钟最多一次；挪动超过 2 公里才换，换失败就留在原地
+  let lastLocate = 0,
+    locating = false;
+  async function silentLocate() {
+    const city = client.state.city;
+    if (autoCancelled || locating || city?.source !== 'location' || now() - lastLocate < WEATHER_RELOCATE_GAP) return false;
+    locating = true;
+    lastLocate = now();
+    try {
+      if (!(await checkLocation())) return false;
+      const next = await quietLocate();
+      const current = client.state.city;
+      if (autoCancelled || current?.source !== 'location' || cityKey(current) !== cityKey(city)) return false;
+      if (!next || distanceKm(current, next) < WEATHER_RELOCATE_KM) return false;
+      return await client.relocate(next);
+    } catch {
+      return false;
+    } finally {
+      locating = false;
+    }
+  }
+  const tick = () => {
+    if (document.hidden || !root.isConnected) return;
+    client.refresh();
+    silentLocate();
+  };
   const foreground = () => {
-    if (!document.hidden && root.isConnected) client.refresh();
+    if (!document.hidden && root.isConnected) tick();
   };
   document.addEventListener('visibilitychange', foreground);
+  const timer = setInterval(tick, WEATHER_AUTO_REFRESH);
   client.refresh();
+  if (originalCity) silentLocate();
   return {
+    silentLocate,
     root,
     destroy() {
       autoCancelled = true;
@@ -211,6 +263,7 @@ export function createHomeWeather({ client, onAdvice, onConfigure, locate = loca
       locationId++;
       searchCtrl?.abort();
       document.removeEventListener('visibilitychange', foreground);
+      clearInterval(timer);
       dialog.remove();
     }
   };
