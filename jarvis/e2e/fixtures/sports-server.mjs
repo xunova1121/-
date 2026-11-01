@@ -8,7 +8,12 @@ import { createTaskRunner } from '../../server/taskRunner.mjs';
 import { DEFAULT_CONFIG } from '../../src/llm/config.js';
 const data = process.env.JARVIS_DATA;
 let modelCalls = 0, upstreamCalls = 0, scoreRevision = 0;
-const stats = () => fs.writeFileSync(path.join(data, 'fixture-stats.json'), JSON.stringify({ modelCalls, upstreamCalls, scoreRevision }));
+// 浏览器检查与服务端分属两个进程：完整替换快照，避免读到截断后的空文件。
+const stats = () => {
+  const target = path.join(data, 'fixture-stats.json');
+  fs.writeFileSync(target + '.tmp', JSON.stringify({ modelCalls, upstreamCalls, scoreRevision }));
+  fs.renameSync(target + '.tmp', target);
+};
 const actualLookup = dns.lookup.bind(dns);
 dns.lookup = (host, opts) => ['bifen4pc.qiumibao.com', 'site.api.espn.com'].includes(host) ? Promise.resolve([{ address: '93.184.216.34', family: 4 }]) : actualLookup(host, opts);
 const actualFetch = globalThis.fetch;
