@@ -376,16 +376,28 @@ export function initModelLibrary({ root, workspace, toast }) {
     // （不能靠 toggle 事件：它晚一拍才到，刚展开就选的话会漏记）
     reviewOpen = root.querySelector('.ml-review')?.open ?? reviewOpen;
     imageOptionsOpen = root.querySelector('.mc-image-options')?.open ?? imageOptionsOpen;
+    // 下面的“本机 / 云服务器”只切换正在编辑哪边的设置，不切换任务在哪儿跑（用户 2026-11-01：切到本机后在这里点“云服务器”，以为切回去了，实际还在本机跑）
     const caption =
       workspace.scope === 'server'
         ? runsOnServer
           ? '任务在云服务器上做：这里改的就是实际在用的配置'
-          : '正在修改服务器配置，不影响本机'
+          : '正在修改服务器配置，不影响本机；任务现在在本机运行，要让任务回到云服务器，点上面的“切换到云服务器运行”'
         : runsOnServer
           ? '注意：任务在云服务器上做，这里改的是本机配置，不影响现在的回答；要改请切到“云服务器”'
           : '正在修改本机配置，不影响服务器';
+    const otherRuntime = runsOnServer ? 'local' : 'server';
+    const runtimeRow = node(
+      'div',
+      { className: 'ml-runtime', role: 'group', ariaLabel: '任务运行位置' },
+      node('span', { textContent: `任务现在在${runsOnServer ? '云服务器' : '本机'}运行` }),
+      button(runsOnServer ? '切换到本机运行' : '切换到云服务器运行', () => {
+        if (!busy) run(() => workspace.switchRuntime(otherRuntime));
+      }, 'ml-runtime-switch')
+    );
     root.replaceChildren(
       node(mobile ? 'h2' : 'p', { className: mobile ? 'mc-title' : 'ml-muted', textContent: mobile ? '模型中心' : '配置按运行位置独立保存' }),
+      runtimeRow,
+      node('p', { className: 'ml-tabs-label', textContent: '正在编辑哪边的设置：' }),
       tabs,
       node('p', { className: 'ml-scope-note', textContent: caption })
     );
