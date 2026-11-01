@@ -376,3 +376,30 @@
   border-radius: 12px;
   box-shadow: 0 4px 18px #172f5914;
 }
+/* 低矮屏幕保留三项建议和文件入口：压缩装饰区，不隐藏操作或缩小点击目标。 */
+@media (max-height: 700px) and (max-width: 720px) {
+  :root body.compact.companion-edition .welcome.home-reference {
+    gap: 0;
+    padding-bottom: 6px;
+    background: linear-gradient(180deg, #173873 0, #2154ad 152px, var(--surface) 153px);
+  }
+  :root body.compact.companion-edition .home-reference .home-hero {
+    height: 84px;
+    margin-bottom: 8px;
+  }
+  :root body.compact.companion-edition .home-reference .home-hero-copy {
+    top: 16px;
+  }
+  :root body.compact.companion-edition .home-reference .home-pet {
+    height: 80px;
+    top: 0;
+  }
+  :root body.compact.companion-edition .home-reference .home-pet .wy-mascot {
+    --mascot-size: 72px;
+  }
+  :root body.compact.companion-edition .home-reference .home-files {
+    min-height: 44px;
+    margin-top: 8px;
+    padding-block: 10px;
+  }
+}
