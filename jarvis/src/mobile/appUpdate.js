@@ -8,7 +8,8 @@
 export const REPO = 'xunova1121/-';
 export const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`;
 const DOWNLOAD = `https://github.com/${REPO}/releases`;
-export const MIRRORS = [(u) => u, (u) => `https://ghfast.top/${u}`];
+// 镜像依次试：一个连不上换下一个（用户 2026-11-01：ghfast.top 在服务器上连不上，加国内备用）
+export const MIRRORS = [(u) => u, (u) => `https://ghfast.top/${u}`, (u) => `https://gh-proxy.com/${u}`, (u) => `https://ghproxy.net/${u}`];
 const KEY = 'jarvis.update.downloaded'; // 已下载好的安装包是哪个版本
 
 /** '1.0.63' → [1, 0, 63]；不是正式版本号（本地调试包）返回 null */

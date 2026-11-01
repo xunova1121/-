@@ -56,6 +56,15 @@ describe('手机自动更新', () => {
     expect(plugin.calls.download[1]).toBe(`https://ghfast.top/${apkUrl('1.0.64')}`);
   });
 
+  it('第一个镜像也连不上时换国内备用镜像', async () => {
+    const urls = [];
+    const plugin = fakePlugin({ failDownload: 2 });
+    const u = createAppUpdater({ current: '1.0.63', plugin, storage: mem(), getText: async (url) => { urls.push(url); if (/^https:\/\/(github\.com|ghfast\.top)/.test(url)) throw new Error('超时'); return yml('1.0.64'); } });
+    expect((await u.check()).state).toBe('ready');
+    expect(urls[2]).toMatch(/^https:\/\/gh-proxy\.com\/https:\/\/github\.com\//);
+    expect(plugin.calls.download[2]).toBe(`https://gh-proxy.com/${apkUrl('1.0.64')}`);
+  });
+
   it('用流量时自动检查只提示，不下载；已下载过的版本不重复下载', async () => {
     const plugin = fakePlugin();
     const storage = mem();

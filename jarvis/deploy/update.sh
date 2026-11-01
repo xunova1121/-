@@ -11,7 +11,9 @@ REPO=xunova1121/-
 DATA="$BASE/data"
 STATUS="$DATA/update-status.json"
 WORK="$BASE/updates"
-read -ra MIRRORS <<< "${JARVIS_MIRRORS:-https://ghfast.top/ -}"   # 国内服务器连 GitHub 常常很慢：先走镜像，不行再直连（“-”表示直连）
+# 国内服务器连 GitHub 常常很慢：先走镜像，一个连不上换下一个，都不行再直连（“-”表示直连）
+# 2026-11-01：ghfast.top 在用户服务器上连不上，加 gh-proxy.com、ghproxy.net 备用；安装包有 sha256 核对，镜像改不了内容
+read -ra MIRRORS <<< "${JARVIS_MIRRORS:-https://ghfast.top/ https://gh-proxy.com/ https://ghproxy.net/ -}"
 
 # 按国内习惯记北京时间
 now() { TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S'; }
