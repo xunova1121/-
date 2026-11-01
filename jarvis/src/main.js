@@ -287,7 +287,7 @@ if (MOBILE) {
     .catch(() => {});
 }
 composer = initConversationComposer({ cancelDictation: () => app.stopDictation() });
-initCompanionAppearance();
+initCompanionAppearance({ showPanel: app.showPanel, closePanel: app.closeSide });
 initStandbyToggle({ toast });
 initRenderHealthPanel({
   mobile: MOBILE,

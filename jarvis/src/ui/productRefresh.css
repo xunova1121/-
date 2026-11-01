@@ -1,0 +1,378 @@
+/* 蓝白产品主题：只改变呈现，原DOM、隐藏状态、键盘及任务生命周期继续使用既有实现。 */
+:root[data-theme='light'] body.companion-edition,
+:root[data-theme='light'] body.compact.companion-edition {
+  --bg: #f4f7fc;
+  --bg-2: #eef4fc;
+  --surface: #fff;
+  --surface-2: #f6f9ff;
+  --text: #16243c;
+  --muted: #65748d;
+  --dim: #75849b;
+  --accent: #245cdb;
+  --accent-soft: #eaf1ff;
+  --line: #dce5f3;
+  --line-strong: #b9cdef;
+  --side-bg: linear-gradient(180deg, #f4f7fc, #fff);
+  --code-bg: #edf3fc;
+  --tool-bg: #f6f9ff;
+  --chip-bg: #edf3ff;
+}
+:root[data-theme='light'] body.compact.companion-edition {
+  background: linear-gradient(180deg, #f4f7fc, #fff) !important;
+}
+:root:not([data-theme='light']) body.companion-edition,
+:root:not([data-theme='light']) body.compact.companion-edition {
+  --accent: #91b7ff;
+  --accent-soft: #213451;
+  --line: #34445d;
+}
+:root body.companion-edition button:focus-visible,
+:root body.companion-edition a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+/* 桌面保留工作台网格、舞台和信息栏，只同步视觉令牌。 */
+:root[data-theme='light'] body.workbench.companion-edition .rail {
+  background: #edf3fc;
+}
+:root[data-theme='light'] body.workbench.companion-edition .wb-landing h1 {
+  color: #183457;
+}
+:root body.companion-edition :is(.ml-card, .mc-ability, .code-project-workspace) {
+  border-color: var(--line);
+  box-shadow: none;
+}
+:root body.companion-edition .ml-runtime {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px;
+  background: var(--surface);
+}
+:root body.companion-edition .ml-runtime-switch {
+  color: var(--accent);
+  border-color: var(--line-strong);
+}
+:root[data-theme='light'] body.companion-edition .code-project-dialog {
+  background: #fff;
+  border-color: var(--line);
+  box-shadow: 0 24px 80px #172f5926;
+}
+:root body.companion-edition .code-project-dialog > header {
+  margin: -24px -24px 18px;
+  padding: 20px 24px 14px;
+  background: linear-gradient(120deg, #12295b, #245cce);
+  color: #fff;
+}
+:root body.companion-edition .code-project-dialog > header :is(small, button) {
+  color: #fff;
+}
+:root body.companion-edition .code-project-dialog a {
+  color: var(--accent);
+}
+:root body.companion-edition .code-project-workspace {
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: 16px;
+}
+:root body.companion-edition .code-project-dialog button {
+  background: var(--accent-soft);
+  border-color: var(--line);
+}
+/* 手机导航调用原页面入口，全部按钮可用；不遮挡输入区与系统安全区。 */
+.product-navigation {
+  display: none;
+}
+:root body.compact.companion-edition .app {
+  height: calc(var(--wy-viewport-height, 100dvh) - 58px - env(safe-area-inset-bottom, 0px));
+  max-height: calc(100dvh - 58px - env(safe-area-inset-bottom, 0px));
+}
+:root body.compact.companion-edition .product-navigation {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  height: calc(58px + env(safe-area-inset-bottom, 0px));
+  box-sizing: border-box;
+  padding: 4px 12px env(safe-area-inset-bottom, 0px);
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  z-index: 15;
+}
+.product-navigation button {
+  flex: 1;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 3px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  min-width: 44px;
+  min-height: 44px;
+}
+.product-navigation svg {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.product-navigation [aria-current='page'] {
+  color: var(--accent);
+  font-weight: 600;
+}
+:root body.compact.companion-edition.wy-keyboard-open .product-navigation {
+  display: none;
+}
+:root body.compact.companion-edition.wy-keyboard-open .app {
+  height: var(--wy-viewport-height, 100dvh);
+  max-height: 100dvh;
+}
+:root[data-theme='light'] body.compact.companion-edition .topbar {
+  background: linear-gradient(110deg, #132b62, #2153b9);
+  color: #fff;
+}
+:root[data-theme='light'] body.compact.companion-edition .topbar :is(button, .brand-name, .brand-subtitle) {
+  color: #fff;
+}
+:root body.compact.companion-edition .side-back {
+  background: var(--bg);
+}
+:root body.compact.companion-edition .pane {
+  padding-bottom: 24px;
+}
+:root body.compact.companion-edition .pane-head {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 14px;
+}
+:root body.compact.companion-edition :is(.ml-tabs, .ws-view-tabs) {
+  border-radius: 12px;
+  border-color: var(--line);
+}
+:root body.compact.companion-edition :is(.ml-tabs, .ws-view-tabs) button {
+  min-height: 44px;
+}
+:root body.compact.companion-edition :is(.ml-tabs .selected, .mc-tabs .selected) {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+:root body.compact.companion-edition .msg.agent {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 10px 0;
+}
+:root[data-theme='light'] body.compact.companion-edition .msg.user {
+  background: #e8f0ff;
+  color: #183457;
+  border-radius: 16px 16px 5px 16px;
+}
+:root[data-theme='light'] body.compact.companion-edition .msg.user :is(.who, .who-time, button) {
+  color: #526b92;
+}
+:root body.compact.companion-edition .progress-card {
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+:root body.compact.companion-edition .conversation-composer {
+  border-radius: 20px;
+  box-shadow: 0 4px 18px #20447708;
+}
+:root body.compact.companion-edition .conversation-composer .composer-row > :is(#btn-call, #btn-send) {
+  background: #2462ef;
+}
+:root body.compact.companion-edition .msg .file {
+  border-radius: 12px;
+  border-color: var(--line);
+}
+:root body.compact.companion-edition #file-list > li.ws-result {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  margin-block: 8px;
+}
+:root body.compact.companion-edition .ws-result :is(button, a) {
+  color: var(--accent);
+}
+/* 首页上半部蓝色氛围、下半部白色工作区；不增网络/图形依赖。 */
+:root body.compact.companion-edition .welcome.home-reference {
+  padding: 6px 20px 14px;
+  background: linear-gradient(180deg, #173873 0, #2154ad 252px, var(--surface) 253px);
+  max-width: 620px;
+}
+:root body.compact.companion-edition .home-reference :is(.home-weather, .home-date, .home-weather-summary, .home-hero-copy, .home-hero h1, .home-care) {
+  color: #fff !important;
+}
+:root body.compact.companion-edition .home-reference .home-city {
+  background: #ffffff12;
+  border-color: #ffffff30;
+}
+:root body.compact.companion-edition .home-reference .home-city :is(b, button) {
+  color: #fff;
+}
+:root body.compact.companion-edition .home-reference .home-hero {
+  position: relative;
+  height: 188px;
+  flex: none;
+  margin: 0 -20px 16px;
+  padding-inline: 20px;
+  border-radius: 0 0 24px 24px;
+}
+:root body.compact.companion-edition .home-reference .home-hero-copy {
+  position: absolute;
+  top: 44px;
+  left: 20px;
+  width: calc(100% - 195px);
+  text-align: left;
+}
+:root body.compact.companion-edition .home-reference .home-hero h1 {
+  font-size: 20px;
+  line-height: 1.45;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+:root body.compact.companion-edition .home-reference .home-care {
+  font-size: 12px !important;
+  line-height: 1.6;
+}
+:root body.compact.companion-edition .home-reference .home-pet {
+  position: absolute;
+  right: 8px;
+  top: 6px;
+  width: 156px;
+  height: 174px;
+  min-height: 0;
+  padding: 0;
+}
+:root body.compact.companion-edition .home-reference .home-pet .wy-mascot {
+  --mascot-size: 138px;
+  filter: drop-shadow(0 4px 18px #39c8ff30);
+}
+:root body.compact.companion-edition .home-reference .home-pet-hint {
+  font-size: 10px;
+  padding: 5px 8px;
+  white-space: normal;
+  max-width: 156px;
+  color: #294574;
+  background: #edf7ff;
+  border-color: #b7d7f9;
+}
+.home-resume {
+  display: grid;
+  gap: 5px;
+  text-align: left;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface-2);
+  color: var(--text);
+}
+.home-resume[hidden] {
+  display: none;
+}
+.home-resume strong {
+  font-size: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-resume :is(small, span) {
+  font-size: 12px;
+  color: var(--muted);
+}
+.home-resume span {
+  color: var(--accent);
+}
+:root body.compact.companion-edition .home-reference .home-suggestions {
+  border-radius: 14px;
+  border-color: var(--line);
+  background: var(--surface);
+}
+:root body.compact.companion-edition .home-reference .home-suggestion {
+  min-height: 42px;
+}
+:root body.compact.companion-edition .home-reference .home-task-icon {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 8px;
+}
+:root body.compact.companion-edition .home-reference .home-files {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  width: 100%;
+  text-align: left;
+  background: var(--surface);
+  color: var(--accent);
+}
+@media (max-width: 360px) {
+  :root body.compact.companion-edition .home-reference .home-hero h1 {
+    font-size: 18px;
+  }
+  :root body.compact.companion-edition .home-reference .home-hero-copy {
+    width: calc(100% - 175px);
+    top: 32px;
+  }
+  :root body.compact.companion-edition .home-reference .home-pet {
+    width: 140px;
+    right: 2px;
+  }
+  :root body.compact.companion-edition .home-reference .home-pet .wy-mascot {
+    --mascot-size: 122px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-reference .home-pet .wy-mascot {
+    animation: none !important;
+  }
+}
+/* 模型中心有独立令牌，沿用同一品牌色，保留全部配置页签和运行位置说明。 */
+:root body.companion-edition #model-workspace {
+  --ml-accent: var(--accent);
+  --ml-ink: var(--text);
+  --ml-muted: var(--muted);
+  --ml-line: var(--line);
+  --ml-surface: var(--surface);
+}
+:root body.compact.companion-edition .side {
+  bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+}
+:root body.compact.companion-edition.wy-keyboard-open .side {
+  bottom: 0;
+}
+:root body.compact.companion-edition .file-link {
+  padding: 14px;
+  border-color: var(--line);
+  background: var(--surface);
+}
+:root body.compact.companion-edition .file-link .fl-ext {
+  background: #2462ef;
+}
+:root body.compact.companion-edition .home-reference .home-task-icon svg {
+  color: var(--accent);
+}
+/* 天气原组件使用独立ID令牌，深蓝背景下仍需保持地点和温度对比度。 */
+:root body.compact.companion-edition #homepage-weather {
+  --weather-ink: #fff;
+  --weather-muted: #d5e5ff;
+}
+:root body.compact.companion-edition #homepage-weather .home-city {
+  background: #ffffff0d;
+  border-color: #ffffff3b;
+  box-shadow: none;
+}
+/* 非交互提示不盖住文件卡和输入按钮，原通知内容与生命周期不变。 */
+:root body.compact.companion-edition .toast {
+  top: calc(var(--top-h, 52px) + 8px);
+  bottom: auto;
+  pointer-events: none;
+  border-radius: 12px;
+  box-shadow: 0 4px 18px #172f5914;
+}

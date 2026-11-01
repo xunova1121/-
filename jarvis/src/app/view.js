@@ -49,7 +49,9 @@ export function createView(app) {
           $('#prompt').value = text;
           $('#prompt').focus();
         },
-        openPanel: app.showPanel
+        openPanel: app.showPanel,
+        recentSessions: () => sessionsApi.list(),
+        openSession: (id) => app.openSession(id)
       });
       $('#transcript').prepend(homeView.root);
       $('#transcript').scrollTop = 0;

@@ -1,9 +1,11 @@
 import './companionRefresh.css';
 import './mobileTheme.css';
+import './productRefresh.css';
+import { initProductNavigation } from './productNavigation.js';
 import { initMobileStartup } from './mobileStartup.js';
 
 /** 只管理布局：键盘出现时让角色退让，阅读旧消息时保留阅读位置。 */
-export function initCompanionAppearance() {
+export function initCompanionAppearance(navigation = {}) {
   const body = document.body,
     viewport = window.visualViewport;
   body.classList.add('companion-edition');
@@ -32,6 +34,7 @@ export function initCompanionAppearance() {
   document.addEventListener('focusout', () => requestAnimationFrame(resize));
   resize();
   if (!body.classList.contains('compact')) return;
+  initProductNavigation(navigation);
   const root = document.querySelector('#transcript');
   const jump = Object.assign(document.createElement('button'), { type: 'button', className: 'wy-jump-latest', textContent: '↓ 回到最新回复', hidden: true });
   root.after(jump);

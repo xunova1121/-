@@ -37,7 +37,7 @@ function icon(kind) {
 }
 
 /** 手机欢迎页复用原天气与输入入口，不新增模型调用或图片持久化。 */
-export function createHome({ weather, fill, openPanel, configureWeather }) {
+export function createHome({ weather, fill, openPanel, configureWeather, recentSessions, openSession }) {
   const root = element('div', undefined, 'welcome wy-home home-reference');
   const hero = element('section', undefined, 'home-hero');
   const copy = element('div', undefined, 'home-hero-copy');
@@ -82,6 +82,29 @@ export function createHome({ weather, fill, openPanel, configureWeather }) {
 
   const weatherUI = createHomeWeather({ client: weather, onConfigure: configureWeather });
   root.append(weatherUI.root, hero);
+  const resume = element('button', undefined, 'home-resume');
+  resume.type = 'button';
+  resume.hidden = true;
+  root.append(resume);
+  // 只展示当前运行位置真实保存的对话；不把上次回答冒充正在执行的任务。
+  queueMicrotask(async () => {
+    if (!recentSessions || !openSession) return;
+    try {
+      const rows = await recentSessions();
+      if (destroyed || !root.isConnected) return;
+      // 原列表会把置顶对话排在前面，“上次”应按真实更新时间选取。
+      const recent = rows.reduce((latest, row) => (row.title && !row.evaluationId && (!latest || row.updatedAt > latest.updatedAt) ? row : latest), null);
+      if (!recent) return;
+      resume.append(element('small', '继续上次的对话'), element('strong', recent.title), element('span', '打开原对话  →'));
+      resume.onclick = () => openSession(recent.id);
+      resume.hidden = false;
+    } catch {
+      if (destroyed || !root.isConnected) return;
+      resume.textContent = '历史对话暂不可用 · 打开对话列表查看';
+      resume.onclick = () => openPanel('sessions');
+      resume.hidden = false;
+    }
+  });
   const head = element('div', undefined, 'home-suggestions-head');
   head.append(element('span', '未央为你准备了'));
   const refresh = element('button', '换一换 ↻');

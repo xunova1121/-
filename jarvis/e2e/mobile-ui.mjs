@@ -49,10 +49,10 @@ try{
   await page.waitForFunction(()=>window.__jarvis&&document.querySelector('#app-splash')?.hidden!==false);await page.waitForTimeout(400);
   await page.waitForFunction(()=>document.querySelector('.home-weather-temp')?.textContent==='23°');
   check('首页自动定位城市、真实数据渲染，不需要手动选择',await page.evaluate(()=>window.__weatherLocations===1&&document.querySelector('.home-city b').textContent.includes('上海')));
-  check('首页问候与未央不重叠，卡片不横向溢出',await page.evaluate(()=>{const h=document.querySelector('.home-hero-copy').getBoundingClientRect(),p=document.querySelector('.home-pet').getBoundingClientRect();return p.bottom<=h.top+1&&document.documentElement.scrollWidth<=innerWidth;}));
+  check('首页问候与未央不重叠，卡片不横向溢出',await page.evaluate(()=>{const h=document.querySelector('.home-hero-copy').getBoundingClientRect(),p=document.querySelector('.home-pet').getBoundingClientRect();return (p.left>=h.right-1||p.bottom<=h.top+1)&&document.documentElement.scrollWidth<=innerWidth;}));
   check('首次首页从日期天气开始，顶部不会被自动滚动裁掉',await page.evaluate(()=>{const weather=document.querySelector('.home-weather').getBoundingClientRect(),header=document.querySelector('.topbar').getBoundingClientRect();return weather.top>=header.bottom-1&&document.querySelector('#transcript').scrollTop===0;}));
-  // 新确认稿改为居中角色与参考字号，旧32px大标题和创作大卡片不再是验收目标。
-  check('新确认稿居中角色、参考字号和三行建议完整呈现',await page.evaluate(()=>{const m=document.querySelector('.home-pet .wy-mascot').getBoundingClientRect(),h=document.querySelector('.home-hero h1');return m.width>=90&&m.width<=150&&Math.abs((m.left+m.right)/2-innerWidth/2)<6&&parseFloat(getComputedStyle(h).fontSize)<=17&&document.querySelectorAll('.home-suggestion').length===3&&document.querySelector('.home-footer')?.textContent.includes('内容由 AI 生成');}));
+  // 用户确认的蓝白稿采用右侧角色与参考字号，原功能断言保持。
+  check('蓝白稿角色位于问候右侧、字号与三行建议完整呈现',await page.evaluate(()=>{const m=document.querySelector('.home-pet .wy-mascot').getBoundingClientRect(),h=document.querySelector('.home-hero h1');return m.width>=90&&m.width<=150&&m.left>innerWidth/2&&parseFloat(getComputedStyle(h).fontSize)<=20&&document.querySelectorAll('.home-suggestion').length===3&&document.querySelector('.home-footer')?.textContent.includes('内容由 AI 生成');}));
   check('390屏幕首屏显示文件空间，角色不贴屏幕右边',await page.evaluate(()=>{const files=document.querySelector('.home-files').getBoundingClientRect(),composer=document.querySelector('#inputbar').getBoundingClientRect(),mascot=document.querySelector('.home-pet .wy-mascot').getBoundingClientRect();return files.bottom<=composer.top-2&&mascot.right<=innerWidth-8;}));
   await page.locator('.toast').evaluateAll(nodes=>nodes.forEach(n=>{n.hidden=true;}));
   await page.screenshot({path:path.join(OUT,'mobile-weather-home.png')});
@@ -73,15 +73,15 @@ try{
   await page.click('.home-suggestions-head button');check('推荐可轮换而不重复天气入口',await page.locator('.home-suggestions').textContent().then(t=>t.includes('创作灵感')));
   await page.click('.home-start');check('创作卡片填写任务，继续复用原发送入口',await page.inputValue('#prompt').then(t=>t.includes('目标')));await page.fill('#prompt','');await page.locator('#prompt').blur();
   check('手机版实际产物启用陪伴感布局',await page.evaluate(()=>document.body.classList.contains('compact')&&!document.body.classList.contains('workbench')&&window.__jarvis.stage===null));
-  check('手机浅蓝紫底色，保留清楚的未央图标',await page.evaluate(()=>{const r=document.querySelector('.brand-mark').getBoundingClientRect();return r.width>=44&&r.height>=44&&getComputedStyle(document.body).getPropertyValue('--bg').trim()==='#eef0ff';}));
+  check('手机蓝白底色，保留清楚的未央图标',await page.evaluate(()=>{const r=document.querySelector('.brand-mark').getBoundingClientRect();return r.width>=44&&r.height>=44&&getComputedStyle(document.body).getPropertyValue('--bg').trim()==='#f4f7fc';}));
   check('手机空白输入栏显示＋、模型、转文字和电话，发送收起',await page.evaluate(()=>['btn-attach','model-chip','btn-mic','btn-call'].every(id=>{const r=document.getElementById(id).getBoundingClientRect();return r.width>=32&&r.height>=36;})&&document.getElementById('btn-send').hidden));
   await page.click('#btn-attach');
   check('拍照、相册、文件和常用指令收在＋菜单中',await page.isVisible('#composer-more')&&await page.isVisible('#btn-camera')&&await page.isVisible('#btn-composer-file'));
   await page.click('#btn-attach');
   check('顶栏图标完整位于栏内，与文字保持间距',await page.evaluate(()=>{const header=document.querySelector('.topbar').getBoundingClientRect(),logo=document.querySelector('.brand-mark .wy-mascot').getBoundingClientRect(),name=document.querySelector('.brand-name').getBoundingClientRect();return logo.top>=header.top&&logo.bottom<=header.bottom&&logo.right+6<=name.left&&Math.abs((logo.top+logo.bottom)/2-(name.top+name.bottom)/2)<8;}));
-  check('顶栏与页面使用同一底色',await page.evaluate(()=>getComputedStyle(document.querySelector('.topbar')).backgroundColor==='rgba(0, 0, 0, 0)'&&getComputedStyle(document.body).backgroundImage.includes('gradient')));
+  check('蓝白稿深蓝顶栏与白色页面形成层次',await page.evaluate(()=>getComputedStyle(document.querySelector('.topbar')).backgroundImage.includes('gradient')&&getComputedStyle(document.body).backgroundImage.includes('gradient')));
   await page.evaluate(()=>window.__jarvis.showPanel('mind'));
-  check('记忆面板和返回栏使用同一套新主题',await page.evaluate(()=>getComputedStyle(document.querySelector('.side')).backgroundImage.includes('gradient')&&getComputedStyle(document.querySelector('.side-back')).backgroundColor==='rgb(238, 240, 255)'));
+  check('记忆面板和返回栏使用同一套新主题',await page.evaluate(()=>getComputedStyle(document.querySelector('.side')).backgroundImage.includes('gradient')&&getComputedStyle(document.querySelector('.side-back')).backgroundColor==='rgb(244, 247, 252)'));
   await page.click('#btn-theme');
   await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
   check('夜间顶栏和面板同步切换，不出现白色顶栏',await page.evaluate(()=>getComputedStyle(document.body).getPropertyValue('--bg').trim()==='#191b2b'&&getComputedStyle(document.querySelector('.side')).backgroundImage.includes('gradient')&&getComputedStyle(document.querySelector('.topbar')).backgroundColor==='rgba(0, 0, 0, 0)'));

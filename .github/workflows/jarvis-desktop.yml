@@ -273,6 +273,7 @@ jobs:
           npm run build:mobile
           mkdir -p "$RUNNER_TEMP/jarvis-e2e"
           node e2e/mobile-ui.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/product-refresh.mjs "$RUNNER_TEMP/jarvis-e2e/product-refresh"
           node e2e/weather-card.mjs "$RUNNER_TEMP/jarvis-e2e/weather-card"
           node e2e/weather-seamless.mjs "$RUNNER_TEMP/jarvis-e2e/weather-seamless"
           node e2e/weather-server.mjs "$RUNNER_TEMP/jarvis-e2e/weather-server"
