@@ -52,6 +52,13 @@ export function initMobileStartup({ prepareImages = prepareMascotImages } = {}) 
           if (!splash || reduced) {
             finish();
           } else {
+            const from = splash.querySelector?.('.as-character')?.getBoundingClientRect();
+            const to = document.querySelector?.('.topbar .brand-mark')?.getBoundingClientRect();
+            if (from?.width && to?.width) {
+              splash.style?.setProperty('--splash-dx', `${to.x + to.width / 2 - from.x - from.width / 2}px`);
+              splash.style?.setProperty('--splash-dy', `${to.y + to.height / 2 - from.y - from.height / 2}px`);
+              splash.style?.setProperty('--splash-scale', String(to.width / from.width));
+            }
             splash.classList.add('out');
             splash.addEventListener('transitionend', finish, { once: true });
             setTimeout(finish, 240);

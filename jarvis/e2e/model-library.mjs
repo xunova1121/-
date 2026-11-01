@@ -323,6 +323,7 @@ try {
       document.body.classList.add('side-closed');
       document.body.classList.remove('side-open');
     });
+    await page.click('#prompt');
     await page.click('#model-chip');
     await page.waitForSelector('.ml-picker-item');
     check(

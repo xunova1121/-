@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createSongTool, styleText, queueUrl, audioUrlOf, MUSIC_LIMITS } from '../src/agent/music.js';
 import * as ws from '../src/agent/workspace.js';
+import { songInfoPath, loadSongAsset } from '../shared/musicAsset.js';
 import { createTools } from '../src/agent/tools.js';
 
 const pollMs = MUSIC_LIMITS.pollMs;
@@ -37,6 +38,8 @@ describe('唱歌', () => {
     expect(path).toMatch(/^音乐\/歇一歇-/);
     expect((await ws.readBlob(path)).size).toBe(6);
     expect(shown).toEqual([path]);
+    expect(await ws.exists(songInfoPath(path))).toBe(true);
+    expect((await loadSongAsset(path, ws.readBlob)).lyrics).toBe(LYRICS);
     expect(steps.join('|')).toContain('排队中（前面还有 2 个）');
     const body = JSON.parse(fal.calls[0].body);
     expect(body).toEqual({ prompt: '温柔女声，慢板钢琴民谣，治愈，夜晚', lyrics_prompt: LYRICS });

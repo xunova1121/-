@@ -121,7 +121,11 @@ export function createToolbox(app) {
         },
         videoGen: (o) => generateVideo(app.llmConfig, { ...o, gateway: app.gateway }),
         onVideo: (src) => out()?.video?.(src),
-        onAudio: (src) => out()?.audio?.(src),
+        onAudio: (src, path) => {
+          // 文件卡已负责歌曲播放；不再挂第二个播放器，也不留未使用的Blob URL。
+          if (path) URL.revokeObjectURL(src);
+          else out()?.audio?.(src);
+        },
         onSchedulesChanged: () => app.schedulesPanel?.refresh(),
         currentSessionId: () => app.session?.id,
         // 桌面版：写 PDF 时直接转成 PDF 文件（网页版和安卓生成可打印的网页）

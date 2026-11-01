@@ -373,7 +373,7 @@ export function remoteSessions(client, { storage = globalThis.localStorage } = {
   };
   const remember = (s) => {
     if (!s?.id) return s;
-    const { taskId, taskReceipts, recoveryCheckpoints, ...rest } = s;
+    const { taskId, taskStatus, taskReceipts, recoveryCheckpoints, ...rest } = s;
     cache.sessions[s.id] = { ...rest, messages: (s.messages ?? []).slice(-CACHE_MESSAGES), cachedAt: Date.now() };
     persist();
     return s;
@@ -385,7 +385,7 @@ export function remoteSessions(client, { storage = globalThis.localStorage } = {
   return {
     list() {
       listing ??= client.listSessions().then((rows) => {
-        cache.list = rows.map(({ taskId, ...x }) => x);
+        cache.list = rows.map(({ taskId, taskStatus, ...x }) => x);
         persist();
         return rows.map((x) => ({ ...x, messages: [] }));
       }).finally(() => { setTimeout(() => { listing = null; }, 1500); });
@@ -393,8 +393,12 @@ export function remoteSessions(client, { storage = globalThis.localStorage } = {
     },
     get: (id) => client.getSession(id).then((s) => (s ? remember(s) : (delete cache.sessions[id], persist(), s))),
     /** 副本里的列表 / 某段对话（没有就是 null），马上能拿到 */
-    cachedList: () => cache.list?.map((x) => ({ ...x, messages: [] })) ?? null,
-    cachedGet: (id) => (cache.sessions[id] ? { ...cache.sessions[id], cached: true } : null),
+    cachedList: () => cache.list?.map(({ taskId, taskStatus, ...x }) => ({ ...x, messages: [] })) ?? null,
+    cachedGet: (id) => {
+      if (!cache.sessions[id]) return null;
+      const { taskId, taskStatus, ...saved } = cache.sessions[id];
+      return { ...saved, cached: true };
+    },
     /** 马上把副本写进存储（App 切到后台前用；平时攒一下再写） */
     flush: () => { clearTimeout(saveTimer); writeNow(); },
     save: async (s) => s,

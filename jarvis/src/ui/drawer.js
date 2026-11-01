@@ -41,7 +41,7 @@ export function groupSessions(list, now = Date.now()) {
 /**
  * @param {{ onNew: () => void, onOpenSession: (id: string) => void, onPanel: (name: string) => void, listSessions: () => Promise<object[]>, cachedSessions?: () => object[] | null, currentId: () => string, icons: Record<string, string>, onRename?: (id: string, title: string) => Promise<void>, onPin?: (id: string, pinned: boolean) => Promise<void>, onDelete?: (id: string) => Promise<void> }} o
  */
-export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, cachedSessions = () => null, currentId, icons = {}, onRename, onPin, onDelete, onExport, searchContent }) {
+export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, cachedSessions = () => null, currentId, icons = {}, onRename, onPin, onDelete, onExport, searchContent, rowState = () => ({}), onRendered = () => {}, source = () => 'local' }) {
   const scrim = el('div', { className: 'drawer-scrim', hidden: true });
   const history = el('div', { className: 'drawer-history' });
   // 按标题搜对话：有关键词时列出所有匹配的（不受“只显示 8 条”限制）
@@ -87,10 +87,12 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, cached
     el('span', { className: 'drawer-avatar', textContent: '我' }),
     el('span', {}, el('b', { textContent: '我的未央' }), el('small', { textContent: '记忆与进化' })));
   memBtn.addEventListener('click', () => { close(); onPanel('mind'); });
+  const closeBtn = el('button', { type: 'button', className: 'drawer-close', textContent: '×', ariaLabel: '关闭菜单' });
+  closeBtn.addEventListener('click', close);
   const drawer = el('aside', { className: 'drawer', id: 'drawer', ariaLabel: '菜单' },
     el('div', { className: 'drawer-head' },
       el('span', { className: 'drawer-logo', ariaHidden: 'true' }),
-      el('div', { className: 'drawer-title' }, el('strong', { textContent: '未央' }), el('small', { textContent: 'WEIYANG AI · 个人智能助手' }))),
+      el('div', { className: 'drawer-title' }, el('strong', { textContent: '未央' }), el('small', { textContent: '个人智能助手' })), closeBtn),
     newBtn,
     el('section', { className: 'drawer-card' }, el('h3', { textContent: '功能' }), grid),
     el('section', { className: 'drawer-hist' }, el('h3', { textContent: '历史对话' }), search, history),
@@ -102,16 +104,26 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, cached
   let expanded = false;
   let lastList = [];
   let loading = 0;
+  let refreshTimer;
+  let refreshing = false;
   /** 先用手机上留的那份马上画出来，再从服务器取最新的重画（服务器慢时不用干等） */
   async function refresh() {
+    if (refreshing) return;
+    refreshing = true;
+    const origin = source();
+    const scrollTop = history.parentElement.scrollTop;
     const cached = cachedSessions();
     if (cached?.length) render(cached);
     else if (!lastList.length) history.replaceChildren(el('p', { className: 'drawer-empty', textContent: '正在读取对话…' }));
     const mine = ++loading;
     const list = await listSessions().catch(() => null);
+    refreshing = false;
+    if (origin !== source()) { if (document.body.classList.contains('drawer-open')) refresh(); return; }
     if (mine !== loading) return; // 又刷新了一次：以后来的为准
     if (list) render(list);
     else if (!cached?.length && !lastList.length) history.replaceChildren(el('p', { className: 'drawer-empty', textContent: '读不到对话列表（网络不好？），稍后再打开菜单试试' }));
+    history.parentElement.scrollTop = scrollTop;
+    onRendered();
   }
   function render(list) {
     lastList = list;
@@ -142,19 +154,27 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, cached
         list.length > 60 ? '更早的对话在“全部对话”里 · ' : '',
         el('button', { type: 'button', className: 'drawer-more inline', textContent: '收起' }));
       tail.querySelector('button').addEventListener('click', () => { expanded = false; render(lastList); });
-    } else tail = el('p', { className: 'drawer-end', textContent: '没有更多对话了～' });
+    } else {
+      tail = el('button', { type: 'button', className: 'drawer-more inline', textContent: '查看全部对话 →' });
+      tail.addEventListener('click', () => { close(); onPanel('sessions'); });
+    }
     history.replaceChildren(...groups, tail);
   }
   /** 一条对话：点标题打开；右边“⋯”展开重命名 / 置顶 / 删除 */
   function row(x, cur) {
+    const state = rowState(x);
+    const caption = el('span', { className: 'drawer-item-copy' }, el('span', { className: 'drawer-item-t', textContent: x.title || '新对话' }));
+    if (state.label) caption.append(el('small', { className: 'drawer-activity', textContent: state.label }));
+    if (state.unread) caption.append(el('span', { className: 'drawer-unread', ariaLabel: '有未读回复', title: '有未读回复' }));
     const b = el('button', { type: 'button', className: `drawer-item${x.id === cur ? ' current' : ''}` },
-      el('span', { className: 'drawer-item-icon', ariaHidden: 'true' }),
-      el('span', { className: 'drawer-item-t', textContent: x.title || '新对话' }),
+      caption,
       el('time', { textContent: shortTime(x.updatedAt ?? x.createdAt ?? Date.now()) }));
+    if (x.id === cur) b.setAttribute('aria-current', 'true');
     b.addEventListener('click', () => { close(); onOpenSession(x.id); });
     const more = el('button', { type: 'button', className: 'drawer-item-more', textContent: '⋯', title: '重命名 / 置顶 / 删除', ariaLabel: `管理「${x.title || '新对话'}」` });
     const wrap = el('div', { className: 'drawer-row' }, b, more);
     wrap.dataset.id = x.id;
+    if (state.status) wrap.dataset.activity = state.status;
     more.addEventListener('click', () => {
       const open = wrap.querySelector('.drawer-menu');
       for (const m of history.querySelectorAll('.drawer-menu')) m.remove();
@@ -194,13 +214,23 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, cached
     document.body.classList.add('drawer-open');
     drawer.setAttribute('aria-hidden', 'false');
     scrim.hidden = false;
+    clearInterval(refreshTimer);
+    // 只在菜单可见时刷新小列表；不轮询正文、不启动任务、不后台常驻。
+    refreshTimer = setInterval(() => {
+      if (!document.hidden && !drawer.querySelector('.drawer-menu') && !search.value.trim()) refresh();
+    }, 5000);
   }
   function close() {
+    clearInterval(refreshTimer);
+    clearTimeout(searchTimer);
+    searchSeq++;
     document.body.classList.remove('drawer-open');
     drawer.setAttribute('aria-hidden', 'true');
     scrim.hidden = true;
   }
   scrim.addEventListener('click', close);
+  drawer.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  addEventListener('pagehide', () => clearInterval(refreshTimer));
 
   // 手势：从左边缘右滑打开，抽屉里左滑关闭
   let sx = null, sy = 0;
@@ -220,5 +250,5 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, cached
     else if (dx < -60 && document.body.classList.contains('drawer-open')) close();
   }, { passive: true });
 
-  return { open, close, refresh, get isOpen() { return document.body.classList.contains('drawer-open'); } };
+  return { open, close, refresh, markRead(row) { rowState(row); onRendered(); }, get isOpen() { return document.body.classList.contains('drawer-open'); } };
 }

@@ -122,6 +122,8 @@ try {
     if (width === 390) {
       // 真实构建的启动样式：夜间设置下也保持浅底，素材可读取，角色不旋转。
       await page.emulateMedia({ reducedMotion: 'no-preference' });
+      // matchMedia先变化，应用的change回调下一帧才同步body；等真实状态再检查动画。
+      await page.waitForFunction(() => !document.body.classList.contains('reduced-motion'));
       const startup = await page.evaluate(async () => {
         const root = document.documentElement;
         const previous = root.dataset.theme;
@@ -179,6 +181,7 @@ try {
       await page.screenshot({ path: path.join(output, 'theme-startup-390.png') });
       await page.evaluate(() => document.querySelector('#app-splash')?.remove());
       await page.emulateMedia({ reducedMotion: 'reduce' });
+      await page.waitForFunction(() => document.body.classList.contains('reduced-motion'));
     }
     const metrics = await page.evaluate(() => {
       const home = document.querySelector('.home-reference');
@@ -190,12 +193,12 @@ try {
         count: home.querySelectorAll('.home-suggestion').length,
         width: document.documentElement.scrollWidth,
         composerFits: input.left >= 0 && input.right <= innerWidth && input.bottom <= innerHeight,
-        modelFits: model.top >= input.top && model.bottom <= input.bottom,
+        modelFits: model.width === 0 && !document.querySelector('#inputbar').classList.contains('composer-editing'),
         image: getComputedStyle(home.querySelector('.wy-mascot')).backgroundImage
       };
     });
-    check(`${width} 首页参考配色与字号`, metrics.background === '#eef0ff' && metrics.titleSize >= 15 && metrics.titleSize <= 17 && metrics.count === 3);
-    check(`${width} 输入区与模型标签可见且无横向溢出`, metrics.width <= width && metrics.composerFits && metrics.modelFits, JSON.stringify(metrics));
+    check(`${width} 首页渐变参考配色与字号`, metrics.background === '#f4f7fc' && metrics.titleSize >= 15 && metrics.titleSize <= 26 && metrics.count === 3);
+    check(`${width} 输入栏单行、模型收起且无横向溢出`, metrics.width <= width && metrics.composerFits && metrics.modelFits, JSON.stringify(metrics));
     check(`${width} 使用批准的新未央形象`, metrics.image.includes('mascot-approved'));
     check(
       `${width} 原生可用高度下首页一屏完整、无内容被输入区遮挡`,
@@ -262,7 +265,7 @@ try {
           for(const el of [panel,content]) el.scrollTop=el.scrollHeight;
           return {width:panel.scrollWidth,doc:document.documentElement.scrollWidth,title:parseFloat(getComputedStyle(content.querySelector('h2')||content).fontSize)};
         },pane);
-        check(`${pane} 页尾保持统一字号且无横向溢出`,bottomMetrics.width<=width&&bottomMetrics.doc<=width&&bottomMetrics.title<=18,JSON.stringify(bottomMetrics));
+        check(`${pane} 页尾保持统一字号且无横向溢出`,bottomMetrics.width<=width&&bottomMetrics.doc<=width&&bottomMetrics.title<=22,JSON.stringify(bottomMetrics));
         await page.screenshot({path:path.join(output,`theme-${pane}-bottom-${width}.png`)});
       }
 

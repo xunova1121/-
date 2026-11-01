@@ -14,9 +14,14 @@ import * as agentMemory from '../agent/memory.js';
 import * as sessionsApi from '../agent/sessions.js';
 import { $, DESKTOP, COMPACT, toast } from './env.js';
 import { sportsCardRefresh } from './sportsCards.js';
+import { loadSongAsset } from '../../shared/musicAsset.js';
 
 export function createConversations(app) {
-  const transcript = new Transcript($('#transcript'), { progress: COMPACT, refreshSports: sportsCardRefresh(app) });
+  const transcript = new Transcript($('#transcript'), {
+    progress: COMPACT,
+    refreshSports: sportsCardRefresh(app),
+    loadSong: (path) => loadSongAsset(path, app.server ? app.server.download.bind(app.server) : ws.readBlob)
+  });
   // 当前会话；app.history 就是它的消息列表（换对话只改 app.session）
   app.session = sessionsApi.create();
   /** 记一条消息：默认记进当前会话；后台任务记进它自己的会话（切到别的对话后仍然记对地方） */
@@ -29,6 +34,7 @@ export function createConversations(app) {
     if (role === 'user' && asked && agentMemory.DECLINE_OPEN.test(String(content).trim())) agentMemory.resolveOpen([asked.openItem]).catch(() => {});
     target.messages.push({ role, content, ts: Date.now(), ...extra });
     target.updatedAt = Date.now();
+    if (target.id === app.session.id) app.drawer?.markRead(target);
     persistSession(target);
   }
   function persistSession(target = app.session) {
@@ -76,6 +82,7 @@ export function createConversations(app) {
     return transcriptWindow(app.history.length, { mobile: MOBILE, safe: document.documentElement.classList.contains('safe-render'), end });
   }
   function replayTranscript(end = app.history.length, { fromTop = false } = {}) {
+    app.drawer?.markRead(app.session);
     showChatTitle();
     const root = $('#transcript'),
       range = visibleHistory(end);

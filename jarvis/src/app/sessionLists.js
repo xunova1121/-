@@ -3,6 +3,7 @@
  */
 import { initSessionsPanel as createSessionsPanel } from '../ui/sessionsPanel.js';
 import { initDrawer as createDrawer } from '../ui/drawer.js';
+import { createConversationActivity } from '../ui/conversationActivity.js';
 import * as sessionsApi from '../agent/sessions.js';
 import { $, COMPACT, toast } from './env.js';
 
@@ -28,6 +29,7 @@ export function createSessionLists(app) {
   /** 手机：左侧抽屉菜单（启动时创建；电脑上不建） */
   function initDrawer() {
     if (!COMPACT) return;
+    const activity = createConversationActivity();
     const icons = Object.fromEntries([...document.querySelectorAll('.rail-btn')].map((b) => [b.dataset.panel, b.querySelector('svg').outerHTML]));
     app.drawer = createDrawer({
       icons,
@@ -43,6 +45,16 @@ export function createSessionLists(app) {
       listSessions: () => sessionsApi.list(),
       cachedSessions: () => sessionsApi.cachedList(),
       currentId: () => app.session.id,
+      source: () => (app.server ? `server:${app.server.base}` : 'local'),
+      rowState: (row) => {
+        const turn = [app.active, ...(app.backgroundTurns || [])].find((t) => t?.session.id === row.id && !t.streamDone && !t.ctrl.signal.aborted);
+        return activity.state(row, {
+          scope: app.server ? `server:${app.server.base}` : 'local',
+          current: row.id === app.session.id,
+          activity: turn && !turn.remote ? 'running' : ''
+        });
+      },
+      onRendered: () => activity.flush(),
       onRename: async (id, title) => {
         await sessionsApi.rename(id, title);
         if (id === app.session.id) {

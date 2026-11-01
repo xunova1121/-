@@ -25,7 +25,9 @@ function icon(kind) {
     chat: 'M21 11a8 8 0 0 1-8 8H8l-5 3v-6a8 8 0 1 1 18-5M8 10h8M8 14h5',
     spark: 'M12 2l3 7 7 3-7 3-3 7-3-7-7-3 7-3z',
     search: 'M20 20l-5-5M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0',
-    calendar: 'M4 5h16v16H4zM8 2v6M16 2v6M4 10h16M8 14h3M13 17h3'
+    calendar: 'M4 5h16v16H4zM8 2v6M16 2v6M4 10h16M8 14h3M13 17h3',
+    folder: 'M3 6h7l2 3h9v12H3zM3 6V4h7l2 2h9v3',
+    clock: 'M12 8v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0'
   };
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
@@ -37,7 +39,7 @@ function icon(kind) {
 }
 
 /** 手机欢迎页复用原天气与输入入口，不新增模型调用或图片持久化。 */
-export function createHome({ weather, fill, openPanel, configureWeather }) {
+export function createHome({ weather, fill, openPanel, configureWeather, recentSessions, openSession }) {
   const root = element('div', undefined, 'welcome wy-home home-reference');
   const hero = element('section', undefined, 'home-hero');
   const copy = element('div', undefined, 'home-hero-copy');
@@ -82,6 +84,36 @@ export function createHome({ weather, fill, openPanel, configureWeather }) {
 
   const weatherUI = createHomeWeather({ client: weather, onConfigure: configureWeather });
   root.append(weatherUI.root, hero);
+  const resume = element('button', undefined, 'home-resume');
+  resume.type = 'button';
+  resume.hidden = true;
+  root.append(resume);
+  // 只展示当前运行位置真实保存的对话；不把上次回答冒充正在执行的任务。
+  queueMicrotask(async () => {
+    if (!recentSessions || !openSession) return;
+    try {
+      const rows = await recentSessions();
+      if (destroyed || !root.isConnected) return;
+      // 原列表会把置顶对话排在前面，“上次”应按真实更新时间选取。
+      const recent = rows.reduce((latest, row) => (row.title && !row.evaluationId && (!latest || row.updatedAt > latest.updatedAt) ? row : latest), null);
+      if (!recent) return;
+      const mark = element('span', undefined, 'home-resume-icon');
+      mark.append(icon('clock'));
+      const text = element('span', undefined, 'home-resume-copy');
+      text.append(element('small', '继续上次的对话'), element('strong', recent.title), element('span', '接着聊，不用重新开始'));
+      const arrow = element('span', '›', 'home-task-arrow');
+      arrow.setAttribute('aria-hidden', 'true');
+      resume.append(mark, text, arrow);
+      resume.onclick = () => openSession(recent.id);
+      resume.hidden = false;
+    } catch {
+      if (destroyed || !root.isConnected) return;
+      resume.classList.add('home-resume-error');
+      resume.textContent = '历史对话暂不可用 · 打开对话列表查看';
+      resume.onclick = () => openPanel('sessions');
+      resume.hidden = false;
+    }
+  });
   const head = element('div', undefined, 'home-suggestions-head');
   head.append(element('span', '未央为你准备了'));
   const refresh = element('button', '换一换 ↻');
@@ -113,7 +145,14 @@ export function createHome({ weather, fill, openPanel, configureWeather }) {
   };
   renderSuggestions();
   root.append(head, suggestions);
-  const files = element('button', '文件空间  ›', 'home-files');
+  const files = element('button', undefined, 'home-files');
+  const fileMark = element('span', undefined, 'home-files-icon');
+  fileMark.append(icon('folder'));
+  const fileCopy = element('span', undefined, 'home-files-copy');
+  fileCopy.append(element('strong', '文件空间'), element('small', '文档、图片与生成作品'));
+  const fileArrow = element('span', '›', 'home-task-arrow');
+  fileArrow.setAttribute('aria-hidden', 'true');
+  files.append(fileMark, fileCopy, fileArrow);
   files.type = 'button';
   files.onclick = () => openPanel('workspace');
   root.append(files);

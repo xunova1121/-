@@ -1,5 +1,6 @@
 import './conversationComposer.css';
 import { composerState } from './composerState.js';
+import { initCompactComposer } from './compactComposer.js';
 
 /** 三端共用的输入栏。相机、文件和常用指令移入＋菜单，保留原处理器。 */
 export function initConversationComposer({ cancelDictation } = {}) {
@@ -54,5 +55,6 @@ export function initConversationComposer({ cancelDictation } = {}) {
   new MutationObserver(refresh).observe(form.querySelector('#attach-list'),{childList:true});
   // 部分旧入口直接写 value 不发 input；在聚焦和返回页面时同步，不轮询。
   prompt.addEventListener('focus',refresh); document.addEventListener('visibilitychange',refresh);
+  initCompactComposer(form, prompt, model);
   refresh(); return { refresh, close };
 }

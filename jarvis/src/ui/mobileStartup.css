@@ -3,21 +3,41 @@ html[data-mode='mobile'] #boot {
   display: none !important;
 }
 html[data-mode='mobile'] #app-splash {
-  background: linear-gradient(165deg, #eef0ff, #eeecfc 55%, #e8edfc);
-  color: #343448;
+  background: radial-gradient(ellipse at 95% 12%, #c8effa 0, transparent 62%), radial-gradient(ellipse at 4% 98%, #e2dcfb 0, transparent 60%), linear-gradient(135deg, #eef0ff, #fdfbfc 55%, #e9f7fc);
+  color: #172b49;
   transition: opacity 180ms ease;
 }
 html[data-mode='mobile'] #app-splash.out {
   opacity: 0;
   transform: none;
+  pointer-events: none;
 }
 html[data-mode='mobile'] #app-splash .as-inner {
   gap: 12px;
   margin-top: -3vh;
 }
 html[data-mode='mobile'] #app-splash .as-glow {
-  display: none;
+  display: block;
+  position: absolute;
+  top: 155px;
+  left: 50%;
+  width: 212px;
+  height: 46px;
+  margin: 0;
+  border: 1px solid #ffffffdc;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, #ffe9b957, #c1edfa30 50%, transparent 72%);
+  box-shadow: 0 0 26px #ffffffa0;
+  transform: translateX(-50%);
+  animation: startup-water 1.8s ease-out infinite;
 }
+html[data-mode='mobile'] #app-splash .as-inner { position: relative; }
+html[data-mode='mobile'] #app-splash .as-character { position: relative; animation: startup-emerge .7s ease-out both; }
+html[data-mode='mobile'] #app-splash .as-drop { position: absolute; left: calc(50% - 9px); top: 70px; width: 18px; height: 22px; border-radius: 55% 45% 55% 45%; background: radial-gradient(circle at 30% 30%, #fff, #8edcf8 65%, #d5edff); box-shadow: 0 0 20px #ffffffd0; transform: rotate(35deg); animation: startup-droplet .6s ease-out both; }
+html[data-mode='mobile'] #app-splash.out .as-character { animation: none; transform: translate(var(--splash-dx, 0px), var(--splash-dy, -24px)) scale(var(--splash-scale, .9)); opacity: 0; transition: transform 180ms ease-in, opacity 180ms ease-in; }
+@keyframes startup-emerge { 0%, 22% { opacity: 0; transform: translateY(10px) scale(.88); } 100% { opacity: 1; transform: none; } }
+@keyframes startup-droplet { 0% { opacity: 0; transform: translateY(-20px) scale(.3) rotate(35deg); } 45% { opacity: 1; } 100% { opacity: 0; transform: translateY(12px) scale(1.6) rotate(35deg); } }
+@keyframes startup-water { 0% { opacity: 0; transform: translateX(-50%) scale(.65); } 35% { opacity: .85; } 100% { opacity: 0; transform: translateX(-50%) scale(1.12); } }
 html[data-mode='mobile'] #app-splash .as-logo,
 html[data-mode='mobile'] #app-splash .as-logo.wy-brand {
   display: block !important;
@@ -50,7 +70,7 @@ html[data-mode='mobile'] #app-splash .as-name {
     'Noto Sans SC',
     system-ui,
     sans-serif;
-  color: #343448;
+  color: #172b49;
   gap: 0;
   letter-spacing: 0.08em;
 }
@@ -65,7 +85,7 @@ html[data-mode='mobile'] #app-splash .as-sub {
     'Noto Sans SC',
     system-ui,
     sans-serif;
-  color: #777b92;
+  color: #52657e;
   letter-spacing: 0;
   animation: none;
 }
@@ -101,10 +121,13 @@ html[data-mode='mobile'] #app-splash .as-dots {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  html[data-mode='mobile'] #app-splash .as-logo {
+  html[data-mode='mobile'] #app-splash :is(.as-logo, .as-character, .as-glow, .as-drop) {
     animation: none !important;
   }
+  html[data-mode='mobile'] #app-splash .as-drop { display: none; }
 }
+html[data-mode='mobile'] body.reduced-motion #app-splash :is(.as-logo, .as-character, .as-glow, .as-drop) { animation: none !important; }
+html[data-mode='mobile'] body.reduced-motion #app-splash .as-drop { display: none; }
 html.safe-render[data-mode='mobile'] #app-splash {
   display: none !important;
 }
