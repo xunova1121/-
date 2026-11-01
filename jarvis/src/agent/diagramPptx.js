@@ -1,5 +1,4 @@
 import { nativeTree, nativeLeaves, groupNativeDiagram } from './diagramPptxStructure.js';
-import { ICON_PNG } from './pptIcons.js';
 import { imageData } from './imageRegion.js';
 import { validateScene } from './diagramScene.js';
 import { diagramPptxViewport } from './diagramPptxViewport.js';
@@ -10,6 +9,8 @@ export async function makeDiagramPptx(scene, { png, editable = false } = {}) {
   const frame = diagramPptxViewport(scene);
   scene = frame.scene;
   const { default: PptxGenJS } = await import('pptxgenjs');
+  // 图标约 1.9MB：用到时再加载，不打进启动主包（用户 2026-11-01：图标扩到 238 个后主包从 2.0MB 涨到 4.0MB）
+  const { ICON_PNG } = await import('./pptIcons.js');
   const pptx = new PptxGenJS();
   const scale = frame.scale;
   const width = scene.width * scale;
