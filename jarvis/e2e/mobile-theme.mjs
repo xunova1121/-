@@ -194,7 +194,7 @@ try {
         image: getComputedStyle(home.querySelector('.wy-mascot')).backgroundImage
       };
     });
-    check(`${width} 首页蓝白参考配色与字号`, metrics.background === '#f4f7fc' && metrics.titleSize >= 15 && metrics.titleSize <= 20 && metrics.count === 3);
+    check(`${width} 首页渐变参考配色与字号`, metrics.background === '#f4f7fc' && metrics.titleSize >= 15 && metrics.titleSize <= 26 && metrics.count === 3);
     check(`${width} 输入区与模型标签可见且无横向溢出`, metrics.width <= width && metrics.composerFits && metrics.modelFits, JSON.stringify(metrics));
     check(`${width} 使用批准的新未央形象`, metrics.image.includes('mascot-approved'));
     check(
@@ -262,7 +262,7 @@ try {
           for(const el of [panel,content]) el.scrollTop=el.scrollHeight;
           return {width:panel.scrollWidth,doc:document.documentElement.scrollWidth,title:parseFloat(getComputedStyle(content.querySelector('h2')||content).fontSize)};
         },pane);
-        check(`${pane} 页尾保持统一字号且无横向溢出`,bottomMetrics.width<=width&&bottomMetrics.doc<=width&&bottomMetrics.title<=18,JSON.stringify(bottomMetrics));
+        check(`${pane} 页尾保持统一字号且无横向溢出`,bottomMetrics.width<=width&&bottomMetrics.doc<=width&&bottomMetrics.title<=22,JSON.stringify(bottomMetrics));
         await page.screenshot({path:path.join(output,`theme-${pane}-bottom-${width}.png`)});
       }
 

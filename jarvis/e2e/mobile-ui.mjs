@@ -52,7 +52,7 @@ try{
   check('首页问候与未央不重叠，卡片不横向溢出',await page.evaluate(()=>{const h=document.querySelector('.home-hero-copy').getBoundingClientRect(),p=document.querySelector('.home-pet').getBoundingClientRect();return (p.left>=h.right-1||p.bottom<=h.top+1)&&document.documentElement.scrollWidth<=innerWidth;}));
   check('首次首页从日期天气开始，顶部不会被自动滚动裁掉',await page.evaluate(()=>{const weather=document.querySelector('.home-weather').getBoundingClientRect(),header=document.querySelector('.topbar').getBoundingClientRect();return weather.top>=header.bottom-1&&document.querySelector('#transcript').scrollTop===0;}));
   // 用户确认的蓝白稿采用右侧角色与参考字号，原功能断言保持。
-  check('蓝白稿角色位于问候右侧、字号与三行建议完整呈现',await page.evaluate(()=>{const m=document.querySelector('.home-pet .wy-mascot').getBoundingClientRect(),h=document.querySelector('.home-hero h1');return m.width>=90&&m.width<=150&&m.left>innerWidth/2&&parseFloat(getComputedStyle(h).fontSize)<=20&&document.querySelectorAll('.home-suggestion').length===3&&document.querySelector('.home-footer')?.textContent.includes('内容由 AI 生成');}));
+  check('渐变稿角色位于问候右侧、字号与三行建议完整呈现',await page.evaluate(()=>{const m=document.querySelector('.home-pet .wy-mascot').getBoundingClientRect(),h=document.querySelector('.home-hero h1');return m.width>=90&&m.width<=150&&m.left>innerWidth/2&&parseFloat(getComputedStyle(h).fontSize)<=26&&document.querySelectorAll('.home-suggestion').length===3&&document.querySelector('.home-footer')?.textContent.includes('内容由 AI 生成');}));
   check('390屏幕首屏显示文件空间，角色不贴屏幕右边',await page.evaluate(()=>{const files=document.querySelector('.home-files').getBoundingClientRect(),composer=document.querySelector('#inputbar').getBoundingClientRect(),mascot=document.querySelector('.home-pet .wy-mascot').getBoundingClientRect();return files.bottom<=composer.top-2&&mascot.right<=innerWidth-8;}));
   await page.locator('.toast').evaluateAll(nodes=>nodes.forEach(n=>{n.hidden=true;}));
   await page.screenshot({path:path.join(OUT,'mobile-weather-home.png')});
@@ -79,9 +79,9 @@ try{
   check('拍照、相册、文件和常用指令收在＋菜单中',await page.isVisible('#composer-more')&&await page.isVisible('#btn-camera')&&await page.isVisible('#btn-composer-file'));
   await page.click('#btn-attach');
   check('顶栏图标完整位于栏内，与文字保持间距',await page.evaluate(()=>{const header=document.querySelector('.topbar').getBoundingClientRect(),logo=document.querySelector('.brand-mark .wy-mascot').getBoundingClientRect(),name=document.querySelector('.brand-name').getBoundingClientRect();return logo.top>=header.top&&logo.bottom<=header.bottom&&logo.right+6<=name.left&&Math.abs((logo.top+logo.bottom)/2-(name.top+name.bottom)/2)<8;}));
-  check('蓝白稿深蓝顶栏与白色页面形成层次',await page.evaluate(()=>getComputedStyle(document.querySelector('.topbar')).backgroundImage.includes('gradient')&&getComputedStyle(document.body).backgroundImage.includes('gradient')));
+  check('渐变稿顶栏透明融入整页背景',await page.evaluate(()=>getComputedStyle(document.querySelector('.topbar')).backgroundImage==='none'&&getComputedStyle(document.querySelector('.topbar')).backgroundColor==='rgba(0, 0, 0, 0)'&&getComputedStyle(document.body).backgroundImage.includes('radial-gradient')));
   await page.evaluate(()=>window.__jarvis.showPanel('mind'));
-  check('记忆面板和返回栏使用同一套新主题',await page.evaluate(()=>getComputedStyle(document.querySelector('.side')).backgroundImage.includes('gradient')&&getComputedStyle(document.querySelector('.side-back')).backgroundColor==='rgb(244, 247, 252)'));
+  check('记忆面板和返回栏使用同一套新主题',await page.evaluate(()=>getComputedStyle(document.querySelector('.side')).backgroundImage.includes('gradient')&&getComputedStyle(document.querySelector('.side-back')).backgroundColor==='rgba(0, 0, 0, 0)'));
   await page.click('#btn-theme');
   await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
   check('夜间顶栏和面板同步切换，不出现白色顶栏',await page.evaluate(()=>getComputedStyle(document.body).getPropertyValue('--bg').trim()==='#191b2b'&&getComputedStyle(document.querySelector('.side')).backgroundImage.includes('gradient')&&getComputedStyle(document.querySelector('.topbar')).backgroundColor==='rgba(0, 0, 0, 0)'));
