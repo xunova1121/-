@@ -18,8 +18,8 @@ export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs, cloc
   const limits = { search: 12, read: news ? 8 : 10, model: 3 };
   const totalLimit = limits.search + limits.read;
   let strict = strictVerification(text);
-  let extensive = extensiveRetrieval(text), started = null, calls = 0, failed = 0, reason = '';
-  const duration = () => timeBudgetMs ?? (strict ? VERIFICATION_MS : extensive ? DEEP_RETRIEVAL_MS : QUICK_RETRIEVAL_MS);
+  let extensive = extensiveRetrieval(text), started = null, calls = 0, failed = 0, reason = '', override = null;
+  const duration = () => override ?? timeBudgetMs ?? (strict ? VERIFICATION_MS : extensive ? DEEP_RETRIEVAL_MS : QUICK_RETRIEVAL_MS);
   const check = () => {
     if (!reason && started !== null) {
       if ((clock && clock.retrievalRemaining() <= 0 || duration() > 0 && now() - started >= duration())) reason = '本轮联网检索已达到时间预算';
@@ -44,6 +44,8 @@ export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs, cloc
     end(ok) { failed = ok ? 0 : failed + 1; },
     upgrade(text) { if (extensiveRetrieval(text)) extensive = true; if (strictVerification(text)) strict = true; },
     close(why) { reason ||= why; },
+    /** 自主编排：快查失败后交给模型接着查——从现在起再给 ms，去掉普通查询的次数/连续失败/8秒单项门槛 */
+    extend(ms) { extensive = true; failed = 0; reason = ''; override = (started === null ? 0 : now() - started) + ms; },
     get extensive() { return extensive; },
     get reason() { return check(); },
     /** 还能联网几次（发请求前用：模型自带的联网搜索按这个限次数，不等搜完再扣） */

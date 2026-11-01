@@ -4,6 +4,8 @@ import { withWebDeadline } from './request.js';
 import { lastGoodKey } from './lastGood.js';
 import { failureKind, failureSentence, usefulReceipt, receiptLinks, recoveryText, QUERY_LABELS } from './recoveryData.js';
 
+/** 后备搜索单次上限：不再是5秒/3秒，仍受本轮剩余时间约束 */
+export const RECOVERY_SEARCH_MS = 20_000;
 /** 程序负责有界自救；全部操作共用调用方的时钟、次数账本和取消信号。 */
 export async function recoverLookup(intent, plan, options) {
   const { signal, text = '', execute, getTool, lastGood, clock, retrieval } = options;
@@ -11,6 +13,8 @@ export async function recoverLookup(intent, plan, options) {
   const attempts = [];
   const key = lastGoodKey(intent, plan, text);
   const left = () => Math.min(clock?.retrievalRemaining() ?? Infinity, retrieval?.remaining ?? Infinity);
+  // 有时钟/预算时按剩余时间给（最多20秒）；没有任何时钟约束时保持原短超时，避免无界等待
+  const searchMs = fallback => Number.isFinite(left()) ? Math.min(RECOVERY_SEARCH_MS, left()) : fallback;
   const check = () => { if (signal?.aborted) throw signal.reason || Object.assign(new Error('已停止'), { name: 'AbortError' }); };
   async function attempt(call, label, timeoutMs) {
     check();
@@ -53,11 +57,13 @@ export async function recoverLookup(intent, plan, options) {
   // 专用源全失败才搜索；词中保留用户原始范围，不把体育资讯改为比分。
   const query = intent.kind === 'sports_live' && (plan.args.teams?.length || plan.args.team) ? `${[...(plan.args.teams || []), plan.args.team || ''].filter(Boolean).join(' ')} ${text}` : intent.kind === 'weather' ? `${plan.args.place} ${text || '今天天气'}` : text;
   if (getTool('web_search') && query.trim()) {
-    found = await attempt({ name: 'web_search', args: { query: plan.name === 'web_search' ? query.replace(/[？?。！!]/g, '').trim() + ' 官方资料' : query } }, '公开搜索', 5000);
+    // 用户 2026-11-01：服务器上免密钥搜索要同时问必应和百度，常要十几秒；原先只给5秒/3秒，每次搜到一半被掐断。
+    // 改为按本轮剩余时间给（上限见 RECOVERY_SEARCH_MS），总时钟和次数账本不变。
+    found = await attempt({ name: 'web_search', args: { query: plan.name === 'web_search' ? query.replace(/[？?。！!]/g, '').trim() + ' 官方资料' : query } }, '公开搜索', searchMs(5000));
     if (!found && left() > 250) {
       const topic = { weather: '天气预报', sports_live: /篮球|NBA|CBA/i.test(text) ? '篮球赛程 对阵' : '足球赛程 对阵 直播吧', sports_news: '体育新闻报道', news: '新闻报道', market: '股票收盘价', general: '官方信息' }[intent.kind];
       const date = plan.args.date || newsDate(now());
-      found = await attempt({ name: 'web_search', args: { query: `${query} ${date} ${topic}`.slice(0, 300) } }, '换词搜索', 3000);
+      found = await attempt({ name: 'web_search', args: { query: `${query} ${date} ${topic}`.slice(0, 300) } }, '换词搜索', searchMs(3000));
     }
     if (found) {
       // 摘要不冒充原文。读取至多两个真实链接，仍经原安全网关/白名单。

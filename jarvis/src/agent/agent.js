@@ -8,6 +8,7 @@ import { classifyLookupIntent } from './lookup/classify.js';
 import { LOOKUP_DEFAULT_PREFERENCES } from './lookup/preferences.js';
 import { withWebDeadline } from './lookup/request.js';
 import { lookupAnswerNote, lookupReceiptData } from './lookup/answer.js';
+import { SELF_DRIVE_MS, SELF_DRIVE_PROGRESS, selfDriveNote, triedSummary } from './lookup/selfDrive.js';
 import { createLookupDelivery } from './lookupDelivery.js';
 import { lookupPhase } from './lookupModels.js';
 import { codeWorkBlock, CODE_TASK_CORE } from './codeDevelopment.js';
@@ -73,7 +74,7 @@ import { canFallback, needsComputer, computerTaskKind } from '../llm/router.js';
 import { compactToolResults } from './turnContext.js';
 import { requirementsTool } from './taskRequirements.js';
 import * as holdings from './holdings.js';
-import { recentFailures } from './failedSteps.js';
+import { recentFailures, recentWorkLog } from './failedSteps.js';
 import { createImageSight } from './imageSight.js';
 
 export const STABLE_PROMPT = `你是“未央”，用户的个人智能体。实际运行位置与能力以下方环境和本轮工具为准。
@@ -188,6 +189,8 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
   // 上一轮有步骤失败：带上报错原话（用户问“为啥失败”时答得出具体原因）
   const failed = recentFailures(currentSession?.messages?.length ? currentSession.messages : history);
   if (failed) parts.push(failed);
+  const workLog = recentWorkLog(currentSession?.messages?.length ? currentSession.messages : history);
+  if (workLog) parts.push(workLog);
   if (periodText) parts.push(periodText);
   if (recentS.length) parts.push(`## 最近的其他对话（用户说“接着上次 / 刚才那个”时参考）\n${recentS.map((s) => `- ${day(s.updatedAt)}「${s.title}」（id: ${s.id}，${s.messages.length} 条）最后：${String([...s.messages].reverse().find((m) => m.role === 'user')?.content ?? '').slice(0, 60)}`).join('\n')}`);
   if (open.length) parts.push(`## 之前对话里说好以后再做的事（只在当前请求相关时参考；用户没要求就不要转回旧任务；用户说不用了就不再提）\n${open.map((o) => `- ${o.text}${o.sessionTitle ? `（来自「${o.sessionTitle}」，${day(o.ts)}）` : ''}`).join('\n')}`);
@@ -409,6 +412,17 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   };
 
   let preFound = null;
+  // 自主编排：快查没拿到结果时只启动一次，解除普通查询时限，把真实经过交给模型自己换办法（见 lookup/selfDrive.js）
+  let selfDriven = false;
+  const triedCalls = [];
+  const selfDrive = (recovery) => {
+    selfDriven = true;
+    lookupControl?.release?.();
+    retrieval.extend(SELF_DRIVE_MS);
+    emit({ type: 'tool_progress', text: SELF_DRIVE_PROGRESS });
+    emit({ type: 'diagnostic', phase: 'self_drive', tried: (recovery?.attempts?.length || 0) + triedCalls.length });
+    return selfDriveNote({ kind: retrieval.intent?.kind || 'general', place: preFound?.args?.place || '', tried: triedSummary({ recovery, calls: triedCalls }) });
+  };
   // 严格架构流水线只在用户明确要逐条核对需求原文时接管；平时架构图由主模型直接 create_diagram 出图（见 diagramPlanning.js）
   if (depth === 0 && !images.length && strictArchitecture(userText)) {
     const directed = await runArchitectureDirector({
@@ -446,7 +460,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       }
     });
     if (found && intent.kind === 'general' && lookupControl && !fallbacks.length && !['failed', 'input'].includes(found.recovery?.state)) lookupControl.phased = true;
-    if (found) { if (found.recovery && found.recovery.state !== 'fresh') lookupDelivery.record({ name: found.tool, args: found.args, ok: !['failed', 'input'].includes(found.recovery.state), output: found.output, lookupRecovery: found.recovery }); preFound = found; convo.at(-1).content = `${convo.at(-1).content}\n\n${lookupReceiptData(found)}`; }
+    if (found) { if (found.recovery && found.recovery.state !== 'fresh') lookupDelivery.record({ name: found.tool, args: found.args, ok: !['failed', 'input'].includes(found.recovery.state), output: found.output, lookupRecovery: found.recovery }); preFound = found; convo.at(-1).content = `${convo.at(-1).content}\n\n${found.recovery?.state === 'failed' && !signal?.aborted ? selfDrive(found.recovery) : lookupReceiptData(found)}`; }
     toolHint = loader.hint();
   }
 
@@ -460,6 +474,11 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     const quickAttempts = review.report().sourceRequirement ? Math.max(5, QUICK_MODEL_ATTEMPTS) : QUICK_MODEL_ATTEMPTS;
     if (!retrieval.reason && lookupDeadline && lookupControl && (lookupControl.retrievalRemaining() <= 0 || retrieval.active && modelAttempts >= quickAttempts)) {
       retrieval.close('已停止新增检索，正在整理已有资料');
+    }
+    // 普通查询到点/次数用完却一条可用结果都没有：不收工说“查不到”，交给模型接着想办法（只一次，之后按放宽后的上限收尾）
+    // 模型自己已经换着试过3次以上仍失败的，算已经自主尝试过，按原规矩收尾；手里没有联网工具的也不启动
+    if (allowWebSearch && retrieval.reason && !retrieval.extensive && !selfDriven && !signal?.aborted && !triedCalls.some(c => c.ok) && triedCalls.length < 3 && (loader.get('web_search') || loader.get('fetch_url')) && !(preFound && !['failed', 'input'].includes(preFound.recovery?.state))) {
+      convo.push({ role: 'user', content: selfDrive(preFound?.recovery) });
     }
     const closing = allowWebSearch && Boolean(retrieval.reason);
     if (closing) {
@@ -683,7 +702,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     const results = r.toolCalls.map((c) => reused.get(c) ?? ran.find((x) => x.c === c)).filter(Boolean);
     for (const { c, ok, output, outImages } of results) {
       toolCount++;
-      if (WEB_TOOLS.has(c.name)) retrieval.end(ok);
+      if (WEB_TOOLS.has(c.name)) { retrieval.end(ok); triedCalls.push({ name: c.name, args: c.args, ok, output: ok ? '' : String(output).slice(0, 300) }); }
       if (ok && /^(write_file|edit_file|code_write|code_edit)$/.test(c.name) && CODE_FILE.test(String(c.args?.path ?? ''))) wroteCode = true;
       if (ok && (/^(run_javascript|run_python|computer_run|run_project_tests)$/.test(c.name) || c.name === 'code_run' && c.args?.command === 'test')) ranCode = true;
       if (!ok) failCount++;

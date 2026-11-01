@@ -1,7 +1,7 @@
 import { httpError, throwControl } from '../core/networkRequest.js';
 import { errorKind } from '../core/suggest.js';
 import { fetchQWeather, parseQWeather, lookupQWeatherCity, formatQWeather } from '../core/qweather.js';
-import { weatherProvider, shortSourceRetry } from './lookup/weatherProvider.js';
+import { allWeatherCooling, weatherProvider, shortSourceRetry } from './lookup/weatherProvider.js';
 import { failureKind } from './lookup/recoveryData.js';
 import { WEATHER_SOURCE_MS } from './lookup/weatherLimits.js';
 /**
@@ -63,7 +63,14 @@ export function formatWttr(placeName, j, days = 3, dataUrl = '') {
  */
 export async function getWeather(place, { get, days = 3, signal, retrieval, qweather = null, health }) {
   if (!String(place || '').trim()) throw Object.assign(new Error('缺少地点，请提供城市或定位结果，不能默认猜测城市'), { code: 'WEATHER_LOCATION_REQUIRED', name: 'ValidationError' });
-  const name = String(place || '').trim().replace(/(市|区|县)$/, '') || '北京';
+  // 问的是省份：天气接口只认城市，按省会查并写明（用户 2026-11-01：“河南的天气”直接说查不到）
+  const raw = String(place || '').trim(), capital = provinceCapital(raw);
+  const name = (capital || raw).replace(/(市|区|县)$/, '') || '北京';
+  const note = capital ? `“${raw}”是省级地区，天气接口按城市查询，下面是省会${capital}的天气；要查其他城市请说城市名。\n` : '';
+  const ids = [qweather && 'weather_qweather', 'weather_openmeteo', 'weather_wttr'].filter(Boolean);
+  const ignoreCooling = await allWeatherCooling(ids, health);
+  return note + await fetchWeather();
+  async function fetchWeather() {
   const json = (url, activeSignal) => shortSourceRetry(async requestSignal => { retrieval?.consume('read'); const response = await get(url, { signal: requestSignal }); if (!response.ok) throw httpError(response.status, '', '天气服务'); return response.json(); }, { signal: activeSignal });
   let firstErr;
   // 和风天气（填了 Key 时）：国内快、维度多；失败了再走 Open-Meteo。Key 同时放在请求头和 key 参数里：经网关转发网页时请求头会丢
@@ -77,7 +84,7 @@ export async function getWeather(place, { get, days = 3, signal, retrieval, qwea
         if (!city) throw new Error(`没找到地点“${name}”`);
         const data = parseQWeather(await fetchQWeather({ ...qweather, latitude: city.latitude, longitude: city.longitude, fetchImpl, signal: activeSignal }));
         return formatQWeather([city.name, city.region].filter(Boolean).join('，'), data, days, city.link);
-      }, { signal, timeoutMs: WEATHER_SOURCE_MS.qweather, health });
+      }, { signal, timeoutMs: WEATHER_SOURCE_MS.qweather, health, ignoreCooling });
     } catch (e) { throwControl(e, signal); firstErr = e; }
   }
   try {
@@ -90,12 +97,20 @@ export async function getWeather(place, { get, days = 3, signal, retrieval, qwea
         + '&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,precipitation'
         + `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=${Math.min(7, Math.max(1, days))}`;
       return (qweather ? `和风天气暂时不可用，已改用Open-Meteo${failureKind(firstErr) === 'auth' ? '；请在设置中检查和风授权或额度' : ''}。\n` : '') + formatOpenMeteo(p, await json(url, activeSignal), days, url);
-    }, { signal, timeoutMs: WEATHER_SOURCE_MS.openMeteo, health });
+    }, { signal, timeoutMs: WEATHER_SOURCE_MS.openMeteo, health, ignoreCooling });
   } catch (e) { throwControl(e, signal); firstErr = e; }
   try {
-    return await weatherProvider('weather_wttr', async activeSignal => '前面的天气来源暂时不可用，已改用wttr.in。\n' + formatWttr(name, await json(`https://wttr.in/${encodeURIComponent(name)}?format=j1&lang=zh`, activeSignal), days, `https://wttr.in/${encodeURIComponent(name)}?lang=zh`), { signal, timeoutMs: WEATHER_SOURCE_MS.wttr, health });
+    return await weatherProvider('weather_wttr', async activeSignal => '前面的天气来源暂时不可用，已改用wttr.in。\n' + formatWttr(name, await json(`https://wttr.in/${encodeURIComponent(name)}?format=j1&lang=zh`, activeSignal), days, `https://wttr.in/${encodeURIComponent(name)}?lang=zh`), { signal, timeoutMs: WEATHER_SOURCE_MS.wttr, health, ignoreCooling });
   } catch (e) {
     throwControl(e, signal);
     throw Object.assign(new Error('天气服务访问失败（' + firstErr?.message + '；' + e.message + '），可以改用web_search查询'), { code: e.code || 'WEATHER_FAILED', kind: errorKind(e) || 'api', status: e.status, cause: e });
   }
+  }
+}
+
+/** 省级地区 → 省会；直辖市、特别行政区本身就是城市，不在表里 */
+const PROVINCE_CAPITALS = { 河北: '石家庄', 山西: '太原', 辽宁: '沈阳', 黑龙江: '哈尔滨', 江苏: '南京', 浙江: '杭州', 安徽: '合肥', 福建: '福州', 江西: '南昌', 山东: '济南', 河南: '郑州', 湖北: '武汉', 湖南: '长沙', 广东: '广州', 海南: '海口', 四川: '成都', 贵州: '贵阳', 云南: '昆明', 陕西: '西安', 甘肃: '兰州', 青海: '西宁', 台湾: '台北', 内蒙古: '呼和浩特', 广西: '南宁', 西藏: '拉萨', 宁夏: '银川', 新疆: '乌鲁木齐' };
+export function provinceCapital(place) {
+  const key = String(place || '').trim().replace(/(?:省|自治区|壮族自治区|回族自治区|维吾尔自治区)$/, '').replace(/(?:壮族|回族|维吾尔)$/, '');
+  return PROVINCE_CAPITALS[key] || '';
 }

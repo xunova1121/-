@@ -421,8 +421,8 @@ function createRetrievalBudget(text2, { now = Date.now, timeBudgetMs, clock = nu
   const limits = { search: 12, read: news ? 8 : 10, model: 3 };
   const totalLimit = limits.search + limits.read;
   let strict = strictVerification(text2);
-  let extensive = extensiveRetrieval(text2), started = null, calls = 0, failed = 0, reason = "";
-  const duration = () => timeBudgetMs ?? (strict ? VERIFICATION_MS : extensive ? DEEP_RETRIEVAL_MS : QUICK_RETRIEVAL_MS);
+  let extensive = extensiveRetrieval(text2), started = null, calls = 0, failed = 0, reason = "", override = null;
+  const duration = () => override ?? timeBudgetMs ?? (strict ? VERIFICATION_MS : extensive ? DEEP_RETRIEVAL_MS : QUICK_RETRIEVAL_MS);
   const check = () => {
     if (!reason && started !== null) {
       if (clock && clock.retrievalRemaining() <= 0 || duration() > 0 && now() - started >= duration()) reason = "\u672C\u8F6E\u8054\u7F51\u68C0\u7D22\u5DF2\u8FBE\u5230\u65F6\u95F4\u9884\u7B97";
@@ -466,6 +466,13 @@ function createRetrievalBudget(text2, { now = Date.now, timeBudgetMs, clock = nu
     },
     close(why) {
       reason ||= why;
+    },
+    /** 自主编排：快查失败后交给模型接着查——从现在起再给 ms，去掉普通查询的次数/连续失败/8秒单项门槛 */
+    extend(ms) {
+      extensive = true;
+      failed = 0;
+      reason = "";
+      override = (started === null ? 0 : now() - started) + ms;
     },
     get extensive() {
       return extensive;
@@ -701,10 +708,15 @@ var WEATHER_HEALTH = [
   { id: "weather_openmeteo", label: "Open-Meteo", region: "global", validation: "existing" },
   { id: "weather_wttr", label: "wttr.in", region: "global", validation: "existing" }
 ];
-async function weatherProvider(id, work, { signal, timeoutMs, health }) {
+async function allWeatherCooling(ids, health) {
+  if (!health) return false;
+  const states = await Promise.all(ids.map((id) => health.get(id).catch(() => null)));
+  return states.every((state) => state?.cooling);
+}
+async function weatherProvider(id, work, { signal, timeoutMs, health, ignoreCooling = false }) {
   const started = performance.now();
   if (signal?.aborted) throw signal.reason;
-  const state = await health?.get(id);
+  const state = ignoreCooling ? null : await health?.get(id);
   if (state?.cooling) throw Object.assign(new Error("\u6765\u6E90\u6682\u65F6\u4E0D\u53EF\u7528"), { code: "LOOKUP_SOURCE_COOLING" });
   try {
     const result = await withWebDeadline(work, { signal, timeoutMs });
@@ -1047,12 +1059,14 @@ function relevantRecoverySearch(output, intent, args = {}, request = "") {
 }
 
 // src/agent/lookup/recovery.js
+var RECOVERY_SEARCH_MS = 2e4;
 async function recoverLookup(intent, plan, options) {
   const { signal, text: text2 = "", execute, getTool, lastGood, clock, retrieval } = options;
   const now = options.nowFn || Date.now;
   const attempts = [];
   const key = lastGoodKey(intent, plan, text2);
   const left = () => Math.min(clock?.retrievalRemaining() ?? Infinity, retrieval?.remaining ?? Infinity);
+  const searchMs = (fallback) => Number.isFinite(left()) ? Math.min(RECOVERY_SEARCH_MS, left()) : fallback;
   const check = () => {
     if (signal?.aborted) throw signal.reason || Object.assign(new Error("\u5DF2\u505C\u6B62"), { name: "AbortError" });
   };
@@ -1101,11 +1115,11 @@ async function recoverLookup(intent, plan, options) {
   }
   const query = intent.kind === "sports_live" && (plan.args.teams?.length || plan.args.team) ? `${[...plan.args.teams || [], plan.args.team || ""].filter(Boolean).join(" ")} ${text2}` : intent.kind === "weather" ? `${plan.args.place} ${text2 || "\u4ECA\u5929\u5929\u6C14"}` : text2;
   if (getTool("web_search") && query.trim()) {
-    found = await attempt({ name: "web_search", args: { query: plan.name === "web_search" ? query.replace(/[？?。！!]/g, "").trim() + " \u5B98\u65B9\u8D44\u6599" : query } }, "\u516C\u5F00\u641C\u7D22", 5e3);
+    found = await attempt({ name: "web_search", args: { query: plan.name === "web_search" ? query.replace(/[？?。！!]/g, "").trim() + " \u5B98\u65B9\u8D44\u6599" : query } }, "\u516C\u5F00\u641C\u7D22", searchMs(5e3));
     if (!found && left() > 250) {
       const topic = { weather: "\u5929\u6C14\u9884\u62A5", sports_live: /篮球|NBA|CBA/i.test(text2) ? "\u7BEE\u7403\u8D5B\u7A0B \u5BF9\u9635" : "\u8DB3\u7403\u8D5B\u7A0B \u5BF9\u9635 \u76F4\u64AD\u5427", sports_news: "\u4F53\u80B2\u65B0\u95FB\u62A5\u9053", news: "\u65B0\u95FB\u62A5\u9053", market: "\u80A1\u7968\u6536\u76D8\u4EF7", general: "\u5B98\u65B9\u4FE1\u606F" }[intent.kind];
       const date = plan.args.date || newsDate(now());
-      found = await attempt({ name: "web_search", args: { query: `${query} ${date} ${topic}`.slice(0, 300) } }, "\u6362\u8BCD\u641C\u7D22", 3e3);
+      found = await attempt({ name: "web_search", args: { query: `${query} ${date} ${topic}`.slice(0, 300) } }, "\u6362\u8BCD\u641C\u7D22", searchMs(3e3));
     }
     if (found) {
       const search = found;
@@ -2669,54 +2683,67 @@ function formatWttr(placeName, j, days = 3, dataUrl = "") {
 }
 async function getWeather(place, { get, days = 3, signal, retrieval, qweather = null, health }) {
   if (!String(place || "").trim()) throw Object.assign(new Error("\u7F3A\u5C11\u5730\u70B9\uFF0C\u8BF7\u63D0\u4F9B\u57CE\u5E02\u6216\u5B9A\u4F4D\u7ED3\u679C\uFF0C\u4E0D\u80FD\u9ED8\u8BA4\u731C\u6D4B\u57CE\u5E02"), { code: "WEATHER_LOCATION_REQUIRED", name: "ValidationError" });
-  const name = String(place || "").trim().replace(/(市|区|县)$/, "") || "\u5317\u4EAC";
-  const json = (url, activeSignal) => shortSourceRetry(async (requestSignal) => {
-    retrieval?.consume("read");
-    const response = await get(url, { signal: requestSignal });
-    if (!response.ok) throw httpError(response.status, "", "\u5929\u6C14\u670D\u52A1");
-    return response.json();
-  }, { signal: activeSignal });
-  let firstErr;
-  if (qweather) {
+  const raw = String(place || "").trim(), capital = provinceCapital(raw);
+  const name = (capital || raw).replace(/(市|区|县)$/, "") || "\u5317\u4EAC";
+  const note = capital ? `\u201C${raw}\u201D\u662F\u7701\u7EA7\u5730\u533A\uFF0C\u5929\u6C14\u63A5\u53E3\u6309\u57CE\u5E02\u67E5\u8BE2\uFF0C\u4E0B\u9762\u662F\u7701\u4F1A${capital}\u7684\u5929\u6C14\uFF1B\u8981\u67E5\u5176\u4ED6\u57CE\u5E02\u8BF7\u8BF4\u57CE\u5E02\u540D\u3002
+` : "";
+  const ids = [qweather && "weather_qweather", "weather_openmeteo", "weather_wttr"].filter(Boolean);
+  const ignoreCooling = await allWeatherCooling(ids, health);
+  return note + await fetchWeather();
+  async function fetchWeather() {
+    const json = (url, activeSignal) => shortSourceRetry(async (requestSignal) => {
+      retrieval?.consume("read");
+      const response = await get(url, { signal: requestSignal });
+      if (!response.ok) throw httpError(response.status, "", "\u5929\u6C14\u670D\u52A1");
+      return response.json();
+    }, { signal: activeSignal });
+    let firstErr;
+    if (qweather) {
+      try {
+        return await weatherProvider("weather_qweather", async (activeSignal) => {
+          retrieval?.consume("read");
+          const fetchImpl = (url, init) => shortSourceRetry(async (requestSignal) => {
+            const response = await get(`${url}${url.includes("?") ? "&" : "?"}key=${encodeURIComponent(qweather.key)}`, { ...init, signal: requestSignal });
+            if (response.status >= 500) throw httpError(response.status, "", "\u548C\u98CE\u5929\u6C14");
+            return response;
+          }, { signal: init?.signal, beforeRetry: () => retrieval?.consume("read") });
+          const city = (await lookupQWeatherCity({ ...qweather, query: name, fetchImpl, signal: activeSignal }))[0];
+          throwControl(null, activeSignal);
+          if (!city) throw new Error(`\u6CA1\u627E\u5230\u5730\u70B9\u201C${name}\u201D`);
+          const data = parseQWeather(await fetchQWeather({ ...qweather, latitude: city.latitude, longitude: city.longitude, fetchImpl, signal: activeSignal }));
+          return formatQWeather([city.name, city.region].filter(Boolean).join("\uFF0C"), data, days, city.link);
+        }, { signal, timeoutMs: WEATHER_SOURCE_MS.qweather, health, ignoreCooling });
+      } catch (e) {
+        throwControl(e, signal);
+        firstErr = e;
+      }
+    }
     try {
-      return await weatherProvider("weather_qweather", async (activeSignal) => {
-        retrieval?.consume("read");
-        const fetchImpl = (url, init) => shortSourceRetry(async (requestSignal) => {
-          const response = await get(`${url}${url.includes("?") ? "&" : "?"}key=${encodeURIComponent(qweather.key)}`, { ...init, signal: requestSignal });
-          if (response.status >= 500) throw httpError(response.status, "", "\u548C\u98CE\u5929\u6C14");
-          return response;
-        }, { signal: init?.signal, beforeRetry: () => retrieval?.consume("read") });
-        const city = (await lookupQWeatherCity({ ...qweather, query: name, fetchImpl, signal: activeSignal }))[0];
+      return await weatherProvider("weather_openmeteo", async (activeSignal) => {
+        const geo = await json(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=zh&format=json`, activeSignal);
         throwControl(null, activeSignal);
-        if (!city) throw new Error(`\u6CA1\u627E\u5230\u5730\u70B9\u201C${name}\u201D`);
-        const data = parseQWeather(await fetchQWeather({ ...qweather, latitude: city.latitude, longitude: city.longitude, fetchImpl, signal: activeSignal }));
-        return formatQWeather([city.name, city.region].filter(Boolean).join("\uFF0C"), data, days, city.link);
-      }, { signal, timeoutMs: WEATHER_SOURCE_MS.qweather, health });
+        const p = geo.results?.[0];
+        if (!p) throw new Error(`\u6CA1\u627E\u5230\u5730\u70B9\u201C${name}\u201D`);
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${p.latitude}&longitude=${p.longitude}&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,precipitation&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=${Math.min(7, Math.max(1, days))}`;
+        return (qweather ? `\u548C\u98CE\u5929\u6C14\u6682\u65F6\u4E0D\u53EF\u7528\uFF0C\u5DF2\u6539\u7528Open-Meteo${failureKind(firstErr) === "auth" ? "\uFF1B\u8BF7\u5728\u8BBE\u7F6E\u4E2D\u68C0\u67E5\u548C\u98CE\u6388\u6743\u6216\u989D\u5EA6" : ""}\u3002
+` : "") + formatOpenMeteo(p, await json(url, activeSignal), days, url);
+      }, { signal, timeoutMs: WEATHER_SOURCE_MS.openMeteo, health, ignoreCooling });
     } catch (e) {
       throwControl(e, signal);
       firstErr = e;
     }
+    try {
+      return await weatherProvider("weather_wttr", async (activeSignal) => "\u524D\u9762\u7684\u5929\u6C14\u6765\u6E90\u6682\u65F6\u4E0D\u53EF\u7528\uFF0C\u5DF2\u6539\u7528wttr.in\u3002\n" + formatWttr(name, await json(`https://wttr.in/${encodeURIComponent(name)}?format=j1&lang=zh`, activeSignal), days, `https://wttr.in/${encodeURIComponent(name)}?lang=zh`), { signal, timeoutMs: WEATHER_SOURCE_MS.wttr, health, ignoreCooling });
+    } catch (e) {
+      throwControl(e, signal);
+      throw Object.assign(new Error("\u5929\u6C14\u670D\u52A1\u8BBF\u95EE\u5931\u8D25\uFF08" + firstErr?.message + "\uFF1B" + e.message + "\uFF09\uFF0C\u53EF\u4EE5\u6539\u7528web_search\u67E5\u8BE2"), { code: e.code || "WEATHER_FAILED", kind: errorKind(e) || "api", status: e.status, cause: e });
+    }
   }
-  try {
-    return await weatherProvider("weather_openmeteo", async (activeSignal) => {
-      const geo = await json(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=zh&format=json`, activeSignal);
-      throwControl(null, activeSignal);
-      const p = geo.results?.[0];
-      if (!p) throw new Error(`\u6CA1\u627E\u5230\u5730\u70B9\u201C${name}\u201D`);
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${p.latitude}&longitude=${p.longitude}&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,precipitation&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=${Math.min(7, Math.max(1, days))}`;
-      return (qweather ? `\u548C\u98CE\u5929\u6C14\u6682\u65F6\u4E0D\u53EF\u7528\uFF0C\u5DF2\u6539\u7528Open-Meteo${failureKind(firstErr) === "auth" ? "\uFF1B\u8BF7\u5728\u8BBE\u7F6E\u4E2D\u68C0\u67E5\u548C\u98CE\u6388\u6743\u6216\u989D\u5EA6" : ""}\u3002
-` : "") + formatOpenMeteo(p, await json(url, activeSignal), days, url);
-    }, { signal, timeoutMs: WEATHER_SOURCE_MS.openMeteo, health });
-  } catch (e) {
-    throwControl(e, signal);
-    firstErr = e;
-  }
-  try {
-    return await weatherProvider("weather_wttr", async (activeSignal) => "\u524D\u9762\u7684\u5929\u6C14\u6765\u6E90\u6682\u65F6\u4E0D\u53EF\u7528\uFF0C\u5DF2\u6539\u7528wttr.in\u3002\n" + formatWttr(name, await json(`https://wttr.in/${encodeURIComponent(name)}?format=j1&lang=zh`, activeSignal), days, `https://wttr.in/${encodeURIComponent(name)}?lang=zh`), { signal, timeoutMs: WEATHER_SOURCE_MS.wttr, health });
-  } catch (e) {
-    throwControl(e, signal);
-    throw Object.assign(new Error("\u5929\u6C14\u670D\u52A1\u8BBF\u95EE\u5931\u8D25\uFF08" + firstErr?.message + "\uFF1B" + e.message + "\uFF09\uFF0C\u53EF\u4EE5\u6539\u7528web_search\u67E5\u8BE2"), { code: e.code || "WEATHER_FAILED", kind: errorKind(e) || "api", status: e.status, cause: e });
-  }
+}
+var PROVINCE_CAPITALS = { \u6CB3\u5317: "\u77F3\u5BB6\u5E84", \u5C71\u897F: "\u592A\u539F", \u8FBD\u5B81: "\u6C88\u9633", \u9ED1\u9F99\u6C5F: "\u54C8\u5C14\u6EE8", \u6C5F\u82CF: "\u5357\u4EAC", \u6D59\u6C5F: "\u676D\u5DDE", \u5B89\u5FBD: "\u5408\u80A5", \u798F\u5EFA: "\u798F\u5DDE", \u6C5F\u897F: "\u5357\u660C", \u5C71\u4E1C: "\u6D4E\u5357", \u6CB3\u5357: "\u90D1\u5DDE", \u6E56\u5317: "\u6B66\u6C49", \u6E56\u5357: "\u957F\u6C99", \u5E7F\u4E1C: "\u5E7F\u5DDE", \u6D77\u5357: "\u6D77\u53E3", \u56DB\u5DDD: "\u6210\u90FD", \u8D35\u5DDE: "\u8D35\u9633", \u4E91\u5357: "\u6606\u660E", \u9655\u897F: "\u897F\u5B89", \u7518\u8083: "\u5170\u5DDE", \u9752\u6D77: "\u897F\u5B81", \u53F0\u6E7E: "\u53F0\u5317", \u5185\u8499\u53E4: "\u547C\u548C\u6D69\u7279", \u5E7F\u897F: "\u5357\u5B81", \u897F\u85CF: "\u62C9\u8428", \u5B81\u590F: "\u94F6\u5DDD", \u65B0\u7586: "\u4E4C\u9C81\u6728\u9F50" };
+function provinceCapital(place) {
+  const key = String(place || "").trim().replace(/(?:省|自治区|壮族自治区|回族自治区|维吾尔自治区)$/, "").replace(/(?:壮族|回族|维吾尔)$/, "");
+  return PROVINCE_CAPITALS[key] || "";
 }
 
 // src/agent/stockKline.js
