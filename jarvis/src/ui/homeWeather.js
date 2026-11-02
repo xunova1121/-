@@ -1,6 +1,7 @@
 import { renderWeatherDetails, weatherOverview, weatherTravelAdvice } from './weatherDetails.js';
 import './weatherCard.css';
 import { POPULAR_CITIES, weatherKind, cityKey } from '../core/weather.js';
+import { createWeatherFollow, WEATHER_LOCATION_INTERVAL } from '../core/weatherFollow.js';
 
 export function weatherSVG(kind = 'sun', night = false) {
   const paths = {
@@ -18,15 +19,22 @@ export function weatherSVG(kind = 'sun', night = false) {
 const node = (tag, text, className) =>
   Object.assign(document.createElement(tag), { ...(text !== undefined ? { textContent: text } : {}), ...(className ? { className } : {}) });
 const degrees = (value) => (typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value)}°` : '—');
-export async function locateWeatherCity() {
+export async function locateWeatherCity({ maximumAge = 0, requestPermission = true } = {}) {
   if (globalThis.Capacitor?.isNativePlatform?.()) {
     const { registerPlugin } = await import('@capacitor/core');
-    const p = await registerPlugin('WeatherLocation').locate();
-    return { name: p.name === '附近' ? '当前位置' : p.name || '当前位置', ...(p.city && {city:p.city}), ...(p.district && {district:p.district}), latitude: p.latitude, longitude: p.longitude, source: 'location' };
+    const p = await registerPlugin('WeatherLocation').locate({ maximumAge, requestPermission });
+    return {
+      name: p.name === '附近' ? '当前位置' : p.name || '当前位置',
+      ...(p.city && { city: p.city }),
+      ...(p.district && { district: p.district }),
+      latitude: p.latitude,
+      longitude: p.longitude,
+      source: 'location'
+    };
   }
   if (!navigator.geolocation) throw new Error('当前环境不支持定位，请手动选城市');
   const p = await new Promise((resolve, reject) =>
-    navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 })
+    navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: false, timeout: 10000, maximumAge })
   ).catch((error) => {
     throw new Error(error.code === 1 ? '定位未允许，可以手动选择城市' : '暂时没有定位结果，可以手动选择城市');
   });
@@ -51,15 +59,25 @@ export async function locationGranted() {
   }
 }
 // 两个坐标相距多少公里（城市范围内够用的近似）
-export const distanceKm = (a, b) =>
-  Math.hypot(a.latitude - b.latitude, (a.longitude - b.longitude) * Math.cos((a.latitude * Math.PI) / 180)) * 111;
+export const distanceKm = (a, b) => Math.hypot(a.latitude - b.latitude, (a.longitude - b.longitude) * Math.cos((a.latitude * Math.PI) / 180)) * 111;
 export const WEATHER_AUTO_REFRESH = 15 * 60 * 1000;
-export const WEATHER_RELOCATE_GAP = 30 * 60 * 1000;
-export const WEATHER_RELOCATE_KM = 2;
+export const WEATHER_RELOCATE_GAP = WEATHER_LOCATION_INTERVAL;
 
-let sessionLocation;
-const locateOnce = () => (sessionLocation ??= locateWeatherCity());
-export function createHomeWeather({ client, onAdvice, onConfigure, locate = locateOnce, checkLocation = locationGranted, quietLocate = locateWeatherCity, now = () => Date.now() } = {}) {
+// 只合并正在进行的首次定位，不把一次坐标永久缓存到整个App会话。
+let pendingLocation;
+const locateOnce = () =>
+  (pendingLocation ??= locateWeatherCity().finally(() => {
+    pendingLocation = null;
+  }));
+export function createHomeWeather({
+  client,
+  onAdvice,
+  onConfigure,
+  locate = locateOnce,
+  checkLocation = locationGranted,
+  quietLocate = locateWeatherCity,
+  now = () => Date.now()
+} = {}) {
   const root = node('section', undefined, 'home-weather');
   root.id = 'homepage-weather';
   root.setAttribute('aria-label', '日期与天气');
@@ -80,6 +98,14 @@ export function createHomeWeather({ client, onAdvice, onConfigure, locate = loca
     searchId = 0,
     locationId = 0,
     previousFocus;
+  let follow,
+    locationNotice = '',
+    latestState,
+    userLocationIntent = 0;
+  const invalidateLocation = () => {
+    userLocationIntent++;
+    follow?.invalidate();
+  };
   const showCities = (rows) => {
     results.replaceChildren();
     for (const city of rows) {
@@ -87,6 +113,7 @@ export function createHomeWeather({ client, onAdvice, onConfigure, locate = loca
       b.type = 'button';
       b.append(node('b', city.name), node('span', city.region || '中国'));
       b.onclick = () => {
+        invalidateLocation();
         dialog.close();
         client.select(city).catch((error) => {
           $('.weather-message').textContent = error.message;
@@ -109,9 +136,13 @@ export function createHomeWeather({ client, onAdvice, onConfigure, locate = loca
   root.querySelector('.home-weather-location').onclick = () => open('city');
   root.querySelector('.home-weather-details').onclick = () => open(client.state.city ? 'detail' : 'city');
   $('.weather-close').onclick = () => dialog.close();
-  $('.weather-configure').onclick = () => { dialog.close(); onConfigure?.(); };
+  $('.weather-configure').onclick = () => {
+    dialog.close();
+    onConfigure?.();
+  };
   $('.weather-change').onclick = () => open('city');
   $('.weather-clear').onclick = () => {
+    invalidateLocation();
     client.clear();
     dialog.close();
   };
@@ -119,7 +150,8 @@ export function createHomeWeather({ client, onAdvice, onConfigure, locate = loca
     const b = $('.weather-refresh');
     b.disabled = true;
     try {
-      await client.refresh({ force: true });
+      const changed = await follow.check({ force: true, foreground: true });
+      if (!changed) await client.refresh({ force: true });
     } finally {
       b.disabled = false;
     }
@@ -148,10 +180,12 @@ export function createHomeWeather({ client, onAdvice, onConfigure, locate = loca
     const b = $('.weather-locate'),
       id = ++locationId;
     b.disabled = true;
+    invalidateLocation();
     $('.weather-message').textContent = '正在获取位置…';
     try {
-      const city = await (locate === locateOnce ? locateWeatherCity() : locate());
+      const city = await (locate === locateOnce ? locateWeatherCity({ maximumAge: 0 }) : locate({ maximumAge: 0 }));
       if (id !== locationId || !dialog.open) return;
+      invalidateLocation();
       dialog.close();
       await client.select(city);
     } catch (error) {
@@ -169,20 +203,24 @@ export function createHomeWeather({ client, onAdvice, onConfigure, locate = loca
   dialog.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') e.stopPropagation();
   });
-  const unsubscribe = client.subscribe((state) => {
+  const render = (state) => {
+    latestState = state;
     // 后台刷新时照常显示上次的数据，不提“缓存”；只有真的没刷新成功才标出来
     const { city, data, status, error } = state,
       stale = !!(state.stale && error),
       kind = weatherKind(data?.code);
     root.querySelector('.home-city b').textContent = city ? (city.district || city.name).replace(/市$/, '') : '选择城市';
     root.querySelector('.home-city b').title = city?.name || '';
-    const locationNote = city?.source === 'location' && !city.district ? (state.locationError || '当前为粗略定位，区县名称暂未解析；可重新定位或手动选择区县。') : '';
-    $('.weather-provider-note').hidden = !data?.providerNote && !locationNote;
-    $('.weather-provider-note').textContent = [data?.providerNote, locationNote].filter(Boolean).join('。');
+    const locationNote =
+      city?.source === 'location' && !city.district ? state.locationError || '当前为粗略定位，区县名称暂未解析；可重新定位或手动选择区县。' : '';
+    $('.weather-provider-note').hidden = !data?.providerNote && !locationNote && !locationNotice;
+    $('.weather-provider-note').textContent = [data?.providerNote, locationNote, locationNotice].filter(Boolean).join('。');
     $('.weather-configure').hidden = !data?.providerNote || !onConfigure;
     root.querySelector('.home-weather-temp').textContent = data ? degrees(data.temp) : '—';
     root.querySelector('.home-weather-condition').textContent = weatherOverview(data, { stale });
-    root.querySelector('.home-weather-details').setAttribute('aria-label', city ? `查看${city.name}天气详情${data ? '，' + degrees(data.temp) : ''}` : '查看天气详情');
+    root
+      .querySelector('.home-weather-details')
+      .setAttribute('aria-label', city ? `查看${city.name}天气详情${data ? '，' + degrees(data.temp) : ''}` : '查看天气详情');
     root.querySelector('.home-weather-location').setAttribute('aria-label', city ? `切换天气位置，当前${city.name}` : '切换天气位置');
     root.querySelector('.home-weather-icon').innerHTML = weatherSVG(data ? kind.icon : 'cloud', data && !data.isDay);
     root.querySelector('.home-weather-summary').textContent = data
@@ -192,13 +230,27 @@ export function createHomeWeather({ client, onAdvice, onConfigure, locate = loca
         : error
           ? '天气暂不可用，点击重试'
           : '选个城市，看看出门的天气';
+    if (locationNotice) root.querySelector('.home-weather-summary').textContent += ' · 位置待更新';
     const advice = weatherTravelAdvice(data, { stale });
     onAdvice?.(advice);
     renderWeatherDetails(dialog, { city, data, status, stale, error, advice }, weatherSVG);
     $('.weather-updated').textContent = data ? `${stale ? '缓存数据 · ' : ''}资料时间 ${data.at.replace('T', ' ')}${error ? ' · ' + error : ''}` : error;
-  });
+  };
+  const unsubscribe = client.subscribe(render);
   let autoCancelled = false;
-  // 只在第一次打开首页时定位一次；之后用记住的城市，不再每次打开都弹定位确认。要更新位置点“使用当前位置”。
+  const active = () => !autoCancelled && (globalThis.__jarvisForeground === true || (!document.hidden && globalThis.__jarvisForeground !== false));
+  follow = createWeatherFollow({
+    client,
+    locate: quietLocate,
+    checkPermission: checkLocation,
+    now,
+    active,
+    onNotice: (text) => {
+      locationNotice = text;
+      render(latestState || client.state);
+    }
+  });
+  // 仅首次无城市时申请权限；之后在已授权的前台静默检查，不重复弹授权框。
   let attempted = false;
   try {
     attempted = localStorage.getItem('jarvis.weather.locationAsked.v1') === '1';
@@ -207,6 +259,7 @@ export function createHomeWeather({ client, onAdvice, onConfigure, locate = loca
   }
   const originalCity = client.state.city,
     originalKey = originalCity ? cityKey(originalCity) : '';
+  const initialIntent = userLocationIntent;
   if (!originalCity && !attempted) {
     try {
       localStorage.setItem('jarvis.weather.locationAsked.v1', '1');
@@ -214,55 +267,52 @@ export function createHomeWeather({ client, onAdvice, onConfigure, locate = loca
     locate()
       .then((city) => {
         const current = client.state.city;
-        if (!autoCancelled && ((!originalCity && !current) || (current?.source === 'location' && cityKey(current) === originalKey))) return client.select(city);
+        if (
+          !autoCancelled &&
+          initialIntent === userLocationIntent &&
+          ((!originalCity && !current) || (current?.source === 'location' && cityKey(current) === originalKey))
+        )
+          return client.select(city);
       })
       .catch(() => {
         if (!autoCancelled && !client.state.city) root.querySelector('.home-weather-summary').textContent = '定位暂不可用，可以手动选城市';
       });
   }
-  // 后台定位：只对“当前位置”定位来的城市，已授权才做，30 分钟最多一次；挪动超过 2 公里才换，换失败就留在原地
-  let lastLocate = 0,
-    locating = false;
-  async function silentLocate() {
-    const city = client.state.city;
-    if (autoCancelled || locating || city?.source !== 'location' || now() - lastLocate < WEATHER_RELOCATE_GAP) return false;
-    locating = true;
-    lastLocate = now();
-    try {
-      if (!(await checkLocation())) return false;
-      const next = await quietLocate();
-      const current = client.state.city;
-      if (autoCancelled || current?.source !== 'location' || cityKey(current) !== cityKey(city)) return false;
-      if (!next || distanceKm(current, next) < WEATHER_RELOCATE_KM) return false;
-      return await client.relocate(next);
-    } catch {
-      return false;
-    } finally {
-      locating = false;
-    }
-  }
-  const tick = () => {
-    if (document.hidden || !root.isConnected) return;
-    client.refresh();
-    silentLocate();
+  const silentLocate = (options) => follow.check(options);
+  const tick = (foreground = false) => {
+    if (!active() || !root.isConnected) return;
+    if (!follow.busy) client.refresh();
+    silentLocate({ foreground });
   };
   const foreground = () => {
-    if (!document.hidden && root.isConnected) tick();
+    if (active()) tick(true);
+    else follow.cancel();
+  };
+  const nativeForeground = (event) => {
+    if (event.detail?.active === true) foreground();
+    else if (event.detail?.active === false) follow.cancel();
   };
   document.addEventListener('visibilitychange', foreground);
-  const timer = setInterval(tick, WEATHER_AUTO_REFRESH);
+  globalThis.addEventListener('jarvis:foreground', nativeForeground);
+  const timer = setInterval(() => tick(), WEATHER_AUTO_REFRESH);
+  const locationTimer = setInterval(() => {
+    if (active() && root.isConnected) silentLocate();
+  }, WEATHER_LOCATION_INTERVAL);
   client.refresh();
-  if (originalCity) silentLocate();
+  if (originalCity && active()) silentLocate({ foreground: true });
   return {
     silentLocate,
     root,
     destroy() {
       autoCancelled = true;
+      follow.destroy();
       unsubscribe();
       searchId++;
       locationId++;
       searchCtrl?.abort();
       document.removeEventListener('visibilitychange', foreground);
+      globalThis.removeEventListener('jarvis:foreground', nativeForeground);
+      clearInterval(locationTimer);
       clearInterval(timer);
       dialog.remove();
     }

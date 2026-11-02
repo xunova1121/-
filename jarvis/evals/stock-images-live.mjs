@@ -17,7 +17,7 @@ function stockMediaUrl(value) {
 }
 const safeLink = value => {try {const url=new URL(value);return url.protocol==='https:' && !url.username && !url.password ? url.href : '';}catch{return '';}};
 const genericStockQuery = request => {
-  const scenes = [[/足球|球场|赛程|football|stadium/i,'empty football stadium'],[/农业|农田|agriculture|field/i,'agriculture field'],[/医疗|医院|hospital/i,'hospital building'],[/城市|city|skyline/i,'city skyline'],[/办公|商务|会议|office|workspace/i,'office workspace'],[/教育|学校|classroom/i,'classroom']];
+  const scenes = [[/足球|球场|赛程|football|stadium/i,'empty football stadium'],[/农业|农田|agriculture|field/i,'agriculture field'],[/医疗|医院|hospital/i,'hospital building'],[/城市|city|skyline/i,'city skyline'],[/办公|商务|会议|公司|企业|团队|office|workspace|company|business/i,'office workspace'],[/教育|学校|classroom/i,'classroom']];
   return scenes.find(([pattern]) => pattern.test(request))?.[1] || '';
 };
 const sensitiveStockRequest = request => /真实人物|具体人物|新闻现场|赛事现场|球员照片|明星照片|肖像|梅西|C罗|习近平|特朗普|(?:real|specific)\s+(?:person|player)|news\s+photo/i.test(request);

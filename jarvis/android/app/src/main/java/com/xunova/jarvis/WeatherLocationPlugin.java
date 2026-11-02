@@ -23,7 +23,10 @@ public class WeatherLocationPlugin extends Plugin {
     private PluginCall pending;
     private Runnable timeout;
     @PluginMethod public void locate(PluginCall call){
-        if(getPermissionState("location")!=PermissionState.GRANTED){requestPermissionForAlias("location",call,"permissionResult");return;}
+        if(getPermissionState("location")!=PermissionState.GRANTED){
+            if(!call.getBoolean("requestPermission",true)){call.reject("定位尚未授权", "WEATHER_LOCATION_PERMISSION");return;}
+            requestPermissionForAlias("location",call,"permissionResult");return;
+        }
         getActivity().runOnUiThread(()->begin(call));
     }
     @PermissionCallback private void permissionResult(PluginCall call){
@@ -33,20 +36,25 @@ public class WeatherLocationPlugin extends Plugin {
     private void clean(){if(manager!=null&&listener!=null)try{manager.removeUpdates(listener);}catch(Exception ignored){}listener=null;if(timeout!=null)handler.removeCallbacks(timeout);timeout=null;}
     private void fail(String text){PluginCall call=pending;pending=null;clean();if(call!=null)call.reject(text);}
     private void begin(PluginCall call){
-        if(pending!=null){call.reject("正在获取位置，请稍候");return;}
+        if(pending!=null){
+            if(!WeatherLocationPolicy.canReplace(call.getBoolean("requestPermission",true))){call.reject("正在获取位置，请稍候", "WEATHER_LOCATION_BUSY");return;}
+            PluginCall old=pending;pending=null;clean();old.reject("定位请求已由新的手动定位替换", "WEATHER_LOCATION_REPLACED");
+        }
         pending=call;
         try{
             manager=(LocationManager)getContext().getSystemService(android.content.Context.LOCATION_SERVICE);
             if(manager==null||!manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)){fail("请打开系统定位，或手动选择城市");return;}
             timeout=()->fail("暂时没有定位结果，可以手动选择城市");handler.postDelayed(timeout,12000);
             Location last=manager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
-            if(last!=null&&android.os.SystemClock.elapsedRealtimeNanos()-last.getElapsedRealtimeNanos()>=0&&android.os.SystemClock.elapsedRealtimeNanos()-last.getElapsedRealtimeNanos()<600000000000L){finish(last);return;}
-            listener=new LocationListener(){public void onLocationChanged(Location p){finish(p);}public void onProviderDisabled(String p){fail("系统定位已关闭，可以手动选择城市");}public void onProviderEnabled(String p){}public void onStatusChanged(String p,int s,Bundle b){}};
-            manager.requestSingleUpdate(LocationManager.NETWORK_PROVIDER,listener,Looper.getMainLooper());
+            long cacheAge=WeatherLocationPolicy.cacheAge(call.getData().opt("maximumAge"));
+            if(last!=null&&WeatherLocationPolicy.fresh(last.getElapsedRealtimeNanos(),android.os.SystemClock.elapsedRealtimeNanos(),cacheAge)){finish(call,last);return;}
+            // 过滤系统迟到的旧定位；拿到新鲜结果立即removeUpdates，最多等12秒。
+            listener=new LocationListener(){public void onLocationChanged(Location p){if(pending==call&&WeatherLocationPolicy.fresh(p.getElapsedRealtimeNanos(),android.os.SystemClock.elapsedRealtimeNanos(),WeatherLocationPolicy.MAX_AGE_MS))finish(call,p);}public void onProviderDisabled(String p){if(pending==call)fail("系统定位已关闭，可以手动选择城市");}public void onProviderEnabled(String p){}public void onStatusChanged(String p,int s,Bundle b){}};
+            manager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER,0L,0f,listener,Looper.getMainLooper());
         }catch(Exception error){fail("暂时无法定位，可以手动选择城市");}
     }
-    private void finish(Location location){
-        final PluginCall call=pending;if(call==null)return;clean();
+    private void finish(final PluginCall call,Location location){
+        if(pending!=call)return;clean();
         // 系统地理编码保留真实区县；无结果时交给和风坐标解析，不猜测行政区。
         timeout=()->resolve(call,location,"当前位置","","");handler.postDelayed(timeout,2500);
         new Thread(()->{
@@ -64,5 +72,6 @@ public class WeatherLocationPlugin extends Plugin {
         },"weather-city").start();
     }
     private void resolve(PluginCall call,Location p,String place,String city,String district){if(pending!=call)return;pending=null;clean();JSObject result=new JSObject();result.put("name",place);result.put("city",city);result.put("district",district);result.put("latitude",Math.round(p.getLatitude()*100.0)/100.0);result.put("longitude",Math.round(p.getLongitude()*100.0)/100.0);call.resolve(result);}
+    @Override protected void handleOnPause(){fail("已暂停定位，回到前台后重新检查");super.handleOnPause();}
     @Override protected void handleOnDestroy(){fail("定位已取消");super.handleOnDestroy();}
 }

@@ -332,7 +332,9 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         ctx.documentContentReview.business = 'needs_recheck';
       }
       const r = await deliverDocument(ctx, out, target, { progress, signal, checkpoint, plan, issues: lint(format, finalContent, { kind: design.kind }), generatorReview: looked, requirements: goal || requirements, preservation, design: sheetDesign || design });
+      const stockNotes = /图库|pixabay|pexels|unsplash|openverse/i.test(goal) ? [...new Set(imagePlan.map(page => page.stockIssue).filter(Boolean))].slice(0,3) : [];
       const notes = [
+        ...(stockNotes.length ? ['图库取图说明：'+stockNotes.join('；')] : []),
         ...(imagePlan.length ? [`配图计划${imagePlan.length}段，来源顺序：用户指定图片、已有图表/图标、已验证图库、AI配图；成功资产缓存复用，实际页数与图片以读回回执为准`] : []),
         ...(out.info?.imageLayouts?.length ? ['逐页图片版式：' + out.info.imageLayouts.map(p => `第${p.page}页 ${p.name}${p.imageSide === 'left' ? '（左图）' : p.imageSide === 'right' ? '（右图）' : ''}：${p.reason}`).join('；')] : []),
         `主题：${out.theme.name}`,

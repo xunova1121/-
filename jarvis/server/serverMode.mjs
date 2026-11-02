@@ -1,3 +1,4 @@
+import { stockDiagnostic } from '../src/agent/stockImageDiagnostics.js';
 import { createStockImages } from './stockImages.mjs';
 import { STOCK_KEY_FIELDS, STOCK_PROVIDERS } from '../src/agent/stockImageSources.js';
 import { publicDataHosts } from '../src/agent/publicJson.js';
@@ -248,7 +249,12 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       if (!STOCK_PROVIDERS.includes(body.provider)) { json(res, 400, { error: '图库名称不支持' }); return true; }
       const original = loadConfig();
       const service = createStockImages({ getConfig: () => original, fetchImpl: publicFetch });
-      const result = await service.probe(body.provider, { signal: AbortSignal.timeout(25000) });
+      let result;
+      try { result = await service.probe(body.provider, { signal: AbortSignal.timeout(25000) }); }
+      catch (error) {
+        const detail = stockDiagnostic(error, { provider:body.provider, phase:'api' });
+        json(res, 502, { error:detail.note, ...detail }); return true;
+      }
       const cfg = loadConfig();
       if (cfg[body.provider + 'Key'] !== original[body.provider + 'Key']) { json(res, 409, { error: '检测期间密钥已改变，请重新检测' }); return true; }
       saveConfig({ ...cfg, stockVerified: { ...cfg.stockVerified, [body.provider]: result } });

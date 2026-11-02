@@ -24,15 +24,23 @@ export function normalizeCities(raw){return(Array.isArray(raw?.results)?raw.resu
 export function createWeatherClient({fetchImpl=(...a)=>fetch(...a),storage,direct=true,now=()=>Date.now(),qweather=()=>null,transport=()=>null}={}){
   if(storage===undefined)try{storage=globalThis.localStorage;}catch{storage=null;}
   const read=key=>{try{return JSON.parse(storage?.getItem(key)||'null');}catch{return null;}},write=(key,value)=>{try{storage?.setItem(key,JSON.stringify(value));}catch{}};
-  const saved=read(CITY_KEY);let state={city:validCity(saved)?{...saved,...(saved.name==='附近'&&{name:'当前位置'})}:null,data:null,status:'empty',stale:false,error:''},generation=0,request=null;const listeners=new Set();
+  const saved=read(CITY_KEY);let state={city:validCity(saved)?{...saved,...(saved.name==='附近'&&{name:'当前位置'})}:null,data:null,status:'empty',stale:false,error:''},generation=0,selectionRevision=0,request=null;const listeners=new Set();
   const emit=()=>{for(const fn of listeners)fn({...state});};
   // 经网关 / 服务器取天气时带上本机填的和风 Key（服务器模式下服务器有自己的 Key，这里没有就不带）
   const qwHeaders=()=>{const qw=qweather();return qw?{'x-qweather-key':qw.key,'x-qweather-host':qw.host}:{};};
   async function json(url,signal){const ctrl=new AbortController(),timeout=setTimeout(()=>ctrl.abort(),12000),cancel=()=>ctrl.abort();signal?.addEventListener('abort',cancel,{once:true});if(signal?.aborted)ctrl.abort();try{const response=await fetchImpl(url,{signal:ctrl.signal,...(direct?{}:{headers:qwHeaders()})});if(!response.ok)throw new Error(`天气服务暂不可用（${response.status}）`);return await response.json();}finally{clearTimeout(timeout);signal?.removeEventListener('abort',cancel);}}
   function cache(scope='',any=false){const saved=read(CACHE_KEY),age=now()-(saved?.data?.fetchedAt??0);if((!any&&((saved?.scope||'')!==scope||(scope===''&&qweather()&&saved?.data?.source!=='qweather')))||saved?.key!==cityKey(state.city)||age<0||age>WEATHER_MAX_AGE)return null;try{const d=saved.data;if(typeof d.at!=='string'||typeof d.isDay!=='boolean'||typeof d.temp!=='number'||!Number.isFinite(d.temp)||!Array.isArray(d.days)||!Number.isFinite(d.offset)||!Number.isFinite(d.fetchedAt)||d.temp< -120||d.temp>80||d.days.length>7||d.days.some(day=>!day||!/^\d{4}-\d{2}-\d{2}$/.test(day.date)||['low','high','code','rain'].some(k=>day[k]!==null&&!Number.isFinite(day[k]))))return null;const date=new Date(now()+d.offset*1000).toISOString().slice(0,10);return{data:d,stale:age>WEATHER_TTL||d.days[0]?.date!==date};}catch{return null;}}
+  // 当前地点/候选新地点共用原来源链路，换位成功前不把旧温度贴到新地点上。
+  async function fetchForCity(city, route, signal) {
+    const qw=!route&&direct?qweather():null;
+    const raw=route?await route.weather(city,signal):qw?await fetchQWeather({...qw,latitude:city.latitude,longitude:city.longitude,fetchImpl,signal}):await json(direct?forecastURL(city):`/api/weather?${new URLSearchParams({latitude:String(city.latitude),longitude:String(city.longitude)})}`,signal);
+    const data=raw?.source==='qweather'?parseQWeather(raw,now()):parseWeather(raw,now());
+    if(data.source==='open-meteo'&&!data.providerNote)data.providerNote='和风天气尚未配置完整，当前显示基础天气';
+    return data;
+  }
   // 无感刷新（用户 2026-11-01）：刷新期间照常显示旧数据；同一城市在另一运行位置的缓存只作刷新期间的占位，失败即丢弃，不当结果
   async function refresh({force=false,keep=false}={}){if(!state.city)return false;const gen=++generation;request?.abort();request=new AbortController();const route=transport(),scope=route?.id||'',city={...state.city},cached=cache(scope),placeholder=cached?null:cache(scope,true)?.data||(keep?state.data:null);state={...state,data:cached?.data||placeholder||null,stale:cached?.stale||false,error:'',status:cached||placeholder?'ready':'loading',refreshing:true};emit();if(cached&&!cached.stale&&!force){state={...state,refreshing:false};await resolveLocation(gen,route,request.signal);return true;}
-    try{const qw=!route&&direct?qweather():null;const raw=route?await route.weather(city,request.signal):qw?await fetchQWeather({...qw,latitude:city.latitude,longitude:city.longitude,fetchImpl,signal:request.signal}):await json(direct?forecastURL(city):`/api/weather?${new URLSearchParams({latitude:String(city.latitude),longitude:String(city.longitude)})}`,request.signal);if(gen!==generation)return;const data=raw?.source==='qweather'?parseQWeather(raw,now()):parseWeather(raw,now());if(data.source==='open-meteo'&&!data.providerNote)data.providerNote='和风天气尚未配置完整，当前显示基础天气';write(CACHE_KEY,{key:cityKey(city),scope,data});state={city:{...state.city},data,stale:false,error:'',status:'ready',refreshing:false};emit();await resolveLocation(gen,route,request.signal);return true;}
+    try{const data=await fetchForCity(city,route,request.signal);if(gen!==generation)return;write(CACHE_KEY,{key:cityKey(city),scope,data});state={city:{...state.city},data,stale:false,error:'',status:'ready',refreshing:false};emit();await resolveLocation(gen,route,request.signal);return true;}
     catch(error){if(gen!==generation)return false;if(keep){state={...state,refreshing:false};return false;}const message=error.status===401?'服务器登录已失效，请重新登录后刷新天气':error.status===502&&route?'服务器天气查询失败，请检查云端和风 Key 与 API Host':'天气暂时连不上，稍后可以重试';state={...state,status:cached?'ready':'error',data:cached?.data||null,stale:!!cached,error:message,refreshing:false};emit();return false;}
   }
   async function resolveLocation(gen, route, signal) {
@@ -50,5 +58,29 @@ export function createWeatherClient({fetchImpl=(...a)=>fetch(...a),storage,direc
       if(gen===generation&&!signal.aborted){state={...state,locationError:'区县名称暂未解析，已按当前坐标查询天气'};emit();}
     }
   }
-  return{get state(){return{...state};},subscribe(fn){listeners.add(fn);fn({...state});return()=>listeners.delete(fn);},refresh,clear(){generation++;request?.abort();try{storage?.removeItem(CITY_KEY);storage?.removeItem(CACHE_KEY);}catch{}state={city:null,data:null,status:'empty',stale:false,error:''};emit();},async relocate(city){if(!validCity(city))return false;const prev=state.city,prevData=state.data,prevStale=state.stale;if(prev&&cityKey(prev)===cityKey(city))return false;state={...state,city:{...city,name:city.name.trim()}};const ok=await refresh({keep:true});if(ok){write(CITY_KEY,state.city);return true;}if(cityKey(state.city)===cityKey(city)){state={...state,city:prev,data:prevData,stale:prevStale,status:prevData?'ready':state.status,refreshing:false};emit();}return false;},async select(city){if(!validCity(city))throw new Error('城市位置无效');state={city:{...city,name:city.name.trim()},data:null,stale:false,status:'loading',error:''};write(CITY_KEY,state.city);emit();await refresh();},async search(query,signal){const q=String(query).trim();if(q.length<2)return[];const local=POPULAR_CITIES.filter(c=>c.name.includes(q));if(local.length)return local;const route=transport();if(route)return normalizeCities(await route.cities(q,signal));const qw=direct?qweather():null;if(qw)return lookupQWeatherCity({...qw,query:q,fetchImpl,signal});const raw=await json(direct?geocodingURL(q):`/api/weather/cities?${new URLSearchParams({q})}`,signal);return normalizeCities(raw);}};
+  return{get state(){return{...state};},get selectionRevision(){return selectionRevision;},subscribe(fn){listeners.add(fn);fn({...state});return()=>listeners.delete(fn);},refresh,clear(){selectionRevision++;generation++;request?.abort();try{storage?.removeItem(CITY_KEY);storage?.removeItem(CACHE_KEY);}catch{}state={city:null,data:null,status:'empty',stale:false,error:''};emit();},async relocate(city,{signal}={}){
+    if(signal?.aborted||!validCity(city))return false;
+    const previous={...state},prev=state.city;
+    if(prev&&cityKey(prev)===cityKey(city)){
+      const name=['当前位置','附近'].includes(city.name)?prev.name:city.name.trim();
+      const next={...prev,...city,name,...(!city.district&&prev.district?{district:prev.district}:{}),...(!city.city&&prev.city?{city:prev.city}:{})};
+      if(next.name===prev.name&&next.district===prev.district&&next.city===prev.city&&next.source===prev.source)return false;
+      selectionRevision++;generation++;request?.abort();state={...state,city:next,refreshing:false,...(next.district?{locationError:''}:{})};write(CITY_KEY,next);emit();return true;
+    }
+    const gen=++generation;request?.abort();request=new AbortController();
+    const control=request,route=transport(),scope=route?.id||'',next={...city,name:city.name.trim()};
+    const cancel=()=>control.abort(signal?.reason);signal?.addEventListener('abort',cancel,{once:true});if(signal?.aborted)cancel();
+    state={...state,refreshing:true};emit();
+    try{
+      const data=await fetchForCity(next,route,control.signal);
+      control.signal.throwIfAborted();
+      if(gen!==generation)return false;
+      write(CACHE_KEY,{key:cityKey(next),scope,data});
+      selectionRevision++;state={city:next,data,stale:false,error:'',status:'ready',refreshing:false};write(CITY_KEY,next);emit();
+      await resolveLocation(gen,route,control.signal);return gen===generation;
+    }catch{
+      if(gen===generation){state={...previous,refreshing:false};emit();}
+      return false;
+    }finally{signal?.removeEventListener('abort',cancel);}
+  },async select(city){if(!validCity(city))throw new Error('城市位置无效');selectionRevision++;state={city:{...city,name:city.name.trim()},data:null,stale:false,status:'loading',error:''};write(CITY_KEY,state.city);emit();await refresh();},async search(query,signal){const q=String(query).trim();if(q.length<2)return[];const local=POPULAR_CITIES.filter(c=>c.name.includes(q));if(local.length)return local;const route=transport();if(route)return normalizeCities(await route.cities(q,signal));const qw=direct?qweather():null;if(qw)return lookupQWeatherCity({...qw,query:q,fetchImpl,signal});const raw=await json(direct?geocodingURL(q):`/api/weather/cities?${new URLSearchParams({q})}`,signal);return normalizeCities(raw);}};
 }

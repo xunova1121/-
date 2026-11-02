@@ -2,6 +2,7 @@ import * as ws from './workspace.js';
 import { parseSlides } from './pptxWriter.js';
 import { slideBudget } from './documentPageBudget.js';
 import { asksForImages, requiresEverySlideImage, wantsEverySlideImage } from './presentationReceipt.js';
+import { stockDiagnostic } from './stockImageDiagnostics.js';
 import { imageInfo } from './imageInfo.js';
 import { throwControl } from '../core/networkRequest.js';
 import { selectPictureLayout, pictureRequestSize } from './pptImageLayout.js';
@@ -74,11 +75,11 @@ export async function preparePresentationImages(ctx, content, options, execution
     // 已接入且通过国内探测的图库可在这里提供真实工作区图片；未配置时不伪造来源。
     if (ctx.stockImageForSlide && !/只(?:用|使用).{0,6}AI/i.test(requirements)) {
       try {
-        const stock = await ctx.stockImageForSlide({query:page.title,slot:page.slot,size:page.size,aspectRatio:page.requiredRatio,layout:page.layout,signal,retrieval});
+        const stock = await ctx.stockImageForSlide({query:`${title} ${page.title}`.slice(0,160),slot:page.slot,size:page.size,aspectRatio:page.requiredRatio,layout:page.layout,signal,retrieval,onDiagnostic:detail=>{if(!page.stockIssue)page.stockIssue=stockDiagnostic({...detail,status:detail.upstreamStatus}).note;}});
         if (stock?.path) return {path:stock.path,source:'stock',credit:stock.credit};
-      } catch(error) { throwControl(error,signal); }
+      } catch(error) { throwControl(error,signal);page.stockIssue=stockDiagnostic(error,{phase:'api'}).note; }
     }
-    if (noAI) throw new Error('未取得符合指定来源的图片，未用AI替代');
+    if (noAI) throw new Error((page.stockIssue||'未取得符合指定来源的图片')+'；未用AI替代');
     if (!ctx.imageGen) throw new Error('画图能力未配置，保留本页内容；配图未完成');
     progress?.(`生成配图：${page.title}（最多2路并发）`);
     const result = await ctx.imageGen({prompt:imagePrompt,size:page.size,outputFormat:'png',signal,beforeRequest:()=>retrieval?.consume('model')});

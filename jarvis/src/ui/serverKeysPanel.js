@@ -9,42 +9,115 @@ const mask = (value) => (!value ? '' : String(value).startsWith('••••') 
 export function serverKeysPanel({ cfg, workspace, node }) {
   const where = workspace.scope === 'server' ? '云服务器' : '本机';
   const field = (label, value, hint) => {
-    const input = node('input', { type: 'password', autocomplete: 'off', ariaLabel: label, maxLength: 512, placeholder: value ? `已配置（${mask(value)}）；留空保留` : '未配置' });
-    return { input, row: node('label', { className: 'ml-field' }, node('span', { textContent: label }), input, node('small', { className: 'ml-muted', textContent: hint })) };
+    const input = node('input', {
+      type: 'password',
+      autocomplete: 'off',
+      ariaLabel: label,
+      maxLength: 512,
+      placeholder: value ? `已配置（${mask(value)}）；留空保留` : '未配置'
+    });
+    return {
+      input,
+      row: node('label', { className: 'ml-field' }, node('span', { textContent: label }), input, node('small', { className: 'ml-muted', textContent: hint }))
+    };
   };
   const fields = {
     bochaKey: field('博查搜索 Key', cfg.bochaKey, 'DeepSeek 搜索没开或失败时的备用（国内，中文结果好）；不填就退回免费的必应、百度。申请：open.bochaai.com'),
-    falKey: field('fal.ai Key（唱歌）', cfg.falKey, '让未央把写好的歌唱出来，按次收费（约 0.03 美元一首）。fal 在海外，国内网络可能连不上。申请：fal.ai/dashboard/keys'),
+    falKey: field(
+      'fal.ai Key（唱歌）',
+      cfg.falKey,
+      '让未央把写好的歌唱出来，按次收费（约 0.03 美元一首）。fal 在海外，国内网络可能连不上。申请：fal.ai/dashboard/keys'
+    ),
     tavilyKey: field('Tavily 搜索 Key', cfg.tavilyKey, '国外资料多时用（英文结果好）。申请：app.tavily.com'),
-    qweatherKey: field('和风天气 Key', cfg.qweatherKey, '填了以后天气用和风（国内快，有空气质量、逐小时、7 天、生活指数、预警）；不填用免费的 Open-Meteo。申请：console.qweather.com →“项目管理”创建项目和 API KEY')
+    qweatherKey: field(
+      '和风天气 Key',
+      cfg.qweatherKey,
+      '填了以后天气用和风（国内快，有空气质量、逐小时、7 天、生活指数、预警）；不填用免费的 Open-Meteo。申请：console.qweather.com →“项目管理”创建项目和 API KEY'
+    )
   };
   if (workspace.scope === 'server') {
-    for (const name of ['pexels', 'pixabay', 'unsplash']) fields[name + 'Key'] = field(name + ' 图库 Key', cfg[name + 'Key'], '仅保存在服务器；保存后需通过国内连接检测才启用，图片按来源许可署名。');
+    for (const name of ['pexels', 'pixabay', 'unsplash'])
+      fields[name + 'Key'] = field(name + ' 图库 Key', cfg[name + 'Key'], '仅保存在服务器；保存后需通过国内连接检测才启用，图片按来源许可署名。');
   }
   const stockControls = [];
+  const stockStates = new Map();
+  const stockConfigured = new Set(['pexels', 'pixabay', 'unsplash'].filter((provider) => !!cfg[provider + 'Key']));
+  const needsProbe = (provider) => {
+    const providerStatus = stockStates.get(provider);
+    if (providerStatus) providerStatus.textContent = 'Key已保存，尚未检测通过';
+  };
   if (workspace.scope === 'server') {
     const confirmed = node('input', { type: 'checkbox', ariaLabel: '服务器位于国内网络' });
     stockControls.push(node('label', {}, confirmed, node('span', { textContent: '确认服务器位于国内网络（用于图库实测）' })));
     for (const provider of ['pexels', 'pixabay', 'unsplash', 'openverse']) {
       const button = node('button', { type: 'button', className: 'ml-button', textContent: '检测 ' + provider });
-      button.addEventListener('click', async () => {
-        if (!confirmed.checked) { result.textContent = '请先确认服务器网络地区'; return; }
-        button.disabled = true;
-        try { const checked = await workspace.probeStockImages(provider); result.textContent = `${provider} API与图片下载通过：${checked.width}×${checked.height}；已启用`; }
-        catch (error) { result.textContent = error.message; }
-        finally { button.disabled = false; }
+      const providerStatus = node('small', {
+        className: 'ml-muted',
+        textContent:
+          provider !== 'openverse' && !stockConfigured.has(provider)
+            ? '尚未配置Key'
+            : cfg.stockVerified?.[provider]?.ok
+              ? '连接检测已通过，已启用'
+              : '尚未检测通过'
       });
-      stockControls.push(button);
+      stockStates.set(provider, providerStatus);
+      button.addEventListener('click', async () => {
+        if (!confirmed.checked) {
+          result.textContent = '请先确认服务器网络地区';
+          return;
+        }
+        button.disabled = true;
+        try {
+          const input = fields[provider + 'Key']?.input,
+            key = input?.value.trim();
+          // 填完直接点检测时先保存本库Key，不能拿服务器上旧Key检测；不碰其他服务字段。
+          if (key) {
+            await workspace.patch((value) => ({ ...value, [provider + 'Key']: key }));
+            input.value = '';
+            stockConfigured.add(provider);
+            needsProbe(provider);
+          }
+          const checked = await workspace.probeStockImages(provider);
+          providerStatus.textContent = '连接检测已通过，已启用';
+          result.textContent = `${provider} API与图片下载通过：${checked.width}×${checked.height}；已启用`;
+        } catch (error) {
+          providerStatus.textContent = '本次检测未通过';
+          result.textContent = error.message;
+        } finally {
+          button.disabled = false;
+        }
+      });
+      stockControls.push(node('div', {}, button, providerStatus));
     }
   }
   // API Host 不是密钥：明文显示，方便核对
-  const hostInput = node('input', { type: 'text', autocomplete: 'off', ariaLabel: '和风天气 API Host', maxLength: 120, placeholder: '如 abc123xyz.re.qweatherapi.com', value: cfg.qweatherHost || '' });
-  const hostRow = node('label', { className: 'ml-field' }, node('span', { textContent: '和风天气 API Host' }), hostInput, node('small', { className: 'ml-muted', textContent: '控制台“设置”页里的 API Host，每个账号不一样' }));
+  const hostInput = node('input', {
+    type: 'text',
+    autocomplete: 'off',
+    ariaLabel: '和风天气 API Host',
+    maxLength: 120,
+    placeholder: '如 abc123xyz.re.qweatherapi.com',
+    value: cfg.qweatherHost || ''
+  });
+  const hostRow = node(
+    'label',
+    { className: 'ml-field' },
+    node('span', { textContent: '和风天气 API Host' }),
+    hostInput,
+    node('small', { className: 'ml-muted', textContent: '控制台“设置”页里的 API Host，每个账号不一样' })
+  );
   const result = node('p', { className: 'ml-muted', role: 'status' });
   const save = node('button', { type: 'button', className: 'ml-button', textContent: `保存到${where}` });
   save.addEventListener('click', async () => {
-    const next = Object.fromEntries(Object.entries(fields).map(([key, f]) => [key, f.input.value.trim()]).filter(([, value]) => value));
-    const host = hostInput.value.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+    const next = Object.fromEntries(
+      Object.entries(fields)
+        .map(([key, f]) => [key, f.input.value.trim()])
+        .filter(([, value]) => value)
+    );
+    const host = hostInput.value
+      .trim()
+      .replace(/^https?:\/\//i, '')
+      .replace(/\/+$/, '');
     if (host !== (cfg.qweatherHost || '')) next.qweatherHost = host;
     if (!Object.keys(next).length) {
       result.textContent = '没有填新的 Key，原来的保持不变';
@@ -54,12 +127,28 @@ export function serverKeysPanel({ cfg, workspace, node }) {
     try {
       await workspace.patch((value) => ({ ...value, ...next }));
       if (next.qweatherKey || 'qweatherHost' in next) globalThis.dispatchEvent(new Event('jarvis:weather-config-changed'));
-      result.textContent = `已保存到${where}`;
+      for (const provider of ['pexels', 'pixabay', 'unsplash'])
+        if (next[provider + 'Key']) {
+          stockConfigured.add(provider);
+          fields[provider + 'Key'].input.value = '';
+          needsProbe(provider);
+        }
+      result.textContent =
+        `已保存到${where}` + (Object.keys(next).some((key) => /^(pexels|pixabay|unsplash)Key$/.test(key)) ? '；图库Key需检测通过后启用' : '');
     } catch (error) {
       result.textContent = error.message;
     } finally {
       save.disabled = false;
     }
   });
-  return node('details', { className: 'ml-copy ml-service-keys' }, node('summary', { textContent: `其他服务的 Key：搜索、唱歌、天气 · ${where}` }), ...Object.values(fields).map((f) => f.row), hostRow, save, ...stockControls, result);
+  return node(
+    'details',
+    { className: 'ml-copy ml-service-keys' },
+    node('summary', { textContent: `其他服务的 Key：搜索、唱歌、天气 · ${where}` }),
+    ...Object.values(fields).map((f) => f.row),
+    hostRow,
+    save,
+    ...stockControls,
+    result
+  );
 }

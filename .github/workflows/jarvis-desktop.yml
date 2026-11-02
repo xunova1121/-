@@ -280,6 +280,7 @@ jobs:
           node e2e/music-card.mjs "$RUNNER_TEMP/jarvis-e2e/music-card"
           node e2e/weather-card.mjs "$RUNNER_TEMP/jarvis-e2e/weather-card"
           node e2e/weather-seamless.mjs "$RUNNER_TEMP/jarvis-e2e/weather-seamless"
+          node e2e/weather-follow.mjs "$RUNNER_TEMP/jarvis-e2e/weather-follow"
           node e2e/weather-server.mjs "$RUNNER_TEMP/jarvis-e2e/weather-server"
           node e2e/sports-card.mjs "$RUNNER_TEMP/jarvis-e2e/sports-card"
           node e2e/sports-layout.mjs "$RUNNER_TEMP/jarvis-e2e/sports-layout"
@@ -383,12 +384,12 @@ jobs:
           make_latest: true
           files: dist/*
           body: |
-            ## 本版更新 · PPT 先定版式再配图
-            - 按正文长度、内容结构和图片比例选择全幅主图、左右分栏或多图排布；连续分栏左右交替，表格和卡片不再挤进旧窄栏。
-            - 图片过量裁切改完整容纳，多图放不下拆续页；文字不低于14磅，指定大字号按实际字号分页，不能满足严格页数会明确说明。
-            - 封面按明暗调整遮罩；交付说明写出逐页图片版式，实际图片面积与裁切比例从PPT读回。
-            - 保留1.0.374的“含图片 / 带图 / 图文并茂”自动配图、图片文件名回退及只展示最终版文件。
-            - 6份固定样例已用LibreOffice转PDF并逐页截图核对，相关回归与浏览器检查通过；尚未在用户服务器用真实模型制作验收，不能把本地固定样例当作真实模型通过。
+            ## 本版更新 · 天气位置跟随与图库检测
+            - 手机回到前台时重新检查当前位置，取消原30分钟 / 2公里限制；前台每5分钟复查，手选城市仍固定不被覆盖。
+            - 新位置天气取到后才一起切换地点和温度；定位或取数失败保留原天气，并提示“位置待更新”。安卓不再复用10分钟前的旧定位，保持一次性粗略定位，不增加后台定位权限。
+            - 图库填入新Key后直接检测会先保存该库Key；显示“已保存 / 尚未检测 / 已启用 / 本次检测失败”，避免配置成功与连接可用混淆。
+            - Pixabay等图库故障区分API、图片下载和看图模型阶段，明确HTTP状态、超时或未验证，不回显Key和第三方原始响应。
+            - 保留1.0.375的PPT图片美学版式、1.0.374含图片自动配图与最终版文件展示。真实手机GPS、用户服务器Pixabay Key与国内网络仍需实测；本地模拟检查不冒充通过。
 
             ## 更新与使用
             先在设置里“立即更新服务器”，再更新电脑和手机。仅安装APK不会替换远端服务器代码。
