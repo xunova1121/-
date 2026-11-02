@@ -117,6 +117,10 @@ try {
       return value.token && !/^[a-f0-9]{64}$/.test(value.token) && globalThis.__jarvisServerMode;
     });
     const migrated = await tokenOf(legacyPage);
+    const gatewayRequest = legacyPage.waitForRequest(request => request.url() === base + '/api/server/status?upgrade-check=1');
+    const gatewayStatus = await legacyPage.evaluate(() => fetch('/api/server/status?upgrade-check=1').then(response => response.status));
+    assert.equal(gatewayStatus, 200);
+    check((await gatewayRequest).headers().authorization === 'Bearer ' + migrated, width + '：同源网关立即使用换发后的凭证');
     await legacyPage.reload();
     await legacyPage.waitForFunction(() => globalThis.__jarvisServerMode);
     check(await tokenOf(legacyPage) === migrated && (await api('/api/sessions', migrated)).status === 200, width + '：旧登录自动换发、刷新仍有效，不输入密码');

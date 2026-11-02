@@ -101,10 +101,11 @@ export function createModels(app) {
   const metrics = () => (app.gateway ? fetch(`${app.gateway.origin}/api/local/metrics`).then((r) => r.json()) : browserMetrics());
   function fetchDeepseek(url, init = {}) {
     const headers = new Headers(init.headers);
-    if (app.gateway?.serverMode && serverCfg.token && normalizeUrl(serverCfg.url) === app.gateway?.origin) {
+    const currentServer = loadServerSettings(storage);
+    if (app.gateway?.serverMode && currentServer.token && normalizeUrl(currentServer.url) === app.gateway?.origin) {
       // 同源服务器的登录凭据不能冒充DeepSeek密钥，也不能被转发给上游。
       headers.set('x-jarvis-search-key', String(headers.get('Authorization') || '').replace(/^Bearer\s+/i, ''));
-      headers.set('Authorization', 'Bearer ' + serverCfg.token);
+      headers.set('Authorization', 'Bearer ' + currentServer.token);
     }
     return fetch(`/api/llm/deepseek/${url.slice('https://api.deepseek.com/v1/'.length)}`, { ...init, headers });
   }
@@ -191,7 +192,9 @@ export function createModels(app) {
       const url = typeof input === 'string' ? input : (input?.url ?? '');
       if (!/^\/api\//.test(url) && !url.startsWith(`${location.origin}/api/`)) return plain(input, init);
       const headers = new Headers(init.headers || (typeof input === 'object' ? input.headers : undefined));
-      if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${serverCfg.token}`);
+      const currentServer = loadServerSettings(storage);
+      if (!headers.has('Authorization') && currentServer.token && normalizeUrl(currentServer.url) === location.origin)
+        headers.set('Authorization', `Bearer ${currentServer.token}`);
       return plain(input, { ...init, headers });
     };
   }
