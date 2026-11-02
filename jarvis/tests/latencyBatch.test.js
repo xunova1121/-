@@ -12,7 +12,7 @@ const context = { dynamic: '虚构测试', kbHits: [] };
 const call = (id, name, args = {}) => ({ id, name, args });
 const long = '真实网页正文材料。'.repeat(100);
 
-it('DeepSeek、直读、代读和重试共用八秒，忽略signal也不死等', async () => {
+it('DeepSeek按新约定等八秒，整轮到点不再启动直读或代读，忽略signal也不死等', async () => {
   vi.useFakeTimers();
   try {
     const calls = [];
@@ -22,8 +22,31 @@ it('DeepSeek、直读、代读和重试共用八秒，忽略signal也不死等',
     await vi.advanceTimersByTimeAsync(7999);expect(settled).toBe(false);
     await vi.advanceTimersByTimeAsync(1);expect((await result).name).toBe('TimeoutError');
     expect(calls.some(x => x.includes('api.deepseek.com'))).toBe(true);
-    expect(calls.some(x => x.includes('tavily.com'))).toBe(true);
+    expect(calls.some(x => x.includes('tavily.com'))).toBe(false);
+    expect(calls).toHaveLength(1);
     const count = calls.length;await vi.advanceTimersByTimeAsync(30000);expect(calls).toHaveLength(count);
+  } finally { vi.useRealTimers(); }
+});
+
+it('DeepSeek早失败时仍会换直读和代读，所有阶段仍共用八秒且到点不追加请求', async () => {
+  vi.useFakeTimers();
+  try {
+    const calls = [];
+    const read = createPageReader({ deepseekSearchEnabled: true, deepseekSearchKey: 'fixture', tavilyKey: 'fixture', fetchViaGateway: url => {
+      calls.push(url);
+      return url.includes('api.deepseek.com') ? Promise.resolve(new Response('fixture forbidden', { status: 403 })) : new Promise(() => {});
+    } });
+    let settled = false;
+    const result = read('https://fixture.example/page').catch(e => e).then(e => { settled = true; return e; });
+    await vi.advanceTimersByTimeAsync(7999);
+    expect(settled).toBe(false);
+    expect(calls.some(url => url.includes('api.deepseek.com'))).toBe(true);
+    expect(calls.some(url => url.includes('tavily.com'))).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await result).name).toBe('TimeoutError');
+    const count = calls.length;
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(calls).toHaveLength(count);
   } finally { vi.useRealTimers(); }
 });
 

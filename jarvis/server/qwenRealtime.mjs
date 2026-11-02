@@ -6,12 +6,14 @@ export function attachQwenGateway(server,{serverMode=null,localAllowed,createUps
   const wss=new WebSocketServer({noServer:true,maxPayload:256*1024,perMessageDeflate:false});
   const clients=new Set();
   server.on('upgrade',(req,socket,head)=>{
-    if(new URL(req.url,'http://localhost').pathname!=='/api/voice/qwen'){socket.destroy();return;}
+    const address=new URL(req.url,'http://localhost');
+    if(address.pathname!=='/api/voice/qwen'){socket.destroy();return;}
+    if(serverMode&&address.searchParams.has('token')){socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');socket.destroy();return;}
     if(clients.size>=8||(!serverMode&&!localAllowed?.(req))){socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');socket.destroy();return;}
     wss.handleUpgrade(req,socket,head,client=>{
       clients.add(client);
-      let upstream,initialized=false,ended=false;
-      const end=()=>{if(ended)return;ended=true;clearTimeout(timer);clearTimeout(idle);clients.delete(client);upstream?.terminate?.();client.close();};
+      let upstream,initialized=false,ended=false,unwatch=()=>{};
+      const end=()=>{if(ended)return;ended=true;unwatch();clearTimeout(timer);clearTimeout(idle);clients.delete(client);upstream?.terminate?.();client.close();};
       const error=()=>{if(client.readyState===WebSocket.OPEN)client.send(JSON.stringify({type:'transport.error'}));end();};
       let idle;
       const touch=()=>{clearTimeout(idle);idle=setTimeout(error,45000);idle.unref?.();};
@@ -22,7 +24,9 @@ export function attachQwenGateway(server,{serverMode=null,localAllowed,createUps
         let msg;try{msg=JSON.parse(raw.toString());}catch{return error();}
         if(!initialized){
           initialized=true;clearTimeout(timer);
-          if(serverMode&&!serverMode.authorized({...req,url:'/api/voice/qwen',headers:{...req.headers,authorization:'Bearer '+String(msg.token||'')}}))return error();
+          const authRequest={...req,url:'/api/voice/qwen',headers:{...req.headers,authorization:'Bearer '+String(msg.token||'')}};
+          if(serverMode&&!serverMode.authorized(authRequest))return error();
+          unwatch=serverMode?.watchAccess?.(authRequest,end)||(()=>{});
           if(!serverMode&&req.headers.origin==='null'&&!msg.key)return error(); // 单文件只准使用自己明确提供的密钥
           let url;try{url=qwenUrl(msg.model,msg.region);}catch{return error();}
           const key=String(msg.key||serverMode?.realtimeKey?.()||process.env.DASHSCOPE_API_KEY||'');

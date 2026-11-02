@@ -21,7 +21,7 @@ import { proxyDeepseekTool } from './deepseekProxy.mjs';
  *   JARVIS_INTERNAL_TOKEN   情绪注入端点的令牌
  *   HOST                    默认 127.0.0.1（只允许本机访问；设为 0.0.0.0 才对局域网开放）
  *   JARVIS_DATA             服务器模式的数据目录（设置了就开启服务器模式）
- *   JARVIS_PASSWORD         服务器模式的访问密码（至少 8 位）
+ *   JARVIS_PASSWORD         服务器模式的访问密码（至少 6 位）
  *   JARVIS_MAX_TASKS        服务器模式同时最多做几个任务（默认 1）
  *   OPENAI_API_KEY / DEEPSEEK_API_KEY / DASHSCOPE_API_KEY / …  各服务商密钥（见 shared/providers.js 的 ENV_KEYS）
  */
@@ -45,7 +45,7 @@ import { createRuntimeReadiness } from './runtimeReadiness.mjs';
 const CORS_PATHS = /^\/api\/(health|readiness|local\/metrics|llm\/.+|tts\/edge|voice\/qwen\/voices)$/;
 /** 服务器模式里允许跨域调用的接口（手机 App、电脑版连自己的服务器） */
 const SERVER_CORS = /^\/api\/(health|server\/.+|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?|work-records(\/[^/]+)?|weather(\/cities)?|sports\/scores|voice\/qwen\/voices)$/;
-export const EXTRA_UPSTREAMS = { tavily: 'https://api.tavily.com', bocha: 'https://api.bochaai.com', elevenlabs: 'https://api.elevenlabs.io', fal: 'https://queue.fal.run' };
+export const EXTRA_UPSTREAMS = { qianfan: 'https://qianfan.baidubce.com', tavily: 'https://api.tavily.com', bocha: 'https://api.bochaai.com', elevenlabs: 'https://api.elevenlabs.io', fal: 'https://queue.fal.run' };
 // 读取网页时用常见浏览器的请求头：不少网站（包括搜索引擎）会拒绝或降级陌生的客户端
 const FETCH_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
@@ -334,11 +334,14 @@ export function createServer({
         if (req.headers.origin && SERVER_CORS.test(pathname)) {
           res.setHeader('Access-Control-Allow-Origin', '*');
           if (req.method === 'OPTIONS') {
-            res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE', 'Access-Control-Allow-Headers': 'authorization, content-type, last-event-id', 'Access-Control-Max-Age': '600' });
+            res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE', 'Access-Control-Allow-Headers': 'authorization, content-type, last-event-id, x-jarvis-device', 'Access-Control-Max-Age': '600' });
             return res.end();
           }
         }
-        if (pathname !== '/api/health' && pathname !== '/api/server/login' && !serverMode.authorized(req)) return json(res, 401, { error: '请先登录', login: true });
+        if (pathname !== '/api/health' && pathname !== '/api/server/login') {
+          const decision = serverMode.access ? await serverMode.access(req) : { status: serverMode.authorized(req) ? 200 : 401 };
+          if (decision.status !== 200) return json(res, decision.status, { error: decision.status === 403 ? '此授权不能访问这项功能' : '请先登录', ...(decision.status === 401 && { login: true }) });
+        }
         if (await serverMode.handle(req, res, pathname)) return;
       }
       if (pathname === '/api/voice/qwen/voices' && req.method === 'GET') {

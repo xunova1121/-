@@ -1,0 +1,11 @@
+.server-security { margin-top: 16px; max-width: 100%; }
+.server-security summary { cursor: pointer; font-weight: 600; }
+.server-security .field { display: grid; gap: 6px; margin: 10px 0; }
+.server-security input, .server-security textarea { width: 100%; min-width: 0; box-sizing: border-box; }
+.server-security-warning { color: #9f1239; }
+.server-security-row { padding: 12px 0; border-bottom: 1px solid rgb(100 116 139 / 20%); overflow-wrap: anywhere; }
+.server-security-row p { margin: 4px 0; }
+.server-security-issued { padding: 12px; border: 1px solid #64748b; border-radius: 12px; margin: 12px 0; }
+.server-security-issued textarea { font: 14px/1.5 monospace; overflow-wrap: anywhere; }
+.toast .toast-action { margin-left: 10px; pointer-events: auto; }
+:root[data-theme='dark'] .server-security-warning { color: #fda4af; }

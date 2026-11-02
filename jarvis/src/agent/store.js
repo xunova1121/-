@@ -70,6 +70,19 @@ export function useBackend(b) { backend = b; }
 /** 某个集合的增删查 */
 export function collection(name) {
   return {
+    /** 长寿命缓存/延迟刷盘绑定创建时的后端，避免异步任务串存储范围。 */
+    bind() {
+      const captured = backend?.scoped?.(name) || backend;
+      if (!captured) return this;
+      return {
+        scopeKey: captured,
+        all: () => captured.all(name),
+        get: id => captured.get(name, id),
+        put: obj => captured.put(name, obj),
+        delete: id => captured.delete(name, id),
+        clear: () => captured.clear(name)
+      };
+    },
     async all() {
       if (backend) return backend.all(name);
       const db = await openDb();

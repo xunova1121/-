@@ -1,3 +1,4 @@
+import { datedSearchHits } from './qianfanSearch.js';
 import { creativeWithoutLookup } from '../core/imageFollowup.js';
 /** 机械筛查只排除明显错题，不把摘要当作已经核实的事实。 */
 export function requiresSources(text = '') {
@@ -19,8 +20,9 @@ export function searchRequest(query, requestText = '', freshness, now = Date.now
 
 export function screenSearchHits(hits, requestText = '') {
   const input = Array.isArray(hits) ? hits.slice(0, 20) : [];
-  if (!newsToday(String(requestText))) return { hits: input, rejected: 0 };
-  const kept = input.filter((hit) => {
+  const dated = input.filter(hit => datedSearchHits([hit], requestText).length > 0);
+  if (!newsToday(String(requestText))) return { hits: dated, rejected: input.length - dated.length };
+  const kept = dated.filter((hit) => {
     const title = String(hit.title || '').trim();
     // 年度日历、概况、往年节假日通知不能充当今日新闻；真实当日报道仍保留。
     const reference = /^\d{4}年(?:概况|日历|节假日|全年|放假安排)|关于\d{4}年部分节假日安排/.test(title);

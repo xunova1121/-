@@ -1,5 +1,6 @@
 /** 登录后主动测试固定公开内容，最多两个并发；不回传密钥或网页正文。 */
 import { testDeepseekSearch } from '../src/agent/deepseekSearch.js';
+import { testQianfanSearch } from '../src/agent/qianfanSearch.js';
 import { publicFetch } from './taskRunner.mjs';
 
 export function createSearchTest({ getConfig, readJson, json, fetchViaGateway = publicFetch }) {
@@ -12,11 +13,13 @@ export function createSearchTest({ getConfig, readJson, json, fetchViaGateway = 
     active++;
     try {
       const { kind } = await readJson(req, 4096);
-      const result = await testDeepseekSearch(getConfig(), kind, { signal: controller.signal, fetchViaGateway });
+      const result = kind === 'qianfan'
+        ? await testQianfanSearch(getConfig(), { signal: controller.signal, fetchViaGateway })
+        : await testDeepseekSearch(getConfig(), kind, { signal: controller.signal, fetchViaGateway });
       json(res, 200, result);
     } catch (error) {
       if (error.name === 'AbortError' || error.code === 'RETRIEVAL_BUDGET') throw error;
-      const configuration = ['INVALID_SEARCH_TEST', 'DEEPSEEK_SEARCH_DISABLED', 'DEEPSEEK_SEARCH_KEY_MISSING'].includes(error.code);
+      const configuration = ['INVALID_SEARCH_TEST', 'DEEPSEEK_SEARCH_DISABLED', 'DEEPSEEK_SEARCH_KEY_MISSING', 'QIANFAN_KEY_MISSING'].includes(error.code);
       // 服务商鉴权失败不能让客户端误以为未央登录已过期。
       json(res, configuration ? 400 : error.name === 'TimeoutError' ? 504 : 502, {
         error: error.message,

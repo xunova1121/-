@@ -1,3 +1,4 @@
+import { evaluationInfo } from './evaluation-auth.mjs';
 import { evalError, safeFailure, retainSnapshot, pollWait } from './task-diagnostics.mjs';
 import { reliabilityCases } from './reliability-cases.mjs';
 import { randomUUID } from 'node:crypto';
@@ -72,6 +73,7 @@ export async function runCase(api, item, { runId = randomUUID(), now = Date.now,
       }
       await wait(500, signal);
     }
+    result.evaluationId = typeof info?.evaluationId === 'string' ? info.evaluationId : null;
     result.timing = info?.timing ?? null;
     result.usage = info?.usage ?? null;
     result.review = info?.review ?? null;
@@ -136,9 +138,10 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   }
   if (!env.JARVIS_EVAL_URL || !env.JARVIS_EVAL_TOKEN) throw new Error('缺少JARVIS_EVAL_URL或JARVIS_EVAL_TOKEN');
   const api = serverAPI(env.JARVIS_EVAL_URL, env.JARVIS_EVAL_TOKEN);
-  const cfg = await api('/api/server/config');
+  const info = await evaluationInfo(api);
+  const cfg = { provider: info.provider, models: { [info.provider]: info.model }, routing: { enabled: info.routingEnabled } };
   if (!cfg.provider || cfg.provider === 'mock') throw new Error('必须配置真实模型，演示模型不能充当能力评测');
-  const status = await api('/api/server/status');
+  const status = { running: 0, tasks: [], features: { evaluationMemoryIsolation: true, taskRequestIds: true, taskNotes: true } };
   if (status.running || status.tasks?.length) throw new Error('服务器有正在运行或排队的任务，稍后单独评测，避免干扰实际使用');
   if (!status.features?.taskRequestIds || !status.features?.taskNotes) throw new Error('服务器过旧，请先更新任务去重与补充接口');
   const out = args.find(a=>a.startsWith('--out='))?.slice(6) || `weiyang-eval-${Date.now()}.json`;

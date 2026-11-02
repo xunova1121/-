@@ -33,8 +33,8 @@ function link(chunk, base) {
 }
 function parseNewsSource(html, source, now = Date.now()) {
   const date = newsDate(now);
-  const clean = String(html).replace(/<!--[\s\S]*?-->/g, "").replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
-  const chunks = source.id === "cnfin" ? clean.split(/<div\b[^>]*class=["']ui-zxlist-item["'][^>]*>/i).slice(1) : source.id === "cnr" ? clean.split(/<div\b[^>]*class=["']item url_http["'][^>]*>/i).slice(1) : [...clean.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)].map((m) => m[1]);
+  const clean2 = String(html).replace(/<!--[\s\S]*?-->/g, "").replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+  const chunks = source.id === "cnfin" ? clean2.split(/<div\b[^>]*class=["']ui-zxlist-item["'][^>]*>/i).slice(1) : source.id === "cnr" ? clean2.split(/<div\b[^>]*class=["']item url_http["'][^>]*>/i).slice(1) : [...clean2.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)].map((m) => m[1]);
   const out = [], seen = /* @__PURE__ */ new Set();
   for (const raw of chunks.slice(0, 150)) {
     const chunk = raw.slice(0, 12e3);
@@ -86,8 +86,8 @@ function parseCnsRolling(html, source, { now = Date.now(), params = {} } = {}) {
   const range = lookupTimeRange(params, now);
   const out = [], seen = /* @__PURE__ */ new Set();
   const techOnly = source.kind === "news" && params.categories?.length === 1 && params.categories[0] === "\u79D1\u6280";
-  const clean = String(html).slice(0, 1024 * 1024).replace(/<!--[\s\S]*?-->/g, "").replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
-  for (const match of clean.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)) {
+  const clean2 = String(html).slice(0, 1024 * 1024).replace(/<!--[\s\S]*?-->/g, "").replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+  for (const match of clean2.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)) {
     if (out.length >= 36) break;
     const row = match[1].slice(0, 16e3);
     const column = newsPlain(row.match(/class=["']dd_lm["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] || "");
@@ -136,8 +136,8 @@ function parseSinaSports(json, source, { now = Date.now(), params = {} } = {}) {
 }
 function parseZhiboNewsIndex(html, source) {
   const candidates = [], seen = /* @__PURE__ */ new Set();
-  const clean = String(html).slice(0, 1024 * 1024).replace(/<!--[\s\S]*?-->/g, "").replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
-  for (const match of clean.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+  const clean2 = String(html).slice(0, 1024 * 1024).replace(/<!--[\s\S]*?-->/g, "").replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+  for (const match of clean2.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
     const url = safeLink(match[1], source), title = newsPlain(match[2]);
     if (!url || seen.has(url) || !/\/(?:zuqiu|nba)\/20\d{2}-\d{2}-\d{2}\/[^/]+\.htm$/.test(new URL(url).pathname) || title.length < 8 || title.length > 180) continue;
     seen.add(url);
@@ -147,10 +147,10 @@ function parseZhiboNewsIndex(html, source) {
   return { items: [], candidates };
 }
 function parseZhiboNewsArticle(html, source, candidate, { now = Date.now(), params = {} } = {}) {
-  const clean = String(html).slice(0, 1024 * 1024).replace(/<!--[\s\S]*?-->/g, "").replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
-  const stamp = clean.match(/<span\b[^>]*ms-controller=["']title_controller["'][^>]*>\s*(20\d{2}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})/i);
-  const title = newsPlain(clean.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || "");
-  const body = clean.match(/<div\b[^>]*id=["']signals["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] || "";
+  const clean2 = String(html).slice(0, 1024 * 1024).replace(/<!--[\s\S]*?-->/g, "").replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+  const stamp = clean2.match(/<span\b[^>]*ms-controller=["']title_controller["'][^>]*>\s*(20\d{2}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})/i);
+  const title = newsPlain(clean2.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || "");
+  const body = clean2.match(/<div\b[^>]*id=["']signals["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] || "";
   const publishedAt = stamp && `${stamp[1]}T${stamp[2]}+08:00`;
   if (!safeLink(candidate.url, source) || !title || !publishedAt || !validBeijingStamp(publishedAt) || !inRange(Date.parse(publishedAt), lookupTimeRange(params, now)) || !newsPlain(body).trim()) return [];
   return [item(source, { title: title.slice(0, 180), url: candidate.url, publishedAt, summary: newsPlain(body).slice(0, 350), verified: "page", verification: "page_read" })];
@@ -394,6 +394,337 @@ function todayNewsIntent(text2 = "", options) {
   return intent.kind === "news" && intent.params.dateMode !== "specified";
 }
 
+// src/core/suggest.js
+var NET_CODES = /^(ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EPIPE|ENETUNREACH|EHOSTUNREACH|UND_ERR_SOCKET|UND_ERR_CONNECT_TIMEOUT)$/;
+function errorKind(error) {
+  if (!error) return "";
+  if (typeof error === "object") {
+    if (["timeout", "api", "network", "budget"].includes(error.kind)) return error.kind;
+    const code = String(error.code || error.cause?.code || "");
+    if (code === "RETRIEVAL_BUDGET") return "budget";
+    if (error.name === "NetworkError" || code === "NETWORK_ERROR") return "network";
+    if (error.stalled || error.name === "TimeoutError" || error.name === "LookupTimeoutError" || code === "LOOKUP_TIMEOUT" || code === "ETIMEDOUT") return "timeout";
+    if (Number.isInteger(error.status) && error.status >= 400) return "api";
+    if (NET_CODES.test(code) || error.name === "TypeError" && /fetch|network|load failed/i.test(String(error.message))) return "network";
+  }
+  const message = String(error?.message || error || "");
+  if (/LOOKUP_TIMEOUT|超时|时间预算|等待 \d+ 秒|没有任何输出|timed? ?out/i.test(message)) return "timeout";
+  if (/模型接口|模型服务|返回 [45]\d\d|reasoning_content/.test(message)) return "api";
+  if (/network|网络|failed to fetch|fetch failed|load failed|连接|socket|econn/i.test(message)) return "network";
+  return "";
+}
+
+// src/llm/openai.js
+function retryWait(base, err, random = Math.random) {
+  const after = Number(err?.retryAfterMs) || 0;
+  if (after > 0) return Math.min(3e4, after);
+  return Math.round(base * (0.5 + random() * 0.5));
+}
+
+// src/core/networkRequest.js
+function throwControl(error, signal) {
+  if (signal?.aborted) throw signal.reason ?? Object.assign(new Error("\u5DF2\u505C\u6B62"), { name: "AbortError" });
+  if (error?.name === "AbortError" || error?.code === "RETRIEVAL_BUDGET") throw error;
+}
+function httpError(httpStatus, detail = "", service = "\u7F51\u7EDC\u670D\u52A1") {
+  return Object.assign(
+    new Error(service + (/[A-Za-z]$/.test(service) ? " \u8FD4\u56DE " : "\u8FD4\u56DE ") + httpStatus + (detail ? "\uFF1A" + String(detail).slice(0, 200) : "")),
+    {
+      name: "ApiError",
+      kind: "api",
+      status: httpStatus,
+      code: httpStatus === 429 ? "RATE_LIMITED" : "HTTP_ERROR"
+    }
+  );
+}
+function wait(ms, signal) {
+  return new Promise((resolve, reject) => {
+    let timer;
+    const finish = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+    };
+    const abort = () => {
+      finish();
+      reject(signal.reason ?? Object.assign(new Error("\u5DF2\u505C\u6B62"), { name: "AbortError" }));
+    };
+    if (signal?.aborted) return abort();
+    timer = setTimeout(() => {
+      finish();
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+async function retryRead(work, { signal, timeoutMs = 6e3, beforeAttempt, onRetry, delayMs = 250 } = {}) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    throwControl(null, signal);
+    beforeAttempt?.(attempt);
+    try {
+      return await withWebDeadline(work, { signal, timeoutMs });
+    } catch (error) {
+      throwControl(error, signal);
+      if (attempt || !["timeout", "network"].includes(errorKind(error))) throw error;
+      onRetry?.(error);
+      await wait(retryWait(delayMs, error), signal);
+    }
+  }
+}
+
+// src/agent/webBody.js
+async function webBody(response, maxBytes, signal) {
+  const tooLarge = () => Object.assign(new Error("\u7F51\u9875\u6216\u9644\u4EF6\u8D85\u8FC7\u8BFB\u53D6\u5927\u5C0F\u4E0A\u9650"), { code: "WEB_BODY_LIMIT", kind: "api" });
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) throw tooLarge();
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    const bytes2 = new Uint8Array(await response.arrayBuffer());
+    if (bytes2.length > maxBytes) throw tooLarge();
+    return bytes2;
+  }
+  const abort = () => {
+    void reader.cancel(signal.reason).catch(() => {
+    });
+  };
+  signal?.addEventListener("abort", abort, { once: true });
+  const chunks = [];
+  let length = 0;
+  try {
+    for (; ; ) {
+      if (signal?.aborted) throw signal.reason;
+      const result = await reader.read();
+      if (signal?.aborted) throw signal.reason;
+      if (result.done) break;
+      length += result.value.length;
+      if (length > maxBytes) throw tooLarge();
+      chunks.push(result.value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => {
+    });
+    throw error;
+  } finally {
+    signal?.removeEventListener("abort", abort);
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes;
+}
+
+// shared/providers.js
+var PROVIDERS = [
+  { id: "mock", name: "\u5185\u7F6E\u6F14\u793A\uFF08\u79BB\u7EBF\uFF09", kind: "mock", baseURL: "", models: ["jarvis-demo"], needsKey: false, browser: true },
+  { id: "anthropic", name: "Anthropic Claude", kind: "anthropic", baseURL: "https://api.anthropic.com", models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"], keyUrl: "https://console.anthropic.com/", browser: true, webSearch: true },
+  { id: "openai", name: "OpenAI", kind: "openai", baseURL: "https://api.openai.com/v1", models: ["gpt-5", "gpt-5-mini", "gpt-4.1"], keyUrl: "https://platform.openai.com/api-keys", browser: true },
+  { id: "gemini", name: "Google Gemini", kind: "openai", baseURL: "https://generativelanguage.googleapis.com/v1beta/openai", models: ["gemini-2.5-pro", "gemini-2.5-flash"], keyUrl: "https://aistudio.google.com/apikey", browser: true },
+  { id: "deepseek", name: "DeepSeek \u6DF1\u5EA6\u6C42\u7D22", kind: "openai", baseURL: "https://api.deepseek.com/v1", models: ["deepseek-chat", "deepseek-reasoner"], keyUrl: "https://platform.deepseek.com/api_keys", browser: false },
+  { id: "qwen", name: "\u901A\u4E49\u5343\u95EE\uFF08\u963F\u91CC\u4E91\u767E\u70BC\uFF09", kind: "openai", baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", models: ["qwen-max", "qwen-plus", "qwen-turbo"], keyUrl: "https://bailian.console.aliyun.com/", browser: false },
+  { id: "moonshot", name: "Kimi\uFF08\u6708\u4E4B\u6697\u9762\uFF09", kind: "openai", baseURL: "https://api.moonshot.cn/v1", models: ["kimi-latest", "moonshot-v1-32k"], keyUrl: "https://platform.moonshot.cn/console/api-keys", browser: false },
+  { id: "zhipu", name: "\u667A\u8C31 GLM", kind: "openai", baseURL: "https://open.bigmodel.cn/api/paas/v4", models: ["glm-4.5", "glm-4-flash"], keyUrl: "https://open.bigmodel.cn/usercenter/apikeys", browser: false },
+  { id: "doubao", name: "\u8C46\u5305\uFF08\u706B\u5C71\u65B9\u821F\uFF09", kind: "openai", baseURL: "https://ark.cn-beijing.volces.com/api/v3", models: ["doubao-seed-1-6-250615"], keyUrl: "https://console.volcengine.com/ark", browser: false, note: "\u578B\u53F7\u5904\u53EF\u586B\u5199\u65B9\u821F\u63A7\u5236\u53F0\u91CC\u7684\u201C\u63A8\u7406\u63A5\u5165\u70B9 ID\u201D" },
+  { id: "siliconflow", name: "\u7845\u57FA\u6D41\u52A8 SiliconFlow", kind: "openai", baseURL: "https://api.siliconflow.cn/v1", models: ["deepseek-ai/DeepSeek-V3", "Qwen/Qwen2.5-72B-Instruct"], keyUrl: "https://cloud.siliconflow.cn/account/ak", browser: false },
+  { id: "openrouter", name: "OpenRouter\uFF08\u805A\u5408\uFF09", kind: "openai", baseURL: "https://openrouter.ai/api/v1", models: ["openai/gpt-5", "google/gemini-2.5-pro", "deepseek/deepseek-chat"], keyUrl: "https://openrouter.ai/keys", browser: true },
+  { id: "ollama", name: "Ollama\uFF08\u672C\u673A\u6A21\u578B\uFF09", kind: "openai", baseURL: "http://127.0.0.1:11434/v1", models: ["qwen3:8b", "qwen3:4b"], needsKey: false, browser: true, note: "\u6D4F\u89C8\u5668\u76F4\u8FDE\u9700\u4EE5 OLLAMA_ORIGINS=* \u542F\u52A8 Ollama\uFF1B\u7528\u5B8C\u6574\u7248\u7F51\u5173\u5219\u4E0D\u9700\u8981" },
+  // 多协议中转（如 TeamoRouter）：一个地址一个密钥，按模型名自动用原生格式——
+  // Claude → /v1/messages、GPT → /v1/responses（都能开模型自带的联网搜索），其他 → /v1/chat/completions
+  { id: "relay-multi", name: "\u591A\u534F\u8BAE\u4E2D\u8F6C\uFF08\u6309\u6A21\u578B\u7528\u539F\u751F\u683C\u5F0F\uFF0C\u5982 TeamoRouter\uFF09", kind: "multi", baseURL: "", models: ["gpt-6.1-sol", "claude-fable-5-1", "gemini-3.5-flash"], browser: true, custom: true, webSearch: true },
+  // 中转站的 Anthropic 原生接口（/v1/messages）：能用 Claude 和它的内置联网搜索（要看中转站是否支持）
+  { id: "claude-relay", name: "Claude \u4E2D\u8F6C\uFF08Anthropic \u539F\u751F\u683C\u5F0F\uFF09", kind: "anthropic", baseURL: "", models: ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"], browser: true, custom: true, webSearch: true },
+  { id: "custom", name: "\u81EA\u5B9A\u4E49\uFF08OpenAI \u517C\u5BB9\uFF09", kind: "openai", baseURL: "", models: [""], browser: true, custom: true },
+  // 有界的独立中转线路：同名模型也能分开保存地址、密钥和备用顺序。
+  ...Array.from({ length: 7 }, (_, index) => ({ id: `relay-${index + 2}`, name: `\u81EA\u5B9A\u4E49\u670D\u52A1\u5546 ${index + 2}\uFF08\u591A\u534F\u8BAE\uFF09`, kind: "multi", baseURL: "", models: [""], browser: true, custom: true, webSearch: true }))
+];
+function isPrivateHost(host) {
+  const h = host.replace(/^\[|\]$/g, "").toLowerCase();
+  return h === "localhost" || h.endsWith(".local") || h === "::1" || h === "0.0.0.0" || /^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^f[cd][0-9a-f]{2}:/.test(h) || /^fe80:/.test(h);
+}
+
+// src/agent/newsFeeds.js
+var bbc = (section, category) => ({ id: "bbc", label: "BBC", format: "rss", family: "bbc", category, hosts: ["www.bbc.com", "www.bbc.co.uk", "bbc.com", "bbc.co.uk"], url: `https://feeds.bbci.co.uk/${section}/rss.xml` });
+var guardian = (sport) => ({ id: "guardian", label: "\u536B\u62A5", format: "rss", family: "guardian", category: sport ? "\u4F53\u80B2" : "\u56FD\u9645", hosts: ["www.theguardian.com"], url: `https://www.theguardian.com/${sport ? "sport" : "world"}/rss` });
+var reuters = (category) => ({ id: "reuters", label: "\u8DEF\u900F\uFF08CNA\u8F6C\u8F7D\uFF09", format: "rss", family: "reuters", category, reprint: true, hosts: ["www.channelnewsasia.com"], url: "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=" + ({ \u4F53\u80B2: "10296", \u8D22\u7ECF: "6936" }[category] || "6311") });
+var aljazeera = { id: "aljazeera", label: "\u534A\u5C9B\u7535\u89C6\u53F0", format: "rss", family: "aljazeera", category: "\u56FD\u9645", hosts: ["www.aljazeera.com", "aljazeera.com"], url: "https://www.aljazeera.com/xml/rss/all.xml" };
+function internationalNewsFeeds(categories = [], publishers = []) {
+  const sport = categories.length === 1 && categories[0] === "\u4F53\u80B2";
+  const business = categories.length === 1 && categories[0] === "\u8D22\u7ECF";
+  const tech = categories.length === 1 && categories[0] === "\u79D1\u6280";
+  const feeds = [bbc(sport ? "sport" : business ? "news/business" : tech ? "news/technology" : "news/world", sport ? "\u4F53\u80B2" : business ? "\u8D22\u7ECF" : tech ? "\u79D1\u6280" : "\u56FD\u9645"), reuters(sport ? "\u4F53\u80B2" : business ? "\u8D22\u7ECF" : "\u56FD\u9645")];
+  if (tech) feeds.splice(1, 1);
+  if (sport || categories.includes("\u56FD\u9645") || publishers.length) feeds.push(guardian(sport), ...!sport ? [aljazeera] : []);
+  return feeds.filter((feed) => !publishers.length || publishers.some((p) => feed.label.startsWith(p)));
+}
+
+// src/agent/officialSources.js
+var REGISTERED = /* @__PURE__ */ new Set(["thecfa.cn", "china-coop.org", "sse.com.cn", "szse.cn", "cninfo.com.cn"]);
+var PROVINCES = { \u6C5F\u82CF: "jiangsu.gov.cn", \u6D59\u6C5F: "zj.gov.cn", \u5E7F\u4E1C: "gd.gov.cn", \u5317\u4EAC: "beijing.gov.cn", \u4E0A\u6D77: "shanghai.gov.cn", \u5C71\u4E1C: "shandong.gov.cn", \u56DB\u5DDD: "sc.gov.cn" };
+var under = (hostname, domain) => hostname === domain || hostname.endsWith("." + domain);
+function isOfficialSource(address) {
+  try {
+    const parsed = new URL(address);
+    if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) return false;
+    return under(parsed.hostname, "gov.cn") || [...REGISTERED].some((domain) => under(parsed.hostname, domain));
+  } catch {
+    return false;
+  }
+}
+function sourceAuthority(address) {
+  if (isOfficialSource(address)) return 3;
+  try {
+    const hostname = new URL(address).hostname.replace(/^www\./, "");
+    const sources = [...DOMESTIC_NEWS_CANDIDATES, ...internationalNewsFeeds([], ["BBC", "\u8DEF\u900F", "\u536B\u62A5", "\u534A\u5C9B\u7535\u89C6\u53F0"])];
+    return sources.some((source) => (source.hosts || []).some((host) => under(hostname, host.replace(/^www\./, "")))) ? 2 : 0;
+  } catch {
+    return 0;
+  }
+}
+function mergeSearchHits(hits) {
+  const unique = /* @__PURE__ */ new Map();
+  for (const hit of hits.slice(0, 300)) {
+    try {
+      const parsed = new URL(hit.url);
+      if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) continue;
+      parsed.hash = "";
+      for (const key2 of [...parsed.searchParams.keys()]) if (/^(utm_|spm$|from$)/i.test(key2)) parsed.searchParams.delete(key2);
+      const key = parsed.href.replace(/\/$/, "");
+      if (!unique.has(key)) unique.set(key, { ...hit, url: parsed.href });
+    } catch {
+    }
+  }
+  return [...unique.values()].map((hit, index) => ({ hit, index })).sort((a, b) => sourceAuthority(b.hit.url) - sourceAuthority(a.hit.url) || a.index - b.index).map(({ hit }) => hit);
+}
+function officialQueries(query, hits) {
+  if (/\bsite:/i.test(query) || !/机构|概况|职责|职能|政策|条例|办法|政府|官网|供销|合作总社|信息公开/.test(query)) return [];
+  const sites = ["gov.cn"];
+  for (const [province, domain] of Object.entries(PROVINCES)) if (query.includes(province)) sites.push(domain);
+  const candidate = hits.find((hit) => isOfficialSource(hit.url));
+  if (candidate) sites.push(new URL(candidate.url).hostname.replace(/^www\./, ""));
+  return [...new Set(sites)].slice(0, 3).map((site) => `${query} site:${site}`);
+}
+
+// src/agent/qianfanSearch.js
+var QIANFAN_ENDPOINT = "https://qianfan.baidubce.com/v2/ai_search/web_search";
+var secret = (value) => typeof value === "string" && !value.startsWith("\u2022\u2022\u2022\u2022") ? value.trim() : "";
+var clean = (value) => newsPlain(String(value || "")).replace(/[\x00-\x1f\x7f]/g, " ").replace(/\s+/g, " ").trim();
+var validDay = (value) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const stamp = Date.parse(value + "T00:00:00Z");
+  return Number.isFinite(stamp) && new Date(stamp).toISOString().slice(0, 10) === value;
+};
+function searchDate(query, freshness, now = Date.now()) {
+  const explicit = String(query).match(/(20\d{2})[年/-](\d{1,2})[月/-](\d{1,2})日?/);
+  if (explicit) {
+    const day2 = `${explicit[1]}-${explicit[2].padStart(2, "0")}-${explicit[3].padStart(2, "0")}`;
+    if (validDay(day2)) return day2;
+  }
+  return freshness === "day" || /今天|今日|刚才|最新|实时/.test(query) ? newsDate(now) : null;
+}
+function qianfanPublishedAt(value) {
+  const raw = String(value || "").trim();
+  if (validDay(raw)) return raw;
+  if (!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(raw) || !validDay(raw.slice(0, 10))) return null;
+  const withZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw) ? raw.replace(" ", "T") : raw.replace(" ", "T") + "+08:00";
+  const stamp = Date.parse(withZone);
+  return Number.isFinite(stamp) ? new Date(stamp + 8 * 36e5).toISOString().slice(0, 19) + "+08:00" : null;
+}
+function qianfanSites(query) {
+  const explicit = [...String(query).matchAll(/\bsite:([a-z0-9.-]+)/gi)].map((match) => match[1]);
+  const named = [...DOMESTIC_NEWS_CANDIDATES, ...internationalNewsFeeds([], ["BBC", "\u8DEF\u900F", "\u536B\u62A5", "\u534A\u5C9B\u7535\u89C6\u53F0"])].filter((source) => String(query).includes(source.label.replace(/新闻|候选|体育/g, ""))).flatMap((source) => source.hosts || [new URL(source.url).hostname]);
+  if (/新华网/.test(query)) named.push("news.cn", "xinhuanet.com");
+  if (/直播吧/.test(query)) named.push("zhibo8.com");
+  return [.../* @__PURE__ */ new Set([...explicit, ...named])].filter((host) => /^(?=.{1,253}$)[a-z0-9.-]+\.[a-z]{2,}$/i.test(host) && !isPrivateHost(host)).slice(0, 8);
+}
+function qianfanRequest(query, { topK = 10, freshness, edition = "standard", now = Date.now(), sites, requestText = "" } = {}) {
+  const text2 = String(query).trim().slice(0, 1e3);
+  if (!text2) throw Object.assign(new Error("\u8BF7\u63D0\u4F9B\u641C\u7D22\u8BCD"), { code: "QIANFAN_QUERY", kind: "api" });
+  const day2 = searchDate(requestText, void 0, now) || searchDate(text2, freshness, now);
+  const filteredSites = sites || qianfanSites(requestText + " " + text2);
+  const filter = {};
+  if (filteredSites.length) filter.match = { site: filteredSites };
+  if (day2) filter.range = { page_time: { gte: day2, lt: new Date(Date.parse(day2 + "T00:00:00Z") + 864e5).toISOString().slice(0, 10) } };
+  const recency = !day2 && (freshness || (/新闻|资讯|体育/.test(text2) ? "week" : ""));
+  return {
+    messages: [{ role: "user", content: text2 }],
+    search_source: "baidu_search_v2",
+    edition: edition === "lite" ? "lite" : "standard",
+    resource_type_filter: [{ type: "web", top_k: Number.isFinite(topK) ? Math.max(5, Math.min(20, Math.floor(topK))) : 10 }],
+    block_websites: ["espn.com", "espn.com.cn", "espn.co.uk", "espn.in"],
+    ...Object.keys(filter).length && { search_filter: filter },
+    ...["week", "month", "year"].includes(recency) && { search_recency_filter: recency }
+  };
+}
+function datedSearchHits(hits, query, { freshness, now = Date.now(), requestText = "" } = {}) {
+  const day2 = searchDate(requestText, void 0, now) || searchDate(query, freshness, now);
+  if (!day2) return hits;
+  return hits.flatMap((hit) => {
+    const titleDates = [...String(hit.title || "").matchAll(/(20\d{2})[年/-](\d{1,2})[月/-](\d{1,2})日?/g)].map((match) => `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`);
+    const published = qianfanPublishedAt(hit.publishedAt);
+    if (titleDates.some((value) => value !== day2) || published && published.slice(0, 10) !== day2) return [];
+    if (day2 === newsDate(now) && published?.length > 10 && Date.parse(published) > now) return [];
+    return [{ ...hit, publishedAt: published, dateStatus: published ? "matched" : "unknown" }];
+  });
+}
+function createQianfanSearch({ qianfanSearchKey, qianfanSearchTopK = 10, fetchViaGateway, fetchImpl = (...args) => globalThis.fetch(...args), now = Date.now } = {}) {
+  const key = secret(qianfanSearchKey);
+  if (!key) return null;
+  const get = fetchViaGateway || fetchImpl;
+  let unavailableUntil = 0;
+  return {
+    name: "\u767E\u5EA6\u5343\u5E06\u641C\u7D22",
+    async search(query, count = 10, options = {}) {
+      if (unavailableUntil > now()) throw Object.assign(new Error("\u767E\u5EA6\u641C\u7D22\u6682\u4E0D\u53EF\u7528\uFF0C3\u5206\u949F\u5185\u5148\u7528\u5176\u4ED6\u6765\u6E90"), { code: "QIANFAN_UNAVAILABLE", kind: "api", skipped: true });
+      try {
+        const request = qianfanRequest(query, { ...options, topK: options.topK ?? qianfanSearchTopK, now: now() });
+        const data = await withWebDeadline(async (signal) => {
+          let response;
+          try {
+            response = await get(QIANFAN_ENDPOINT, { method: "POST", redirect: "error", signal, headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" }, body: JSON.stringify(request) });
+          } catch (failure) {
+            throwControl(failure, signal);
+            if (["EVAL_QUOTA", "EVAL_EXPIRED"].includes(failure.code)) throw failure;
+            throw Object.assign(new Error("\u767E\u5EA6\u641C\u7D22\u7F51\u7EDC\u8FDE\u63A5\u5931\u8D25"), { kind: "network", code: "QIANFAN_NETWORK" });
+          }
+          if (!response.ok) {
+            await response.body?.cancel?.();
+            const detail = [401, 403].includes(response.status) ? "Key\u65E0\u6548\u3001\u65E0\u6743\u8BBF\u95EE\u6216\u672A\u751F\u6548\uFF0C\u8BF7\u6838\u5BF9\u670D\u52A1\u5668\u8BBE\u7F6E" : [402, 429].includes(response.status) ? "\u989D\u5EA6\u4E0D\u8DB3\u6216\u670D\u52A1\u5546\u9650\u6D41\uFF0C\u8BF7\u6838\u5BF9\u670D\u52A1\u5546\u8D26\u6237" : "\u670D\u52A1\u6682\u65F6\u4E0D\u53EF\u7528";
+            throw httpError(response.status, detail, "\u767E\u5EA6\u641C\u7D22");
+          }
+          const bytes = await webBody(response, 2 * 1024 * 1024, signal);
+          let parsed;
+          try {
+            parsed = JSON.parse(new TextDecoder().decode(bytes));
+          } catch {
+          }
+          if (!Array.isArray(parsed?.references)) throw Object.assign(new Error("\u767E\u5EA6\u641C\u7D22\u672A\u8FD4\u56DE\u6709\u6548references\u5217\u8868\uFF0C\u8BF7\u6838\u5BF9\u670D\u52A1\u5546\u63A5\u53E3"), { kind: "api", code: "QIANFAN_FORMAT" });
+          return parsed;
+        }, { signal: options.signal, timeoutMs: 8e3 });
+        const rows = data.references.slice(0, 100).flatMap((item2) => {
+          try {
+            const url = new URL(String(item2.url || ""));
+            if (!/^https?:$/.test(url.protocol) || url.username || url.password || isPrivateHost(url.hostname) || /(?:^|\.)espn\.(?:com|com\.cn|co\.uk|in)$/.test(url.hostname) || url.href.includes(key) || item2.type && item2.type !== "web") return [];
+            const redact = (text2) => clean(text2).split(key).join("[\u5DF2\u9690\u85CF]");
+            const title = redact(item2.title).slice(0, 200);
+            if (!title) return [];
+            return [{ title, url: url.href, snippet: redact(item2.content || item2.snippet).slice(0, 800), publishedAt: qianfanPublishedAt(item2.date), source: "qianfan" }];
+          } catch {
+            return [];
+          }
+        });
+        return datedSearchHits(mergeSearchHits(rows), query, { freshness: options.freshness, requestText: options.requestText, now: now() }).slice(0, Math.max(1, Math.min(20, count)));
+      } catch (failure) {
+        throwControl(failure, options.signal);
+        if (["EVAL_QUOTA", "EVAL_EXPIRED"].includes(failure.code)) throw failure;
+        if ([401, 403, 429].includes(failure.status) || failure.status >= 500 || ["timeout", "network"].includes(failure.kind) || failure.name === "TimeoutError") unavailableUntil = now() + 18e4;
+        throw failure;
+      }
+    }
+  };
+}
+
 // src/agent/retrievalQuality.js
 function createQueryLedger() {
   const seen = /* @__PURE__ */ new Set();
@@ -566,51 +897,6 @@ async function withWebDeadline(work, { signal, timeoutMs = 12e3 } = {}) {
     clearTimeout(timer);
     signal?.removeEventListener("abort", abort);
   }
-}
-
-// src/agent/webBody.js
-async function webBody(response, maxBytes, signal) {
-  const tooLarge = () => Object.assign(new Error("\u7F51\u9875\u6216\u9644\u4EF6\u8D85\u8FC7\u8BFB\u53D6\u5927\u5C0F\u4E0A\u9650"), { code: "WEB_BODY_LIMIT", kind: "api" });
-  const declared = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > maxBytes) throw tooLarge();
-  const reader = response.body?.getReader?.();
-  if (!reader) {
-    const bytes2 = new Uint8Array(await response.arrayBuffer());
-    if (bytes2.length > maxBytes) throw tooLarge();
-    return bytes2;
-  }
-  const abort = () => {
-    void reader.cancel(signal.reason).catch(() => {
-    });
-  };
-  signal?.addEventListener("abort", abort, { once: true });
-  const chunks = [];
-  let length = 0;
-  try {
-    for (; ; ) {
-      if (signal?.aborted) throw signal.reason;
-      const result = await reader.read();
-      if (signal?.aborted) throw signal.reason;
-      if (result.done) break;
-      length += result.value.length;
-      if (length > maxBytes) throw tooLarge();
-      chunks.push(result.value);
-    }
-  } catch (error) {
-    await reader.cancel().catch(() => {
-    });
-    throw error;
-  } finally {
-    signal?.removeEventListener("abort", abort);
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return bytes;
 }
 
 // src/agent/lookup/content.js
@@ -793,6 +1079,19 @@ function tx(db, store, mode, fn) {
 var backend = null;
 function collection(name) {
   return {
+    /** 长寿命缓存/延迟刷盘绑定创建时的后端，避免异步任务串存储范围。 */
+    bind() {
+      const captured = backend?.scoped?.(name) || backend;
+      if (!captured) return this;
+      return {
+        scopeKey: captured,
+        all: () => captured.all(name),
+        get: (id) => captured.get(name, id),
+        put: (obj) => captured.put(name, obj),
+        delete: (id) => captured.delete(name, id),
+        clear: () => captured.clear(name)
+      };
+    },
     async all() {
       if (backend) return backend.all(name);
       const db = await openDb();
@@ -1261,21 +1560,6 @@ function connectLookupTools(tools, lookup) {
   });
 }
 
-// src/agent/newsFeeds.js
-var bbc = (section, category) => ({ id: "bbc", label: "BBC", format: "rss", family: "bbc", category, hosts: ["www.bbc.com", "www.bbc.co.uk", "bbc.com", "bbc.co.uk"], url: `https://feeds.bbci.co.uk/${section}/rss.xml` });
-var guardian = (sport) => ({ id: "guardian", label: "\u536B\u62A5", format: "rss", family: "guardian", category: sport ? "\u4F53\u80B2" : "\u56FD\u9645", hosts: ["www.theguardian.com"], url: `https://www.theguardian.com/${sport ? "sport" : "world"}/rss` });
-var reuters = (category) => ({ id: "reuters", label: "\u8DEF\u900F\uFF08CNA\u8F6C\u8F7D\uFF09", format: "rss", family: "reuters", category, reprint: true, hosts: ["www.channelnewsasia.com"], url: "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=" + ({ \u4F53\u80B2: "10296", \u8D22\u7ECF: "6936" }[category] || "6311") });
-var aljazeera = { id: "aljazeera", label: "\u534A\u5C9B\u7535\u89C6\u53F0", format: "rss", family: "aljazeera", category: "\u56FD\u9645", hosts: ["www.aljazeera.com", "aljazeera.com"], url: "https://www.aljazeera.com/xml/rss/all.xml" };
-function internationalNewsFeeds(categories = [], publishers = []) {
-  const sport = categories.length === 1 && categories[0] === "\u4F53\u80B2";
-  const business = categories.length === 1 && categories[0] === "\u8D22\u7ECF";
-  const tech = categories.length === 1 && categories[0] === "\u79D1\u6280";
-  const feeds = [bbc(sport ? "sport" : business ? "news/business" : tech ? "news/technology" : "news/world", sport ? "\u4F53\u80B2" : business ? "\u8D22\u7ECF" : tech ? "\u79D1\u6280" : "\u56FD\u9645"), reuters(sport ? "\u4F53\u80B2" : business ? "\u8D22\u7ECF" : "\u56FD\u9645")];
-  if (tech) feeds.splice(1, 1);
-  if (sport || categories.includes("\u56FD\u9645") || publishers.length) feeds.push(guardian(sport), ...!sport ? [aljazeera] : []);
-  return feeds.filter((feed) => !publishers.length || publishers.some((p) => feed.label.startsWith(p)));
-}
-
 // src/agent/newsRss.js
 var field = (text2, tag) => {
   const value = text2.match(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, "i"))?.[1] || "";
@@ -1283,10 +1567,10 @@ var field = (text2, tag) => {
 };
 var beijingNewsTime = (ms) => new Date(ms + 288e5).toISOString().slice(0, 19) + "+08:00";
 function parseNewsRss(xml, source, now = Date.now()) {
-  const clean = String(xml).slice(0, 800 * 1024);
-  if (/<!DOCTYPE|<!ENTITY/i.test(clean)) return [];
+  const clean2 = String(xml).slice(0, 800 * 1024);
+  if (/<!DOCTYPE|<!ENTITY/i.test(clean2)) return [];
   const out = [], seen = /* @__PURE__ */ new Set();
-  for (const match of clean.matchAll(/<item(?:\s[^>]*)?>([\s\S]*?)<\/item>/gi)) {
+  for (const match of clean2.matchAll(/<item(?:\s[^>]*)?>([\s\S]*?)<\/item>/gi)) {
     if (out.length >= 36) break;
     const item2 = match[1].slice(0, 16e3);
     const title = newsPlain(field(item2, "title")).slice(0, 180);
@@ -1320,11 +1604,11 @@ function parseNewsRss(xml, source, now = Date.now()) {
   return out;
 }
 function verifiedReutersReprint(html, item2, now = Date.now()) {
-  const clean = String(html).slice(0, 800 * 1024);
-  const visible = clean.replace(/<!--[\s\S]*?-->/g, "").replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+  const clean2 = String(html).slice(0, 800 * 1024);
+  const visible = clean2.replace(/<!--[\s\S]*?-->/g, "").replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
   const source = [...new Set([...visible.matchAll(/<div\b[^>]*class=["'][^"']*\bsource\b[^"']*["'][^>]*>([\s\S]{0,500}?)<\/div>/gi)].map((m) => newsPlain(m[1])))];
   if (source.length !== 1 || !/^Source:\s*Reuters(?:\/[\w-]+)?\s*$/i.test(source[0])) return null;
-  for (const match of clean.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+  for (const match of clean2.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
     if (match[1].length > 2e5) continue;
     let data;
     try {
@@ -1544,83 +1828,6 @@ function newsMatchesRequest(item2, request = "") {
   const title = String(item2.title || "");
   const resultOnly = /(?:\d{1,3}\s*[:：-]\s*\d{1,3}|主场不敌|客场不敌|赛程公布|对阵表)/.test(title);
   return !resultOnly || Boolean(item2.verified === "page" && String(item2.summary || "").length >= 80);
-}
-
-// src/core/suggest.js
-var NET_CODES = /^(ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EPIPE|ENETUNREACH|EHOSTUNREACH|UND_ERR_SOCKET|UND_ERR_CONNECT_TIMEOUT)$/;
-function errorKind(error) {
-  if (!error) return "";
-  if (typeof error === "object") {
-    if (["timeout", "api", "network", "budget"].includes(error.kind)) return error.kind;
-    const code = String(error.code || error.cause?.code || "");
-    if (code === "RETRIEVAL_BUDGET") return "budget";
-    if (error.name === "NetworkError" || code === "NETWORK_ERROR") return "network";
-    if (error.stalled || error.name === "TimeoutError" || error.name === "LookupTimeoutError" || code === "LOOKUP_TIMEOUT" || code === "ETIMEDOUT") return "timeout";
-    if (Number.isInteger(error.status) && error.status >= 400) return "api";
-    if (NET_CODES.test(code) || error.name === "TypeError" && /fetch|network|load failed/i.test(String(error.message))) return "network";
-  }
-  const message = String(error?.message || error || "");
-  if (/LOOKUP_TIMEOUT|超时|时间预算|等待 \d+ 秒|没有任何输出|timed? ?out/i.test(message)) return "timeout";
-  if (/模型接口|模型服务|返回 [45]\d\d|reasoning_content/.test(message)) return "api";
-  if (/network|网络|failed to fetch|fetch failed|load failed|连接|socket|econn/i.test(message)) return "network";
-  return "";
-}
-
-// src/llm/openai.js
-function retryWait(base, err, random = Math.random) {
-  const after = Number(err?.retryAfterMs) || 0;
-  if (after > 0) return Math.min(3e4, after);
-  return Math.round(base * (0.5 + random() * 0.5));
-}
-
-// src/core/networkRequest.js
-function throwControl(error, signal) {
-  if (signal?.aborted) throw signal.reason ?? Object.assign(new Error("\u5DF2\u505C\u6B62"), { name: "AbortError" });
-  if (error?.name === "AbortError" || error?.code === "RETRIEVAL_BUDGET") throw error;
-}
-function httpError(httpStatus, detail = "", service = "\u7F51\u7EDC\u670D\u52A1") {
-  return Object.assign(
-    new Error(service + (/[A-Za-z]$/.test(service) ? " \u8FD4\u56DE " : "\u8FD4\u56DE ") + httpStatus + (detail ? "\uFF1A" + String(detail).slice(0, 200) : "")),
-    {
-      name: "ApiError",
-      kind: "api",
-      status: httpStatus,
-      code: httpStatus === 429 ? "RATE_LIMITED" : "HTTP_ERROR"
-    }
-  );
-}
-function wait(ms, signal) {
-  return new Promise((resolve, reject) => {
-    let timer;
-    const finish = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-    };
-    const abort = () => {
-      finish();
-      reject(signal.reason ?? Object.assign(new Error("\u5DF2\u505C\u6B62"), { name: "AbortError" }));
-    };
-    if (signal?.aborted) return abort();
-    timer = setTimeout(() => {
-      finish();
-      resolve();
-    }, ms);
-    signal?.addEventListener("abort", abort, { once: true });
-  });
-}
-async function retryRead(work, { signal, timeoutMs = 6e3, beforeAttempt, onRetry, delayMs = 250 } = {}) {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    throwControl(null, signal);
-    beforeAttempt?.(attempt);
-    try {
-      return await withWebDeadline(work, { signal, timeoutMs });
-    } catch (error) {
-      throwControl(error, signal);
-      if (attempt || !["timeout", "network"].includes(errorKind(error))) throw error;
-      onRetry?.(error);
-      await wait(retryWait(delayMs, error), signal);
-    }
-  }
 }
 
 // src/agent/sportsZhibo8.js
@@ -2362,7 +2569,24 @@ function createEvidenceStore({ store = collection("kv"), now = Date.now, limits 
     }
   };
 }
-var evidence = createEvidenceStore();
+var evidenceCollection = collection("kv");
+var scopedEvidence = /* @__PURE__ */ new Map();
+function currentEvidence() {
+  const bound = evidenceCollection.bind();
+  const key = bound.scopeKey || evidenceCollection;
+  if (!scopedEvidence.has(key)) {
+    if (scopedEvidence.size >= 8) {
+      const oldest = scopedEvidence.keys().next().value;
+      scopedEvidence.get(oldest).flush().catch(() => {
+      });
+      scopedEvidence.delete(oldest);
+    }
+    scopedEvidence.set(key, createEvidenceStore({ store: bound }));
+  }
+  return scopedEvidence.get(key);
+}
+var evidence = Object.fromEntries(["put", "get", "index", "records", "drop", "flush"].map((method) => [method, (...args) => currentEvidence()[method](...args)]));
+Object.defineProperty(evidence, "cached", { get: () => currentEvidence().cached });
 
 // src/agent/lookup/news.js
 async function runNewsLookup(ctx, args = {}, execution = {}) {
@@ -2402,34 +2626,6 @@ async function runNewsLookup(ctx, args = {}, execution = {}) {
     coverage: newsCoverage(result.items),
     note: "\u4EC5\u6309\u660E\u786E\u53D1\u5E03\u65F6\u95F4\u548C\u672C\u6B21\u65F6\u95F4\u8303\u56F4\u4EA4\u4ED8\uFF0C\u4E0D\u628A\u6700\u8FD124\u5C0F\u65F6\u79F0\u4F5C\u4ECA\u65E5\uFF1BRSS\u4E0D\u7B49\u4E8E\u5DF2\u8BFB\u62A5\u9053\u539F\u6587\uFF0C\u8DEF\u900F\u8F6C\u8F7D\u53EA\u8BC1\u660E\u7F72\u540D\u53CA\u8F6C\u8F7D\u65F6\u95F4\uFF0C\u4ECD\u975EReuters\u5B98\u7F51\u72EC\u7ACB\u6838\u5B9E\u3002\u6309\u4E8B\u4EF6\u5C55\u793A\u6765\u6E90\u4E0E\u8865\u5145\uFF0C\u8F6C\u8F7D\u6309\u539F\u59CB\u673A\u6784\u5F52\u7EC4\uFF0C\u4E0D\u7F16\u4EA4\u53C9\u6838\u9A8C\u3002categoryBasis\u4E3Atitle_topic\u65F6\u53EA\u662F\u6309\u539F\u6807\u9898\u4E3B\u9898\u53EC\u56DE\uFF0CpublisherColumn\u4FDD\u7559\u539F\u7AD9\u680F\u76EE\uFF0C\u4E0D\u58F0\u79F0\u539F\u7AD9\u5F52\u4E3A\u79D1\u6280\u6216\u5DF2\u8BFB\u6B63\u6587\u3002"
   });
-}
-
-// shared/providers.js
-var PROVIDERS = [
-  { id: "mock", name: "\u5185\u7F6E\u6F14\u793A\uFF08\u79BB\u7EBF\uFF09", kind: "mock", baseURL: "", models: ["jarvis-demo"], needsKey: false, browser: true },
-  { id: "anthropic", name: "Anthropic Claude", kind: "anthropic", baseURL: "https://api.anthropic.com", models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"], keyUrl: "https://console.anthropic.com/", browser: true, webSearch: true },
-  { id: "openai", name: "OpenAI", kind: "openai", baseURL: "https://api.openai.com/v1", models: ["gpt-5", "gpt-5-mini", "gpt-4.1"], keyUrl: "https://platform.openai.com/api-keys", browser: true },
-  { id: "gemini", name: "Google Gemini", kind: "openai", baseURL: "https://generativelanguage.googleapis.com/v1beta/openai", models: ["gemini-2.5-pro", "gemini-2.5-flash"], keyUrl: "https://aistudio.google.com/apikey", browser: true },
-  { id: "deepseek", name: "DeepSeek \u6DF1\u5EA6\u6C42\u7D22", kind: "openai", baseURL: "https://api.deepseek.com/v1", models: ["deepseek-chat", "deepseek-reasoner"], keyUrl: "https://platform.deepseek.com/api_keys", browser: false },
-  { id: "qwen", name: "\u901A\u4E49\u5343\u95EE\uFF08\u963F\u91CC\u4E91\u767E\u70BC\uFF09", kind: "openai", baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", models: ["qwen-max", "qwen-plus", "qwen-turbo"], keyUrl: "https://bailian.console.aliyun.com/", browser: false },
-  { id: "moonshot", name: "Kimi\uFF08\u6708\u4E4B\u6697\u9762\uFF09", kind: "openai", baseURL: "https://api.moonshot.cn/v1", models: ["kimi-latest", "moonshot-v1-32k"], keyUrl: "https://platform.moonshot.cn/console/api-keys", browser: false },
-  { id: "zhipu", name: "\u667A\u8C31 GLM", kind: "openai", baseURL: "https://open.bigmodel.cn/api/paas/v4", models: ["glm-4.5", "glm-4-flash"], keyUrl: "https://open.bigmodel.cn/usercenter/apikeys", browser: false },
-  { id: "doubao", name: "\u8C46\u5305\uFF08\u706B\u5C71\u65B9\u821F\uFF09", kind: "openai", baseURL: "https://ark.cn-beijing.volces.com/api/v3", models: ["doubao-seed-1-6-250615"], keyUrl: "https://console.volcengine.com/ark", browser: false, note: "\u578B\u53F7\u5904\u53EF\u586B\u5199\u65B9\u821F\u63A7\u5236\u53F0\u91CC\u7684\u201C\u63A8\u7406\u63A5\u5165\u70B9 ID\u201D" },
-  { id: "siliconflow", name: "\u7845\u57FA\u6D41\u52A8 SiliconFlow", kind: "openai", baseURL: "https://api.siliconflow.cn/v1", models: ["deepseek-ai/DeepSeek-V3", "Qwen/Qwen2.5-72B-Instruct"], keyUrl: "https://cloud.siliconflow.cn/account/ak", browser: false },
-  { id: "openrouter", name: "OpenRouter\uFF08\u805A\u5408\uFF09", kind: "openai", baseURL: "https://openrouter.ai/api/v1", models: ["openai/gpt-5", "google/gemini-2.5-pro", "deepseek/deepseek-chat"], keyUrl: "https://openrouter.ai/keys", browser: true },
-  { id: "ollama", name: "Ollama\uFF08\u672C\u673A\u6A21\u578B\uFF09", kind: "openai", baseURL: "http://127.0.0.1:11434/v1", models: ["qwen3:8b", "qwen3:4b"], needsKey: false, browser: true, note: "\u6D4F\u89C8\u5668\u76F4\u8FDE\u9700\u4EE5 OLLAMA_ORIGINS=* \u542F\u52A8 Ollama\uFF1B\u7528\u5B8C\u6574\u7248\u7F51\u5173\u5219\u4E0D\u9700\u8981" },
-  // 多协议中转（如 TeamoRouter）：一个地址一个密钥，按模型名自动用原生格式——
-  // Claude → /v1/messages、GPT → /v1/responses（都能开模型自带的联网搜索），其他 → /v1/chat/completions
-  { id: "relay-multi", name: "\u591A\u534F\u8BAE\u4E2D\u8F6C\uFF08\u6309\u6A21\u578B\u7528\u539F\u751F\u683C\u5F0F\uFF0C\u5982 TeamoRouter\uFF09", kind: "multi", baseURL: "", models: ["gpt-6.1-sol", "claude-fable-5-1", "gemini-3.5-flash"], browser: true, custom: true, webSearch: true },
-  // 中转站的 Anthropic 原生接口（/v1/messages）：能用 Claude 和它的内置联网搜索（要看中转站是否支持）
-  { id: "claude-relay", name: "Claude \u4E2D\u8F6C\uFF08Anthropic \u539F\u751F\u683C\u5F0F\uFF09", kind: "anthropic", baseURL: "", models: ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"], browser: true, custom: true, webSearch: true },
-  { id: "custom", name: "\u81EA\u5B9A\u4E49\uFF08OpenAI \u517C\u5BB9\uFF09", kind: "openai", baseURL: "", models: [""], browser: true, custom: true },
-  // 有界的独立中转线路：同名模型也能分开保存地址、密钥和备用顺序。
-  ...Array.from({ length: 7 }, (_, index) => ({ id: `relay-${index + 2}`, name: `\u81EA\u5B9A\u4E49\u670D\u52A1\u5546 ${index + 2}\uFF08\u591A\u534F\u8BAE\uFF09`, kind: "multi", baseURL: "", models: [""], browser: true, custom: true, webSearch: true }))
-];
-function isPrivateHost(host) {
-  const h = host.replace(/^\[|\]$/g, "").toLowerCase();
-  return h === "localhost" || h.endsWith(".local") || h === "::1" || h === "0.0.0.0" || /^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^f[cd][0-9a-f]{2}:/.test(h) || /^fe80:/.test(h);
 }
 
 // src/agent/publicJson.js
@@ -2914,7 +3110,7 @@ function createStockKlineTool(ctx = {}) {
 
 // src/agent/deepseekSearch.js
 var ORIGIN = "https://api.deepseek.com/v1/tools/";
-var secret = (value) => typeof value === "string" && !value.startsWith("\u2022\u2022\u2022\u2022") ? value.trim() : "";
+var secret2 = (value) => typeof value === "string" && !value.startsWith("\u2022\u2022\u2022\u2022") ? value.trim() : "";
 function publicUrl(address) {
   let parsed;
   try {
@@ -2941,7 +3137,7 @@ function createDeepseekSearch({ deepseekSearchEnabled, deepseekSearchKey, fetchV
     }
   }
   async function requestOnce(kind, body, { signal, consume } = {}) {
-    if (!secret(deepseekSearchKey))
+    if (!secret2(deepseekSearchKey))
       throw Object.assign(new Error("\u8BF7\u914D\u7F6EDeepSeek\u5B98\u65B9\u641C\u7D22Key\uFF0C\u6216\u8BE5\u4F4D\u7F6E\u7684DeepSeek\u5B98\u65B9\u6A21\u578BKey"), { code: "DEEPSEEK_SEARCH_KEY_MISSING", kind: "api" });
     return retryRead(
       async (activeSignal) => {
@@ -3019,43 +3215,6 @@ function createDeepseekSearch({ deepseekSearchEnabled, deepseekSearchKey, fetchV
       return "# " + String(data.title || "").slice(0, 200) + "\n\n" + data.content.slice(0, 6e4) + (data.content.length > 6e4 ? "\n\uFF08\u6B63\u6587\u5DF2\u622A\u65AD\uFF0C\u4E0D\u80FD\u5F53\u4F5C\u5168\u6587\u5DF2\u8BFB\u3002\uFF09" : "");
     }
   };
-}
-
-// src/agent/officialSources.js
-var REGISTERED = /* @__PURE__ */ new Set(["thecfa.cn", "china-coop.org", "sse.com.cn", "szse.cn", "cninfo.com.cn"]);
-var PROVINCES = { \u6C5F\u82CF: "jiangsu.gov.cn", \u6D59\u6C5F: "zj.gov.cn", \u5E7F\u4E1C: "gd.gov.cn", \u5317\u4EAC: "beijing.gov.cn", \u4E0A\u6D77: "shanghai.gov.cn", \u5C71\u4E1C: "shandong.gov.cn", \u56DB\u5DDD: "sc.gov.cn" };
-var under = (hostname, domain) => hostname === domain || hostname.endsWith("." + domain);
-function isOfficialSource(address) {
-  try {
-    const parsed = new URL(address);
-    if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) return false;
-    return under(parsed.hostname, "gov.cn") || [...REGISTERED].some((domain) => under(parsed.hostname, domain));
-  } catch {
-    return false;
-  }
-}
-function mergeSearchHits(hits) {
-  const unique = /* @__PURE__ */ new Map();
-  for (const hit of hits.slice(0, 300)) {
-    try {
-      const parsed = new URL(hit.url);
-      if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) continue;
-      parsed.hash = "";
-      for (const key2 of [...parsed.searchParams.keys()]) if (/^(utm_|spm$|from$)/i.test(key2)) parsed.searchParams.delete(key2);
-      const key = parsed.href.replace(/\/$/, "");
-      if (!unique.has(key)) unique.set(key, { ...hit, url: parsed.href });
-    } catch {
-    }
-  }
-  return [...unique.values()].map((hit, index) => ({ hit, index })).sort((a, b) => Number(isOfficialSource(b.hit.url)) - Number(isOfficialSource(a.hit.url)) || a.index - b.index).map(({ hit }) => hit);
-}
-function officialQueries(query, hits) {
-  if (/\bsite:/i.test(query) || !/机构|概况|职责|职能|政策|条例|办法|政府|官网|供销|合作总社|信息公开/.test(query)) return [];
-  const sites = ["gov.cn"];
-  for (const [province, domain] of Object.entries(PROVINCES)) if (query.includes(province)) sites.push(domain);
-  const candidate = hits.find((hit) => isOfficialSource(hit.url));
-  if (candidate) sites.push(new URL(candidate.url).hostname.replace(/^www\./, ""));
-  return [...new Set(sites)].slice(0, 3).map((site) => `${query} site:${site}`);
 }
 
 // src/agent/searchSources.js
@@ -3274,11 +3433,12 @@ function searchPlan(query, region, freshness = "", now = Date.now()) {
 }
 function createSearch(options = {}) {
   const { bochaKey, tavilyKey, fetchViaGateway, searchRegion = "auto" } = options;
+  const qianfan = createQianfanSearch(options);
   const deepseek = createDeepseekSearch(options);
   const keyless = keylessSearch(fetchViaGateway, searchRegion);
   const bocha = bochaKey ? bochaSearch(bochaKey, fetchViaGateway) : null;
   const tavily = tavilyKey ? tavilySearch(tavilyKey, fetchViaGateway) : null;
-  const all = [deepseek, bocha, tavily, keyless].filter(Boolean);
+  const all = [qianfan, deepseek, bocha, tavily, keyless].filter(Boolean);
   if (all.length <= 1) return all[0] ?? null;
   return {
     get name() {
@@ -3288,9 +3448,8 @@ function createSearch(options = {}) {
     async search(query, n = 6, opts = {}) {
       if (opts.signal?.aborted) throw opts.signal.reason;
       const zh = /[\u4e00-\u9fff]/.test(query);
-      const domestic = zh && (deepseek || !keyless || await keyless.regionNow() === "cn");
-      const order = [deepseek, ...domestic ? [bocha, keyless, tavily] : [tavily, bocha, keyless]].filter(Boolean);
-      return staggeredSearch(order, query, n, opts, deepseek);
+      const order = (zh ? [qianfan, deepseek, bocha, keyless, tavily] : [deepseek, qianfan, tavily, bocha, keyless]).filter(Boolean);
+      return staggeredSearch(order, query, n, opts, order[0] === qianfan ? qianfan : deepseek);
     }
   };
 }
@@ -3320,17 +3479,17 @@ function staggeredSearch(order, query, n, opts = {}, preferred = null, staggerMs
     const launch = () => {
       if (done || started >= order.length) return;
       const e = order[started++];
-      if (e === preferred) opts.progress?.("\u6B63\u5728\u8C03\u7528DeepSeek\u641C\u7D22");
+      if (e === preferred) opts.progress?.(e.name === "\u767E\u5EA6\u5343\u5E06\u641C\u7D22" ? "\u6B63\u5728\u8C03\u7528\u767E\u5EA6\u5343\u5E06\u641C\u7D22" : "\u6B63\u5728\u8C03\u7528DeepSeek\u641C\u7D22");
       Promise.resolve().then(() => e.search(query, n, { ...opts, signal: ctrl.signal })).then((list) => {
         for (const h of list ?? []) if (!hits.some((x) => x.url === h.url)) hits.push(h);
         if (e === preferred) {
           preferredHit = Boolean(list?.length);
-          opts.progress?.(list?.length ? `DeepSeek\u641C\u7D22\u8FD4\u56DE${list.length}\u6761\u7ED3\u679C` : "DeepSeek\u641C\u7D22\u65E0\u7ED3\u679C\uFF0C\u5C1D\u8BD5\u539F\u641C\u7D22\u7EBF\u8DEF");
+          opts.progress?.(list?.length ? `${e.name === "\u767E\u5EA6\u5343\u5E06\u641C\u7D22" ? "\u767E\u5EA6\u641C\u7D22" : "DeepSeek\u641C\u7D22"}\u8FD4\u56DE${list.length}\u6761\u7ED3\u679C` : (e.name === "\u767E\u5EA6\u5343\u5E06\u641C\u7D22" ? "\u767E\u5EA6\u641C\u7D22" : "DeepSeek\u641C\u7D22") + "\u65E0\u7ED3\u679C\uFF0C\u5C1D\u8BD5\u539F\u641C\u7D22\u7EBF\u8DEF");
         }
       }).catch((err) => {
         if (done) return;
         errors.push(err);
-        if (e === preferred) opts.progress?.("DeepSeek\u641C\u7D22\u672A\u53D6\u5F97\u7ED3\u679C\uFF0C\u5C1D\u8BD5\u539F\u641C\u7D22\u7EBF\u8DEF\uFF1A" + err.message);
+        if (e === preferred) opts.progress?.((e.name === "\u767E\u5EA6\u5343\u5E06\u641C\u7D22" ? "\u767E\u5EA6\u641C\u7D22" : "DeepSeek\u641C\u7D22") + "\u672A\u53D6\u5F97\u7ED3\u679C\uFF0C\u5C1D\u8BD5\u539F\u641C\u7D22\u7EBF\u8DEF\uFF1A" + err.message);
       }).finally(() => {
         settled++;
         if (done) return;

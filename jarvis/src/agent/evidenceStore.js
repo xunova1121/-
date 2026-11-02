@@ -124,5 +124,21 @@ export function createEvidenceStore({ store = collection('kv'), now = Date.now, 
   };
 }
 
-/** 全局共用一个（服务器上所有任务、本机所有对话都用它，靠对话 id 隔离） */
-export const evidence = createEvidenceStore();
+/** 浏览器仍共用原集合；服务器长寿命缓存绑定各自的异步存储范围。最多8个热范围。 */
+const evidenceCollection = collection('kv');
+const scopedEvidence = new Map();
+function currentEvidence() {
+  const bound = evidenceCollection.bind();
+  const key = bound.scopeKey || evidenceCollection;
+  if (!scopedEvidence.has(key)) {
+    if (scopedEvidence.size >= 8) {
+      const oldest = scopedEvidence.keys().next().value;
+      scopedEvidence.get(oldest).flush().catch(() => {});
+      scopedEvidence.delete(oldest);
+    }
+    scopedEvidence.set(key, createEvidenceStore({ store: bound }));
+  }
+  return scopedEvidence.get(key);
+}
+export const evidence = Object.fromEntries(['put', 'get', 'index', 'records', 'drop', 'flush'].map(method => [method, (...args) => currentEvidence()[method](...args)]));
+Object.defineProperty(evidence, 'cached', { get: () => currentEvidence().cached });

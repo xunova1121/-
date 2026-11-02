@@ -1,6 +1,7 @@
 import { createModelLocalOptions } from './modelLocalOptions.js';
 import { localLookup } from './lookup.js';
 import { testDeepseekSearch } from '../agent/deepseekSearch.js';
+import { testQianfanSearch } from '../agent/qianfanSearch.js';
 /** 模型工作台：分位置读写配置，界面细节放在ui，不改任务执行中的运行位置。 */
 import { createModelScopes } from '../llm/modelScopes.js';
 import { copyModelSettings, chooseLine, currentLine, hasRouting } from '../llm/modelLibrary.js';
@@ -114,6 +115,14 @@ export function createModelWorkspace(app) {
         return client.testDeepseekSearch(kind, signal);
       }
       return testDeepseekSearch(app.panels.config, kind, { signal, fetchViaGateway: app.fetchViaGateway() });
+    },
+    async testQianfanSearch(target = scope, signal) {
+      if (target === 'server') {
+        const client = getClient();
+        if (!client) throw Object.assign(new Error('请先登录云服务器'), { kind: 'api', code: 'SERVER_NOT_CONNECTED' });
+        return client.testDeepseekSearch('qianfan', signal);
+      }
+      return testQianfanSearch(app.panels.config, { signal, fetchViaGateway: app.fetchViaGateway() });
     },
     async catalog(provider, signal, target = scope) {
       if (target === 'server') {

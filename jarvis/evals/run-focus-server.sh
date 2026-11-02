@@ -18,7 +18,7 @@ cp "$FOCUS_APP/package.json" "$FOCUS_STAGE/app/package.json"
 cp -aL "$FOCUS_APP/evals" "$FOCUS_STAGE/app/evals"
 cp -aL "$FOCUS_APP/shared" "$FOCUS_STAGE/app/shared"
 for part in src server node_modules; do ln -s "$FOCUS_APP/$part" "$FOCUS_STAGE/app/$part"; done
-for relative in evals/focus-cases.mjs evals/focus-code-evidence.mjs evals/focus-report.mjs evals/joint.mjs evals/runner.mjs evals/joint-report.mjs evals/joint-calibrate.mjs shared/capabilityReadiness.js; do
+for relative in evals/evaluation-auth.mjs evals/focus-cases.mjs evals/focus-code-evidence.mjs evals/focus-report.mjs evals/joint.mjs evals/runner.mjs evals/joint-report.mjs evals/joint-calibrate.mjs shared/capabilityReadiness.js; do
   curl -fsSL --retry 2 --connect-timeout 10 --max-time 60 --max-filesize 1000000 -H 'Accept: application/vnd.github.raw+json' "https://api.github.com/repos/xunova1121/-/contents/jarvis/$relative?ref=$FOCUS_REVISION" -o "$FOCUS_STAGE/app/$relative"
 done
 node "$FOCUS_STAGE/app/evals/joint.mjs" --focus > "$FOCUS_STAGE/plan.json"

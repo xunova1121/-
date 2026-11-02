@@ -258,6 +258,8 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/jarvis-e2e"
           node e2e/server-mode.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/server-auth.mjs "$RUNNER_TEMP/jarvis-e2e/server-auth"
+          node e2e/qianfan-search.mjs "$RUNNER_TEMP/jarvis-e2e/qianfan-search"
           node e2e/runtime-switch.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/code-repos.mjs "$RUNNER_TEMP/jarvis-e2e/code-repos"
           node e2e/code-work.mjs "$RUNNER_TEMP/jarvis-e2e/code-work"

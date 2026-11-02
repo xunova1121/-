@@ -40,7 +40,7 @@ it('新增重点入口不读取访问密码或旧密码环境文件，也不调�
   expect(script).not.toMatch(/JARVIS_PASSWORD|jarvis\.env|bash[^\n]*run-joint\.sh/);
   expect(script).toContain('JARVIS_EVAL_TOKEN');
 });
-it('旧服务器缺自检接口时预检即停，保存可分享的阻塞状态，不提交模型任务', async () => {
+it('旧服务器缺专用评测协议时预检即停，保存可分享的阻塞状态，不提交模型任务', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'weiyang-focus-preflight-'));
   const out = path.join(directory, 'results');
   const calls = [];
@@ -66,7 +66,7 @@ it('旧服务器缺自检接口时预检即停，保存可分享的阻塞状态�
     await expect(
       main(['--focus', '--live', '--out-dir=' + out], { JARVIS_EVAL_URL: 'http://127.0.0.1:8787', JARVIS_EVAL_TOKEN: 'private-token' })
     ).rejects.toMatchObject({ code: 'EVAL_CONFIG' });
-    expect(calls.some((row) => row.route === '/api/tasks')).toBe(false);
+    expect(calls.some((row) => row.route === '/api/tasks' && row.method === 'POST')).toBe(false);
     const preflight = JSON.parse(await fs.readFile(path.join(out, '预检失败.json'), 'utf8'));
     expect(preflight).toMatchObject({ state: 'blocked_readiness', modelRequested: false, productionChanged: false });
     expect(JSON.stringify(preflight)).not.toContain('private-token');

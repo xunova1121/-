@@ -17,12 +17,26 @@ async function setup({serverMode=null,localAllowed=()=>true}={}){
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   const url='ws://127.0.0.1:'+server.address().port+'/api/voice/qwen';
   const clients=[];
-  return {calls,upstreams,async client(){
-    const client=new WebSocket(url);clients.push(client);await once(client,'open');return client;
+  return {calls,upstreams,async client(query=''){
+    const client=new WebSocket(url+query);clients.push(client);await once(client,'open');return client;
   },async close(){clients.forEach(ws=>ws.terminate());await new Promise(r=>server.close(r));}};
 }
 async function next(ws,send){const p=once(ws,'message');send();return JSON.parse((await p)[0].toString());}
 describe('百炼实时网关',()=>{
+  it('网址不接受会话凭据，鉴权设备撤销立即释放已连接上游',async()=>{
+    let revoke,unsubscribed=0;
+    const env=await setup({serverMode:{authorized:()=>true,realtimeKey:()=> 'fake-key',watchAccess:(_req,close)=>{revoke=close;return()=>{unsubscribed++;};}}});
+    try{
+      await expect(env.client('?token=fake-session')).rejects.toThrow(/401/);
+      expect(env.calls).toHaveLength(0);
+      const client=await env.client();
+      expect((await next(client,()=>client.send(JSON.stringify({model:QWEN_ASR,token:'fake-session'})))).type).toBe('transport.ready');
+      const closed=once(client,'close');
+      revoke();await closed;
+      expect(env.upstreams[0].terminated).toBe(true);
+      expect(unsubscribed).toBe(1);
+    }finally{await env.close();}
+  });
   it('实际本机网关允许同源浏览器WS，不要求浏览器无法设置的自定义头',async()=>{
     const server=createServer({ollama:null});await new Promise(r=>server.listen(0,'127.0.0.1',r));
     const base='127.0.0.1:'+server.address().port;

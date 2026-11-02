@@ -213,7 +213,7 @@ async function runViewport(width) {
   const context = await browser.newContext({ viewport: { width, height: 900 } });
   await context.addInitScript(
     ({ base, token }) => {
-      localStorage.setItem('jarvis.server.v1', JSON.stringify({ url: base, token, enabled: true }));
+      if (!localStorage.getItem('jarvis.server.v1')) localStorage.setItem('jarvis.server.v1', JSON.stringify({ url: base, token, enabled: true }));
       localStorage.setItem('jarvis.settings.v1', JSON.stringify({ speechOutput: false, autoMemory: false, teamMode: 'off' }));
     },
     { base, token: tokenFor('p7-browser-fixture') }

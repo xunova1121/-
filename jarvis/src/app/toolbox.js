@@ -79,6 +79,8 @@ export function createToolbox(app) {
       ...createTools({
         metrics: app.metrics,
         ...deepseekSearchOptions(app.llmConfig),
+        qianfanSearchKey: app.llmConfig.qianfanSearchKey,
+        qianfanSearchTopK: app.llmConfig.qianfanSearchTopK,
         tavilyKey: app.llmConfig.tavilyKey,
         publicDataHosts: app.llmConfig.publicDataHosts,
         lookup: localLookup(app).options(app.llmConfig.lookupRegion || 'auto'),

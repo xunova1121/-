@@ -1,3 +1,4 @@
+import { evaluationInfo, evaluationFiles, evaluationReadiness } from './evaluation-auth.mjs';
 /**
  * 30 题联合复测：每题跑两次，每轮之后把交付的文件下载回来量一遍；记调用明细、时间拆分、Token、费用。
  * 评分另由 joint-judge.mjs 自动评审、joint-calibrate.mjs 和用户抽查对比校准。
@@ -15,12 +16,11 @@ import { jointSuiteVersion, JOINT_REPEATS } from './joint-cases.mjs';
 import { runCase, serverAPI } from './runner.mjs';
 import { checkResult } from './baseline-report.mjs';
 import { validateLiveConfig } from './baseline.mjs';
-import { fileDownloader, turnFileFacts, fileProblems, turnEvidence } from './joint-files.mjs';
+import { turnFileFacts, fileProblems, turnEvidence } from './joint-files.mjs';
 import { runMetrics, stability, jointSummary, compareRounds } from './joint-report.mjs';
 import { rubricVersion } from './joint-rubric.mjs';
 import { evidenceDownloader, searchEvidence } from './joint-evidence.mjs';
 import { focusSuiteVersion, selectJointCases } from './focus-cases.mjs';
-import { normalizeReadiness } from '../shared/capabilityReadiness.js';
 import { codeResumeProblems } from './focus-code-evidence.mjs';
 
 const bj = (t = Date.now()) => new Date(t + 8 * 3600_000).toISOString().replace('T', ' ').slice(0, 19) + '（北京时间）';
@@ -40,7 +40,7 @@ export async function runJointOnce(api, item, { download, runId, attempt, signal
   const fileFacts = [], evidence = [];
   const capture = async (turn, index) => {
     if (item.id === 'focus-code-resume') turn.codeEvidence = await api.codeEvidence?.(turn.taskId, signal).catch(() => null) || null;
-    const snapshot = evidenceDownloader(download, archiveRoot && path.join(archiveRoot, `turn-${index}`));
+    const snapshot = evidenceDownloader(download.forTurn?.(turn) || download, archiveRoot && path.join(archiveRoot, `turn-${index}`));
     if (item.file) fileFacts.push(await turnFileFacts(turn, snapshot));
     evidence.push({ tools: Object.entries(turn.timing?.tools || {}).map(([name, v]) => ({ name, calls: v.calls, failed: v.failed })), ...searchEvidence(turn), files: await turnEvidence(turn, snapshot).catch(() => []), outcome: turn.review?.outcome ?? null, artifactDirectory: archiveRoot ? `artifacts/${item.id}-r${attempt}/turn-${index}` : null });
   };
@@ -101,34 +101,22 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   }
   if (!env.JARVIS_EVAL_URL || !env.JARVIS_EVAL_TOKEN) throw configError('缺少服务器地址或登录令牌');
   const api = serverAPI(env.JARVIS_EVAL_URL, env.JARVIS_EVAL_TOKEN);
-  const download = fileDownloader(env.JARVIS_EVAL_URL, env.JARVIS_EVAL_TOKEN);
-  const remove = async (id) => {
-    const url = new URL(env.JARVIS_EVAL_URL);
-    await fetch(new URL(url.pathname.replace(/\/$/, '') + '/api/server/schedules/' + encodeURIComponent(id), url.origin), { method: 'DELETE', redirect: 'error', signal: AbortSignal.timeout(10_000), headers: { Authorization: `Bearer ${env.JARVIS_EVAL_TOKEN}` } });
-  };
-  const cfg = await api('/api/server/config');
-  const selected = validateLiveConfig(cfg);
-  const status = await api('/api/server/status');
-  if (status.running || status.tasks?.length) throw configError('服务器有其他任务，请单独评测');
-  if (!status.features?.evaluationMemoryIsolation || !status.features?.taskRequestIds) throw configError('服务器版本太旧（缺评测隔离），请先更新服务器');
-  const update = await api('/api/server/update').catch(() => null);
-  if (arg('expected-version') && update?.version !== arg('expected-version')) throw configError('服务器版本与本次固定基线不一致，未提交评测任务');
-  const repos = await api('/api/server/code-repos').catch(() => null);
-  const envState = { repoConnected: repos?.connected === true && repos?.repository === 'xunova1121/weiyang-code-sandbox', browserConfigured: repos?.capabilities?.browserConfigured === true };
-  let environmentCheck = null;
-  if (focus) {
-    try { environmentCheck = normalizeReadiness(await api('/api/server/readiness', {}, { timeoutMs: 30000 }), 'server'); }
-    catch {
-      const blocked = arg('out-dir');
-      if (blocked) {
-        await fs.mkdir(blocked, { mode: 0o700 });
-        await fs.writeFile(path.join(blocked, '预检失败.json'), JSON.stringify({ suiteVersion, state: 'blocked_readiness', modelRequested: false, productionChanged: false,
-          reason: '服务器统一自检不可用或响应不兼容，请先更新服务器并完成自检', serverVersion: update?.version || null }), { mode: 0o600 });
-      }
-      throw configError('重点复测需要统一自检，请先更新服务器并完成自检；未提交评测任务');
+  let info;
+  try { info = await evaluationInfo(api); }
+  catch (failure) {
+    if (focus && arg('out-dir')) {
+      await fs.mkdir(arg('out-dir'), { mode: 0o700 });
+      await fs.writeFile(path.join(arg('out-dir'), '预检失败.json'), JSON.stringify({ suiteVersion, state: 'blocked_readiness', modelRequested: false, productionChanged: false, reason: '专用评测授权或协议未就绪；未读取主人设置' }), { mode: 0o600 });
     }
-    envState.sandboxReady = environmentCheck.checks?.some(row => row.id === 'sandbox' && row.code === 'sandbox_ready') === true;
+    throw failure;
   }
+  const cfg = { provider: info.provider, models: { [info.provider]: info.model }, routing: { enabled: info.routingEnabled } };
+  const selected = validateLiveConfig(cfg);
+  const update = { version: info.version };
+  if (arg('expected-version') && update.version !== arg('expected-version')) throw configError('服务器版本与本次固定基线不一致，未提交评测任务');
+  const download = evaluationFiles({ dataDir: env.JARVIS_EVAL_DATA || '/opt/jarvis/data', tokenId: info.tokenId });
+  const envState = { repoConnected: false, browserConfigured: false, sandboxReady: false, restrictedEvaluation: true, files: 'server_local_private_reader' };
+  const environmentCheck = null;
   const prices = arg('prices') ? JSON.parse(await fs.readFile(arg('prices'), 'utf8')) : {};
   const repeats = Math.max(1, Math.min(3, Number(arg('repeats')) || JOINT_REPEATS));
   const directory = arg('out-dir');
@@ -168,15 +156,15 @@ export async function main(args = process.argv.slice(2), env = process.env) {
       if (controller.signal.aborted) break;
       const entry = { id: item.id, group: item.group, category: item.category, ...(item.sourceCase && { sourceCase: item.sourceCase }), carriedFrom: item.carriedFrom || null, prompt: item.prompt, followup: item.followup || null, rubric: item.rubric, runs: [] };
       report.results.push(entry);
-      const notReady = readiness(item, envState);
+      const notReady = evaluationReadiness(item) || readiness(item, envState);
       for (let attempt = 1; attempt <= repeats; attempt++) {
         if (controller.signal.aborted) break;
         if (notReady) {
           entry.runs.push({ attempt, status: 'skipped', environment: 'not_ready', reason: notReady, turns: [], metrics: runMetrics([]), judgement: null });
           continue;
         }
-        const before = item.requires.includes('schedule') ? new Set(((await api('/api/server/schedules')) || []).map((s) => s.id)) : null;
-        const run = await runJointOnce(api, item, { download, runId: report.runId, attempt, signal: controller.signal, prices, archiveRoot: path.join(directory, "artifacts", `${item.id}-r${attempt}`), cleanup: before && scheduleCleaner(api, remove, before) });
+        const before = null;
+        const run = await runJointOnce(api, item, { download, runId: report.runId, attempt, signal: controller.signal, prices, archiveRoot: path.join(directory, "artifacts", `${item.id}-r${attempt}`), cleanup: before });
         entry.runs.push(run);
         console.log(`${item.id} 第${attempt}次：${run.status}；${Math.round(run.metrics.totalMs / 1000)}秒；模型调用${run.metrics.allCalls ?? run.metrics.mainCalls ?? '?'}次${run.fileProblems.length ? '；文件不符' : ''}`);
         await save();

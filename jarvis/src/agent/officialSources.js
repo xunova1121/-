@@ -1,3 +1,5 @@
+import { DOMESTIC_NEWS_CANDIDATES } from './lookup/sourceCatalog.js';
+import { internationalNewsFeeds } from './newsFeeds.js';
 /** 政府域名及已登记机构官网；不因页面标题含“官网”就信任任意网站。 */
 const REGISTERED = new Set(['thecfa.cn', 'china-coop.org', 'sse.com.cn', 'szse.cn', 'cninfo.com.cn']);
 const PROVINCES = { 江苏: 'jiangsu.gov.cn', 浙江: 'zj.gov.cn', 广东: 'gd.gov.cn', 北京: 'beijing.gov.cn', 上海: 'shanghai.gov.cn', 山东: 'shandong.gov.cn', 四川: 'sc.gov.cn' };
@@ -9,6 +11,15 @@ export function isOfficialSource(address) {
     if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) return false;
     return under(parsed.hostname, 'gov.cn') || [...REGISTERED].some((domain) => under(parsed.hostname, domain));
   } catch { return false; }
+}
+
+export function sourceAuthority(address) {
+  if (isOfficialSource(address)) return 3;
+  try {
+    const hostname = new URL(address).hostname.replace(/^www\./, '');
+    const sources = [...DOMESTIC_NEWS_CANDIDATES, ...internationalNewsFeeds([], ['BBC', '路透', '卫报', '半岛电视台'])];
+    return sources.some(source => (source.hosts || []).some(host => under(hostname, host.replace(/^www\./, '')))) ? 2 : 0;
+  } catch { return 0; }
 }
 
 export function mergeSearchHits(hits) {
@@ -24,7 +35,7 @@ export function mergeSearchHits(hits) {
     } catch { /* 非网址不能作为检索结果。 */ }
   }
   return [...unique.values()].map((hit, index) => ({ hit, index }))
-    .sort((a, b) => Number(isOfficialSource(b.hit.url)) - Number(isOfficialSource(a.hit.url)) || a.index - b.index)
+    .sort((a, b) => sourceAuthority(b.hit.url) - sourceAuthority(a.hit.url) || a.index - b.index)
     .map(({ hit }) => hit);
 }
 

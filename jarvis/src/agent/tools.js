@@ -1,3 +1,4 @@
+import { formatSearchHit } from './qianfanSearch.js';
 import { createTodayNewsTool } from './todayNews.js';
 import { connectLookupTools } from './lookup/operations.js';
 import { createPublicJsonTool } from './publicJson.js';
@@ -691,12 +692,12 @@ export function createTools(ctx) {
             const selected = searchRequest(q, requestText, freshness);
             retrieval?.registerQuery?.(selected.query);
             retrieval?.consume('search');
-            const rawHits = await withWebDeadline((s) => engine.search(selected.query, list.length > 1 ? 5 : 6, { freshness: selected.freshness, signal: s, progress, consume: kind => retrieval?.consume(kind) }), { signal, timeoutMs: 40000 });
+            const rawHits = await withWebDeadline((s) => engine.search(selected.query, list.length > 1 ? 5 : 6, { freshness: selected.freshness, requestText, signal: s, progress, consume: kind => retrieval?.consume(kind) }), { signal, timeoutMs: 40000 });
             const screened = screenSearchHits(rawHits, requestText);
             const hits = screened.hits;
             if (!hits.length && screened.rejected) throw Object.assign(new Error('检索结果与今日新闻不对应，请换原始报道来源，不用年度日历代替新闻'), { code: 'IRRELEVANT_SEARCH_RESULTS', kind: 'api' });
             if (hits.length) successes++;
-            return hits.length ? hits.map((r) => `- ${r.title}\n  ${r.url}\n  ${String(r.snippet || '').slice(0, r.source === 'deepseek' ? 800 : 300)}${r.source === 'deepseek' ? '\n  （DeepSeek检索摘要，未读原文）' + (r.publishedAt ? ' 发布时间：' + r.publishedAt : '') : ''}`).join('\n') : '（没有结果：换个说法、换成英文或原文再搜）';
+            return hits.length ? hits.map((r) => formatSearchHit(r, { query: selected.query, requestText, freshness: selected.freshness })).join('\n') : '（没有结果：换个说法、换成英文或原文再搜）';
           } catch (e) {
             if (signal?.aborted || e.name === 'AbortError') throw e;
             // 预算用完：别的词搜到了就照常返回；全没搜到才把预算错误交给主循环（它会让模型直接整理答案，而不是换词再搜）

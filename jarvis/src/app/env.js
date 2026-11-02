@@ -27,10 +27,28 @@ export const isMobile = matchMedia('(pointer: coarse)').matches;
 export const reducedMql = matchMedia('(prefers-reduced-motion: reduce)');
 
 let toastTimer = 0;
+let toastRevision = 0;
 /** 底部提示条：几秒后自动消失（字多的停久一点） */
-export function toast(text) {
+export function toast(text, action) {
+  const revision = ++toastRevision;
   const el = $('#toast');
   el.textContent = text;
+  if (action?.run && action.label) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn ghost sm toast-action';
+    button.textContent = action.label;
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        await action.run();
+        if (toastRevision === revision) toast('该设备已退出');
+      } catch {
+        if (toastRevision === revision) toast('退出设备未完成，请在服务器安全设置中重试');
+      }
+    });
+    el.append(button);
+  }
   el.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(

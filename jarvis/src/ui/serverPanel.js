@@ -4,6 +4,7 @@
  */
 import { loadServerSettings, saveServerSettings, createServerClient, normalizeUrl } from '../core/serverClient.js';
 import { listLocal } from '../agent/sessions.js';
+import { createServerSecurityPanel } from './serverSecurityPanel.js';
 import { initCodeReposPanel } from './codeReposPanel.js';
 
 const $ = (s) => document.querySelector(s);
@@ -21,7 +22,13 @@ export function initServerPanel({ getLlmConfig, toast, reload = () => location.r
   on.checked = cfg.enabled;
   on.disabled = !cfg.token;
   const say = (t) => { status.textContent = t; };
-  const client = () => createServerClient({ base: $('#server-url').value || cfg.url, token: loadServerSettings().token });
+  // 编辑地址不等于已登录新服务器；不能把旧凭证带到尚未验证的新地址。
+  const client = () => {
+    const saved = loadServerSettings();
+    return createServerClient({ base: saved.url, token: saved.token });
+  };
+
+  $('#server-net')?.after(createServerSecurityPanel({ client, toast }));
 
   // 最近几次请求花了多久、走的哪种网络：还嫌慢时截图这一行，能看出卡在哪
   const NAMES = { '/api/sessions': '对话列表', '/api/server/config': '模型设置', '/api/server/status': '状态', '/api/server/update': '版本', '/api/tasks': '发任务', '/api/files/raw': '传文件' };

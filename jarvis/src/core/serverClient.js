@@ -10,8 +10,19 @@ import { errorKind } from './suggest.js';
 import { retryWait } from '../llm/openai.js';
 import { abortableFetch } from './abortableFetch.js';
 const KEY = 'jarvis.server.v1';
+const DEVICE_KEY = 'jarvis.server.device.v1';
+const migrations = new Map(); // 最多16台服务器，合并同一浏览器并发的旧登录换发。
+function deviceId() {
+  try {
+    const saved = globalThis.localStorage?.getItem(DEVICE_KEY);
+    if (/^[\w-]{16,100}$/.test(saved || '')) return saved;
+  } catch { /* 存储受限时只用本次页面设备编号。 */ }
+  const value = globalThis.crypto?.randomUUID?.() || 'device_' + Date.now().toString(36) + Math.random().toString(36).slice(2);
+  try { globalThis.localStorage?.setItem(DEVICE_KEY, value); } catch { /* 不保存密码。 */ }
+  return value;
+}
 
-/** 设置：{ url, token, enabled }（令牌由密码算出，不存密码本身） */
+/** 设置：{ url, token, enabled }，只存此设备登录凭证，不存访问密码。 */
 export function loadServerSettings(storage = globalThis.localStorage) {
   try { return { url: '', token: '', enabled: false, ...JSON.parse(storage?.getItem(KEY) || '{}') }; } catch { return { url: '', token: '', enabled: false }; }
 }
@@ -64,6 +75,37 @@ const WARM_GAP_MS = 30_000;
 
 export function createServerClient({ base, token = '', fetchImpl = (...a) => globalThis.fetch(...a), timeoutMs = 20000 }) {
   const root = normalizeUrl(base);
+  const thisDevice = deviceId();
+  async function migrate(signal) {
+    if (signal?.aborted) throw signal.reason ?? Object.assign(new Error('已停止'), { name: 'AbortError' });
+    if (!/^[a-f0-9]{64}$/.test(token)) return;
+    const saved = loadServerSettings();
+    if (normalizeUrl(saved.url) === root && saved.token && saved.token !== token && !/^[a-f0-9]{64}$/.test(saved.token)) { token = saved.token; return; }
+    let pending = migrations.get(root);
+    if (!pending || pending.old !== token) {
+      if (migrations.size >= 16 && !migrations.has(root)) migrations.delete(migrations.keys().next().value);
+      const old = token;
+      pending = { old, promise: (async () => {
+        // 登录换发是一次性事务：调用者停止查天气等操作不能半途丢掉新凭证。
+        const res = await send('/api/server/auth/migrate', { method: 'POST', body: {}, headers: { 'x-jarvis-device': thisDevice }, timeout: timeoutMs });
+        if (res.status === 404) return old; // 新客户端连旧服务时沿用既有登录，升级服务后再换发。
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok || !/^[A-Za-z0-9_-]{43,}$/.test(result.token || '')) throw Object.assign(new Error('服务器登录换发未完成，请在服务器设置核对登录状态'), { status: res.status || 401, code: 'SESSION_MIGRATION' });
+        const current = loadServerSettings();
+        if (normalizeUrl(current.url) === root && current.token === old) saveServerSettings({ ...current, token: result.token });
+        return result.token;
+      })() };
+      migrations.set(root, pending);
+      pending.promise.finally(() => { if (migrations.get(root) === pending) migrations.delete(root); }).catch(() => {});
+    }
+    const transaction = pending.promise.then(value => { token = value; return value; });
+    if (!signal) { await transaction; return; }
+    await new Promise((resolve, reject) => {
+      const stop = () => reject(signal.reason ?? Object.assign(new Error('已停止'), { name: 'AbortError' }));
+      if (signal.aborted) stop(); else signal.addEventListener('abort', stop, { once: true });
+      transaction.then(resolve, reject).finally(() => signal.removeEventListener('abort', stop));
+    });
+  }
   /** 最近几次请求花了多久、走的哪种网络（设置 → 服务器模式里显示，查“为什么慢”用） */
   const timings = [];
   let taskProtocol = null;
@@ -119,6 +161,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     }
   }
   async function req(path, { method = 'GET', body, raw = false, signal, headers = {}, binary = false, stream = false, timeout = raw ? 0 : timeoutMs } = {}) {
+    if (path !== '/api/server/login') await migrate(signal);
     let res;
     try {
       res = await send(path, { method, body, signal, headers, binary, stream, timeout });
@@ -173,6 +216,11 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     deleteDocumentStyle: id => req(`/api/server/document-styles/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     probeStockImages: (provider, signal) => req('/api/server/stock-images/probe', { method: 'POST', body: { provider, network: 'cn' }, signal, timeout: 30000 }),
     readiness: (signal) => req('/api/server/readiness', { method: 'POST', body: {}, signal, timeout: 30000 }),
+    security: () => req('/api/server/security'),
+    revokeDevice: id => req('/api/server/security/devices/' + encodeURIComponent(id), { method: 'DELETE' }),
+    createEvaluationToken: value => req('/api/server/security/evaluations', { method: 'POST', body: value }),
+    revokeEvaluationToken: id => req('/api/server/security/evaluations/' + encodeURIComponent(id), { method: 'DELETE' }),
+    resourceTicket: resource => req('/api/server/security/tickets', { method: 'POST', body: { resource } }),
     putConfig: (cfg) => req('/api/server/config', { method: 'PUT', body: cfg }),
     testDeepseekSearch: (kind, signal) => req('/api/server/search-test', { method: 'POST', body: { kind }, signal, timeout: 30000 }),
     listModels: (provider, signal) => req('/api/server/models', { method: 'POST', body: { provider }, signal }),

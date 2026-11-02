@@ -195,8 +195,10 @@ export function createBackground(app) {
 
   // ---------------------------------------------------------------- 定时任务
   /** 系统通知：桌面版用系统通知；网页版用浏览器通知（需要授权），并总是弹一条提示 */
-  function notify(title, body) {
-    toast(`${title}：${body.slice(0, 60)}`);
+  function notify(title, body, action) {
+    const text = `${title}：${body.slice(0, 60)}`;
+    if (action) toast(text, action);
+    else toast(text);
     if (DESKTOP) {
       DESKTOP.invoke('notify', { title, body }).catch(() => {});
       return;
@@ -290,9 +292,17 @@ export function createBackground(app) {
       }
       // 第一次用：只补最近 12 小时的，不把很久以前的一下子全弹出来
       if (!seen) seen = Date.now() - 12 * 3600_000;
-      const list = await app.server.notices(seen);
+      const client = app.server;
+      const list = await client.notices(seen);
+      if (client !== app.server) return;
       if (!Array.isArray(list) || !list.length) return;
-      for (const n of list.slice(-5)) notify(n.title, n.body);
+      for (const n of list.slice(-5)) {
+        const action =
+          n.kind === 'security' && /^[a-f0-9]{24}$/.test(n.deviceId) && client.revokeDevice
+            ? { label: '踢掉', run: () => client.revokeDevice(n.deviceId) }
+            : undefined;
+        notify(n.title, n.body, action);
+      }
       try {
         localStorage.setItem(NOTICE_KEY, String(Math.max(...list.map((n) => n.at))));
       } catch {

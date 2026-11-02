@@ -6,8 +6,9 @@ const PERSONAL_READS = new Set(['recall', 'search_conversations', 'read_conversa
 /** 评测里不能删、恢复用户真实的对话 */
 const CONVERSATION_WRITES = new Set(['delete_conversations', 'restore_conversations', 'list_deleted_conversations']);
 
-export function evaluationTools(tools, evaluationId) {
+export function evaluationTools(tools, evaluationId, restricted = false) {
   if (!evaluationId) return tools;
+  if (restricted) tools = tools.filter(tool => !/^(?:schedule_task|list_schedules|update_schedule|cancel_schedule|install_skill|save_skill|set_skill_enabled|remove_skill|.*holding.*|code_.*|run_project.*)$/.test(tool.name));
   return tools.map((tool) => CONVERSATION_WRITES.has(tool.name) ? { ...tool, run: async () => '评测隔离：不删除、不恢复用户的对话，也不读回收站。' } : PERSONAL_READS.has(tool.name) ? { ...tool, run: async () => '评测隔离：不读取用户的正式记忆、过往对话、持仓或知识库；按题面作答，需要的信息直接问用户。' } : tool.name === 'list_work_records' ? { ...tool, run: async () => JSON.stringify({ total: 0, items: [], completeHistory: false, note: '评测隔离，不读取正式成果记录' }) } : MEMORY_WRITES.has(tool.name) ? {
     ...tool,
     run: async () => '本条测试信息已保留在当前评测会话中，未写入、修改或删除正式长期记忆；本会话后续可继续引用。'

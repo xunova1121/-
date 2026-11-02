@@ -1,3 +1,4 @@
+import { createQianfanSearch } from './qianfanSearch.js';
 import { createDeepseekSearch } from './deepseekSearch.js';
 import { collectSearchSources, sourceQueue } from './searchSources.js';
 import { mergeSearchHits, officialQueries } from './officialSources.js';
@@ -209,11 +210,12 @@ export function searchEngines(options = {}) {
 
 export function createSearch(options = {}) {
   const { bochaKey, tavilyKey, fetchViaGateway, searchRegion = 'auto' } = options;
+  const qianfan = createQianfanSearch(options);
   const deepseek = createDeepseekSearch(options);
   const keyless = keylessSearch(fetchViaGateway, searchRegion);
   const bocha = bochaKey ? bochaSearch(bochaKey, fetchViaGateway) : null;
   const tavily = tavilyKey ? tavilySearch(tavilyKey, fetchViaGateway) : null;
-  const all = [deepseek, bocha, tavily, keyless].filter(Boolean);
+  const all = [qianfan, deepseek, bocha, tavily, keyless].filter(Boolean);
   if (all.length <= 1) return all[0] ?? null;
   // 中文搜索词（国内用户）：博查 → 国内网站 → Tavily（Tavily 的中文结果多是港台和海外网站）；
   // 其他：Tavily → 博查 → 免密钥。前一个结果不够或出错时用后一个补上
@@ -223,9 +225,8 @@ export function createSearch(options = {}) {
     async search(query, n = 6, opts = {}) {
       if (opts.signal?.aborted) throw opts.signal.reason;
       const zh = /[\u4e00-\u9fff]/.test(query);
-      const domestic = zh && (deepseek || !keyless || (await keyless.regionNow()) === 'cn');
-      const order = [deepseek, ...(domestic ? [bocha, keyless, tavily] : [tavily, bocha, keyless])].filter(Boolean);
-      return staggeredSearch(order, query, n, opts, deepseek);
+      const order = (zh ? [qianfan, deepseek, bocha, keyless, tavily] : [deepseek, qianfan, tavily, bocha, keyless]).filter(Boolean);
+      return staggeredSearch(order, query, n, opts, order[0] === qianfan ? qianfan : deepseek);
     }
   };
 }
@@ -257,18 +258,18 @@ export function staggeredSearch(order, query, n, opts = {}, preferred = null, st
     const launch = () => {
       if (done || started >= order.length) return;
       const e = order[started++];
-      if (e === preferred) opts.progress?.('正在调用DeepSeek搜索');
+      if (e === preferred) opts.progress?.(e.name === '百度千帆搜索' ? '正在调用百度千帆搜索' : '正在调用DeepSeek搜索');
       // 同词换源不重复扣逻辑搜索预算。
       Promise.resolve()
         .then(() => e.search(query, n, { ...opts, signal: ctrl.signal }))
         .then((list) => {
           for (const h of list ?? []) if (!hits.some((x) => x.url === h.url)) hits.push(h);
-          if (e === preferred) { preferredHit = Boolean(list?.length); opts.progress?.(list?.length ? `DeepSeek搜索返回${list.length}条结果` : 'DeepSeek搜索无结果，尝试原搜索线路'); }
+          if (e === preferred) { preferredHit = Boolean(list?.length); opts.progress?.(list?.length ? `${e.name === '百度千帆搜索' ? '百度搜索' : 'DeepSeek搜索'}返回${list.length}条结果` : (e.name === '百度千帆搜索' ? '百度搜索' : 'DeepSeek搜索') + '无结果，尝试原搜索线路'); }
         })
         .catch((err) => {
           if (done) return;
           errors.push(err);
-          if (e === preferred) opts.progress?.('DeepSeek搜索未取得结果，尝试原搜索线路：' + err.message);
+          if (e === preferred) opts.progress?.((e.name === '百度千帆搜索' ? '百度搜索' : 'DeepSeek搜索') + '未取得结果，尝试原搜索线路：' + err.message);
         })
         .finally(() => {
           settled++;

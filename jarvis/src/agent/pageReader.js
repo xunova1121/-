@@ -97,7 +97,7 @@ export function createPageReader(options = {}) {
         try {
           progress?.('正在使用DeepSeek Fetch读取原文');
           triedDeepseek = true;
-          text = await withWebDeadline(activeSignal => deepseek.read(url, { signal: activeSignal, consume }), { signal, timeoutMs: 2500 });
+          text = await withWebDeadline(activeSignal => deepseek.read(url, { signal: activeSignal, consume }), { signal, timeoutMs: 8000 });
         } catch (error) {
           throwControl(error, signal);
           if (error.code === 'PRIVATE_NETWORK_BLOCKED') throw error;

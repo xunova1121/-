@@ -1,3 +1,4 @@
+import { chargeSearchRequest, chargeEvaluation, evaluationAdapter, evaluationModelFetch } from './evaluationAccess.mjs';
 import { presentationOverview } from './presentationOverview.mjs';
 import { createStockImages } from './stockImages.mjs';
 import { createLookupModel } from '../src/agent/lookupModels.js';
@@ -87,6 +88,9 @@ const MAX_IMAGE_CHARS = 4 * 1024 * 1024;
  * 但只许访问公网地址，每一跳重定向都重新检查（不让模型借机访问服务器内网的面板、数据库）
  */
 export async function publicFetch(url, init = {}, fetchImpl = globalThis.fetch, lookup = (h) => dns.lookup(h, { all: true })) {
+  if (init.signal?.aborted) throw init.signal.reason ?? Object.assign(new Error('已停止'), { name: 'AbortError' });
+  chargeSearchRequest(url);
+  if (new URL(url).hostname === 'queue.fal.run' && String(init.method || 'GET').toUpperCase() === 'POST') chargeEvaluation('model');
   let u = new URL(url);
   const headers = new Headers({
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
@@ -123,7 +127,7 @@ export function serverApproves(ask, text) {
   return false;
 }
 
-export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now, skillRunner = null, codeRepos = null, codeProjects = null, projectBaseDir, codeMaxSteps = 80, codeTaskMs = CODE_TASK_MS, lookupService = createLookupService({ get: publicFetch }) }) {
+export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now, skillRunner = null, codeRepos = null, codeProjects = null, projectBaseDir, codeMaxSteps = 80, codeTaskMs = CODE_TASK_MS, lookupService = createLookupService({ get: publicFetch }), evaluationAccess = null }) {
   const stockImages = createStockImages({ getConfig, fetchImpl: publicFetch });
   const tasks = new Map();
   const waiting = [];
@@ -210,7 +214,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   function helper(cfg, kind, task = null, purpose = kind) {
     const { adapter, model, problem } = createAdapter(routeFor(cfg, kind).cfg);
     if (problem || providerById(cfg.provider)?.kind === 'mock') return null;
-    return createHelperLlm(task ? measuredAdapter(adapter, model, task, purpose) : adapter, model);
+    return createHelperLlm(task ? measuredAdapter(evaluationAdapter(adapter), model, task, purpose) : evaluationAdapter(adapter), model);
   }
   /**
    * 只采集数字（用途、型号、耗时、Token），不保存提示、回答或密钥。
@@ -239,13 +243,16 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   function sight(cfg, task = null) {
     const r = visionRoute(cfg);
     if (providerById(cfg.provider)?.kind === 'mock') return {};
-    if (!r) return { readImageText: ocrLine(cfg) ? (file, o) => recognizeText(cfg, file, o) : null };
-    const { adapter, model, problem } = makeAdapter(r.cfg);
-    const readImageText = ocrLine(cfg) ? (file, o) => recognizeText(cfg, file, o) : null; // 文字识别（GLM-OCR）
+    if (!r) return { readImageText: ocrLine(cfg) ? (file, o) => recognizeText(cfg, file, { ...o, fetchImpl: evaluationModelFetch }) : null };
+    const selected = makeAdapter(r.cfg);
+    const { model, problem } = selected;
+    const adapter = evaluationAdapter(selected.adapter);
+    const readImageText = ocrLine(cfg) ? (file, o) => recognizeText(cfg, file, { ...o, fetchImpl: evaluationModelFetch }) : null; // 文字识别（GLM-OCR）
     return problem || !adapter ? { readImageText } : { describeImages: createHelperLlm(task ? measuredAdapter(adapter, model, task, 'vision') : adapter, model), visionLabel: model, readImageText };
   }
 
-  async function execute(task) {
+  const execute = task => evaluationAccess ? evaluationAccess.run(task, () => executeScoped(task)) : executeScoped(task);
+  async function executeScoped(task) {
     task.status = 'running';
     task.startedAt = now();
     task.timing.start();
@@ -257,7 +264,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const cfg = withoutCodeCredentials(await getConfig());
     // 记忆按意思找：用能力表“记忆向量”那一项（服务器没有跨域限制）；没有就只按关键字
     memory.configureMemory({ llm: helper(cfg, 'write', task, 'memory'), embedder: createEmbedder(cfg, { direct: true }) });
-    const taskRepos = codeProjects ? await codeProjects.reposFor(session.id) : codeRepos;
+    const taskRepos = task.evaluationAuthorization ? null : codeProjects ? await codeProjects.reposFor(session.id) : codeRepos;
     const mayUseCode = Boolean((taskRepos || codeProjects) && !task.evaluationId && (codeFollowup(task.text) || codeTaskPolicy({ text: task.text, hasRepos: true, hasProjects: Boolean(codeProjects), projectBound: taskRepos !== codeRepos }).enabled));
     task.codeDeadline = mayUseCode ? setTimeout(() => { task.codeTimeout = true; task.ctrl.abort(Object.assign(new Error('代码任务达到总时限，保留工作副本，可继续'), { code: 'CODE_TASK_TIMEOUT', kind: 'timeout' })); }, Math.max(1, Math.min(20 * 60_000, Number(codeTaskMs) || CODE_TASK_MS))) : null;
     const { policy, codeTaskId, scopedRepos, codeWork } = await prepareCodeWork({ text: task.text, images: task.images.length, sessionId: session.id, taskId: task.id, checkpoint: task.checkpoint, resume: task.resumeFrom, repos: taskRepos, hasProjects: Boolean(codeProjects), projectBound: taskRepos !== codeRepos, evaluationId: task.evaluationId, maxSteps, codeMaxSteps, signal: task.ctrl.signal });
@@ -269,15 +276,17 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       await saveCheckpoint(task, true);
     }
     const route = routeFor(cfg, kind);
-    const { adapter, model, problem } = makeAdapter(route.cfg);
+    const selected = makeAdapter(route.cfg);
+    const { model, problem } = selected;
+    const adapter = evaluationAdapter(selected.adapter);
     if (problem) return finish(task, session, { error: `服务器上的模型还没配置好：${problem}` });
     // 告诉手机这句话交给了谁（回答底下显示）
     record(task, { type: 'route', model, task: kind, routed: route.routed });
-    const fallbacks = fallbackRoutes(cfg, { provider: route.cfg.provider, model, task: kind }).map((f) => ({ ...createAdapter(f.cfg), label: `${providerLabel(f.cfg, f.provider)} · ${f.model}` })).filter((f) => !f.problem && f.adapter && f.model);
+    const fallbacks = fallbackRoutes(cfg, { provider: route.cfg.provider, model, task: kind }).map((f) => ({ ...createAdapter(f.cfg), label: `${providerLabel(f.cfg, f.provider)} · ${f.model}` })).filter((f) => !f.problem && f.adapter && f.model).map(f => ({ ...f, adapter: evaluationAdapter(f.adapter) }));
     const history = session.messages.slice(0, -1); // 最后一条是这次的用户原话，单独作为 userText
     const taskLookup = task.evaluationId ? createLookupService({ storage: memoryLookupStorage(), get: publicFetch }) : lookupService;
     const tools = evaluationTools(makeTools({
-      ...deepseekSearchOptions(cfg),
+      ...deepseekSearchOptions(cfg), qianfanSearchKey: cfg.qianfanSearchKey, qianfanSearchTopK: cfg.qianfanSearchTopK,
       // 评测不读用户保存的文档偏好（字号、风格），结果才能复现
       ...(task.evaluationId && { documentStylePreferences: async () => '' }),
       lookup: taskLookup.options(cfg.lookupRegion || 'auto'),
@@ -290,14 +299,14 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       onSportsScores: (value) => { task.sports = value; record(task, { type: 'sports_scores', value }); },
       // 画图、做视频：用服务器上的模型设置；生成的文件照常存进工作区，手机按文件下载后显示在对话里
       stockImageForSlide: (o) => stockImages.forSlide({ ...o, visionLlm: sight(cfg, task).describeImages }),
-      imageGen: (o) => generateImage(cfg, { ...o, download: publicFetch }),
-      imageEdit: (o) => editImage(cfg, { ...o, download: publicFetch }),
+      imageGen: (o) => generateImage(cfg, { ...o, fetchImpl: evaluationModelFetch, download: publicFetch }),
+      imageEdit: (o) => editImage(cfg, { ...o, fetchImpl: evaluationModelFetch, download: publicFetch }),
       cropImage: cropImageRegion,
       renderSvg,
       compareDiagramPpt,
       visionLlm: sight(cfg, task).describeImages || null,
-      ocr: ocrLine(cfg) ? (file, o) => recognizeText(cfg, file, o) : null, // 文字识别（智谱 GLM-OCR）
-      videoGen: (o) => generateVideo(cfg, o),
+      ocr: ocrLine(cfg) ? (file, o) => recognizeText(cfg, file, { ...o, fetchImpl: evaluationModelFetch }) : null, // 文字识别（智谱 GLM-OCR）
+      videoGen: (o) => generateVideo(cfg, { ...o, fetchImpl: evaluationModelFetch }),
       // 显示工作区里已有的图片：让手机按文件取回来显示
       onImage: (src, path) => { if (path) record(task, { type: 'file', path }); },
       officeRender:renderOffice,
@@ -305,9 +314,9 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       convertLegacyDoc,
       currentSessionId: () => session.id,
       scheduleHost: 'server'
-    }).filter((t) => !SERVER_BLOCKED.has(t.name)), task.evaluationId);
+    }).filter((t) => !SERVER_BLOCKED.has(t.name)), task.evaluationId, Boolean(task.evaluationAuthorization));
     const projectTool = projectExecutionTool({ image: process.env.JARVIS_CODE_SANDBOX_IMAGE, baseDir: projectBaseDir });
-    if (projectTool) tools.push(projectTool);
+    if (projectTool && !task.evaluationAuthorization) tools.push(projectTool);
     if (taskRepos && !task.evaluationId) tools.push(...createCodeTools({ repos: scopedRepos, sessionId: session.id, taskId: task.checkpoint.codeTaskId || task.id, editing: taskRepos.writable === true, enableBrowser: true, saveBrowserArtifact: async (p, data, type) => { await ws.write(p, new Blob([data], { type })); task.files.add(p); record(task, { type: 'file', path: p }); } }));
     if (taskRepos?.adopt && taskRepos.writable === true && !task.evaluationId) tools.push(createRepoAdoptTool({ repos: taskRepos, sessionId: session.id })); // 别的对话里的副本接过来接着改
     if (codeProjects && !task.evaluationId) tools.push(...codeProjectTools(codeProjects, session.id));
@@ -342,7 +351,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     arm();
     try {
       const r = await runAgent({
-        adapter, model, fallbacks, lookupPreferences: () => taskLookup.preferences(), lookupModel: createLookupModel(cfg, makeAdapter), maxSteps: policy.maxSteps, maxTotalSteps: policy.maxTotalSteps, codeWork, ...sight(cfg, task), hedgeMs: cfg.hedgeBackup === false ? 0 : HEDGE_MS, modelNote: modelNote(cfg, { provider: route.cfg.provider, model }),
+        adapter, model, fallbacks, lookupPreferences: () => taskLookup.preferences(), lookupModel: createLookupModel(cfg, value => { const picked = makeAdapter(value); return { ...picked, adapter: evaluationAdapter(picked.adapter) }; }), maxSteps: policy.maxSteps, maxTotalSteps: policy.maxTotalSteps, codeWork, ...sight(cfg, task), hedgeMs: cfg.hedgeBackup === false ? 0 : HEDGE_MS, modelNote: modelNote(cfg, { provider: route.cfg.provider, model }),
         history: unsummarized(history, session.summary).map(({ role, content }) => ({ role, content })),
         userText: task.resumeFrom ? task.text+'\n\n'+checkpointRecoveryText(task.resumeFrom) : task.text, requirementText: task.text, images: task.images,
         // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
@@ -454,7 +463,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
 
   return {
     /** @returns {Promise<{ id: string, sessionId: string }>} */
-    async start({ sessionId = null, text, images = [], voice = false, requestId = null, targetTaskId = null, evaluationId = null }) {
+    async start({ sessionId = null, text, images = [], voice = false, requestId = null, targetTaskId = null, evaluationId = null, evaluationAuthorization = null }) {
       text = String(text ?? '').trim();
       if (!text) throw Object.assign(new Error('任务内容是空的'),{status:400});
       if (text.length>20000) throw Object.assign(new Error('任务内容太长'),{status:400});
@@ -485,7 +494,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         }
         session.messages.push({role:'user',content:text,ts:now()});session.updatedAt=now();
         // 只有评测程序明确带了 evaluationId 的才按评测隔离；用户本人在评测会话里发的话照常读记忆（用户 2026-10-30：误进评测会话后“不知道我是谁”）
-        const task=busy||{id:uid('t'),sessionId:id,evaluationId:evaluationId?evaluationScope:null,text,status:'queued',seq:0,events:[],listeners:new Set(),files:new Set(),inbox:[],notes:[],images,voice:Boolean(voice),ctrl:new AbortController(),createdAt:now(),checkpoint:{text,notes:[],steps:[],inFlight:[],files:[],status:'queued',createdAt:now()}};
+        const task=busy||{id:uid('t'),sessionId:id,evaluationId:evaluationId?evaluationScope:null,...(evaluationAuthorization && { evaluationAuthorization: { id: evaluationAuthorization.id } }),text,status:'queued',seq:0,events:[],listeners:new Set(),files:new Set(),inbox:[],notes:[],images,voice:Boolean(voice),ctrl:new AbortController(),createdAt:now(),checkpoint:{text,notes:[],steps:[],inFlight:[],files:[],status:'queued',createdAt:now()}};
         if (!busy && codeFollowup(text) && (previous?.codeTaskId || codeTaskPolicy({ text: previous?.text || '', hasRepos: Boolean(codeRepos && !evaluationScope) }).enabled)) {
           task.checkpoint.codeTaskId = previous.codeTaskId || previous.taskId;
         }

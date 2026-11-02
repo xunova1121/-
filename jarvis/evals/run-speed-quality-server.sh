@@ -6,15 +6,15 @@ REVISION="${1:-}"
 [[ "$REVISION" =~ ^[a-f0-9]{40}$ ]] || { echo '需要固定的40位评测提交号'; exit 1; }
 APP="${JARVIS_PRODUCTION_APP:-/opt/jarvis/current}"
 [ -f "$APP/evals/joint.mjs" ] && [ -d "$APP/node_modules" ] || { echo '未找到已安装服务的评测入口/依赖；请设置JARVIS_PRODUCTION_APP'; exit 1; }
-[ -r /opt/jarvis/jarvis.env ] || { echo '后台启动需要服务器本地jarvis.env；不要向聊天发送密码'; exit 1; }
+[ -n "${JARVIS_EVAL_TOKEN:-}" ] || { echo '需要私有环境中的JARVIS_EVAL_TOKEN；不读取访问密码'; exit 1; }
 command -v node >/dev/null
 command -v curl >/dev/null
 STAGE="$(mktemp -d /tmp/weiyang-speed-quality-XXXXXX)"
 mkdir "$STAGE/app"
 cp "$APP/package.json" "$STAGE/app/package.json"
-cp -a "$APP/evals" "$STAGE/app/evals"
+cp -aL "$APP/evals" "$STAGE/app/evals"
 for part in src shared server node_modules; do ln -s "$APP/$part" "$STAGE/app/$part"; done
-for file in joint.mjs joint-evidence.mjs joint-files.mjs joint-rubric.mjs joint-report.mjs speed-quality-cases.mjs speed-quality-report.mjs run-joint.sh; do
+for file in evaluation-auth.mjs joint.mjs joint-evidence.mjs joint-files.mjs joint-rubric.mjs joint-report.mjs speed-quality-cases.mjs speed-quality-report.mjs run-joint.sh; do
   curl -fsSL --retry 2 --connect-timeout 10 --max-time 60 --max-filesize 1000000 -H 'Accept: application/vnd.github.raw+json' "https://api.github.com/repos/xunova1121/-/contents/jarvis/evals/$file?ref=$REVISION" -o "$STAGE/app/evals/$file"
 done
 node --check "$STAGE/app/evals/joint.mjs"

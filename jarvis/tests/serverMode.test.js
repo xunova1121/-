@@ -80,7 +80,8 @@ describe('服务器模式接口', () => {
     const bad = await fetch(`${base}/api/server/login`, { method: 'POST', body: JSON.stringify({ password: 'wrong' }) });
     expect(bad.status).toBe(401);
     const ok = await (await fetch(`${base}/api/server/login`, { method: 'POST', body: JSON.stringify({ password: PASS }) })).json();
-    expect(ok.token).toBe(tokenFor(PASS));
+    expect(ok.token).not.toBe(tokenFor(PASS));
+    expect(Buffer.from(ok.token, 'base64url').length).toBeGreaterThanOrEqual(32);
   });
 
   it('发任务 → 关掉连接 → 重新连上补发进度 → 结果在对话里；文件能上传下载', async () => {
@@ -133,7 +134,7 @@ describe('服务器模式接口', () => {
   });
 
   it('密码太短不让开启', () => {
-    expect(() => createServerMode({ dataDir: dir, password: '123' })).toThrow(/至少 8 位/);
+    expect(() => createServerMode({ dataDir: dir, password: '123' })).toThrow(/至少 6 位/);
   });
 });
 

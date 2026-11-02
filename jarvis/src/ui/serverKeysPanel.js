@@ -22,6 +22,7 @@ export function serverKeysPanel({ cfg, workspace, node }) {
     };
   };
   const fields = {
+    qianfanSearchKey: field('百度千帆搜索 Key', cfg.qianfanSearchKey, '国内搜索，按次计费；只填在服务器设置里。保存后可测试真实返回，不改变聊天模型。'),
     bochaKey: field('博查搜索 Key', cfg.bochaKey, 'DeepSeek 搜索没开或失败时的备用（国内，中文结果好）；不填就退回免费的必应、百度。申请：open.bochaai.com'),
     falKey: field(
       'fal.ai Key（唱歌）',
@@ -35,6 +36,19 @@ export function serverKeysPanel({ cfg, workspace, node }) {
       '填了以后天气用和风（国内快，有空气质量、逐小时、7 天、生活指数、预警）；不填用免费的 Open-Meteo。申请：console.qweather.com →“项目管理”创建项目和 API KEY'
     )
   };
+  const topK = node('input', { type: 'number', min: 5, max: 20, value: String(cfg.qianfanSearchTopK || 10), ariaLabel: '百度搜索返回条数' });
+  const topKRow = node('label', { className: 'ml-field' }, node('span', { textContent: '百度搜索返回条数（5～20，默认10）' }), topK);
+  const qianfanTest = node('button', { type: 'button', className: 'ml-button', textContent: '测试百度搜索' });
+  qianfanTest.addEventListener('click', async () => {
+    if (fields.qianfanSearchKey.input.value.trim()) { result.textContent = '请先保存新的百度搜索Key，再测试已保存的配置。'; return; }
+    qianfanTest.disabled = true;
+    result.textContent = '正在请求百度官方搜索，不使用缓存…';
+    try {
+      const outcome = await workspace.testQianfanSearch(workspace.scope);
+      result.textContent = `百度千帆搜索：${(outcome.ms / 1000).toFixed(2)}秒，${outcome.count}条；` + (outcome.sample || []).map(row => `${row.title}｜${row.publishedAt || '日期未知'}｜${row.domain}`).join('；') + '。搜索摘要未读原文，不代表事实已核实。';
+    } catch (error) { result.textContent = error.message; }
+    finally { qianfanTest.disabled = false; }
+  });
   if (workspace.scope === 'server') {
     for (const name of ['pexels', 'pixabay', 'unsplash'])
       fields[name + 'Key'] = field(name + ' 图库 Key', cfg[name + 'Key'], '仅保存在服务器；保存后需通过国内连接检测才启用，图片按来源许可署名。');
@@ -114,6 +128,9 @@ export function serverKeysPanel({ cfg, workspace, node }) {
         .map(([key, f]) => [key, f.input.value.trim()])
         .filter(([, value]) => value)
     );
+    const count = Number(topK.value);
+    if (!Number.isInteger(count) || count < 5 || count > 20) { result.textContent = '百度搜索条数应为5至20。'; return; }
+    if (count !== (cfg.qianfanSearchTopK || 10)) next.qianfanSearchTopK = count;
     const host = hostInput.value
       .trim()
       .replace(/^https?:\/\//i, '')
@@ -126,6 +143,7 @@ export function serverKeysPanel({ cfg, workspace, node }) {
     save.disabled = true;
     try {
       await workspace.patch((value) => ({ ...value, ...next }));
+      if (next.qianfanSearchKey) fields.qianfanSearchKey.input.value = '';
       if (next.qweatherKey || 'qweatherHost' in next) globalThis.dispatchEvent(new Event('jarvis:weather-config-changed'));
       for (const provider of ['pexels', 'pixabay', 'unsplash'])
         if (next[provider + 'Key']) {
@@ -146,8 +164,10 @@ export function serverKeysPanel({ cfg, workspace, node }) {
     { className: 'ml-copy ml-service-keys' },
     node('summary', { textContent: `其他服务的 Key：搜索、唱歌、天气 · ${where}` }),
     ...Object.values(fields).map((f) => f.row),
+    topKRow,
     hostRow,
     save,
+    qianfanTest,
     ...stockControls,
     result
   );

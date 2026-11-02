@@ -71,12 +71,12 @@ fi
 
 ENVF="$BASE/jarvis.env"
 if [[ ! -f "$ENVF" ]]; then
-  echo "== 设置访问密码（手机 / 电脑登录用，至少 8 位；输入时不显示）"
+  echo "== 设置访问密码（手机 / 电脑登录用，至少 6 位；输入时不显示）"
   while :; do
     read -rsp "访问密码：" P1; echo
     read -rsp "再输一次：" P2; echo
-    [[ "$P1" == "$P2" && ${#P1} -ge 8 ]] && break
-    echo "两次不一样或少于 8 位，请重输"
+    [[ "$P1" == "$P2" && ${#P1} -ge 6 ]] && break
+    echo "两次不一样或少于 6 位，请重输"
   done
   umask 077
   printf 'PORT=8787\nHOST=127.0.0.1\nJARVIS_DATA=%s/data\nJARVIS_PASSWORD=%s\nJARVIS_MAX_TASKS=1\nNODE_OPTIONS=--max-old-space-size=512\n' "$BASE" "$P1" > "$ENVF"

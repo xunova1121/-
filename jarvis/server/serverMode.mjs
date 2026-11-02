@@ -1,3 +1,6 @@
+import { createEvaluationAccess } from './evaluationAccess.mjs';
+import { createAccessSecurity, legacyAccessToken } from './accessSecurity.mjs';
+import { createAccessRoutes } from './accessRoutes.mjs';
 import { stockDiagnostic } from '../src/agent/stockImageDiagnostics.js';
 import { createReadinessRoutes } from './readinessRoutes.mjs';
 import { createStockImages } from './stockImages.mjs';
@@ -45,7 +48,6 @@ import { createCodeSandbox } from './codeSandbox.mjs';
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { createHash, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createFileStore } from './fileStore.mjs';
 import { createTaskRunner, publicFetch } from './taskRunner.mjs';
@@ -73,14 +75,14 @@ const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const UPDATE_UNIT = '/etc/systemd/system/jarvis-update.path';
 /** 上传一段本机对话的大小上限 */
 const IMPORT_LIMIT = 8 * 1024 * 1024;
-/** 登录令牌：由密码算出来（改密码后旧令牌自动失效），不在服务器上另存 */
-export const tokenFor = (password) => createHash('sha256').update(`jarvis-server:${password}`).digest('hex');
+/** 仅供14天旧设备迁移；新登录使用随机会话。 */
+export const tokenFor = legacyAccessToken;
 
 /** 模型设置里的密钥只给看后 4 位 */
 export function maskConfig(cfg) {
   cfg = withoutCodeCredentials(cfg);
   const mask = (v) => (v ? `••••${String(v).slice(-4)}` : '');
-  return { ...cfg, ...Object.fromEntries(STOCK_KEY_FIELDS.map(key => [key, mask(cfg[key])])), keys: Object.fromEntries(Object.entries(cfg.keys ?? {}).map(([k, v]) => [k, mask(v)])), tavilyKey: mask(cfg.tavilyKey), bochaKey: mask(cfg.bochaKey), deepseekSearchKey: mask(cfg.deepseekSearchKey), falKey: mask(cfg.falKey), qweatherKey: mask(cfg.qweatherKey) };
+  return { ...cfg, ...Object.fromEntries(STOCK_KEY_FIELDS.map(key => [key, mask(cfg[key])])), keys: Object.fromEntries(Object.entries(cfg.keys ?? {}).map(([k, v]) => [k, mask(v)])), tavilyKey: mask(cfg.tavilyKey), bochaKey: mask(cfg.bochaKey), qianfanSearchKey: mask(cfg.qianfanSearchKey), deepseekSearchKey: mask(cfg.deepseekSearchKey), falKey: mask(cfg.falKey), qweatherKey: mask(cfg.qweatherKey) };
 }
 /** 保存时：密钥没改（还是 •••• 或留空）就沿用原来的 */
 export function mergeConfig(old, next) {
@@ -93,12 +95,13 @@ export function mergeConfig(old, next) {
   const keys = { ...(old.keys ?? {}) };
   for (const [k, v] of Object.entries(next.keys ?? {})) keys[k] = keep(v, old.keys?.[k]);
   const maps = Object.fromEntries(['models', 'baseURLs', 'providerNames', 'modelLists', 'serviceTiers'].map((field) => [field, { ...old[field], ...next[field] }]));
-  const merged = { ...old, ...next, ...maps, keys, tavilyKey: keep(next.tavilyKey, old.tavilyKey), bochaKey: keep(next.bochaKey, old.bochaKey), deepseekSearchKey: keep(next.deepseekSearchKey, old.deepseekSearchKey), falKey: keep(next.falKey, old.falKey), qweatherKey: keep(next.qweatherKey, old.qweatherKey) };
+  const merged = { ...old, ...next, ...maps, keys, tavilyKey: keep(next.tavilyKey, old.tavilyKey), bochaKey: keep(next.bochaKey, old.bochaKey), qianfanSearchKey: keep(next.qianfanSearchKey, old.qianfanSearchKey), deepseekSearchKey: keep(next.deepseekSearchKey, old.deepseekSearchKey), falKey: keep(next.falKey, old.falKey), qweatherKey: keep(next.qweatherKey, old.qweatherKey) };
   merged.stockVerified = { ...old.stockVerified };
   for (const key of STOCK_KEY_FIELDS) {
     merged[key] = keep(next[key], old[key]);
     if (merged[key] !== old[key]) delete merged.stockVerified[key.replace(/Key$/, '')];
   }
+  if (!Number.isInteger(merged.qianfanSearchTopK ?? 10) || (merged.qianfanSearchTopK ?? 10) < 5 || (merged.qianfanSearchTopK ?? 10) > 20) throw Object.assign(new Error('百度搜索条数须为5至20'), { status: 400, code: 'QIANFAN_TOP_K' });
   // 字典合并不能把前端淘汰的旧地址缓存重新带回来；服务器也必须执行同一上限。
   if (next.modelLists || next.baseURLs) merged.modelLists = boundedCatalogs(merged);
   // 前端删掉的服务商：字典合并不会自己少掉，照着标记删
@@ -108,9 +111,11 @@ export function mergeConfig(old, next) {
 /**
  * @param {{ dataDir: string, password: string, maxRunning?: number, runner?: object }} o
  */
-export function createServerMode({ dataDir, password, maxRunning = 1, runner: injected = null, appDir = APP_DIR, updateUnit = UPDATE_UNIT, makeModelAdapter, autoSchedules = false, codeHosting = createGitHubHost(), codeGit, codeSandbox = null, lookupService: injectedLookup = null, readinessRuntime } = {}) {
-  if (!password || String(password).length < 8) throw new Error('服务器模式需要设置 JARVIS_PASSWORD（至少 8 位）');
-  const store = createFileStore(path.join(dataDir, 'store'));
+export function createServerMode({ dataDir, password, maxRunning = 1, runner: injected = null, appDir = APP_DIR, updateUnit = UPDATE_UNIT, makeModelAdapter, autoSchedules = false, codeHosting = createGitHubHost(), codeGit, codeSandbox = null, lookupService: injectedLookup = null, readinessRuntime, searchFetch } = {}) {
+  if (!password || String(password).length < 6) throw new Error('服务器模式需要设置 JARVIS_PASSWORD（至少 6 位）');
+  const security = createAccessSecurity({ dataDir, password: String(password) });
+  const evaluationAccess = createEvaluationAccess({ store: createFileStore(path.join(dataDir, 'store')), dataDir, security });
+  const store = evaluationAccess.store;
   useBackend(store);
   // 内置技能（做 PPT、Word、Excel 的步骤和规范）：和手机 / 电脑一样装上，版本更新时跟着升级
   const ready=seedBuiltins().catch((e) => console.warn('[服务器模式] 内置技能没装上：', e?.message || e));
@@ -142,20 +147,14 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     }
   });
   const lookupService = injectedLookup ?? createLookupService({ storage: { get: id => store.get('kv', id), put: row => store.put('kv', row) }, get: publicFetch });
-  runner = injected ?? createTaskRunner({ codeProjects: projects, getConfig: async () => withoutCodeCredentials(loadConfig()), maxRunning, skillRunner, codeRepos, projectBaseDir: path.join(dataDir, 'project-jobs'), lookupService });
+  runner = injected ?? createTaskRunner({ codeProjects: projects, getConfig: async () => withoutCodeCredentials(loadConfig()), maxRunning, skillRunner, codeRepos, projectBaseDir: path.join(dataDir, 'project-jobs'), lookupService, evaluationAccess });
   // 定时任务 / 提醒：服务器自己按时执行（手机关着也做），见 serverSchedules.mjs；测试里不自动开始计时
   const schedules = createServerSchedules({ runner });
   if (autoSchedules) schedules.start();
-  const want = Buffer.from(tokenFor(password));
-  const failures = new Map(); // IP → 最近登录失败的时间（防止暴力猜密码）
-  let activePCModels=0;
-  let activeCatalogs=0;
-
-  function authorized(req) {
-    const url = new URL(req.url, 'http://x');
-    const got = Buffer.from(String(req.headers.authorization || '').replace(/^Bearer\s+/i, '') || url.searchParams.get('token') || '');
-    return got.length === want.length && timingSafeEqual(got, want);
-  }
+  let activePCModels = 0;
+  let activeCatalogs = 0;
+  // WebSocket等只需主人身份；普通HTTP由access逐项判定权限及403。
+  const authorized = req => security.authenticate(req)?.role === 'owner';
 
   const json = (res, status, body) => {
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -177,19 +176,14 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     try { return JSON.parse((await readBody(req, limit)).toString('utf8') || '{}'); } catch(e) { if(e.status===413)throw e;throw Object.assign(new Error('JSON 格式错误'), { status: 400 }); }
   };
 
-  const searchTest = createSearchTest({ getConfig: () => withoutCodeCredentials(loadConfig()), readJson, json });
+  const accessRoutes = createAccessRoutes({ security, runner, sessions, readJson, json, getConfig: loadConfig, appDir });
+  const searchTest = createSearchTest({ getConfig: () => withoutCodeCredentials(loadConfig()), readJson, json, ...(searchFetch && { fetchViaGateway: searchFetch }) });
   const codeRoutes = createCodeRepoRoutes({ getConfig: loadConfig, saveConfig, hosting: codeHosting, repos: codeRepos, readJson, json });
 
   const projectRoutes = codeProjectRoutes({ projects, readJson, json });
 
   function login(req, res, body) {
-    const ip = String(req.headers['x-real-ip'] || req.socket.remoteAddress || '');
-    const recent = (failures.get(ip) ?? []).filter((t) => Date.now() - t < 10 * 60_000);
-    if (recent.length >= 5) return json(res, 429, { error: '密码错误次数太多，10 分钟后再试' });
-    const got = Buffer.from(tokenFor(String(body.password ?? '')));
-    if (got.length === want.length && timingSafeEqual(got, want)) { failures.delete(ip); return json(res, 200, { token: tokenFor(password) }); }
-    failures.set(ip, [...recent, Date.now()]);
-    return json(res, 401, { error: '密码不对' });
+    json(res, 200, security.login(req, body.password));
   }
 
   function streamEvents(req, res, id, after) {
@@ -211,14 +205,21 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     if (!unsubscribe) return res.end();
     // 心跳：中间的 Nginx / 手机网络长时间没数据会断开连接
     const beat = setInterval(() => res.write(': ping\n\n'), 20_000);
-    const cleanup = () => { clearInterval(beat); unsubscribe(); };
+    const unwatch = security.onRevoke(id => { if (security.authenticate(req)?.id === id) { cleanup(); res.end(); } });
+    const cleanup = () => { clearInterval(beat); unsubscribe(); unwatch(); };
     req.on('close', cleanup);
   }
 
   /** 处理服务器模式的接口；不是这些接口返回 false */
   async function handle(req, res, pathname) {
     const url = new URL(req.url, 'http://x');
+    if (url.searchParams.has('token')) { json(res, 401, { error: '网址不能携带登录凭证，请使用请求头' }); return true; }
     if (pathname === '/api/server/login' && req.method === 'POST') { login(req, res, await readJson(req)); return true; }
+    if (pathname === '/api/health') return false;
+    const decision = await accessRoutes.access(req);
+    if (decision.status !== 200) { json(res, decision.status, { error: decision.status === 403 ? '此授权不能访问这项功能' : '服务器登录已失效' }); return true; }
+    const principal = decision.principal;
+    if (await accessRoutes.handle(req, res, pathname)) return true;
     if (pathname === '/api/server/readiness') {
       if (!authorized(req)) { json(res, 401, { error: '服务器登录已失效' }); return true; }
       return readinessRoutes(req, res);
@@ -362,7 +363,7 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       }
     }
     if (pathname === '/api/server/schedules' && req.method === 'GET') { json(res, 200, await scheduler.list()); return true; }
-    if (pathname === '/api/server/notices' && req.method === 'GET') { json(res, 200, await scheduleNotices(Number(url.searchParams.get('after')) || 0)); return true; }
+    if (pathname === '/api/server/notices' && req.method === 'GET') { const after = Number(url.searchParams.get('after')) || 0; const securityNotices = security.overview(principal).notices.filter(n => n.at > after).map(n => ({ id: n.id, at: n.at, kind: 'security', deviceId: n.sessionId, title: '新设备登录', body: `${new Date(n.at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })} · ${n.ip} · ${n.device}；可在设置→服务器→登录安全中退出此设备` })); json(res, 200, [...await scheduleNotices(after), ...securityNotices].sort((a, b) => a.at - b.at)); return true; }
     const sch = pathname.match(/^\/api\/server\/schedules\/([\w-]{1,60})(\/run)?$/);
     if (sch) {
       if (sch[2] && req.method === 'POST') {
@@ -386,15 +387,22 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     }
     if (pathname === '/api/tasks' && req.method === 'POST') {
       const { sessionId = null, text, images, voice, requestId, evaluationId } = await readJson(req, IMPORT_LIMIT); // 可能带图片，放宽大小
-      json(res, 200, await runner.start({ sessionId, text, images, voice: voice === true, requestId:requestId??null, evaluationId:evaluationId??null })); return true;
+      let forcedEvaluationId = evaluationId ?? null;
+      if (principal.role === 'evaluation') {
+        const existing = sessionId ? await sessions.get(sessionId) : null;
+        if (sessionId && !accessRoutes.owned(principal, existing)) { json(res, 403, { error: '评测授权不能接入这个对话' }); return true; }
+        forcedEvaluationId = existing && !evaluationId ? existing.evaluationId : security.evaluationScope(principal, evaluationId);
+      }
+      if (principal.role === 'evaluation' && security.remaining(principal.id) < 1) { json(res, 429, { error: '评测令牌今日模型与搜索调用次数已达上限', code: 'EVAL_QUOTA' }); return true; }
+      json(res, 200, await runner.start({ sessionId, text, images, voice: voice === true, requestId:requestId??null, evaluationId: forcedEvaluationId, ...(principal.role === 'evaluation' && { evaluationAuthorization: { id: principal.id } }) })); return true;
     }
-    if (pathname === '/api/tasks' && req.method === 'GET') { json(res, 200, runner.list()); return true; }
+    if (pathname === '/api/tasks' && req.method === 'GET') { json(res, 200, runner.list().filter(row => principal.role !== 'evaluation' || accessRoutes.owned(principal, row))); return true; }
     const t = pathname.match(/^\/api\/tasks\/([\w-]+)(\/events|\/stop|\/notes)?$/);
     if (t) {
       if (t[2] === '/notes' && req.method === 'POST') {
         const task=runner.get(t[1]);if(!task){json(res,404,{error:'原任务不存在'});return true;}
         const {text,requestId}=await readJson(req,IMPORT_LIMIT);
-        json(res,200,await runner.start({sessionId:task.sessionId,text,requestId:requestId??null,targetTaskId:t[1]}));return true;
+        json(res,200,await runner.start({sessionId:task.sessionId,text,requestId:requestId??null,targetTaskId:t[1], ...(principal.role === 'evaluation' && { evaluationId: task.evaluationId, evaluationAuthorization: { id: principal.id } })}));return true;
       }
       if (!t[2] && req.method === 'GET') { const info = runner.get(t[1]); info ? json(res, 200, info) : json(res, 404, { error: '找不到这个任务' }); return true; }
       if (t[2] === '/events' && req.method === 'GET') { streamEvents(req, res, t[1], Number(url.searchParams.get('after') || req.headers['last-event-id'] || 0)); return true; }
@@ -444,7 +452,7 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     if (pathname === '/api/sessions' && req.method === 'GET') {
       const busy = new Map(runner.list().filter((x) => x.status === 'running' || x.status === 'queued').map((x) => [x.sessionId, x]));
       // 评测会话不进对话列表（不然手机会把最近一段评测当成“当前对话”打开）
-      json(res, 200, (await sessions.list()).filter((x) => !x.evaluationId).map(({ messages, requirements, taskCheckpoint, taskReceipts, recoveryCheckpoints, ...s }) => ({ ...s, count: messages.length, taskId: busy.get(s.id)?.id ?? null, taskStatus: busy.get(s.id)?.status ?? null, lastReplyAt: messages.findLast((m) => m.role === 'assistant' || m.role === 'agent')?.ts ?? null })));
+      json(res, 200, (principal.role === 'evaluation' ? await store.all('sessions') : await sessions.list()).filter((x) => principal.role === 'evaluation' ? accessRoutes.owned(principal, x) : !x.evaluationId).map(({ messages, requirements, taskCheckpoint, taskReceipts, recoveryCheckpoints, ...s }) => ({ ...s, count: messages.length, taskId: busy.get(s.id)?.id ?? null, taskStatus: busy.get(s.id)?.status ?? null, lastReplyAt: messages.findLast((m) => m.role === 'assistant' || m.role === 'agent')?.ts ?? null })));
       return true;
     }
     // 回收站：删到回收站 / 看回收站 / 恢复（7 天后真正删掉，见 sessions.js）
@@ -498,5 +506,5 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     return false;
   }
 
-  return { authorized, handle, runner, schedules, store, ready, realtimeKey: () => loadConfig().keys?.qwen || '', qweather: () => qweatherConfig(loadConfig()) };
+  return { authorized, watchAccess: (req, close) => { const principal = security.authenticate(req); return security.onRevoke(id => { if (id === principal?.id) close(); }); }, access: accessRoutes.access, handle, runner, schedules, store, ready, realtimeKey: () => loadConfig().keys?.qwen || '', qweather: () => qweatherConfig(loadConfig()) };
 }

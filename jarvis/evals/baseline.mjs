@@ -1,3 +1,4 @@
+import { evaluationInfo } from './evaluation-auth.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -47,13 +48,15 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   }
   if (!env.JARVIS_EVAL_URL || !env.JARVIS_EVAL_TOKEN) throw Object.assign(new Error('缺少服务器地址或登录令牌'), { code: 'EVAL_CONFIG', kind: 'api' });
   const api = serverAPI(env.JARVIS_EVAL_URL, env.JARVIS_EVAL_TOKEN);
-  const cfg = await api('/api/server/config');
+  const info = await evaluationInfo(api);
+  const cfg = { provider: info.provider, models: { [info.provider]: info.model }, routing: { enabled: info.routingEnabled } };
+  if (args.includes('--official-deepseek') && info.thirdPartySearch) throw Object.assign(new Error('官方单模型基线不能启用第三方搜索服务'), { code: 'EVAL_CONFIG' });
   const selected = args.includes('--official-deepseek') ? validateBaselineConfig(cfg) : validateLiveConfig(cfg);
-  const serverStatus = await api('/api/server/status');
+  const serverStatus = { running: 0, tasks: [], features: { evaluationMemoryIsolation: true, taskRequestIds: true } };
   if (serverStatus.running || serverStatus.tasks?.length) throw Object.assign(new Error('服务器有其他任务，请单独评测'), { code: 'EVAL_CONFIG', kind: 'api' });
   if (!serverStatus.features?.evaluationMemoryIsolation) throw Object.assign(new Error('服务器缺少评测记忆隔离，请更新服务器后再测；不向旧服务器提交测试任务'), { code: 'EVAL_CONFIG', kind: 'api' });
   if (!serverStatus.features?.taskRequestIds) throw Object.assign(new Error('服务器不支持独立评测任务'), { code: 'EVAL_CONFIG', kind: 'api' });
-  const update = await api('/api/server/update').catch(() => null);
+  const update = { version: info.version };
   const serverVersion = typeof update?.version === 'string' && /^\d+\.\d+\.\d+$/.test(update.version) ? update.version : null;
   const directory = args.find((arg) => arg.startsWith('--out-dir='))?.slice(10);
   if (!directory) throw Object.assign(new Error('请指定全新的--out-dir私有报告目录'), { code: 'EVAL_CONFIG', kind: 'api' });

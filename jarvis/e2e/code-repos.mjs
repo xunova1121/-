@@ -31,7 +31,7 @@ const browser = await chromium.launch();
 try {
   for (const width of [1280, 390]) {
     const context = await browser.newContext({ viewport: { width, height: 844 } });
-    await context.addInitScript(({ base, token }) => localStorage.setItem('jarvis.server.v1', JSON.stringify({ url: base, token, enabled: true })), {
+    await context.addInitScript(({ base, token }) => { if (!localStorage.getItem('jarvis.server.v1')) localStorage.setItem('jarvis.server.v1', JSON.stringify({ url: base, token, enabled: true })); }, {
       base,
       token: tokenFor(password)
     });
@@ -72,11 +72,14 @@ try {
     await page.screenshot({ path: path.join(out, `code-repos-${width}.png`) });
     const bounds = await page.locator('#code-repos-panel').boundingBox();
     assert(bounds.x >= 0 && bounds.x + bounds.width <= width + 1, '设置面板不应横向溢出');
+    const migratedToken = await page.evaluate(() => JSON.parse(localStorage.getItem('jarvis.server.v1')).token);
+    assert.notEqual(migratedToken, tokenFor(password), '旧登录应已换成设备凭证');
     await page.reload();
     await page.waitForFunction(() => window.__jarvis);
     await page.evaluate(() => window.__jarvis.showPanel('settings'));
     await page.locator('#code-repos-panel summary').click();
     await page.waitForFunction(() => /已存令牌/.test(document.querySelector('#code-repo-status').textContent));
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('jarvis.server.v1')).token), migratedToken, '刷新保留自动换发的新登录');
     assert.equal(await page.inputValue('#code-repo-token'), '');
     await page.click('#code-repo-disconnect');
     await page.waitForFunction(() => /尚未连接仓库/.test(document.querySelector('#code-repo-status').textContent));
