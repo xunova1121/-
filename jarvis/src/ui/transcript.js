@@ -6,6 +6,7 @@ import { imageButton, previewWorkspaceImage, showImagePreview } from './imagePre
 import { PROCESS_FILE } from './workspaceCatalog.js';
 import { createSportsCard } from './sportsCard.js';
 import { createSongCard } from './songCard.js';
+import { foldExtraFiles } from './finalFiles.js';
 import './mobileImprovements.css';
 import { parseMarkdown, inline, toPlainText } from '../core/markdown.js';
 import { stripEmotionTags } from '../../shared/emotionTag.js';
@@ -726,7 +727,7 @@ export class Transcript {
           cur.after(more);
         } else if (role === 'agent' && curRaw) renderBlocks(cur, curRaw);
         for (const b of el.querySelectorAll('.body')) if (!b.textContent.trim() && !b.children.length) b.remove();
-        if (files) el.append(files); // 文件按钮放在回答最后
+        if (files) { foldExtraFiles(files); el.append(files); } // 文件按钮放在回答最后；只摆最终版，其余收进“其他文件”
         const m = document.createElement('div');
         m.className = 'meta';
         if (meta) m.append(meta);

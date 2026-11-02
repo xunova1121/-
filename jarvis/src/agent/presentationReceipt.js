@@ -27,6 +27,18 @@ function mediaPath(slidePath, target) {
   const resolved = parts.join('/');
   return /^ppt\/media\/[^/]+$/.test(resolved) ? resolved : null;
 }
+/**
+ * 用户 2026-11-02：“做成含图片的PPT，做成两页就可”——“含图片”不在原有触发词里，程序不配图也不检查，结果交付的PPT没有图。
+ * 只要说了含图 / 带图 / 有图片 / 图文并茂等就算要图；页数少（≤5页）时按每页都要图处理。
+ */
+export const asksForImages = request => !/(?:不要|不用|无需|别|不需要)[^，。,.\n]{0,4}(?:图片|配图|插图|照片)/.test(String(request)) && /(?:含|带|有|加|补|配|插|放|生成|要)[^，。,.\n]{0,4}(?:图片|配图|插图|照片)|图文(?:并茂|结合)|带图(?!表)|有图(?!表)/.test(String(request));
+const CN = { 一: 1, 两: 2, 二: 2, 三: 3, 四: 4, 五: 5 };
+export const smallDeck = (request, slides = null) => {
+  const m = String(request).match(/([一两二三四五]|[1-5])\s*(?:页|张)(?:幻灯片|PPT)?/i);
+  const asked = m ? CN[m[1]] || Number(m[1]) : null;
+  return (asked ?? slides ?? 99) <= 5;
+};
+export const wantsEverySlideImage = (request, slides = null) => requiresEverySlideImage(request) || asksForImages(request) && smallDeck(request, slides);
 export const requiresEverySlideImage = request => !/(?:每(?:一)?[页张]|所有页|全部页).{0,5}(?:不要|不用|无需).{0,4}(?:图|配图)/.test(String(request)) && /(?:每(?:一)?[页张]|所有页|全部页|逐页).{0,12}(?:配图|有图|要图|图片|加图|补图)|(?:图片|配图).{0,8}(?:每(?:一)?[页张]|所有页)/.test(String(request));
 
 /** 仅从真正嵌入且被页面引用的媒体计数；孤立rels、图标、外链、缺文件不能冒充内容配图。 */

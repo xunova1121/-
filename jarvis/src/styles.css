@@ -1170,6 +1170,13 @@ body.reduced-motion .drawer { transition: none; }
 
 /* 对话里生成的文件：点一下在工作区打开 */
 .file-links { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 2px; }
+/* 非最终版文件（预览、配图、过程稿）收起来，点开再看 */
+.file-more { display: flex; flex-direction: column; gap: 6px; }
+.file-more > summary { cursor: pointer; font-size: 13px; color: var(--muted); padding: 4px 2px; list-style: none; }
+.file-more > summary::-webkit-details-marker { display: none; }
+.file-more > summary::before { content: '▸ '; }
+.file-more[open] > summary::before { content: '▾ '; }
+.file-more[open] { gap: 6px; }
 .file-link { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 420px; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-2); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
 .file-link:hover { border-color: var(--accent); }
 .file-link .fl-ext { flex: none; min-width: 40px; padding: 4px 6px; border-radius: 7px; background: var(--accent); color: #fff; font: 600 11px/1.2 var(--font-mono); text-align: center; text-transform: uppercase; }

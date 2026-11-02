@@ -174,13 +174,15 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       const unchanged = cached && await ws.readBlob(cached.path).then(async (blob) => await digestOf(new Uint8Array(await blob.arrayBuffer())) === cached.digest && cached.digest !== null).catch(() => false);
       if (fresh(cache.results, callKey, 600_000) && unchanged) return `${cache.results.get(callKey).text}；这次的内容和上次完全一样，没有重新生成，文件就是上面这份`;
       const pathKey = await keyOf({ path, goal });
+      // 模型常只写文件名（生成图实际在 images/ 下）：原路径读不到再按 images/文件名、去掉开头的 ./ 和 / 各试一次
       const loadImage = async (src) => {
         if (/^(https?:|data:)/i.test(src)) return null;
-        try {
-          return new Uint8Array(await (await ws.readBlob(src)).arrayBuffer());
-        } catch {
-          return null;
+        const clean = String(src).replace(/^\.?\//, '');
+        const base = clean.replace(/^.*\//, '');
+        for (const candidate of [...new Set([src, clean, `images/${base}`])]) {
+          try { return new Uint8Array(await (await ws.readBlob(candidate)).arrayBuffer()); } catch { /* 换下一个候选 */ }
         }
+        return null;
       };
       const { tpl, tplPath, auto } = await findTemplate(format, template);
       const plan = ['docx', 'pptx', 'xlsx', 'pdf', 'html', 'md'].includes(format)

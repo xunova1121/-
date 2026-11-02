@@ -1,7 +1,7 @@
 import * as ws from './workspace.js';
 import { parseSlides } from './pptxWriter.js';
 import { slideBudget } from './documentPageBudget.js';
-import { requiresEverySlideImage } from './presentationReceipt.js';
+import { asksForImages, requiresEverySlideImage, wantsEverySlideImage } from './presentationReceipt.js';
 import { imageInfo } from './imageInfo.js';
 import { throwControl } from '../core/networkRequest.js';
 const MAX_IMAGES = 24;
@@ -24,8 +24,8 @@ const fingerprint = async value => Array.from(new Uint8Array(await crypto.subtle
 export async function preparePresentationImages(ctx, content, options, execution = {}) {
   const { title, requirements = '', style = 'business', expectedSlides, maxSlides, requireCover, forbidCover } = options;
   const { signal, retrieval, progress } = execution;
-  const every = requiresEverySlideImage(requirements);
-  if (!every && !/(?:补|加|配|生成).{0,6}(?:图片|配图)|带图/.test(requirements)) return {content, issues:[], plan:[]};
+  const every = requiresEverySlideImage(requirements) || wantsEverySlideImage(requirements, expectedSlides);
+  if (!every && !asksForImages(requirements) && !/(?:补|加|配|生成).{0,6}(?:图片|配图)|带图/.test(requirements)) return {content, issues:[], plan:[]};
   const explicitPages = /^\s*---\s*$/m.test(content);
   let sections = String(content).split(explicitPages ? /^\s*---\s*$/m : /(?=^#{1,2}\s)/m).map(section => section.trim()).filter(Boolean);
   const parsed = parseSlides(title, content);

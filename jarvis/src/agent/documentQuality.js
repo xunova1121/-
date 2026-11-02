@@ -1,5 +1,5 @@
 import { measureDocx } from './styleCheck.js';
-import { inspectPresentation, requiresEverySlideImage } from './presentationReceipt.js';
+import { asksForImages, inspectPresentation, requiresEverySlideImage, wantsEverySlideImage } from './presentationReceipt.js';
 import { inspectLength } from './documentLength.js';
 import { checkArtifact } from './artifactCheck.js';
 import { openOfficePackage, orderedSlidePaths, xmlUnescape } from './officePackage.js';
@@ -75,7 +75,9 @@ export async function inspectDocument(blob, filePath, { info = {}, requiredText 
       if (page.estimatedBlankRatio > 0.55) issues.push({level:'warn',text:`第${page.page}页内容框占比不足45%，请检查总览留白；不以背景装饰抵消`});
     }
     if (info.imagePlan) validation.imagePlan = info.imagePlan.slice(0, 120);
-    if (requiresEverySlideImage(requirements) && validation.presentation.missingImagePages.length) issues.push({ level: 'error', text: `缺少内容配图的页：${validation.presentation.missingImagePages.join('、')}；请补图后交付，图标不算配图` });
+    const pageCount = validation.presentation.pages.length;
+    if ((requiresEverySlideImage(requirements) || wantsEverySlideImage(requirements, pageCount)) && validation.presentation.missingImagePages.length) issues.push({ level: 'error', text: `缺少内容配图的页：${validation.presentation.missingImagePages.join('、')}；请补图后交付，图标不算配图` });
+    else if (asksForImages(requirements) && validation.presentation.missingImagePages.length >= pageCount && pageCount) issues.push({ level: 'error', text: '用户要求PPT含图片，但整份PPT没有一张内容配图（图标、装饰不算）；请补图后交付' });
     for (const [index, slidePath] of paths.entries()) {
       const xml = await zip.file(slidePath).async('string');
       const text = [...xml.matchAll(/<a:t\b[^>]*>([^<]*)<\/a:t>/g)].map((match) => xmlUnescape(match[1])).join('');
