@@ -150,3 +150,26 @@ it('候选天气失败不回滚或盖掉其间用户手选的同一目标坐标'
   expect(await work).toBe(false);
   expect(client.state).toMatchObject({ city: { name: '手选秦淮', latitude: next.latitude }, data: { temp: 25 } });
 });
+it('首次天气还在取数时补齐同坐标区县名，不能取消取数或一直没有温度', async () => {
+  const wait = deferred(), fetchImpl = vi.fn(() => wait.promise);
+  const client = createWeatherClient({ storage: null, now: () => stamp, fetchImpl });
+  const initial = client.select({ name: '当前位置', latitude: here.latitude, longitude: here.longitude, source: 'location' });
+  expect(await client.relocate(here)).toBe(true);
+  expect(client.state.refreshing).toBe(true);
+  wait.resolve(response(21));
+  await initial;
+  expect(client.state).toMatchObject({ city: here, data: { temp: 21 }, status: 'ready', refreshing: false });
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+});
+it('补齐当前坐标区县名时仍应取消另一坐标的候选天气，迟到候选不能覆盖它', async () => {
+  const wait = deferred();
+  let pending = false;
+  const { client } = await setup(async () => pending ? wait.promise : response(20));
+  pending = true;
+  const move = client.relocate(next);
+  const named = { ...here, name: '南京市 · 新区', district: '新区' };
+  expect(await client.relocate(named)).toBe(true);
+  wait.resolve(response(24));
+  expect(await move).toBe(false);
+  expect(client.state).toMatchObject({ city: named, data: { temp: 20 }, status: 'ready', refreshing: false });
+});

@@ -37,12 +37,20 @@ function check(value, message) {
   checks++;
   console.log('✓ ' + message);
 }
-async function scene({ city = here, granted = true, holdWeather = false } = {}) {
+function weatherResponse(lat) {
+  const date = new Date(Date.now() + 28800000).toISOString().slice(0, 10);
+  return {
+    utc_offset_seconds: 28800,
+    current: { temperature_2m: lat === '31.96' ? 26 : lat === '39.9' ? 18 : 20, weather_code: 0, is_day: 1, time: date + 'T12:00' },
+    daily: { time: [date], temperature_2m_min: [10], temperature_2m_max: [27], weather_code: [0], precipitation_probability_max: [0] }
+  };
+}
+async function scene({ city = here, granted = true, holdWeather = false, cached = true, holdInitial = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   if (granted) await ctx.grantPermissions(['geolocation'], { origin: base });
   await ctx.setGeolocation(here);
   await ctx.addInitScript(
-    ({ city }) => {
+    ({ city, cached }) => {
       const realNow = Date.now.bind(Date);
       globalThis.__weatherOffset = 0;
       Date.now = () => realNow() + globalThis.__weatherOffset;
@@ -66,6 +74,7 @@ async function scene({ city = here, granted = true, holdWeather = false } = {}) 
           }
         })
       );
+      if (!cached) localStorage.removeItem('jarvis.weather.cache.v1');
       globalThis.__weatherGeoCalls = [];
       globalThis.__weatherGeoDelivered = 0;
       globalThis.__weatherFixes = [];
@@ -95,26 +104,18 @@ async function scene({ city = here, granted = true, holdWeather = false } = {}) 
         for (const run of rows) run();
       };
     },
-    { city }
+    { city, cached }
   );
   const calls = [];
   let held;
   await ctx.route('https://api.open-meteo.com/**', async (route) => {
     const lat = new URL(route.request().url()).searchParams.get('latitude');
     calls.push(lat);
-    if (holdWeather && lat === '31.96') {
+    if ((holdWeather && lat === '31.96') || (holdInitial && lat === '31.95')) {
       held = route;
       return;
     }
-    const date = new Date(Date.now() + 28800000).toISOString().slice(0, 10),
-      temp = lat === '31.96' ? 26 : lat === '39.9' ? 18 : 20;
-    return route.fulfill({
-      json: {
-        utc_offset_seconds: 28800,
-        current: { temperature_2m: temp, weather_code: 0, is_day: 1, time: date + 'T12:00' },
-        daily: { time: [date], temperature_2m_min: [10], temperature_2m_max: [27], weather_code: [0], precipitation_probability_max: [0] }
-      }
-    });
+    return route.fulfill({ json: weatherResponse(lat) });
   });
   const page = await ctx.newPage(),
     errors = [];
@@ -134,6 +135,17 @@ async function resume(page) {
   });
 }
 try {
+  {
+    const s = await scene({ cached: false, holdInitial: true });
+    for (let i = 0; i < 100 && !s.held(); i++) await s.page.waitForTimeout(50);
+    check(!!s.held() && s.calls.length === 1, '无缓存首轮天气与同坐标定位并发，只发一次天气请求');
+    await s.held().fulfill({ json: weatherResponse('31.95') });
+    await s.page.waitForFunction(() => document.querySelector('.home-weather-temp')?.textContent === '20°');
+    check(await s.page.evaluate(() => document.querySelector('.home-city b').textContent === '江宁区'), '首轮取数期间区县名补全不丢失');
+    check(await s.page.evaluate(() => JSON.parse(localStorage.getItem('jarvis.weather.cache.v1')).data.temp === 20), '并发补区县后首轮温度正常显示并写入缓存');
+    check(s.errors.length === 0, '首轮并发场景没有页面错误');
+    await s.ctx.close();
+  }
   {
     const s = await scene();
     const before = await s.page.evaluate(() => __weatherGeoCalls.length);

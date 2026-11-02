@@ -24,7 +24,7 @@ export function normalizeCities(raw){return(Array.isArray(raw?.results)?raw.resu
 export function createWeatherClient({fetchImpl=(...a)=>fetch(...a),storage,direct=true,now=()=>Date.now(),qweather=()=>null,transport=()=>null}={}){
   if(storage===undefined)try{storage=globalThis.localStorage;}catch{storage=null;}
   const read=key=>{try{return JSON.parse(storage?.getItem(key)||'null');}catch{return null;}},write=(key,value)=>{try{storage?.setItem(key,JSON.stringify(value));}catch{}};
-  const saved=read(CITY_KEY);let state={city:validCity(saved)?{...saved,...(saved.name==='附近'&&{name:'当前位置'})}:null,data:null,status:'empty',stale:false,error:''},generation=0,selectionRevision=0,request=null;const listeners=new Set();
+  const saved=read(CITY_KEY);let state={city:validCity(saved)?{...saved,...(saved.name==='附近'&&{name:'当前位置'})}:null,data:null,status:'empty',stale:false,error:''},generation=0,selectionRevision=0,request=null,requestKey='';const listeners=new Set();
   const emit=()=>{for(const fn of listeners)fn({...state});};
   // 经网关 / 服务器取天气时带上本机填的和风 Key（服务器模式下服务器有自己的 Key，这里没有就不带）
   const qwHeaders=()=>{const qw=qweather();return qw?{'x-qweather-key':qw.key,'x-qweather-host':qw.host}:{};};
@@ -39,7 +39,7 @@ export function createWeatherClient({fetchImpl=(...a)=>fetch(...a),storage,direc
     return data;
   }
   // 无感刷新（用户 2026-11-01）：刷新期间照常显示旧数据；同一城市在另一运行位置的缓存只作刷新期间的占位，失败即丢弃，不当结果
-  async function refresh({force=false,keep=false}={}){if(!state.city)return false;const gen=++generation;request?.abort();request=new AbortController();const route=transport(),scope=route?.id||'',city={...state.city},cached=cache(scope),placeholder=cached?null:cache(scope,true)?.data||(keep?state.data:null);state={...state,data:cached?.data||placeholder||null,stale:cached?.stale||false,error:'',status:cached||placeholder?'ready':'loading',refreshing:true};emit();if(cached&&!cached.stale&&!force){state={...state,refreshing:false};await resolveLocation(gen,route,request.signal);return true;}
+  async function refresh({force=false,keep=false}={}){if(!state.city)return false;const gen=++generation;request?.abort();request=new AbortController();requestKey=cityKey(state.city);const route=transport(),scope=route?.id||'',city={...state.city},cached=cache(scope),placeholder=cached?null:cache(scope,true)?.data||(keep?state.data:null);state={...state,data:cached?.data||placeholder||null,stale:cached?.stale||false,error:'',status:cached||placeholder?'ready':'loading',refreshing:true};emit();if(cached&&!cached.stale&&!force){state={...state,refreshing:false};await resolveLocation(gen,route,request.signal);return true;}
     try{const data=await fetchForCity(city,route,request.signal);if(gen!==generation)return;write(CACHE_KEY,{key:cityKey(city),scope,data});state={city:{...state.city},data,stale:false,error:'',status:'ready',refreshing:false};emit();await resolveLocation(gen,route,request.signal);return true;}
     catch(error){if(gen!==generation)return false;if(keep){state={...state,refreshing:false};return false;}const message=error.status===401?'服务器登录已失效，请重新登录后刷新天气':error.status===502&&route?'服务器天气查询失败，请检查云端和风 Key 与 API Host':'天气暂时连不上，稍后可以重试';state={...state,status:cached?'ready':'error',data:cached?.data||null,stale:!!cached,error:message,refreshing:false};emit();return false;}
   }
@@ -65,10 +65,14 @@ export function createWeatherClient({fetchImpl=(...a)=>fetch(...a),storage,direc
       const name=['当前位置','附近'].includes(city.name)?prev.name:city.name.trim();
       const next={...prev,...city,name,...(!city.district&&prev.district?{district:prev.district}:{}),...(!city.city&&prev.city?{city:prev.city}:{})};
       if(next.name===prev.name&&next.district===prev.district&&next.city===prev.city&&next.source===prev.source)return false;
-      selectionRevision++;generation++;request?.abort();state={...state,city:next,refreshing:false,...(next.district?{locationError:''}:{})};write(CITY_KEY,next);emit();return true;
+      // 只补区县不能打断同一坐标正在取的首轮天气；另一个地点的候选仍须取消。
+      const keepRequest=state.refreshing&&requestKey===cityKey(prev)&&request&&!request.signal.aborted;
+      selectionRevision++;if(!keepRequest){generation++;request?.abort();}
+      state={...state,city:next,...(!keepRequest?{refreshing:false}:{}),...(next.district?{locationError:''}:{})};write(CITY_KEY,next);emit();return true;
     }
     const gen=++generation;request?.abort();request=new AbortController();
     const control=request,route=transport(),scope=route?.id||'',next={...city,name:city.name.trim()};
+    requestKey=cityKey(next);
     const cancel=()=>control.abort(signal?.reason);signal?.addEventListener('abort',cancel,{once:true});if(signal?.aborted)cancel();
     state={...state,refreshing:true};emit();
     try{
