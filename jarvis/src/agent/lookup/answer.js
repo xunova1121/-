@@ -24,7 +24,7 @@ export function lookupReceiptNote({ query, output, tool }) {
 /** 查询的唯一模型说明；预取回执只含取得的数据，不能覆盖原始用户约束。 */
 export function lookupAnswerNote(intent, text = '') {
   if (!intent.lookup || intent.kind === 'meta') return '';
-  const notes = [WEB_LOOKUP_NOTE, '工具失败不是终点。程序已替你换过来源或方法时，直接用拿到的数据回答，并自然说明来源；需要你自己联网时，先换来源，再换方法，两种方法都失败才说明，并说清已经试过什么。旧缓存必须保留查到的时间，不冒充实时；全部失败只给一句原因和一个下一步，不复述工具名、错误码或叠加免责声明。未经用户同意不要建立重试提醒。'];
+  const notes = [WEB_LOOKUP_NOTE, '工具失败不是终点。程序已替你换过来源或方法时，直接用拿到的数据回答，并自然说明来源；需要你自己联网时，先换来源，再换方法，两种方法都失败才说明，并说清已经试过什么。旧缓存必须保留查到的时间，不冒充实时；全部失败只给一句原因和一个下一步，不复述工具名、错误码或叠加免责声明。未经用户同意不要建立重试提醒。不要说“额度用完”“明天再查”这类没有依据的话：这只是本轮时间或次数到了，用户回“再查”就能接着查。'];
   if (['news', 'sports_news'].includes(intent.kind)) notes.push(newsLookupNote(text, intent));
   if (intent.kind === 'sports_news') notes.push(SPORTS_NEWS_NOTE);
   if (intent.kind === 'weather') notes.push('天气沿用真实回执的具体地点、数据提供者和更新时间，给出适合用户活动的建议；没有地点先简短问城市或区县，不猜定位。');

@@ -23,7 +23,8 @@ export function serverKeysPanel({ cfg, workspace, node }) {
   };
   const fields = {
     qianfanSearchKey: field('百度千帆搜索 Key', cfg.qianfanSearchKey, '国内搜索，按次计费；只填在服务器设置里。保存后可测试真实返回，不改变聊天模型。'),
-    bochaKey: field('博查搜索 Key', cfg.bochaKey, 'DeepSeek 搜索没开或失败时的备用（国内，中文结果好）；不填就退回免费的必应、百度。申请：open.bochaai.com'),
+    // 用户 2026-11-02：不用博查。保留这一栏只为已填过的人能清空；留空就不会用到（搜索已由百度千帆和 DeepSeek 负责）
+    bochaKey: field('博查搜索 Key', cfg.bochaKey, '已不推荐：搜索由百度千帆和 DeepSeek 负责，这一栏留空即停用；以前填过的清空保存即可。'),
     falKey: field(
       'fal.ai Key（唱歌）',
       cfg.falKey,

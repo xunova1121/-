@@ -220,6 +220,14 @@ var NEWS = /资讯|新闻|消息|动态|转会|伤病|早报|晚报|头条/;
 var withoutNegativeScores = (text2) => text2.replace(/(?:不要|不用|不需要|别|无需|不想看)(?:再|给我|推|推荐|看|查|提供|报|写|显示|的|\s)*(?:(?:比分|赛程|赛果|对阵|比赛结果)(?:和|、|与|及|\/|\s)*)+/g, "");
 var LIVE = /比分|赛程|赛果|对阵|比赛结果|几比几|谁赢|开球|(?:什么|哪些|有没有|剩余|剩下|未开赛|正在进行).{0,5}(?:比赛|球赛)|现在有什么球/;
 var dateMode = (text2) => /昨天|昨日|前天|上周|去年|历史新闻|20\d{2}[年/-]/.test(text2) ? "specified" : /今天|今日/.test(text2) ? "today" : /最近|近期|体育|体坛|转会|伤病/.test(text2) ? "recent24h" : "today";
+var GENERIC_NEWS = /最新|今日|今天|今早|今晚|昨晚|最近|近期|近日|当天|当日|这两天|本周|实时|重要|重点|主要|热点|热门|头条|要闻|大事|有什么|有哪些|有啥|什么|哪些|一下|一些|几条|多少|帮我|给我|替我|麻烦|请|查询|查查|查一?下|查|搜索|搜一?下|搜|看看|看一?下|看|发一?下|发|整理|汇总|总结|列出|推送|简报|早报|晚报|日报|速览|一览|国内外|海内外|国内|国际|全球|世界|全国|中国|财经|经济|金融|科技|体育|体坛|足坛|篮坛|综合|新闻|消息|资讯|动态|报道|情况|进展|方面|本地|当地|相关|领域|行业|比分|赛程|赛果|对阵|打开|原文|核实|核对|核验|逐条|逐项|来源|链接|标注|注明|中文|并且|并|吗|呢|吧|啊|呀|的|了|和|与|及|跟|或|还有|以及|和|[0-9０-９一二两三四五六七八九十百]+\s*[条篇则个]|路透|BBC|卫报|半岛|新华网?|央视|央广|中新网?|人民日报|澎湃|直播吧|[，,。！？!?、\s:：;；"“”'‘’（）()]/gi;
+function newsSubject(text2) {
+  const value = String(text2).replace(/^(?:【这是定时任务)?[^\n]*】\n/, "").replace(/^【这是定时任务[\s\S]*?】\s*/, "").trim();
+  if (value.length > 40) return "";
+  const rest = value.replace(/(?:不要|不用|不需要|别|无需)[^，。,]{0,12}/g, "").replace(GENERIC_NEWS, " ").replace(/\s+/g, " ").trim();
+  const words = rest.split(" ").filter((word) => word.length >= 2 || /^[A-Za-z]{2,}$/.test(word));
+  return words.length <= 4 ? words.join(" ").slice(0, 60) : "";
+}
 function newsParams(text2, sports = false) {
   const categories = sports ? ["\u4F53\u80B2"] : [];
   if (!sports) {
@@ -228,7 +236,8 @@ function newsParams(text2, sports = false) {
     if (/财经|经济|金融/.test(text2)) categories.push("\u8D22\u7ECF");
     if (/科技/.test(text2)) categories.push("\u79D1\u6280");
   }
-  return { categories, dateMode: dateMode(text2) };
+  const subject = newsSubject(text2);
+  return { categories, dateMode: dateMode(text2), ...subject && { subject } };
 }
 function sportsParams(text2) {
   const football = /足球|足彩|竞彩|英超|欧冠|中超|球赛|现在有什么球/.test(text2);
@@ -820,7 +829,7 @@ function createRetrievalBudget(text2, { now = Date.now, timeBudgetMs, clock = nu
       return Math.min(remaining, clock?.retrievalRemaining() ?? Infinity);
     },
     get note() {
-      return `\uFF08\u7CFB\u7EDF\u63D0\u793A\uFF1A${check() || "\u8054\u7F51\u68C0\u7D22\u5DF2\u505C\u6B62"}\u3002${extensive ? "\u4E0D\u8981\u518D\u8C03\u7528\u8054\u7F51\u5DE5\u5177\uFF1B\u53EF\u4EE5\u7EE7\u7EED\u8BFB\u5199\u6587\u4EF6\u3001\u751F\u6210\u6587\u6863\u548C\u8FD0\u884C\u9A8C\u8BC1\u3002" : "\u4E0D\u8981\u518D\u8C03\u7528\u5DE5\u5177\uFF0C\u4E0D\u8981\u7EE7\u7EED\u8054\u7F51\u641C\u7D22\u3002"}\u73B0\u5728\u7528\u5DF2\u7ECF\u53D6\u5F97\u7684\u8D44\u6599\u56DE\u7B54\uFF0C\u533A\u5206\u5DF2\u6838\u5B9E\u548C\u672A\u6838\u5B9E\uFF0C\u5217\u51FA\u5DF2\u6709\u6765\u6E90\uFF1B\u6CA1\u6709\u786E\u5207\u7ED3\u679C\u5C31\u5982\u5B9E\u8BF4\u8FD8\u6CA1\u6709\u786E\u5207\u7ED3\u679C\uFF0C\u4E0D\u8981\u7F16\u9020\uFF0C\u4E5F\u4E0D\u8981\u628A\u68C0\u7D22\u5931\u8D25\u8BF4\u6210\u95EE\u9898\u6CA1\u6709\u7B54\u6848\u3002\uFF09`;
+      return `\uFF08\u7CFB\u7EDF\u63D0\u793A\uFF1A${check() || "\u8054\u7F51\u68C0\u7D22\u5DF2\u505C\u6B62"}\u3002${extensive ? "\u4E0D\u8981\u518D\u8C03\u7528\u8054\u7F51\u5DE5\u5177\uFF1B\u53EF\u4EE5\u7EE7\u7EED\u8BFB\u5199\u6587\u4EF6\u3001\u751F\u6210\u6587\u6863\u548C\u8FD0\u884C\u9A8C\u8BC1\u3002" : "\u4E0D\u8981\u518D\u8C03\u7528\u5DE5\u5177\uFF0C\u4E0D\u8981\u7EE7\u7EED\u8054\u7F51\u641C\u7D22\u3002"}\u73B0\u5728\u7528\u5DF2\u7ECF\u53D6\u5F97\u7684\u8D44\u6599\u56DE\u7B54\uFF0C\u533A\u5206\u5DF2\u6838\u5B9E\u548C\u672A\u6838\u5B9E\uFF0C\u5217\u51FA\u5DF2\u6709\u6765\u6E90\uFF1B\u6CA1\u6709\u786E\u5207\u7ED3\u679C\u5C31\u5982\u5B9E\u8BF4\u8FD8\u6CA1\u6709\u786E\u5207\u7ED3\u679C\uFF0C\u4E0D\u8981\u7F16\u9020\uFF0C\u4E5F\u4E0D\u8981\u628A\u68C0\u7D22\u5931\u8D25\u8BF4\u6210\u95EE\u9898\u6CA1\u6709\u7B54\u6848\u3002\u4E0D\u8981\u8BF4\u201C\u989D\u5EA6\u7528\u5B8C\u201D\u201C\u660E\u5929\u518D\u67E5\u201D\u8FD9\u7C7B\u6CA1\u6709\u4F9D\u636E\u7684\u8BDD\uFF1A\u8FD9\u53EA\u662F\u672C\u8F6E\u65F6\u95F4\u6216\u6B21\u6570\u5230\u4E86\uFF0C\u7528\u6237\u56DE\u201C\u518D\u67E5\u201D\u5C31\u80FD\u63A5\u7740\u67E5\u3002\uFF09`;
     }
   };
   if (clock) clock.retrieval = budget;
@@ -2319,6 +2328,7 @@ function lookupPlan(intent, { text: text2, getTool, now = Date.now() }) {
   const params = intent.params || {};
   if (["news", "sports_news"].includes(intent.kind)) {
     const tool = getTool("get_today_news");
+    if (params.subject && getTool("web_search")) return { name: "web_search", args: { query: preSearchQuery(text2) }, timeoutMs: 6e3 };
     if (tool && params.dateMode !== "specified" && (intent.kind !== "sports_news" || supportsSportsNews(tool))) {
       const categories = params.categories || [];
       const limit = params.perCategory ? Math.min(24, params.perCategory * (categories.length || 5)) : /原文核实|逐条.*(?:原文|核实)|逐项核验/.test(text2) && !/[0-9一二三四五六七八九十]+\s*条/.test(text2) ? 8 : 12;

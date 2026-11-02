@@ -43,5 +43,18 @@ function hints(kind, place = '') {
 
 /** 交给模型的话：真实经过 + 要它自己想办法 + 收尾规矩 */
 export function selfDriveNote({ kind = 'general', place = '', tried = '' } = {}) {
-  return `（系统：程序的快查没拿到可用结果${tried ? `。已经试过：${tried}` : ''}。这些路这轮不要原样重试。普通查询时限已解除，你还有约${SELF_DRIVE_MS / 60000}分钟：自己想办法把问题查到——换搜索词、换来源、直接打开可靠网页。${hints(kind, place)}每次失败先想清原因再换办法，至少换两种不同办法；查到就直接回答并给来源和数据时间。真的都失败，只用一句话说清试过哪几种办法、各卡在哪，不要编造原因。）`;
+  return `（系统：程序的快查没拿到可用结果${tried ? `。已经试过：${tried}` : ''}。这些路这轮不要原样重试。普通查询时限已解除，你还有约${SELF_DRIVE_MS / 60000}分钟：自己想办法把问题查到——换搜索词、换来源、直接打开可靠网页。${hints(kind, place)}每次失败先想清原因再换办法，至少换两种不同办法；查到就直接回答并给来源和数据时间。真的都失败，只用一句话说清试过哪几种办法、各卡在哪，不要编造原因；也不要说“额度用完”“明天再查”。）`;
+}
+
+/**
+ * 拿到了结果但跟点名的对象毫不相干（用户 2026-11-02：问日本新闻，汇总拿回10条国内报道就交差）：
+ * 结果里一个对象词都没有，就算没查到，交给模型接着查。对象词取每个词的前两个字比对，“韩国在”也能认出“韩国”。
+ */
+export function offSubject(output, subject) {
+  const terms = String(subject || '').split(/\s+/).filter(Boolean).map(word => /^[A-Za-z]/.test(word) ? word.toLowerCase() : word.slice(0, 2)).filter(word => word.length >= 2);
+  if (!terms.length) return false;
+  const text = String(output || '').toLowerCase();
+  // 只判断真有条目（带链接）的结果；没有链接的回执交给原有流程，不在这里改判
+  if (!/https?:\/\//.test(text)) return false;
+  return !terms.some(term => text.includes(term));
 }

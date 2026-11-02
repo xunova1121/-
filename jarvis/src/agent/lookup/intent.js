@@ -8,6 +8,21 @@ const NEWS = /资讯|新闻|消息|动态|转会|伤病|早报|晚报|头条/;
 const withoutNegativeScores = text => text.replace(/(?:不要|不用|不需要|别|无需|不想看)(?:再|给我|推|推荐|看|查|提供|报|写|显示|的|\s)*(?:(?:比分|赛程|赛果|对阵|比赛结果)(?:和|、|与|及|\/|\s)*)+/g, '');
 const LIVE = /比分|赛程|赛果|对阵|比赛结果|几比几|谁赢|开球|(?:什么|哪些|有没有|剩余|剩下|未开赛|正在进行).{0,5}(?:比赛|球赛)|现在有什么球/;
 const dateMode = text => /昨天|昨日|前天|上周|去年|历史新闻|20\d{2}[年/-]/.test(text) ? 'specified' : /今天|今日/.test(text) ? 'today' : /最近|近期|体育|体坛|转会|伤病/.test(text) ? 'recent24h' : 'today';
+/**
+ * 新闻里点名的具体对象（国家/地区、人物、公司、事件、汇总以外的领域、球队球员）。
+ * 用户 2026-11-02：“日本新闻”走了今日新闻汇总，拿回10条央广网国内报道，一条日本的都没有。
+ * 有具体对象就改用搜索；只有“今天/国内/国际/财经/科技/体育”这类笼统概览才走汇总。
+ */
+const GENERIC_NEWS = /最新|今日|今天|今早|今晚|昨晚|最近|近期|近日|当天|当日|这两天|本周|实时|重要|重点|主要|热点|热门|头条|要闻|大事|有什么|有哪些|有啥|什么|哪些|一下|一些|几条|多少|帮我|给我|替我|麻烦|请|查询|查查|查一?下|查|搜索|搜一?下|搜|看看|看一?下|看|发一?下|发|整理|汇总|总结|列出|推送|简报|早报|晚报|日报|速览|一览|国内外|海内外|国内|国际|全球|世界|全国|中国|财经|经济|金融|科技|体育|体坛|足坛|篮坛|综合|新闻|消息|资讯|动态|报道|情况|进展|方面|本地|当地|相关|领域|行业|比分|赛程|赛果|对阵|打开|原文|核实|核对|核验|逐条|逐项|来源|链接|标注|注明|中文|并且|并|吗|呢|吧|啊|呀|的|了|和|与|及|跟|或|还有|以及|和|[0-9０-９一二两三四五六七八九十百]+\s*[条篇则个]|路透|BBC|卫报|半岛|新华网?|央视|央广|中新网?|人民日报|澎湃|直播吧|[，,。！？!?、\s:：;；"“”'‘’（）()]/gi;
+export function newsSubject(text) {
+  // 只看简短的问法：定时任务、长段写作要求（覆盖国内国际、每条写明来源……）是新闻简报，不当成点名对象
+  // 定时任务开头的说明里还套着【无需通知】，按“以】结尾的第一行”整行去掉，不能只去到第一个】
+  const value = String(text).replace(/^(?:【这是定时任务)?[^\n]*】\n/, '').replace(/^【这是定时任务[\s\S]*?】\s*/, '').trim();
+  if (value.length > 40) return '';
+  const rest = value.replace(/(?:不要|不用|不需要|别|无需)[^，。,]{0,12}/g, '').replace(GENERIC_NEWS, ' ').replace(/\s+/g, ' ').trim();
+  const words = rest.split(' ').filter(word => word.length >= 2 || /^[A-Za-z]{2,}$/.test(word));
+  return words.length <= 4 ? words.join(' ').slice(0, 60) : '';
+}
 function newsParams(text, sports = false) {
   const categories = sports ? ['体育'] : [];
   if (!sports) {
@@ -16,7 +31,8 @@ function newsParams(text, sports = false) {
     if (/财经|经济|金融/.test(text)) categories.push('财经');
     if (/科技/.test(text)) categories.push('科技');
   }
-  return { categories, dateMode: dateMode(text) };
+  const subject = newsSubject(text);
+  return { categories, dateMode: dateMode(text), ...(subject && { subject }) };
 }
 function sportsParams(text) {
   const football = /足球|足彩|竞彩|英超|欧冠|中超|球赛|现在有什么球/.test(text);

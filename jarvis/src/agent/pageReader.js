@@ -139,3 +139,9 @@ export function createPageReader(options = {}) {
     return text;
   };
 }
+
+/** 读原文用哪几家、什么顺序（给模型看；只有服务商名字，不含任何 Key） */
+export function pageReaderOrder(ctx = {}) {
+  const deepseek = ctx.deepseekSearchEnabled === true;
+  return [deepseek && 'DeepSeek Fetch（最多等8秒）', '服务器/本机直接打开网页', ctx.tavilyKey && 'Tavily代读'].filter(Boolean).join(' → ');
+}

@@ -19,6 +19,8 @@ export function lookupPlan(intent, { text, getTool, now = Date.now() }) {
   const params = intent.params || {};
   if (['news', 'sports_news'].includes(intent.kind)) {
     const tool = getTool('get_today_news');
+    // 点名了具体对象（日本、马斯克、某事件、汽车……）：汇总源按日期取全量，找不到这个对象，直接搜索
+    if (params.subject && getTool('web_search')) return { name: 'web_search', args: { query: preSearchQuery(text) }, timeoutMs: 6000 };
     if (tool && params.dateMode !== 'specified' && (intent.kind !== 'sports_news' || supportsSportsNews(tool))) {
       const categories = params.categories || [];
       const limit = params.perCategory ? Math.min(24, params.perCategory * (categories.length || 5)) : /原文核实|逐条.*(?:原文|核实)|逐项核验/.test(text) && !/[0-9一二三四五六七八九十]+\s*条/.test(text) ? 8 : 12;

@@ -54,7 +54,7 @@ export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs, cloc
       const remaining = started === null || duration() <= 0 ? Infinity : Math.max(0, duration() - (now() - started));
       return Math.min(remaining, clock?.retrievalRemaining() ?? Infinity);
     },
-    get note() { return `（系统提示：${check() || '联网检索已停止'}。${extensive ? '不要再调用联网工具；可以继续读写文件、生成文档和运行验证。' : '不要再调用工具，不要继续联网搜索。'}现在用已经取得的资料回答，区分已核实和未核实，列出已有来源；没有确切结果就如实说还没有确切结果，不要编造，也不要把检索失败说成问题没有答案。）`; }
+    get note() { return `（系统提示：${check() || '联网检索已停止'}。${extensive ? '不要再调用联网工具；可以继续读写文件、生成文档和运行验证。' : '不要再调用工具，不要继续联网搜索。'}现在用已经取得的资料回答，区分已核实和未核实，列出已有来源；没有确切结果就如实说还没有确切结果，不要编造，也不要把检索失败说成问题没有答案。不要说“额度用完”“明天再查”这类没有依据的话：这只是本轮时间或次数到了，用户回“再查”就能接着查。）`; }
   };
   if (clock) clock.retrieval = budget;
   return budget;

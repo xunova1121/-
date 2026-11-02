@@ -45,7 +45,7 @@ import * as sessions from './sessions.js';
 import { createConversationTrashTools } from './conversationTrashTools.js';
 import { createSearch } from './webSearch.js';
 import { getWeather } from './weather.js';
-import { createPageReader } from './pageReader.js';
+import { createPageReader, pageReaderOrder } from './pageReader.js';
 import { withWebDeadline } from './retrievalBudget.js';
 import { matchFiles } from './fileSearch.js';
 import { deepResearch, DEPTHS } from './research.js';
@@ -613,7 +613,8 @@ export function createTools(ctx) {
     },
     {
       name: 'fetch_url',
-      description: '读取网页或PDF正文，附页面栏目和附件链接；链接指向的内容需继续读取。',
+      // 用户 2026-11-02：问未央“读正文是谁家的”，它说工具说明里没写。这里写明当前按什么顺序读（只写服务商名字，不带 Key）
+      description: `读取网页或PDF正文，附页面栏目和附件链接；链接指向的内容需继续读取。读取顺序：${pageReaderOrder(ctx)}。`,
       input_schema: S({ url: str('http(s) 地址'), urls: { type: 'array', maxItems: 2, items: { type: 'string' }, description: '可选：同一问题的另外至多两个备选页面，并发读取、取得正文即停止；用户要求逐页核对时不要使用备选模式' } }, ['url']),
       run: async ({ url, urls = [] }, { signal, progress, retrieval, sessionId, requestText } = {}) => {
         if (!/^https?:\/\//i.test(url)) throw new Error('只支持 http(s) 地址');

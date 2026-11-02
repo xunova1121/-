@@ -8,7 +8,7 @@ import { classifyLookupIntent } from './lookup/classify.js';
 import { LOOKUP_DEFAULT_PREFERENCES } from './lookup/preferences.js';
 import { withWebDeadline } from './lookup/request.js';
 import { lookupAnswerNote, lookupReceiptData } from './lookup/answer.js';
-import { RECOVERED_ANSWER_MS, SELF_DRIVE_MS, SELF_DRIVE_PROGRESS, selfDriveNote, triedSummary } from './lookup/selfDrive.js';
+import { RECOVERED_ANSWER_MS, SELF_DRIVE_MS, SELF_DRIVE_PROGRESS, offSubject, selfDriveNote, triedSummary } from './lookup/selfDrive.js';
 import { createLookupDelivery } from './lookupDelivery.js';
 import { lookupPhase } from './lookupModels.js';
 import { codeWorkBlock, CODE_TASK_CORE } from './codeDevelopment.js';
@@ -451,7 +451,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     }
     const intent = await classifyLookupIntent(requirementText, { history, preferences, classify: lookupClassifier, signal });
     retrieval.intent = intent; retrieval.intentRequest = requirementText;
-    const found = await runLookup(intent, {
+    let found = await runLookup(intent, {
       text: requirementText, getTool: name => loader.get(name), now: now(), signal, clock: lookupControl,
       execute: async (calls, s) => {
         const results = await executeToolCalls(calls, { loader, emit, seen, diagramRecovery, executionScope, closing: false, retrieval, approve, signal: s, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch: true });
@@ -461,6 +461,10 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     });
     if (found && intent.kind === 'general' && lookupControl && !fallbacks.length && !['failed', 'input'].includes(found.recovery?.state)) lookupControl.phased = true;
     if (found && ['recovered', 'cached'].includes(found.recovery?.state)) lookupControl?.extend?.(RECOVERED_ANSWER_MS);
+    // 取到的东西跟问的对象毫不相干（问日本，回来全是国内新闻）：当没查到，交给模型接着查
+    if (found && !['failed', 'input'].includes(found.recovery?.state) && offSubject(found.output, intent.params?.subject)) {
+      found = { ...found, recovery: { state: 'failed', attempts: [...(found.recovery?.attempts || []), { label: `${found.tool === 'get_today_news' ? '今日新闻汇总' : '首次查询'}（结果里没有“${intent.params.subject}”相关内容）`, failure: 'empty' }] } };
+    }
     if (found) { if (found.recovery && found.recovery.state !== 'fresh') lookupDelivery.record({ name: found.tool, args: found.args, ok: !['failed', 'input'].includes(found.recovery.state), output: found.output, lookupRecovery: found.recovery }); preFound = found; convo.at(-1).content = `${convo.at(-1).content}\n\n${found.recovery?.state === 'failed' && !signal?.aborted ? selfDrive(found.recovery) : lookupReceiptData(found)}`; }
     toolHint = loader.hint();
   }
