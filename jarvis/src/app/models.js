@@ -120,12 +120,14 @@ export function createModels(app) {
               ? fetch(`/api/llm/fal/${url.slice('https://queue.fal.run/'.length)}`, init)
               : url.startsWith('https://api.tavily.com/')
                 ? fetch(`/api/llm/tavily/${url.slice('https://api.tavily.com/'.length)}`, init)
-                : url.startsWith('https://api.bochaai.com/')
-                  ? fetch(`/api/llm/bocha/${url.slice('https://api.bochaai.com/'.length)}`, init)
-                  : fetch(`/api/fetch?url=${encodeURIComponent(url)}`, {
-                      signal: init?.signal,
-                      credentials: 'omit'
-                    })
+                : url.startsWith('https://qianfan.baidubce.com/')
+                  ? fetch(`/api/llm/qianfan/${url.slice('https://qianfan.baidubce.com/'.length)}`, init)
+                  : url.startsWith('https://api.bochaai.com/')
+                    ? fetch(`/api/llm/bocha/${url.slice('https://api.bochaai.com/'.length)}`, init)
+                    : fetch(`/api/fetch?url=${encodeURIComponent(url)}`, {
+                        signal: init?.signal,
+                        credentials: 'omit'
+                      })
       : globalThis.__jarvisNativeFetch
         ? nativeWebFetch(globalThis.__jarvisNativeFetch)
         : null;

@@ -29,6 +29,17 @@ const upstream = http.createServer(async (req, res) => {
 });
 await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
 const upstreamURL = `http://127.0.0.1:${upstream.address().port}`;
+const originalFetch = globalThis.fetch;
+globalThis.fetch = (url, options) => {
+  if (String(url).startsWith('https://qianfan.baidubce.com/')) {
+    assert.equal(String(url), QIANFAN_ENDPOINT);
+    return originalFetch(upstreamURL, options);
+  }
+  return originalFetch(url, options);
+};
+const localServer = createServer({ staticDir: path.resolve('dist'), ollama: null });
+await new Promise(resolve => localServer.listen(0, '127.0.0.1', resolve));
+const localBase = `http://127.0.0.1:${localServer.address().port}`;
 const mode = createServerMode({ dataDir, password: 'qianfan-browser-fixture', searchFetch: (url, options) => {
   assert.equal(url, QIANFAN_ENDPOINT);
   if (state === 'offline') throw Object.assign(new Error('fake offline'), { kind: 'network' });
@@ -79,9 +90,32 @@ try {
   check(!logs.join('\n').includes(key) && !(await page.evaluate(() => JSON.stringify(localStorage))).includes(key), 'Key不进入浏览器持久化或控制台');
   check(errors.length === 0, '搜索设置无页面异常');
   await context.close();
+  state = 'ok';
+  const localContext = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  await localContext.addInitScript(key => localStorage.setItem('jarvis.llm.v1', JSON.stringify({ qianfanSearchKey: key })), key);
+  const localPage = await localContext.newPage(), localErrors = [], localRequests = [];
+  localPage.on('pageerror', error => localErrors.push(error.message));
+  localPage.on('request', request => { if (request.url().includes('/api/llm/qianfan/')) localRequests.push(request); });
+  await localPage.route('**/api/fetch?**', route => route.fulfill({ status: 405, body: '不能用普通网页读取代替搜索POST' }));
+  await localPage.route(QIANFAN_ENDPOINT, route => route.fulfill({ status: 403, body: '测试不得请求公网，必须走本机网关' }));
+  await localPage.goto(localBase);
+  await localPage.waitForFunction(() => globalThis.__jarvis?.gateway?.origin);
+  await localPage.evaluate(() => globalThis.__jarvis.showPanel('models'));
+  await localPage.getByRole('button', { name: '服务商', exact: true }).click();
+  const localPane = localPage.locator('.ml-service-keys');
+  await localPane.locator('summary').click();
+  const beforeLocal = requests;
+  await localPane.getByRole('button', { name: '测试百度搜索', exact: true }).click();
+  await localPage.waitForFunction(() => [...document.querySelectorAll('.ml-service-keys button')].some(button => button.textContent === '测试百度搜索' && !button.disabled));
+  check(localRequests.length === 1 && localRequests[0].method() === 'POST' && localRequests[0].url() === localBase + '/api/llm/qianfan/v2/ai_search/web_search', '本机经专用千帆POST路由，不走普通网页读取');
+  check(requests === beforeLocal + 1 && (await localPane.innerText()).includes('合成当日标题3') && lastBody.resource_type_filter[0].top_k === 10, '本机网关实际转发正文与授权，收到固定HTTP替身结果');
+  check(localErrors.length === 0, '本机千帆设置无页面异常');
+  await localContext.close();
   console.log(`${checks}/${checks} 通过；固定本地HTTP替身，不是国内网络或用户Key实测。`);
 } finally {
   await browser.close();
+  globalThis.fetch = originalFetch;
+  await new Promise(resolve => localServer.close(resolve));
   await new Promise(resolve => server.close(resolve));
   await new Promise(resolve => upstream.close(resolve));
   useBackend(null);
