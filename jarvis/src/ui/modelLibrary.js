@@ -1,4 +1,6 @@
 import { publicDataPanel } from './publicDataPanel.js';
+import { readinessPanel } from './readinessPanel.js';
+import './readinessPanel.css';
 import { lookupPanel } from './lookupPanel.js';
 /** 模型库主界面：服务商卡片与常用型号，完整目录按搜索和分页显示。 */
 import './modelLibrary.css';
@@ -67,6 +69,7 @@ export function initModelLibrary({ root, workspace, toast }) {
   compact.addEventListener('change', () => render());
   let reviewOpen = false; // “文档审查与写作偏好”是否展开（重画时保持）
   let imageOptionsOpen = false; // 手机改画图参数后保留展开状态，避免每选一项都收起。
+  let readinessView = null;
   const patch = (update) => run(() => workspace.patch(update));
 
   function modelRow(cfg, provider, model, { catalog = false } = {}) {
@@ -345,6 +348,8 @@ export function initModelLibrary({ root, workspace, toast }) {
 
   function render() {
     if (!root) return;
+    readinessView?.destroy();
+    readinessView = null;
     root.querySelectorAll('dialog[open]').forEach((dialog) => dialog.close());
     const cfg = workspace.config();
     const mobile = compact.matches;
@@ -409,6 +414,17 @@ export function initModelLibrary({ root, workspace, toast }) {
     if (pullController) root.append(button('停止拉取', () => pullController.abort(), 'ml-link'));
     const localTools = button('本机连接与选项', () => workspace.openLocalOptions(), 'ml-local-tools');
     localTools.setAttribute('aria-label', '本机连接与选项');
+    if (workspace.readiness) {
+      readinessView = readinessPanel({ workspace, node,
+        onModels: () => { mobilePage = 'abilities'; render(); root.scrollIntoView?.({ block: 'start' }); },
+        onKeys: () => {
+          mobilePage = 'providers'; render();
+          const keys = root.querySelector('.ml-service-keys');
+          if (keys) { keys.open = true; keys.scrollIntoView?.({ block: 'center' }); }
+        }
+      });
+      root.append(readinessView.root);
+    }
     // 本机诊断不依赖云端配置读取成功，断网时仍保留入口。
     if (!cfg) {
       root.append(localTools);

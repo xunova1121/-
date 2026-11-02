@@ -172,6 +172,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     lookupHealth: (probe = false, signal) => req('/api/server/lookup-health', { method: probe ? 'POST' : 'GET', signal, timeout: 45000 }),
     deleteDocumentStyle: id => req(`/api/server/document-styles/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     probeStockImages: (provider, signal) => req('/api/server/stock-images/probe', { method: 'POST', body: { provider, network: 'cn' }, signal, timeout: 30000 }),
+    readiness: (signal) => req('/api/server/readiness', { method: 'POST', body: {}, signal, timeout: 30000 }),
     putConfig: (cfg) => req('/api/server/config', { method: 'PUT', body: cfg }),
     testDeepseekSearch: (kind, signal) => req('/api/server/search-test', { method: 'POST', body: { kind }, signal, timeout: 30000 }),
     listModels: (provider, signal) => req('/api/server/models', { method: 'POST', body: { provider }, signal }),

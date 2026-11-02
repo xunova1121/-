@@ -1,4 +1,5 @@
 import { stockDiagnostic } from '../src/agent/stockImageDiagnostics.js';
+import { createReadinessRoutes } from './readinessRoutes.mjs';
 import { createStockImages } from './stockImages.mjs';
 import { STOCK_KEY_FIELDS, STOCK_PROVIDERS } from '../src/agent/stockImageSources.js';
 import { publicDataHosts } from '../src/agent/publicJson.js';
@@ -107,7 +108,7 @@ export function mergeConfig(old, next) {
 /**
  * @param {{ dataDir: string, password: string, maxRunning?: number, runner?: object }} o
  */
-export function createServerMode({ dataDir, password, maxRunning = 1, runner: injected = null, appDir = APP_DIR, updateUnit = UPDATE_UNIT, makeModelAdapter, autoSchedules = false, codeHosting = createGitHubHost(), codeGit, codeSandbox = null, lookupService: injectedLookup = null } = {}) {
+export function createServerMode({ dataDir, password, maxRunning = 1, runner: injected = null, appDir = APP_DIR, updateUnit = UPDATE_UNIT, makeModelAdapter, autoSchedules = false, codeHosting = createGitHubHost(), codeGit, codeSandbox = null, lookupService: injectedLookup = null, readinessRuntime } = {}) {
   if (!password || String(password).length < 8) throw new Error('服务器模式需要设置 JARVIS_PASSWORD（至少 8 位）');
   const store = createFileStore(path.join(dataDir, 'store'));
   useBackend(store);
@@ -161,6 +162,7 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     res.end(JSON.stringify(body));
   };
   const lookupRoutes = createLookupRoutes({ service: lookupService, getConfig: loadConfig, json });
+  const readinessRoutes = createReadinessRoutes({ getConfig: loadConfig, appDir, json, runtime: readinessRuntime });
   async function readBody(req, limit) {
     let size = 0;
     const chunks = [];
@@ -217,6 +219,10 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
   async function handle(req, res, pathname) {
     const url = new URL(req.url, 'http://x');
     if (pathname === '/api/server/login' && req.method === 'POST') { login(req, res, await readJson(req)); return true; }
+    if (pathname === '/api/server/readiness') {
+      if (!authorized(req)) { json(res, 401, { error: '服务器登录已失效' }); return true; }
+      return readinessRoutes(req, res);
+    }
     if (pathname === '/api/server/lookup-health') {
       if (!authorized(req)) { json(res, 401, { error: '服务器登录已失效' }); return true; }
       return lookupRoutes(req, res);

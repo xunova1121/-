@@ -35,7 +35,8 @@ export function sheet(report, picks) {
     const facts = run.fileFacts ? `\n\n**程序读回的文件**：${run.fileFacts.map((f) => (f ? `${f.path}：正文${f.body ?? '?'}磅、标题${f.title ?? '?'}磅、横线${f.rules ?? '?'}、页数${f.pages ?? '?'}` : '无文件')).join('；')}` : '';
     return `## ${i + 1}. ${id}（第${attempt}次，${r.group}）\n\n**检查点**：${r.rubric.join('；')}\n\n${turns}${facts}\n\n打分：答到点子上 __ / 事实对 __ / 表达自然 __ / 交付物能用 __ ；通过？__ ；说做到没做到？__`;
   });
-  return `# 30 题联合复测 · 校准打分表\n\n每题按 4 项各打 1～5 分（可以打 2、4），再判通过与否。不用写理由，觉得哪里不对可以写一句。\n\n${dims}\n\n${body.join('\n\n---\n\n')}\n`;
+  const title = report.suiteVersion === 'focus-delivery-v1' ? '五类重点真实任务复测' : '30 题联合复测';
+  return `# ${title} · 校准打分表\n\n每题按 4 项各打 1～5 分（可以打 2、4），再判通过与否。不用写理由，觉得哪里不对可以写一句。\n\n${dims}\n\n${body.join('\n\n---\n\n')}\n`;
 }
 
 /** 对比：各维度平均差、通过与否一致率、分差 ≥2 的题 */

@@ -17,6 +17,8 @@ OUT="${JOINT_OUT:-/root/weiyang-joint-$(date +%Y%m%d-%H%M)}"
 EXTRA=()
 [ -n "${JOINT_EXPECT_VERSION:-}" ] && EXTRA+=("--expected-version=$JOINT_EXPECT_VERSION")
 [ "${JOINT_SPEED_QUALITY:-0}" = "1" ] && EXTRA+=("--speed-quality")
+[ "${JOINT_FOCUS:-0}" = "1" ] && EXTRA+=("--focus")
+[ -n "${JOINT_ONLY:-}" ] && EXTRA+=("--only=$JOINT_ONLY")
 [ -n "${JOINT_PREVIOUS:-}" ] && EXTRA+=("--previous=$JOINT_PREVIOUS")
 [ -n "${JOINT_BASELINE:-}" ] && EXTRA+=("--baseline=$JOINT_BASELINE")
 [ -n "${JOINT_PRICES:-}" ] && EXTRA+=("--prices=$JOINT_PRICES")

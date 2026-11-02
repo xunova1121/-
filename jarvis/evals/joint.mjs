@@ -11,7 +11,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { jointCases, jointSuiteVersion, JOINT_REPEATS } from './joint-cases.mjs';
+import { jointSuiteVersion, JOINT_REPEATS } from './joint-cases.mjs';
 import { runCase, serverAPI } from './runner.mjs';
 import { checkResult } from './baseline-report.mjs';
 import { validateLiveConfig } from './baseline.mjs';
@@ -19,7 +19,9 @@ import { fileDownloader, turnFileFacts, fileProblems, turnEvidence } from './joi
 import { runMetrics, stability, jointSummary, compareRounds } from './joint-report.mjs';
 import { rubricVersion } from './joint-rubric.mjs';
 import { evidenceDownloader, searchEvidence } from './joint-evidence.mjs';
-import { speedQualityCases } from './speed-quality-cases.mjs';
+import { focusSuiteVersion, selectJointCases } from './focus-cases.mjs';
+import { normalizeReadiness } from '../shared/capabilityReadiness.js';
+import { codeResumeProblems } from './focus-code-evidence.mjs';
 
 const bj = (t = Date.now()) => new Date(t + 8 * 3600_000).toISOString().replace('T', ' ').slice(0, 19) + '（北京时间）';
 const configError = (message) => Object.assign(new Error(message), { code: 'EVAL_CONFIG', kind: 'api' });
@@ -28,6 +30,7 @@ const configError = (message) => Object.assign(new Error(message), { code: 'EVAL
 export function readiness(item, env) {
   if (item.requires.includes('repo') && !env.repoConnected) return '服务器没有连接测试仓库';
   if (item.requires.includes('browser') && !env.browserConfigured) return '服务器没有配置网页检查浏览器镜像';
+  if (item.requires.includes('sandbox') && !env.sandboxReady) return '服务器代码容器运行自检未通过，未请求模型修代码';
   return '';
 }
 
@@ -36,6 +39,7 @@ export async function runJointOnce(api, item, { download, runId, attempt, signal
   const turns = [];
   const fileFacts = [], evidence = [];
   const capture = async (turn, index) => {
+    if (item.id === 'focus-code-resume') turn.codeEvidence = await api.codeEvidence?.(turn.taskId, signal).catch(() => null) || null;
     const snapshot = evidenceDownloader(download, archiveRoot && path.join(archiveRoot, `turn-${index}`));
     if (item.file) fileFacts.push(await turnFileFacts(turn, snapshot));
     evidence.push({ tools: Object.entries(turn.timing?.tools || {}).map(([name, v]) => ({ name, calls: v.calls, failed: v.failed })), ...searchEvidence(turn), files: await turnEvidence(turn, snapshot).catch(() => []), outcome: turn.review?.outcome ?? null, artifactDirectory: archiveRoot ? `artifacts/${item.id}-r${attempt}/turn-${index}` : null });
@@ -54,6 +58,7 @@ export async function runJointOnce(api, item, { download, runId, attempt, signal
   // 给评审员的证据：每轮用了哪些工具（次数 / 失败）、交付文件读回、建了哪些提醒（第一轮实测评审员看不到这些，误判了一批题）
   const last = turns.at(-1);
   const mechanical = checkResult(item, last);
+  if (item.id === 'focus-code-resume') mechanical.failures.push(...codeResumeProblems(turns));
   if (item.followup && turns.length !== 2) mechanical.failures.push('追问没跑成');
   const problems = item.file ? fileProblems(item.file, fileFacts) : [];
   return {
@@ -61,7 +66,7 @@ export async function runJointOnce(api, item, { download, runId, attempt, signal
     status: last.status,
     environment: 'ready',
     isolated: Boolean(evaluationId),
-    turns: turns.map((t) => ({ prompt: t.prompt, status: t.status, answer: t.answer, files: t.files, timing: t.timing, clientTotalMs: t.clientTotalMs, failure: t.failure || (t.status === 'error' ? { phase: 'server_task', kind: ['api', 'network', 'timeout', 'aborted', 'auth', 'rate_limit'].includes(t.lastTaskState?.errorKind) ? t.lastTaskState.errorKind : 'unknown' } : null), review: t.review || null })),
+    turns: turns.map((t) => ({ prompt: t.prompt, status: t.status, answer: t.answer, files: t.files, timing: t.timing, clientTotalMs: t.clientTotalMs, ...(t.codeEvidence && { codeEvidence: t.codeEvidence }), failure: t.failure || (t.status === 'error' ? { phase: 'server_task', kind: ['api', 'network', 'timeout', 'aborted', 'auth', 'rate_limit'].includes(t.lastTaskState?.errorKind) ? t.lastTaskState.errorKind : 'unknown' } : null), review: t.review || null })),
     mechanical: { mechanical: mechanical.failures.length ? 'failed' : 'passed', failures: mechanical.failures, warnings: mechanical.warnings },
     fileFacts: item.file ? fileFacts : null,
     evidence,
@@ -87,8 +92,9 @@ export function scheduleCleaner(api, remove, before) {
 export async function main(args = process.argv.slice(2), env = process.env) {
   const arg = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
   const supplement = args.includes('--speed-quality');
-  const selectedCases = supplement ? [...jointCases, ...speedQualityCases] : jointCases;
-  const suiteVersion = supplement ? jointSuiteVersion + '+speed-quality-v1' : jointSuiteVersion;
+  const focus = args.includes('--focus');
+  const selectedCases = selectJointCases({ focus, supplement, only: arg('only') });
+  const suiteVersion = focus ? focusSuiteVersion : supplement ? jointSuiteVersion + '+speed-quality-v1' : jointSuiteVersion;
   if (!args.includes('--live')) {
     console.log(JSON.stringify({ mode: 'plan_only', suiteVersion, repeats: JOINT_REPEATS, cases: selectedCases.map(({ id, group, prompt, followup, requires, carriedFrom }) => ({ id, group, prompt, followup, requires, carriedFrom })) }, null, 2));
     return;
@@ -109,8 +115,21 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   if (arg('expected-version') && update?.version !== arg('expected-version')) throw configError('服务器版本与本次固定基线不一致，未提交评测任务');
   const repos = await api('/api/server/code-repos').catch(() => null);
   const envState = { repoConnected: repos?.connected === true && repos?.repository === 'xunova1121/weiyang-code-sandbox', browserConfigured: repos?.capabilities?.browserConfigured === true };
+  let environmentCheck = null;
+  if (focus) {
+    try { environmentCheck = normalizeReadiness(await api('/api/server/readiness', {}, { timeoutMs: 30000 }), 'server'); }
+    catch {
+      const blocked = arg('out-dir');
+      if (blocked) {
+        await fs.mkdir(blocked, { mode: 0o700 });
+        await fs.writeFile(path.join(blocked, '预检失败.json'), JSON.stringify({ suiteVersion, state: 'blocked_readiness', modelRequested: false, productionChanged: false,
+          reason: '服务器统一自检不可用或响应不兼容，请先更新服务器并完成自检', serverVersion: update?.version || null }), { mode: 0o600 });
+      }
+      throw configError('重点复测需要统一自检，请先更新服务器并完成自检；未提交评测任务');
+    }
+    envState.sandboxReady = environmentCheck.checks?.some(row => row.id === 'sandbox' && row.code === 'sandbox_ready') === true;
+  }
   const prices = arg('prices') ? JSON.parse(await fs.readFile(arg('prices'), 'utf8')) : {};
-  const only = arg('only')?.split(',') || null;
   const repeats = Math.max(1, Math.min(3, Number(arg('repeats')) || JOINT_REPEATS));
   const directory = arg('out-dir');
   if (!directory) throw configError('请指定全新的 --out-dir 私有报告目录');
@@ -129,10 +148,12 @@ export async function main(args = process.argv.slice(2), env = process.env) {
       routingEnabled: selected.routingEnabled,
       routes: cfg.routing?.enabled ? cfg.routing.routes || null : null,
       environment: envState,
+      ...(focus && /^[a-f0-9]{40}$/.test(env.JARVIS_EVAL_REVISION || '') && { evaluationRevision: env.JARVIS_EVAL_REVISION }),
       startedAt: bj(),
       location: new URL(env.JARVIS_EVAL_URL).origin
     },
     pricesNote: Object.keys(prices).length ? '费用按 --prices 文件里的价格（元/百万Token）估算' : '没提供价格表，费用不算（不编价格）',
+    ...(focus && { environmentCheck, scopeNote: '五类重点真实任务，不能当原30题全量复试或总体准确率' }),
     results: []
   };
   const destination = path.join(directory, 'report.json');
@@ -143,9 +164,9 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
   try {
-    for (const item of selectedCases.filter((c) => !only || only.includes(c.id))) {
+    for (const item of selectedCases) {
       if (controller.signal.aborted) break;
-      const entry = { id: item.id, group: item.group, category: item.category, carriedFrom: item.carriedFrom || null, prompt: item.prompt, followup: item.followup || null, rubric: item.rubric, runs: [] };
+      const entry = { id: item.id, group: item.group, category: item.category, ...(item.sourceCase && { sourceCase: item.sourceCase }), carriedFrom: item.carriedFrom || null, prompt: item.prompt, followup: item.followup || null, rubric: item.rubric, runs: [] };
       report.results.push(entry);
       const notReady = readiness(item, envState);
       for (let attempt = 1; attempt <= repeats; attempt++) {

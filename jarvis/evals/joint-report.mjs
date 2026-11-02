@@ -157,7 +157,7 @@ export function summaryMarkdown(report) {
   const c = report.conditions || {};
   const pct = (a, b) => (b ? Math.round((a / b) * 100) + '%' : '?');
   const lines = [
-    `# 30 题联合复测结果`,
+    report.suiteVersion === 'focus-delivery-v1' ? '# 五类重点真实任务复测结果' : '# 30 题联合复测结果',
     ``,
     `- 服务器版本 ${c.serverVersion ?? '?'}；主模型 ${c.provider}/${c.model}${c.routingEnabled ? '（开了分工）' : ''}；${c.startedAt} 到 ${c.finishedAt ?? '未结束'}`,
     `- 评审：${report.judge ? `${report.judge.model}${report.judge.sameAsAnswerModel ? '（和答题模型相同，分数可能偏高）' : ''}` : '还没评审'}；每题跑 ${report.repeats} 次`,

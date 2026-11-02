@@ -9,6 +9,8 @@ import { fetchModelCatalog } from '../llm/modelCatalog.js';
 import { initModelLibrary } from '../ui/modelLibrary.js';
 import { listDocumentStyles, deleteDocumentStyle, vectorStatus } from '../agent/memory.js';
 import { $, toast } from './env.js';
+import { readinessReport, normalizeReadiness, readinessItem } from '../../shared/capabilityReadiness.js';
+import { abortableFetch } from '../core/abortableFetch.js';
 
 export function createModelWorkspace(app) {
   let scope = app.server ? 'server' : 'local';
@@ -56,6 +58,26 @@ export function createModelWorkspace(app) {
       return client.deleteDocumentStyle(id);
     },
     gateway: (target = scope) => (target === 'local' ? app.gateway : null),
+    async readiness(target = scope, signal) {
+      if (target === 'server') {
+        const client = getClient();
+        if (!client) throw Object.assign(new Error('请先登录云服务器'), { code: 'SERVER_NOT_CONNECTED' });
+        return normalizeReadiness(await client.readiness(signal), 'server');
+      }
+      const config = await scopes.get('local');
+      signal?.throwIfAborted();
+      let runtime = { checks: ['office', 'pdf', 'fonts', 'ffmpeg', 'git', 'sandbox', 'browser', 'skills'].map((id) => readinessItem(id, 'unknown')) };
+      if (app.gateway?.origin) {
+        const deadline = AbortSignal.timeout(15000);
+        const response = await abortableFetch(fetch, `${app.gateway.origin}/api/readiness`, {
+          signal: signal ? AbortSignal.any([signal, deadline]) : deadline
+        });
+        if (!response.ok) throw Object.assign(new Error('本机环境自检接口不可用'), { status: response.status });
+        runtime = await response.json();
+        signal?.throwIfAborted();
+      }
+      return readinessReport({ scope: 'local', cfg: config, gatewayKeys: app.gateway?.keys || [], runtime });
+    },
     /** 记忆向量的情况：多少条算好了、上次出错（服务器上的问服务器） */
     async memoryStatus(target = scope) {
       if (target === 'local') return vectorStatus();

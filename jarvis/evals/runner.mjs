@@ -3,6 +3,7 @@ import { reliabilityCases } from './reliability-cases.mjs';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import fs from 'node:fs/promises';
+import { readCodeEvidence } from './focus-code-evidence.mjs';
 import { cases } from './cases.mjs';
 
 /** 真实服务器接口；密钥只通过环境变量传入，不写报告、不跟随重定向。 */
@@ -10,8 +11,8 @@ export function serverAPI(base, token, fetchImpl = fetch) {
   const url = new URL(base);
   if (url.username || url.password || url.search || url.hash || !['http:', 'https:'].includes(url.protocol)) throw evalError('服务器地址格式不正确', 'EVAL_PROTOCOL');
   if (url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) throw evalError('远端评测必须使用HTTPS，避免明文发送登录令牌', 'EVAL_PROTOCOL');
-  return async (route, body, { signal } = {}) => {
-    const timeout = AbortSignal.timeout(10_000);
+  const request = async (route, body, { signal, timeoutMs = 10000 } = {}) => {
+    const timeout = AbortSignal.timeout(Math.max(1, Math.min(30000, Number(timeoutMs) || 10000)));
     try {
       const response = await fetchImpl(new URL(url.pathname.replace(/\/$/, '') + route, url.origin), {
         method: body === undefined ? 'GET' : 'POST',
@@ -32,6 +33,8 @@ export function serverAPI(base, token, fetchImpl = fetch) {
       throw error;
     }
   };
+  request.codeEvidence = (taskId, signal) => readCodeEvidence(base, token, taskId, fetchImpl, signal);
+  return request;
 }
 
 export const terminal = s => ['done', 'error', 'stopped'].includes(s);

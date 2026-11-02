@@ -40,8 +40,9 @@ import { edgeSpeak } from './edgeTts.mjs';
 import { createWeatherProxy } from './weather.mjs';
 import { attachQwenGateway } from './qwenRealtime.mjs';
 import { refreshSports } from './sports.mjs';
+import { createRuntimeReadiness } from './runtimeReadiness.mjs';
 
-const CORS_PATHS = /^\/api\/(health|local\/metrics|llm\/.+|tts\/edge|voice\/qwen\/voices)$/;
+const CORS_PATHS = /^\/api\/(health|readiness|local\/metrics|llm\/.+|tts\/edge|voice\/qwen\/voices)$/;
 /** 服务器模式里允许跨域调用的接口（手机 App、电脑版连自己的服务器） */
 const SERVER_CORS = /^\/api\/(health|server\/.+|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?|work-records(\/[^/]+)?|weather(\/cities)?|sports\/scores|voice\/qwen\/voices)$/;
 export const EXTRA_UPSTREAMS = { tavily: 'https://api.tavily.com', bocha: 'https://api.bochaai.com', elevenlabs: 'https://api.elevenlabs.io', fal: 'https://queue.fal.run' };
@@ -70,6 +71,7 @@ export function createServer({
   const subscribers = new Set();
   const weather=createWeatherProxy({qweather:()=>serverMode?.qweather?.()||null,configurationPlace:serverMode?'云服务器':'本机'});
   const voiceCatalog = createQwenVoiceCatalog();
+  const runtimeReadiness = createRuntimeReadiness({ appDir: ROOT, scope: 'local' });
   let activeChats = 0;
 
   function broadcast(event, data) {
@@ -360,6 +362,9 @@ export function createServer({
           serverMode: Boolean(serverMode),
           gatewayKeys: cross ? [] : Object.entries(ENV_KEYS).filter(([, env]) => process.env[env]).map(([id]) => id)
         });
+      }
+      if (pathname === '/api/readiness' && req.method === 'GET' && !serverMode) {
+        return json(res, 200, await runtimeReadiness.check());
       }
       const llm = pathname.match(/^\/api\/llm\/([a-z0-9-]+)\/(.*)$/);
       if (llm) return await handleLlmProxy(req, res, llm[1], llm[2], new URL(req.url, 'http://x').search, cross);
