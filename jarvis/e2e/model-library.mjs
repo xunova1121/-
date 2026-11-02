@@ -99,6 +99,9 @@ try {
     );
     await page.goto(base);
     await page.waitForFunction(() => window.__jarvis?.showPanel);
+    await page.waitForFunction(() => /^[A-Za-z0-9_-]{43}$/.test(JSON.parse(localStorage.getItem('jarvis.server.v1') || '{}').token || ''));
+    const deviceToken = await page.evaluate(() => JSON.parse(localStorage.getItem('jarvis.server.v1')).token);
+    check(`${width} 旧登录换发独立随机凭证且仍然有效`, deviceToken !== token && (await fetch(base + '/api/server/status', { headers: { Authorization: 'Bearer ' + deviceToken } })).status === 200);
     await page.evaluate(() => window.__jarvis.send('以后Word用黑体'));
     await page.waitForFunction(() => !document.querySelector('.msg.agent.streaming'));
     const reflectionIsolated = await page.evaluate(async () => {
@@ -153,7 +156,7 @@ try {
     await page.waitForFunction(() => document.querySelector('.ml-style-list')?.parentElement.querySelector('[role="status"]')?.dataset.failureKind === 'network');
     check(`${width} 写作偏好断网最多重试一次，显示连接问题且保留登录`,
       abortedReads === 2 && await stylesPanel.locator('[role="status"]').getAttribute('data-attempt') === '2'
-      && await page.evaluate((expected) => JSON.parse(localStorage.getItem('jarvis.server.v1')).token === expected, token));
+      && await page.evaluate((expected) => JSON.parse(localStorage.getItem('jarvis.server.v1')).token === expected, deviceToken));
     await page.unroute('**/api/server/document-styles');
     await stylesPanel.getByRole('button', { name: '查看写作偏好', exact: true }).click();
     await stylesPanel.locator('li').first().waitFor();
@@ -215,7 +218,7 @@ try {
     await localSearch.getByRole('button', { name: '测试Search', exact: true }).click();
     await localSearch.getByText(/search：.*返回1条结果/).waitFor();
     check(`${width} 本机Search测试经过网关，登录令牌与上游Key分开`,
-      searchHeaders?.authorization === 'Bearer ' + token && searchHeaders?.['x-jarvis-search-key'] === 'fake-local-search-key');
+      searchHeaders?.authorization === 'Bearer ' + deviceToken && searchHeaders?.['x-jarvis-search-key'] === 'fake-local-search-key');
     await page.unroute('**/api/llm/deepseek/tools/search');
     await localSearch.getByLabel('启用DeepSeek搜索', { exact: true }).uncheck();
     await localSearch.getByRole('button', { name: '保存搜索设置', exact: true }).click();
