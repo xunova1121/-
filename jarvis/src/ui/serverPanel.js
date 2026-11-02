@@ -25,6 +25,7 @@ export function initServerPanel({ getLlmConfig, toast, reload = () => location.r
   // 编辑地址不等于已登录新服务器；不能把旧凭证带到尚未验证的新地址。
   const client = () => {
     const saved = loadServerSettings();
+    if (!saved.url || !saved.token) throw Object.assign(new Error('请先登录服务器'), { status: 401 });
     return createServerClient({ base: saved.url, token: saved.token });
   };
 

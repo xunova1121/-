@@ -21,8 +21,9 @@ const server = http.createServer(async (req, res) => {
   try {
     const f = path.resolve(ROOT, p === '/' ? 'index.html' : decodeURIComponent(p.slice(1)));
     if (!f.startsWith(ROOT)) throw new Error('outside');
+    const bytes = await readFile(f);
     res.writeHead(200, { 'Content-Type': TYPES[path.extname(f)] || 'application/octet-stream' });
-    res.end(await readFile(f));
+    res.end(bytes);
   } catch {
     res.writeHead(404);
     res.end();
@@ -30,6 +31,7 @@ const server = http.createServer(async (req, res) => {
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const BASE = `http://127.0.0.1:${server.address().port}/`;
+check('静态夹具对缺失资源只返回一次404', (await fetch(BASE + 'missing-fixture-resource')).status === 404);
 
 // 很长的型号名：常用线路和“文档审查”下拉框里都会出现
 const LONG = 'deepseek-v4-pro-thinking-2026-10-preview-with-a-really-long-name';

@@ -30,6 +30,16 @@ async function login(page) {
   page.on('pageerror', failure => errors.push(failure.stack || failure.message));
   await page.goto(base);
   await settings(page);
+  if (!(await tokenOf(page).catch(() => ''))) {
+    let anonymousReads = 0;
+    const observe = request => { if (request.url() === base + '/api/server/security') anonymousReads++; };
+    page.on('request', observe);
+    await page.locator('.server-security summary').click();
+    await page.locator('.server-security [role=status]').getByText('请先在上方登录服务器。', { exact: true }).waitFor();
+    check(anonymousReads === 0, '未登录展开安全管理只提示登录，不请求本机或匿名服务器接口');
+    await page.locator('.server-security summary').click();
+    page.off('request', observe);
+  }
   await page.fill('#server-url', base);
   await page.fill('#server-pass', password);
   await Promise.all([page.waitForEvent('load'), page.click('#btn-server-login')]);
