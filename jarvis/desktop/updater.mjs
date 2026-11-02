@@ -10,6 +10,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 export const RELEASES_URL = 'https://github.com/xunova1121/-/releases/latest';
+/** 安装包另放的公开仓库（用户 2026-11-02：代码仓库以后改私密）。原仓库检查失败时改从这里更新 */
+export const RELEASE_FEED = { provider: 'github', owner: 'xunova1121', repo: 'weiyang-release', releaseType: 'release' };
 const FIRST_CHECK_MS = 30_000;
 const EVERY_MS = 6 * 3600_000;
 
@@ -43,8 +45,17 @@ export async function createUpdater({ app, send, log = console.log, onBeforeInst
   autoUpdater.on('update-downloaded', (info) => set({ state: 'ready', version: info.version }));
   autoUpdater.on('error', (e) => { log(`[更新] ${e?.message || e}`); set({ state: 'error', error: String(e?.message || e).slice(0, 200) }); });
 
-  let timer = 0;
-  const check = () => autoUpdater.checkForUpdates().catch((e) => set({ state: 'error', error: String(e?.message || e).slice(0, 200) }));
+  let timer = 0, switched = false;
+  // 原仓库读不到更新信息（比如改成私密后 404）：改用安装包仓库再查一次；之后一直用它
+  const check = () => autoUpdater.checkForUpdates().catch((e) => {
+    if (!switched) {
+      switched = true;
+      log(`[更新] 原发布地址不可用（${String(e?.message || e).slice(0, 120)}），改用安装包仓库`);
+      try { autoUpdater.setFeedURL(RELEASE_FEED); } catch (failure) { log(`[更新] ${failure?.message || failure}`); }
+      return check();
+    }
+    set({ state: 'error', error: String(e?.message || e).slice(0, 200) });
+  });
   return {
     get state() { return state; },
     auto,

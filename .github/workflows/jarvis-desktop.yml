@@ -387,7 +387,8 @@ jobs:
           make_latest: true
           files: dist/*
           body: |
-            ## 本版更新 · 点名查新闻直接搜索；拿回不相关的会接着查
+            ## 本版更新 · 为代码仓库改私密做准备；点名查新闻直接搜索
+            - 自动更新支持安装包单独的公开仓库 weiyang-release：服务器、手机、电脑在原仓库读不到更新时自动改从这里更新。代码仓库以后改成私密也不影响自动更新（步骤见 docs/代码仓库改私密-操作步骤.md）。
             - 问“日本新闻”“马斯克最新动态”“汽车新闻”“某事件进展”这类点名了国家、人物、公司、事件或领域的新闻，直接用搜索（配了百度千帆优先用千帆），不再走只按日期取全量的今日新闻汇总；“今天有什么新闻 / 国内国际财经科技新闻 / 体育资讯 / 每日新闻定时任务”仍走汇总。
             - 拿回来的结果里一条跟点名对象相关的都没有，会当成没查到，接着换办法查，不再拿国内新闻交差。
             - 不再说“额度用完、明天再查”这类没依据的话；时间到了会提示回“再查”继续。
@@ -412,3 +413,27 @@ jobs:
             Windows安装版可按提示重启更新；安卓按提示下载、安装新版本，继续沿用固定签名。
             
             构建自 ${{ github.sha }}
+      # 用户 2026-11-02：代码仓库以后改私密，安装包另放公开仓库 xunova1121/weiyang-release，三端更新在原仓库读不到时改从这里读。
+      # 需要在代码仓库 Secrets 里放 RELEASE_REPO_TOKEN（只对安装包仓库有 Contents 读写权限的细粒度令牌）；没配就跳过，不影响原发布。
+      - name: 检查安装包仓库令牌
+        id: release_repo
+        env:
+          RELEASE_REPO_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+        run: echo "enabled=$([ -n "$RELEASE_REPO_TOKEN" ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
+      - name: 同步发布到安装包仓库
+        if: steps.release_repo.outputs.enabled == 'yes'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          SOURCE_TOKEN: ${{ github.token }}
+          TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('desktop-v1.0.{0}', github.run_number) }}
+          TITLE: "未央 ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('1.0.{0}', github.run_number) }}"
+        run: |
+          set -euo pipefail
+          # 发布说明沿用代码仓库刚发的那份（只读本仓库，用本仓库自带令牌）
+          GH_TOKEN="$SOURCE_TOKEN" gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body -q .body > release-notes.md
+          if gh release view "$TAG" --repo xunova1121/weiyang-release >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --repo xunova1121/weiyang-release --clobber
+          else
+            gh release create "$TAG" dist/* --repo xunova1121/weiyang-release --title "$TITLE" --notes-file release-notes.md --latest
+          fi
+          echo "已同步到 xunova1121/weiyang-release：$TAG"

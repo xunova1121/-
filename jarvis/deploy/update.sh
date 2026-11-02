@@ -8,6 +8,9 @@ set -uo pipefail
 
 BASE="${JARVIS_BASE:-/opt/jarvis}"   # 测试时可以换目录
 REPO=xunova1121/-
+# 用户 2026-11-02：代码仓库以后改私密，安装包另放公开仓库。原仓库回“找不到”（HTTP 404 等，改私密后就是这样）时改用它；
+# 网络超时不换（那是连不上，不是没有）
+RELEASE_REPO="${JARVIS_RELEASE_REPO:-xunova1121/weiyang-release}"
 DATA="$BASE/data"
 STATUS="$DATA/update-status.json"
 WORK="$BASE/updates"
@@ -23,11 +26,15 @@ status() { # status 状态 说明 [版本]
   chown jarvis:jarvis "$STATUS" 2>/dev/null || true
   echo "[$(now)] $1：$2"
 }
-fetch() { # fetch 地址 保存到；依次试镜像
-  local m
+NOT_FOUND=0
+fetch() { # fetch 地址 保存到；依次试镜像。NOT_FOUND=1 表示至少有一处回了 HTTP 错误（能连上但没有这个文件）
+  local m code
+  NOT_FOUND=0
   for m in "${MIRRORS[@]}"; do
     [[ "$m" == - ]] && m=''
-    if curl -fsSL --connect-timeout 15 --max-time 600 -o "$2" "${m}$1"; then return 0; fi
+    curl -fsSL --connect-timeout 15 --max-time 600 -o "$2" "${m}$1"; code=$?
+    [[ $code == 0 ]] && return 0
+    [[ $code == 22 ]] && NOT_FOUND=1
   done
   return 1
 }
@@ -45,7 +52,11 @@ mkdir -p "$WORK"
 CUR="$(cat "$BASE/current/VERSION" 2>/dev/null | tr -d '[:space:]')"
 status checking "正在检查新版本" "$CUR"
 if ! fetch "https://github.com/$REPO/releases/latest/download/jarvis-server-latest.json" "$WORK/latest.json"; then
-  status error "连不上 GitHub，稍后会再试" "$CUR"; exit 1
+  if [[ $NOT_FOUND == 1 && -n "$RELEASE_REPO" ]] && fetch "https://github.com/$RELEASE_REPO/releases/latest/download/jarvis-server-latest.json" "$WORK/latest.json"; then
+    REPO="$RELEASE_REPO"; echo "[$(now)] 原发布地址找不到，改用安装包仓库 $RELEASE_REPO"
+  else
+    status error "连不上 GitHub，稍后会再试" "$CUR"; exit 1
+  fi
 fi
 VER="$(sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p' "$WORK/latest.json")"
 SHA="$(sed -n 's/.*"sha256" *: *"\([0-9a-f]\{64\}\)".*/\1/p' "$WORK/latest.json")"

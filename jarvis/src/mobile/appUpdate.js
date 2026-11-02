@@ -5,9 +5,13 @@
  *   3. 下载好后顶栏出现“安装新版本”，点一下打开系统安装界面（安卓不允许静默安装，要用户点“安装”）
  * 国内直连 GitHub 不稳定：先直连，失败再走镜像。安装包有签名，镜像改不了内容（被改过的装不上）。
  */
+// 用户 2026-11-02：代码仓库以后改私密，安装包另放公开仓库 weiyang-release。
+// 先试原仓库（公开期间照旧），读不到（改私密后 404）再用安装包仓库；两边发同一批文件，过渡期哪边都能更新
 export const REPO = 'xunova1121/-';
+export const RELEASE_REPO = 'xunova1121/weiyang-release';
+export const UPDATE_REPOS = [REPO, RELEASE_REPO];
 export const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`;
-const DOWNLOAD = `https://github.com/${REPO}/releases`;
+const releases = (repo = REPO) => `https://github.com/${repo}/releases`;
 // 镜像依次试：一个连不上换下一个（用户 2026-11-01：ghfast.top 在服务器上连不上，加国内备用）
 export const MIRRORS = [(u) => u, (u) => `https://ghfast.top/${u}`, (u) => `https://gh-proxy.com/${u}`, (u) => `https://ghproxy.net/${u}`];
 const KEY = 'jarvis.update.downloaded'; // 已下载好的安装包是哪个版本
@@ -27,8 +31,8 @@ export function isNewer(latest, current) {
 export function versionFromYml(text) {
   return String(text ?? '').match(/^version:\s*['"]?([\d.]+)['"]?\s*$/m)?.[1] ?? null;
 }
-export const apkUrl = (version) => `${DOWNLOAD}/download/desktop-v${version}/Jarvis-${version}-android.apk`;
-export const ymlUrl = () => `${DOWNLOAD}/latest/download/latest.yml`;
+export const apkUrl = (version, repo = REPO) => `${releases(repo)}/download/desktop-v${version}/Jarvis-${version}-android.apk`;
+export const ymlUrl = (repo = REPO) => `${releases(repo)}/latest/download/latest.yml`;
 
 /**
  * @param {object} o
@@ -50,13 +54,16 @@ export function createAppUpdater({ getText, plugin, current, metered = () => fal
   if (read() && !isNewer(read(), current)) { write(''); plugin.clear?.().catch(() => {}); }
   plugin.addListener?.('progress', (e) => { if (state.state === 'downloading') set({ percent: e?.percent ?? 0 }); });
 
+  let source = REPO; // 最近一次读到版本信息的仓库，下载安装包也优先用它
   async function latestVersion() {
     let last;
-    for (const via of MIRRORS) {
-      try {
-        const v = versionFromYml(await getText(via(ymlUrl())));
-        if (v) return v;
-      } catch (e) { last = e; }
+    for (const repo of UPDATE_REPOS) {
+      for (const via of MIRRORS) {
+        try {
+          const v = versionFromYml(await getText(via(ymlUrl(repo))));
+          if (v) { source = repo; return v; }
+        } catch (e) { last = e; }
+      }
     }
     throw last ?? new Error('读不到版本信息');
   }
@@ -64,12 +71,14 @@ export function createAppUpdater({ getText, plugin, current, metered = () => fal
   async function download(version) {
     set({ state: 'downloading', version, percent: 0 });
     let last;
-    for (const via of MIRRORS) {
-      try {
-        await plugin.download({ url: via(apkUrl(version)) });
-        write(version);
-        return set({ state: 'ready', version, percent: 100 });
-      } catch (e) { last = e; set({ percent: 0 }); }
+    for (const repo of [source, ...UPDATE_REPOS.filter((r) => r !== source)]) {
+      for (const via of MIRRORS) {
+        try {
+          await plugin.download({ url: via(apkUrl(version, repo)) });
+          write(version);
+          return set({ state: 'ready', version, percent: 100 });
+        } catch (e) { last = e; set({ percent: 0 }); }
+      }
     }
     return set({ state: 'error', error: last?.message ?? '下载失败' });
   }
