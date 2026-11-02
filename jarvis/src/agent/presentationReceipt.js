@@ -2,6 +2,17 @@ import { orderedSlidePaths } from './officePackage.js';
 
 const attribute = (xml, key) => xml.match(new RegExp(`(?:^|\\s)${key}="([^"]*)"`))?.[1];
 const count = (xml, tag) => [...xml.matchAll(new RegExp(`<${tag}\\b`, 'g'))].length;
+function imageUnion(boxes, width, height) {
+  const xs = [...new Set(boxes.flatMap(([x,,w]) => [Math.max(0,Math.min(width,x)), Math.max(0,Math.min(width,x+w))]))].sort((a,b)=>a-b);
+  let area = 0;
+  for (let i=1;i<xs.length;i++) {
+    const intervals=boxes.filter(([x,,w])=>x<xs[i]&&x+w>xs[i-1]).map(([,y,,h])=>[Math.max(0,Math.min(height,y)),Math.max(0,Math.min(height,y+h))]).sort((a,b)=>a[0]-b[0]);
+    let occupied=0,end=0;
+    for(const [start,stop] of intervals){if(stop>Math.max(start,end))occupied+=stop-Math.max(start,end);end=Math.max(end,stop);}
+    area+=(xs[i]-xs[i-1])*occupied;
+  }
+  return width>0&&height>0?Number((area/(width*height)).toFixed(5)):null;
+}
 const boxOf = xml => {
   const off = xml.match(/<a:off\b[^>]*>/)?.[0], ext = xml.match(/<a:ext\b[^>]*>/)?.[0];
   if (!off || !ext) return null;
@@ -61,15 +72,24 @@ export async function inspectPresentation(zip, { signal } = {}) {
       if (target && zip.file(target)) images.set(attribute(rel, 'Id'), target);
     }
     let pictures = 0, contentImages = 0, icons = 0, decorations = 0;
+    const contentImageBoxes = [], imageFacts = [];
     const boxes = [];
     for (const [pic] of xml.matchAll(/<p:pic\b[^>]*>[\s\S]*?<\/p:pic>/g)) {
       const id = pic.match(/<a:blip\b[^>]*\br:embed="([^"]+)"/)?.[1];
       if (!images.has(id)) continue;
       pictures++;
+      if (pictures > 400) throw new Error('单页图片超过400张检查上限');
       const box = boxOf(pic), role = pic.match(/\bname="(wy-[^"]+)"/)?.[1] || '';
       if (role.startsWith('wy-icon')) icons++;
       else if (role.startsWith('wy-decoration')) decorations++;
-      else if (role.startsWith('wy-content') || box && box[2] * box[3] >= width * height * 0.015) contentImages++;
+      else if (role.startsWith('wy-content') || box && box[2] * box[3] >= width * height * 0.015) {
+        contentImages++;
+        if(box)contentImageBoxes.push(box);
+        const crop=pic.match(/<a:srcRect\b[^>]*>/)?.[0]||'';
+        const clipped=key=>Math.max(0,Math.min(1,(Number(attribute(crop,key))||0)/100000));
+        const cropRatio=1-Math.max(0,1-clipped('l')-clipped('r'))*Math.max(0,1-clipped('t')-clipped('b'));
+        imageFacts.push({areaRatio:box?Number((box[2]*box[3]/(width*height)).toFixed(5)):0,cropRatio:Number(cropRatio.toFixed(5)),shortSide:box?Math.min(box[2],box[3])/914400:0});
+      }
       if (box && !role.startsWith('wy-decoration')) boxes.push(box);
     }
     const shapes = [...xml.matchAll(/<p:sp\b[^>]*>[\s\S]*?<\/p:sp>/g)].map(match => match[0]);
@@ -96,9 +116,10 @@ export async function inspectPresentation(zip, { signal } = {}) {
     const outside = boxes.some(([x,y,w,h])=>x < -9144 || y < -9144 || x+w > width+9144 || y+h > height+9144);
     const minBodyFont = bodyFonts.length ? Math.min(...bodyFonts) : null;
     const minTableFont = tableFonts.length ? Math.min(...tableFonts) : null;
-    pages.push({ minBodyFont, minTableFont, outside, page: index + 1, pictures, contentImages, icons, decorations, tables: count(xml, 'a:tbl'), textBoxes: texts.length, estimatedBlankRatio: blankRatio(boxes, width, height) });
+    const marker=xml.match(/name="wy-picture-layout-(hero|split-wide|split|gallery-[234]|cover)(?:-(left|right))?"/);
+    pages.push({ minBodyFont, minTableFont, outside, page: index + 1, pictures, contentImages, icons, decorations, imageAreaRatio:imageUnion(contentImageBoxes,width,height),maxCropRatio:Math.max(0,...imageFacts.map(p=>p.cropRatio)),images:imageFacts,imageLayout:marker?.[1]||null,imageSide:marker?.[2]||null,tables: count(xml, 'a:tbl'), textBoxes: texts.length, estimatedBlankRatio: blankRatio(boxes, width, height) });
   }
-  return { pages, imagePages: pages.filter(page => page.contentImages > 0).length, missingImagePages: pages.filter(page => !page.contentImages).map(page => page.page), scope: '真实页面引用的嵌入图片；图标/装饰单列；空白为包围框估算，不是视觉验收' };
+  return { pages, imagePages: pages.filter(page => page.contentImages > 0 && page.imageAreaRatio >= 0.08).length, missingImagePages: pages.filter(page => !page.contentImages || page.imageAreaRatio < 0.08).map(page => page.page), scope: '真实页面引用的嵌入图片；图标/装饰单列；图片面积为可见图片框并集，裁切从srcRect读取；空白为包围框估算，不是视觉验收' };
 }
 
 export function presentationAnswerIssues(request, answer, artifact) {

@@ -3,6 +3,8 @@ import { PPT_ICON_CATALOG } from './pptIconCatalog.js';
 import { planTablePages, combineExplanationPages, tidyPresentationPunctuation } from './presentationLayoutPlan.js';
 import { summarizeTable, decorationData } from './presentationLocalVisuals.js';
 import { reserveImageColumn, placeSlideImages } from './presentationImages.js';
+import { preparePicturePages, drawPictureBody } from './pptImageContent.js';
+import { placePictureImages, pictureContrast, placePictureCover } from './pptPictureRender.js';
 import { throwControl } from '../core/networkRequest.js';
 import { applyPresentationTypography } from './officeTypography.js';
 import { slideBudget } from './documentPageBudget.js';
@@ -349,7 +351,7 @@ function chartColumns(table) {
  * @param {{ title: string, content: string, theme: object, subtitle?: string, author?: string, date?: string, loadImage?: (src: string) => Promise<Uint8Array|null> }} o
  * @returns {Promise<{ blob: Blob, info: { slides: number, layouts: string[], missingImages: string[], preview: object[], layoutIssues: object[] } }>}
  */
-export async function makePptx({ title, content, theme, subtitle = '', author = '', date = '', loadImage = null, style = 'business', expectedSlides = null, maxSlides = null, requireCover = false, forbidCover = false, typography = {}, renderSvg = null, signal }) {
+export async function makePptx({ title, content, theme, subtitle = '', author = '', date = '', loadImage = null, style = 'business', expectedSlides = null, maxSlides = null, requireCover = false, forbidCover = false, typography = {}, renderSvg = null, signal, pictureLayout = 'legacy' }) {
   const PptxGenJS = (await import('pptxgenjs')).default;
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
@@ -421,8 +423,6 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     } else expanded.push(s);
   }
   slides = planTablePages(combineExplanationPages(expanded, { strict: expectedSlides != null }), { strict: expectedSlides != null });
-  const budget = slideBudget(slides.length, expectedSlides, requireCover, forbidCover, maxSlides);
-
   const imageData = async (src) => {
     try {
       const bytes = loadImage ? await loadImage(src) : null;
@@ -430,9 +430,29 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
       if (!info) { missingImages.push(src); return null; }
       let bin = '';
       for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-      return { data: `image/${info.type === 'jpg' ? 'jpeg' : info.type};base64,${btoa(bin)}`, ratio: info.width / info.height };
+      return { data: `image/${info.type === 'jpg' ? 'jpeg' : info.type};base64,${btoa(bin)}`, ratio: info.width / info.height, ...(pictureLayout === 'aesthetic' && { bytes }) };
     } catch (error) { throwControl(error); missingImages.push(src); return null; }
   };
+
+  // 图片缓存最多16MB/24张，真实比例先于排版确定，不长期保留大图。
+  const imageCache = new Map();
+  let cacheBytes = 0;
+  const loadPicture = async src => {
+    signal?.throwIfAborted();
+    if (imageCache.has(src)) return imageCache.get(src);
+    const image = await imageData(src);
+    const bytes = (image?.data.length || 0) + (image?.bytes.length || 0);
+    while (imageCache.size && (cacheBytes + bytes > 16e6 || imageCache.size >= 24)) {
+      const key = imageCache.keys().next().value, old = imageCache.get(key);
+      cacheBytes -= (old?.data.length || 0) + (old?.bytes.length || 0); imageCache.delete(key);
+    }
+    if (bytes <= 16e6) { imageCache.set(src, image); cacheBytes += bytes; }
+    return image;
+  };
+  if (pictureLayout === 'aesthetic') slides = await preparePicturePages(slides, { load: loadPicture, style, bodySize: typography.body?.size, onOmitted: text => missingImages.push(text) });
+  if (pictureLayout === 'aesthetic' && typography.body?.size < 14 && slides.some(s => s.picture)) throw Object.assign(new Error('图片页正文至少14磅，与指定字号冲突；请提高字号'), { code: 'PPT_IMAGE_FONT', kind: 'validation' });
+  const budget = slideBudget(slides.length, expectedSlides, requireCover, forbidCover, maxSlides);
+  const imageLayouts = [];
 
   // ---------- 版式零件（白底、左上标题、右上章节标签、底部页脚；白色卡片带淡阴影和圆形图标）
   const { ICON_PNG, ICON_DARK_PNG } = await import('./pptIcons.js');
@@ -739,8 +759,11 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   // 单位 / 署名里已经带了日期就不再重复写日期
   const coverDate = /\d{4}\s*年|\d{4}[-./]\d{1,2}/.test(author) ? '' : (date || today());
   if (coverImages.length) {
-    await placeSlideImages(cover, coverImages, 'cover', { load: imageData, missingImages });
-    cover.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W, h: H, fill: { color: '101D35', transparency: 35 }, line: { transparency: 100 } });
+    if (pictureLayout === 'aesthetic') imageLayouts.push(await placePictureCover(cover, coverImages, { load: loadPicture, missingImages, tokens: T, shape: pptx.ShapeType }));
+    else {
+      await placeSlideImages(cover, coverImages, 'cover', { load: imageData, missingImages });
+      cover.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W, h: H, fill: { color: '101D35', transparency: 35 }, line: { transparency: 100 } });
+    }
     cover.addText(title, { x: 0.9, y: 2.1, w: 11.5, h: 1.8, fontSize: 40, bold: true, color: 'FFFFFF', fontFace: HFONT, fit: 'shrink' });
     if (subtitle) cover.addText(subtitle, { x: 0.9, y: 4.15, w: 11.5, h: 1.1, fontSize: 20, color: 'FFFFFF', fontFace: FONT });
     cover.addText([author, coverDate].filter(Boolean).join(' · '), { x: 0.9, y: 6.1, w: 11.5, h: 0.5, fontSize: 14, color: 'FFFFFF', fontFace: FONT });
@@ -823,6 +846,36 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     const why = ignoredLayout(s, kind);
     if (why) ignored.push({ level: 'warn', slide: n, text: `第 ${n} 页${why}` });
     const images = s.blocks.filter(block => block.type === 'image');
+    if (pictureLayout === 'aesthetic' && images.length) {
+      const plan = s.picture;
+      sl.background = { color: light };
+      if (plan.name !== 'hero') titleBar(sl, s.title);
+      const pictures = await placePictureImages(sl, images, plan, { load: loadPicture, missingImages, tokens: T, shape: pptx.ShapeType });
+      if (plan.name === 'hero') {
+        const contrast = await pictureContrast(await loadPicture(images[0].src));
+        sl.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W, h: H, fill: { color: '000000', transparency: Math.round((1 - contrast.opacity) * 100) }, line: { color: '000000', transparency: 100 } });
+        sl.addText(s.title, { objectName: 'wy-title', x: 0.85, y: 0.45, w: 11.6, h: 0.9, fontSize: 32, fontFace: HFONT, bold: true, color: 'FFFFFF', margin: 0 });
+        plan.contrast = contrast;
+      }
+      // 数字表仍保留可编辑图表与全部数据；不把不同单位列塞进同一纵轴。
+      const table = s.blocks.find(block => block.type === 'table');
+      let chart = null;
+      if (kind === 'chart' && table && chartColumns(table).length === table.header.length - 1 && !table.rows.some(row => TOTAL_ROW.test(plain(row[0] || [])))) {
+        const columns = chartColumns(table), labels = table.rows.map(r => plain(r[0]));
+        const share = columns.length === 1 && /占比|比重|构成|份额/.test(plain(table.header[columns[0]])) && table.rows.length >= 2 && table.rows.length <= 6;
+        const timed = table.rows.length >= 4 && labels.every(label => PERIOD.test(label));
+        const chartShape = s.wish === '饼图' || (share && s.wish !== '柱状图') ? 'doughnut' : s.wish === '折线图' || s.wish === '趋势' || (timed && s.wish !== '柱状图') ? 'line' : 'bar';
+        const extra = chartShape === 'doughnut' ? { holeSize: 55, showPercent: true, showValue: false, showLegend: true, legendPos: 'r', chartColors: [T.accent, T.strong, T.gold, T.sub] } : chartShape === 'line' ? { lineSize: 3, lineDataSymbol: 'circle', lineDataSymbolSize: 8 } : {};
+        chart = { type: pptx.ChartType[chartShape], data: columns.map(c => ({ name: plain(table.header[c]), labels, values: table.rows.map(r => num(plain(r[c] || []))) })), options: { barDir: 'col', chartColors: [T.accent, T.strong], showLegend: columns.length > 1, legendPos: 'b', legendFontSize: 14, showValue: true, dataLabelFontSize: 14, catAxisLabelFontSize: 14, valAxisLabelFontSize: 14, showTitle: false, showBorder: false, showCatName: false, ...extra } };
+        layouts[layouts.length - 1] = chartShape === 'bar' ? 'chart' : chartShape === 'line' ? 'chart-line' : 'chart-pie';
+      }
+      drawPictureBody(sl, s.blocks, plan, { tokens: T, shape: pptx.ShapeType, kind, bodySize: typography.body?.size, chart });
+      if (plan.name === 'hero') sl.addText(String(n), { objectName: 'wy-caption', x: W - 1.1, y: H - 0.42, w: 0.5, h: 0.28, fontSize: 9, color: 'FFFFFF', fontFace: FONT, align: 'right' });
+      else pageNo(sl, n);
+      imageLayouts.push({ page: n, name: plan.name, imageSide: plan.imageSide, reason: plan.reason, pictures, ...(plan.contrast && { contrast: plan.contrast }) });
+      if (s.notes.length) sl.addNotes(s.notes.join('\n'));
+      continue;
+    }
     const summary = kind === 'table' && !images.length ? summarizeTable(s.blocks.find(block => block.type === 'table')) : null;
     const restoreImageSpace = (images.length || summary) && !['image', 'imageText'].includes(kind) ? reserveImageColumn(sl) : () => {};
     const lines = s.blocks.flatMap(blockLines).filter(Boolean);
@@ -1175,7 +1228,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   }
   const blob = await pptx.write({ outputType: 'blob' });
   const preview = records.map(({ n, title: t, items, slide }) => ({ n, title: t, items, background: slide.background?.color }));
-  return { blob, info: { slides: records.length, expectedSlides, layouts, coverMetadata: { subtitle, author, date: date || today() }, editableContent: presentationMarkdown(slides, { title, cover: budget.cover, coverImages, agenda: !budget.strict && sections.length >= 2 ? sections.map(s => s.title) : [] }), missingImages, preview, layoutIssues: [...layoutIssues(preview), ...monotony(pages, MONOTONY_RUN[T.id] ?? 3), ...ignored, ...localVisualIssues], style: T.id } };
+  return { blob, info: { slides: records.length, expectedSlides, layouts, imageLayouts, coverMetadata: { subtitle, author, date: date || today() }, editableContent: presentationMarkdown(slides, { title, cover: budget.cover, coverImages, agenda: !budget.strict && sections.length >= 2 ? sections.map(s => s.title) : [] }), missingImages, preview, layoutIssues: [...layoutIssues(preview), ...monotony(pages, MONOTONY_RUN[T.id] ?? 3), ...ignored, ...localVisualIssues], style: T.id } };
 }
 
 /**

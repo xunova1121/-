@@ -4,6 +4,8 @@ import { slideBudget } from './documentPageBudget.js';
 import { asksForImages, requiresEverySlideImage, wantsEverySlideImage } from './presentationReceipt.js';
 import { imageInfo } from './imageInfo.js';
 import { throwControl } from '../core/networkRequest.js';
+import { selectPictureLayout, pictureRequestSize } from './pptImageLayout.js';
+import { pictureMetrics } from './pptImageContent.js';
 const MAX_IMAGES = 24;
 /** 独立有界两路队列；停止向上传播，普通单页失败不抹掉已取得图片。 */
 export async function imagePool(items, run, signal) {
@@ -22,7 +24,7 @@ export async function imagePool(items, run, signal) {
 const fingerprint = async value => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))), n => n.toString(16).padStart(2,'0')).join('');
 /** 只在明确要求配图时发请求；上传图片由正文显式引用，不擅自挑用户其他文件。 */
 export async function preparePresentationImages(ctx, content, options, execution = {}) {
-  const { title, requirements = '', style = 'business', expectedSlides, maxSlides, requireCover, forbidCover } = options;
+  const { title, requirements = '', style = 'business', expectedSlides, maxSlides, requireCover, forbidCover, loadImage } = options;
   const { signal, retrieval, progress } = execution;
   const every = requiresEverySlideImage(requirements) || wantsEverySlideImage(requirements, expectedSlides);
   if (!every && !asksForImages(requirements) && !/(?:补|加|配|生成).{0,6}(?:图片|配图)|带图/.test(requirements)) return {content, issues:[], plan:[]};
@@ -34,12 +36,24 @@ export async function preparePresentationImages(ctx, content, options, execution
   const budget = slideBudget(bodyCount, expectedSlides, requireCover, forbidCover, maxSlides);
   if (!budget.cover && /^#\s+[^\n]+\s*$/.test(sections[0] || '')) sections.shift();
   if (every && budget.cover && !hasCoverSection) sections.unshift(`# ${title}\n\n`);
-  const plan = sections.map((section,index) => {
+  const plan = [];
+  let previous = null;
+  for (const [index, section] of sections.entries()) {
     const heading = section.match(/^#{1,2}\s+([^\n]+)/)?.[1] || title;
     const isCover = index === 0 && budget.cover && /^#\s/.test(section);
-    const slot = isCover ? 'cover' : /\|.*\|/.test(section) ? 'side' : 'half';
-    return {index, title:heading, slot, size:slot === 'cover' ? '1536x864' : slot === 'side' ? '768x1536' : '1024x1280', existing:/!\[[^\]]*\]\([^)]+\)/.test(section), text:section.replace(/^#{1,2}[^\n]*\n/,'').slice(0,500)};
-  });
+    const page = parseSlides(heading, section)[0];
+    const images = (page?.blocks || []).filter(block => block.type === 'image').slice(0, 4);
+    const ratios = [];
+    for (const image of images) {
+      try {
+        const data = loadImage ? await loadImage(image.src) : new Uint8Array(await (await ws.readBlob(image.src)).arrayBuffer());
+        const info = data && imageInfo(data); ratios.push(info ? info.width / info.height : 1);
+      } catch (error) { throwControl(error, signal); ratios.push(1); }
+    }
+    const layout = isCover ? { name: 'cover', ratio: 16 / 9, reason: '封面全幅铺底' } : selectPictureLayout({ ...pictureMetrics(page?.blocks || []), count: Math.max(1, images.length), ratios, previous, style });
+    previous = layout;
+    plan.push({index, title:heading, slot:layout.name, layout:layout.name, imageSide:layout.imageSide, requiredRatio:layout.ratio, reason:layout.reason, size:pictureRequestSize(layout), existing:images.length > 0, text:section.replace(/^#{1,2}[^\n]*\n/,'').slice(0,500)});
+  }
   const pending = plan.filter(page=>!page.existing && (every || page.slot === 'cover' || !/\|.*\|/.test(page.text)));
   const issues = [];
   const selected = pending.slice(0,MAX_IMAGES);
@@ -60,7 +74,7 @@ export async function preparePresentationImages(ctx, content, options, execution
     // 已接入且通过国内探测的图库可在这里提供真实工作区图片；未配置时不伪造来源。
     if (ctx.stockImageForSlide && !/只(?:用|使用).{0,6}AI/i.test(requirements)) {
       try {
-        const stock = await ctx.stockImageForSlide({query:page.title,slot:page.slot,signal,retrieval});
+        const stock = await ctx.stockImageForSlide({query:page.title,slot:page.slot,size:page.size,aspectRatio:page.requiredRatio,layout:page.layout,signal,retrieval});
         if (stock?.path) return {path:stock.path,source:'stock',credit:stock.credit};
       } catch(error) { throwControl(error,signal); }
     }

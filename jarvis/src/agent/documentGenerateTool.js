@@ -208,12 +208,13 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       let imagePlan = [];
       const build = async (text) => {
         text = tableSource && /完整|全部|不删|不漏|保留/.test(goal) ? restoreTableIdentifiers(text, tableSource) : text;
-        const prepared = format === 'pptx' ? await preparePresentationImages(ctx, text, { title: title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''), requirements: goal, style: design.style, expectedSlides, maxSlides, requireCover, forbidCover }, execution) : { content: text, issues: [], plan: [] };
+        const prepared = format === 'pptx' ? await preparePresentationImages(ctx, text, { title: title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''), requirements: goal, style: design.style, expectedSlides, maxSlides, requireCover, forbidCover, loadImage }, execution) : { content: text, issues: [], plan: [] };
         imagePlan = prepared.plan;
         const generated = await generate(format, {
           // 文件名常带“_5页”：封面标题不要这个尾巴
           title: (title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, '')).replace(/[_\s-]*\d+\s*页$/, ''),
           content: prepared.content,
+          pictureLayout: 'aesthetic',
           typography,
           noRules,
           scale,
@@ -333,6 +334,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       const r = await deliverDocument(ctx, out, target, { progress, signal, checkpoint, plan, issues: lint(format, finalContent, { kind: design.kind }), generatorReview: looked, requirements: goal || requirements, preservation, design: sheetDesign || design });
       const notes = [
         ...(imagePlan.length ? [`配图计划${imagePlan.length}段，来源顺序：用户指定图片、已有图表/图标、已验证图库、AI配图；成功资产缓存复用，实际页数与图片以读回回执为准`] : []),
+        ...(out.info?.imageLayouts?.length ? ['逐页图片版式：' + out.info.imageLayouts.map(p => `第${p.page}页 ${p.name}${p.imageSide === 'left' ? '（左图）' : p.imageSide === 'right' ? '（右图）' : ''}：${p.reason}`).join('；')] : []),
         `主题：${out.theme.name}`,
         ...(design.label ? [`设计：${STYLE_NAMES[out.info?.style] || design.label}（${out.info?.style && out.info.style !== design.style ? '公文主题固定稳重商务，与请求风格冲突；未按请求风格生成' : design.reason}）`] : []),
         ...(sheetDesign ? [`表格样式：${SHEET_STYLE_NAMES[out.info?.sheetStyle] || sheetDesign.label}（${out.info?.sheetStyle !== sheetDesign.style ? '公文主题与请求风格冲突；未按请求风格生成' : sheetDesign.reason}）`] : []),

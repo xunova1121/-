@@ -69,6 +69,8 @@ export async function inspectDocument(blob, filePath, { info = {}, requiredText 
     validation.slides = paths.length;
     validation.presentation = await inspectPresentation(zip, { signal });
     for (const page of validation.presentation.pages) {
+      if (page.contentImages && page.imageAreaRatio < 0.08) issues.push({level:'warn',text:`第${page.page}页内容图片面积仅${(page.imageAreaRatio*100).toFixed(1)}%，低于8%，请放大配图或拆页`});
+      if (page.maxCropRatio > 0.25) issues.push({level:'warn',text:`第${page.page}页图片裁切${(page.maxCropRatio*100).toFixed(1)}%，超过25%，请改为完整容纳或更换版式`});
       if (page.outside) issues.push({level:'warn',text:`第${page.page}页存在越过画布的内容框，请检查真实总览`});
       if (page.minBodyFont != null && page.minBodyFont < 14) issues.push({level:'warn',text:`第${page.page}页内容区最小字号${page.minBodyFont}磅，低于14磅建议；需核对是否为脚注或用户指定字号`});
       if (page.minTableFont != null && page.minTableFont < 12) issues.push({level:'warn',text:`第${page.page}页表格最小字号${page.minTableFont}磅，低于12磅建议`});

@@ -12,7 +12,7 @@ export function applyPresentationTypography(slide, profile, slideTitle) {
     table = slide.addTable.bind(slide);
   slide.addText = (text, options = {}) => {
     const plain = Array.isArray(text) ? text.map((t) => t.text || '').join('') : String(text);
-    const role = plain.trim() === String(slideTitle).trim() || (Number(options.y || 0) < 2.2 && Number(options.fontSize || 0) >= 28) ? 'title' : 'body';
+    const role = options.objectName === 'wy-body' ? 'body' : options.objectName === 'wy-title' ? 'title' : plain.trim() === String(slideTitle).trim() || (Number(options.y || 0) < 2.2 && Number(options.fontSize || 0) >= 28) ? 'title' : 'body';
     const rule = profile[role];
     if (!rule?.size || (Number(options.y || 0) > 6.6 && Number(options.fontSize || 0) <= 10)) return add(text, options);
     const content = Array.isArray(text) ? text.map((t) => ({ ...t, options: { ...t.options, fontSize: rule.size } })) : text;
