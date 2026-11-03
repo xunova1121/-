@@ -275,7 +275,10 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     if (pathname === '/api/server/config') {
       if (req.method === 'GET') { json(res, 200, maskConfig(loadConfig())); return true; }
       if (req.method === 'PUT') {
-        const next = mergeConfig(loadConfig(), await readJson(req));
+        // 请求正文尚未收完时，另一台设备可能刚保存了新Key。收完再读配置，
+        // 同步合并/写盘，防止慢请求把先读到的旧Key覆盖回去。
+        const patch = await readJson(req);
+        const next = mergeConfig(loadConfig(), patch);
         saveConfig(next);
         const stored = loadConfig();
         // 写盘失败或读回不一致绝不显示“已保存”；只比较，不回传完整密钥。
