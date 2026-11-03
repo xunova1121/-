@@ -49,4 +49,11 @@ describe('问大盘先取指数，兜底不贴搜索原文',()=>{
     expect(oneLine('第一句说明大盘今天高开低走，成交放量到两万亿。第二句很长'.padEnd(120,'字'))).toBe('第一句说明大盘今天高开低走，成交放量到两万亿。');
     expect(oneLine('#股票# 沪指收涨')).toBe('沪指收涨');
   });
+  it('金价、汇率、油价、个股名字的兜底按问题关键词筛，不套大盘筛选（修复中途误把对题条目全丢掉）',()=>{
+    for(const [q,good,bad] of [['今天金价多少','今日金价报价每克1141元','华侨城核心大盘楼盘'],['美元汇率','美元兑人民币中间价7.12','A股收盘上涨'],['茅台股价','贵州茅台股价收涨1%','白酒行业观察'],['今天油价','油价今晚上调','金价下跌']]){
+      const d=createLookupDelivery(q);
+      d.record({name:'web_search',ok:true,output:JSON.stringify([{title:good,url:'https://a.cn/good',snippet:'摘要'},{title:bad,url:'https://a.cn/bad',snippet:'摘要'}])});
+      expect(d.text(),q).toContain('a.cn/good');expect(d.text(),q).not.toContain('a.cn/bad');expect(d.text(),q).not.toContain('不对题');
+    }
+  });
 });

@@ -4,7 +4,8 @@ import { newsCandidates } from './newsDelivery.js';
 import { answerConstraintIssues, answerConstraints } from './answerRequirements.js';
 import { todayNewsIntent } from './newsIntent.js';
 import { newsDate } from './newsSources.js';
-import { lookupIntent } from './lookup/intent.js';
+import { lookupIntent, newsSubject } from './lookup/intent.js';
+import { marketIndex } from './lookup/plan.js';
 import { weatherFallback, marketFallback } from './lookup/fallback.js';
 const MARKET_TOPIC = /指数|沪指|上证|深成|深证|创业板|科创|A股|大A|两市|股市|成交|涨停|跌停|券商|板块|收盘|开盘|行情|个股/;
 const MARKET_OFF = /金价|黄金|回收|楼盘|小区|学区|房价|二手房/;
@@ -17,7 +18,10 @@ export function oneLine(text) {
 }
 /** 兜底条目：去重标题、剔除和问题不对题的（问行情时剔除金价/楼盘），最多5条。 */
 export function digestRows(items, request) {
+  // 只有问“大盘/沪指/深成/创业板”才按指数话题筛；金价、汇率、油价、个股名字按问题里的关键词筛（前两个字出现即可）
   const market = lookupIntent(request).kind === 'market';
+  const index = market && Boolean(marketIndex(request));
+  const terms = market && !index ? newsSubject(request).split(/\s+/).map(word => word.slice(0, 2)).filter(word => word.length >= 2) : [];
   const seen = new Set();
   return items.filter(item => {
     const key = String(item.title).replace(/\s+/g, '').slice(0, 40);
@@ -25,7 +29,8 @@ export function digestRows(items, request) {
     seen.add(key);
     const text = item.title + ' ' + (item.summary || '');
     if (/^\s*[{[]/.test(item.title)) return false; // 接口原始JSON当标题的，不给人看
-    return !market || MARKET_TOPIC.test(text) && !MARKET_OFF.test(item.title);
+    if (index) return MARKET_TOPIC.test(text) && !MARKET_OFF.test(item.title);
+    return !terms.length || terms.some(term => text.includes(term));
   }).slice(0, 5);
 }
 /** 本轮最多12条短证据，只存于执行期；不用模型旧回复填补失败，不把正文放入检查点。 */
