@@ -26,6 +26,12 @@ on:
 permissions:
   contents: write
 
+env:
+  # 本次发版的标签；正式分支/版本标签才发布
+  RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('desktop-v1.0.{0}', github.run_number) }}
+  RELEASE_TITLE: "未央 ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('1.0.{0}', github.run_number) }}"
+  PUBLISH: ${{ github.ref == 'refs/heads/claude/jolly-darwin-tijh97' || startsWith(github.ref, 'refs/tags/desktop-v') }}
+
 concurrency:
   group: jarvis-desktop-${{ github.ref }}
   cancel-in-progress: true
@@ -49,8 +55,26 @@ jobs:
           echo "要删除 $(wc -l < old-artifacts.txt) 个旧产物"
           while read -r id; do gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" >/dev/null || echo "删除 $id 失败"; done < old-artifacts.txt
 
-  build:
+  # 用户 2026-11-03：删了旧产物，GitHub 用量也要6～12小时才重算，连续4次发版都卡在上传构建产物。
+  # 正式发版改为：先建草稿发布，各作业把安装包直接传到草稿发布（Releases 资产不占 Actions 构建产物存储），全部通过后再转为正式发布。
+  prepare:
+    name: 建草稿发布
     needs: cleanup
+    runs-on: ubuntu-latest
+    steps:
+      - name: 建草稿发布（只在正式分支/版本标签）
+        if: env.PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "草稿 $RELEASE_TAG 已存在，沿用"
+          else
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" --title "$RELEASE_TITLE" --notes "构建中"
+          fi
+
+  build:
+    needs: prepare
     name: 打包 (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -96,7 +120,20 @@ jobs:
             sleep 20
           done
           exit 1
-      - name: 上传安装包
+      - name: 上传安装包（正式发版：直接传到草稿发布）
+        if: env.PUBLISH == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          shopt -s nullglob
+          files=(jarvis/desktop/release/*.exe jarvis/desktop/release/*.zip jarvis/desktop/release/*.blockmap jarvis/desktop/release/latest*.yml)
+          [ ${#files[@]} -gt 0 ] || { echo "::error::没有找到要上传的文件"; exit 1; }
+          gh release upload "$RELEASE_TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+      - name: 上传安装包（验证分支：构建产物）
+        if: env.PUBLISH != 'true'
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           retention-days: 1
@@ -111,7 +148,7 @@ jobs:
             jarvis/desktop/release/*.blockmap
 
   android:
-    needs: cleanup
+    needs: prepare
     name: 打包安卓 App
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -185,7 +222,20 @@ jobs:
           mkdir -p ../release-android
           cp app/build/outputs/apk/release/app-release.apk "../release-android/Jarvis-${VERSION}-android.apk"
           ls -la ../release-android
-      - name: 上传 APK
+      - name: 上传 APK（正式发版：直接传到草稿发布）
+        if: env.PUBLISH == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          shopt -s nullglob
+          files=(jarvis/release-android/*.apk)
+          [ ${#files[@]} -gt 0 ] || { echo "::error::没有找到要上传的文件"; exit 1; }
+          gh release upload "$RELEASE_TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+      - name: 上传 APK（验证分支：构建产物）
+        if: env.PUBLISH != 'true'
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           retention-days: 1
@@ -194,7 +244,7 @@ jobs:
           path: jarvis/release-android/*.apk
 
   verify:
-    needs: cleanup
+    needs: prepare
     name: 发布前完整验证
     runs-on: ubuntu-latest
     # Office安装自身允许20分钟重试，另需浏览器安装及完整验证预算；不改变各测试的断言/时限。
@@ -288,7 +338,20 @@ jobs:
           node e2e/code-work.mjs "$RUNNER_TEMP/jarvis-e2e/code-work"
           node scripts/pack-server.mjs "${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('1.0.{0}', github.run_number) }}" release-server
           node e2e/server-package.mjs release-server/jarvis-server-*.tar.gz
-      - name: 上传服务器版
+      - name: 上传服务器版（正式发版：直接传到草稿发布）
+        if: env.PUBLISH == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          shopt -s nullglob
+          files=(jarvis/release-server/*.tar.gz jarvis/release-server/jarvis-server-latest.json)
+          [ ${#files[@]} -gt 0 ] || { echo "::error::没有找到要上传的文件"; exit 1; }
+          gh release upload "$RELEASE_TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+      - name: 上传服务器版（验证分支：构建产物）
+        if: env.PUBLISH != 'true'
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           retention-days: 1
@@ -379,6 +442,7 @@ jobs:
           node e2e/standalone.mjs "$RUNNER_TEMP/jarvis-e2e"
       - name: 保存验证截图和日志
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           retention-days: 1
@@ -395,47 +459,49 @@ jobs:
     needs: [build, android, verify]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: jarvis-*
-          path: dist
-          merge-multiple: true
-      - name: 发布
-        uses: softprops/action-gh-release@v2
-        with:
-          # 标签里带版本号：自动更新做差量下载时按版本号找到旧版本的 .blockmap
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('desktop-v1.0.{0}', github.run_number) }}
-          target_commitish: ${{ github.sha }}
-          name: "未央 ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('1.0.{0}', github.run_number) }}"
-          # 正式发布（不是预发布），“最新版本”才会指向它，自动更新才能找到
-          prerelease: false
-          make_latest: true
-          files: dist/*
-          body: |
-            ## 本版更新 · 行情改为先取实时数据，不再贴搜索原文
-            - 问“今天大盘的情况”：先取上证指数（深成指、创业板各自的指数），给出盘中点位和涨跌幅，不再拿原话去搜、混进金价“大盘价”和楼盘“核心大盘”。
-            - 新增实时报价：金价（上海金 元/克、伦敦金 美元/盎司）、汇率（美元、欧元、日元等兑人民币）、按名字问个股（如“茅台股价”）、港股美股（如腾讯控股、苹果）、港美日指数（恒生、纳斯达克、道琼斯、标普、日经；问“港股/美股怎么样”给一组主要指数）。数据来自腾讯、东方财富公开行情，可能延迟几秒到15分钟；取不到时自动改用搜索。
-            - 油价没有免费接口，仍用搜索，但搜索词改成“92号/95号汽油、最新调价”的口径，少搜到自媒体旧文。
-            - 模型没来得及回答时，不再贴整段搜索原文：只留相关的、去重后的最多5条，每条一句话；都不对题就直说，不拿来凑数。
-            - 执行记录写清每次换备用模型的来去和原因；下载页链接改指向公开安装包仓库 weiyang-release。
-            - 以上已通过单元测试、浏览器测试和服务器安装包实装测试；行情接口在开发环境连不上，没有实测，需要在服务器上问几次确认（如“今天大盘的情况”“今天金价多少”“茅台股价”“美元汇率”）。
+      # 安装包已由各作业传到草稿发布；这里取回一份（同步到安装包仓库用），写发布说明，再转为正式发布
+      - name: 取回草稿发布里的安装包
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" -D dist
+          ls -la dist
+          for need in '*.exe' '*.apk' 'jarvis-server-*.tar.gz' 'jarvis-server-latest.json' 'latest.yml'; do
+            ls dist/$need >/dev/null 2>&1 || { echo "::error::草稿发布缺少 $need"; exit 1; }
+          done
+      - name: 写发布说明
+        run: |
+          cat > release-notes.md <<'NOTES'
+          ## 本版更新 · 行情改为先取实时数据，不再贴搜索原文
+          - 问“今天大盘的情况”：先取上证指数（深成指、创业板各自的指数），给出盘中点位和涨跌幅，不再拿原话去搜、混进金价“大盘价”和楼盘“核心大盘”。
+          - 新增实时报价：金价（上海金 元/克、伦敦金 美元/盎司）、汇率（美元、欧元、日元等兑人民币）、按名字问个股（如“茅台股价”）、港股美股（如腾讯控股、苹果）、港美日指数（恒生、纳斯达克、道琼斯、标普、日经；问“港股/美股怎么样”给一组主要指数）。数据来自腾讯、东方财富公开行情，可能延迟几秒到15分钟；取不到时自动改用搜索。
+          - 油价没有免费接口，仍用搜索，但搜索词改成“92号/95号汽油、最新调价”的口径，少搜到自媒体旧文。
+          - 模型没来得及回答时，不再贴整段搜索原文：只留相关的、去重后的最多5条，每条一句话；都不对题就直说，不拿来凑数。
+          - 执行记录写清每次换备用模型的来去和原因；下载页链接改指向公开安装包仓库 weiyang-release。
+          - 以上已通过单元测试、浏览器测试和服务器安装包实装测试；行情接口在开发环境连不上，没有实测，需要在服务器上问几次确认（如“今天大盘的情况”“今天金价多少”“茅台股价”“美元汇率”）。
 
-            ## 更新与使用
-            先在设置里“立即更新服务器”，再更新电脑和手机。仅安装APK不会替换远端服务器代码。
-            本机与云服务器配置独立：服务器模式下，看图、画图、向量用的是“模型 → 云服务器”里填的 Key。博查、fal、Tavily 的 Key 在“模型 → 服务商与 Key → 其他服务的 Key”。
-            
-            ## 下载
-            - Windows：Jarvis-Setup-*.exe（安装版）或 Jarvis-*-win-x64.zip（免安装版）。
-            - 安卓手机：Jarvis-*-android.apk。
-            - 自有云服务器：jarvis-server-*.tar.gz，步骤见 jarvis/deploy/服务器部署说明.md。
-            
-            ## 多设备使用
-            电脑与手机连接同一台未央云服务器使用服务器端对话和文件；本机配置与数据仍独立。已移除的OSS同步不再作为配置方式。
-            
-            ## 自动更新
-            Windows安装版可按提示重启更新；安卓按提示下载、安装新版本，继续沿用固定签名。
-            
-            构建自 ${{ github.sha }}
+          ## 更新与使用
+          先在设置里“立即更新服务器”，再更新电脑和手机。仅安装APK不会替换远端服务器代码。
+          本机与云服务器配置独立：服务器模式下，看图、画图、向量用的是“模型 → 云服务器”里填的 Key。博查、fal、Tavily 的 Key 在“模型 → 服务商与 Key → 其他服务的 Key”。
+          
+          ## 下载
+          - Windows：Jarvis-Setup-*.exe（安装版）或 Jarvis-*-win-x64.zip（免安装版）。
+          - 安卓手机：Jarvis-*-android.apk。
+          - 自有云服务器：jarvis-server-*.tar.gz，步骤见 jarvis/deploy/服务器部署说明.md。
+          
+          ## 多设备使用
+          电脑与手机连接同一台未央云服务器使用服务器端对话和文件；本机配置与数据仍独立。已移除的OSS同步不再作为配置方式。
+          
+          ## 自动更新
+          Windows安装版可按提示重启更新；安卓按提示下载、安装新版本，继续沿用固定签名。
+          
+          构建自 ${{ github.sha }}
+          NOTES
+      - name: 发布
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # 正式发布（不是预发布），“最新版本”才会指向它，自动更新才能找到；标签带版本号，差量更新按它找旧版 .blockmap
+        run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "$RELEASE_TITLE" --notes-file release-notes.md --draft=false --prerelease=false --latest
       # 用户 2026-11-02：代码仓库以后改私密，安装包另放公开仓库 xunova1121/weiyang-release，三端更新在原仓库读不到时改从这里读。
       # 需要在代码仓库 Secrets 里放 RELEASE_REPO_TOKEN（只对安装包仓库有 Contents 读写权限的细粒度令牌）；没配就跳过，不影响原发布。
       - name: 检查安装包仓库令牌
@@ -452,8 +518,7 @@ jobs:
           TITLE: "未央 ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('1.0.{0}', github.run_number) }}"
         run: |
           set -euo pipefail
-          # 发布说明沿用代码仓库刚发的那份（只读本仓库，用本仓库自带令牌）
-          GH_TOKEN="$SOURCE_TOKEN" gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body -q .body > release-notes.md
+          # 发布说明沿用上一步写好的 release-notes.md
           if gh release view "$TAG" --repo xunova1121/weiyang-release >/dev/null 2>&1; then
             gh release upload "$TAG" dist/* --repo xunova1121/weiyang-release --clobber
           else
