@@ -31,7 +31,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 用户 2026-11-03：代码仓库改私密后，免费账户的构建产物存储有上限（约500MB），旧产物默认留90天把空间占满，
+  # 1.0.385 所有测试通过却在“上传安装包”报 Artifact storage quota has been hit。发版前先删旧产物，新产物只留1天（正式安装包在 Releases）。
+  cleanup:
+    name: 清理旧的构建产物
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: 删除以前运行留下的构建产物
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/${{ github.repository }}/actions/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.workflow_run.id != ${{ github.run_id }}) | .id' > old-artifacts.txt || true
+          echo "要删除 $(wc -l < old-artifacts.txt) 个旧产物"
+          while read -r id; do gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" >/dev/null || echo "删除 $id 失败"; done < old-artifacts.txt
+
   build:
+    needs: cleanup
     name: 打包 (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -80,6 +99,7 @@ jobs:
       - name: 上传安装包
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 1
           name: jarvis-desktop-${{ runner.os }}
           if-no-files-found: error
           path: |
@@ -91,6 +111,7 @@ jobs:
             jarvis/desktop/release/*.blockmap
 
   android:
+    needs: cleanup
     name: 打包安卓 App
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -167,11 +188,13 @@ jobs:
       - name: 上传 APK
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 1
           name: jarvis-android
           if-no-files-found: error
           path: jarvis/release-android/*.apk
 
   verify:
+    needs: cleanup
     name: 发布前完整验证
     runs-on: ubuntu-latest
     # Office安装自身允许20分钟重试，另需浏览器安装及完整验证预算；不改变各测试的断言/时限。
@@ -268,6 +291,7 @@ jobs:
       - name: 上传服务器版
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 1
           name: jarvis-server
           path: |
             jarvis/release-server/*.tar.gz
@@ -357,6 +381,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 1
           name: verification-jarvis
           if-no-files-found: ignore
           path: |
