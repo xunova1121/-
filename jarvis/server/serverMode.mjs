@@ -93,7 +93,12 @@ export function mergeConfig(old, next) {
   if (Object.hasOwn(next, 'lookupRegion') && !LOOKUP_REGIONS.includes(next.lookupRegion)) throw Object.assign(new Error('查询地区只接受auto、cn或global'), { status: 400, code: 'LOOKUP_REGION' });
   const keep = (n, o) => (!n || String(n).startsWith('••••') ? o ?? '' : n);
   const keys = { ...(old.keys ?? {}) };
-  for (const [k, v] of Object.entries(next.keys ?? {})) keys[k] = keep(v, old.keys?.[k]);
+  for (const [k, v] of Object.entries(next.keys ?? {})) {
+    if (typeof v !== 'string') throw Object.assign(new Error('模型Key必须是文字'), { status: 400 });
+    const value = v.trim();
+    if (value === 'use-gateway-key') throw Object.assign(new Error('请填写真实模型Key，不能保存网关占位符'), { status: 400 });
+    keys[k] = keep(value, old.keys?.[k]);
+  }
   const maps = Object.fromEntries(['models', 'baseURLs', 'providerNames', 'modelLists', 'serviceTiers'].map((field) => [field, { ...old[field], ...next[field] }]));
   const merged = { ...old, ...next, ...maps, keys, tavilyKey: keep(next.tavilyKey, old.tavilyKey), bochaKey: keep(next.bochaKey, old.bochaKey), qianfanSearchKey: keep(next.qianfanSearchKey, old.qianfanSearchKey), deepseekSearchKey: keep(next.deepseekSearchKey, old.deepseekSearchKey), falKey: keep(next.falKey, old.falKey), qweatherKey: keep(next.qweatherKey, old.qweatherKey) };
   merged.stockVerified = { ...old.stockVerified };
@@ -269,7 +274,15 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     }
     if (pathname === '/api/server/config') {
       if (req.method === 'GET') { json(res, 200, maskConfig(loadConfig())); return true; }
-      if (req.method === 'PUT') { saveConfig(mergeConfig(loadConfig(), await readJson(req))); json(res, 200, { ok: true }); return true; }
+      if (req.method === 'PUT') {
+        const next = mergeConfig(loadConfig(), await readJson(req));
+        saveConfig(next);
+        const stored = loadConfig();
+        // 写盘失败或读回不一致绝不显示“已保存”；只比较，不回传完整密钥。
+        if (Object.entries(next.keys || {}).some(([id, key]) => stored.keys?.[id] !== key))
+          throw Object.assign(new Error('云服务器Key保存后核对失败，请重试'), { status: 500, code: 'MODEL_KEY_SAVE' });
+        json(res, 200, { ok: true }); return true;
+      }
     }
     // 记忆向量现在的情况（模型页“记忆向量”那一行显示）；还有没算向量的记忆就在后台补
     if (pathname === '/api/server/memory-status' && req.method === 'GET') {

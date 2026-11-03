@@ -1,3 +1,4 @@
+import { serverModelConfig } from './modelCredentials.mjs';
 /** 仅代理模型推理；文件/鼠标/命令工具始终留在PC，由PC执行原有确认流程。 */
 import { createAdapter } from '../src/llm/config.js';
 import { routeFor, fallbackRoutes, canFallback } from '../src/llm/router.js';
@@ -18,6 +19,7 @@ export function bridgeInput(body) {
 }
 
 export async function streamPCModel(req,res,body,{cfg,makeAdapter=createAdapter}) {
+  cfg=serverModelConfig(cfg);
   const input=bridgeInput(body);
   if(cfg.provider==='mock')throw Object.assign(new Error('服务器仍是演示模型，请先配置真实模型；不会用演示结果冒充电脑任务已完成'),{status:409});
   const kind=body.messages.some(m=>m.images?.length)?'vision':['chat','code','write','reason','vision'].includes(body.task)?body.task:'chat';

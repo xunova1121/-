@@ -1,6 +1,9 @@
 import { errorKind } from './suggest.js';
+import { credentialErrorText } from '../llm/credentialContext.js';
 /** 不从429或网络中断推断欠费，也不虚构已经重试。 */
 export function friendlyError(error) {
+  const credential = credentialErrorText(error);
+  if (credential) return credential;
   const msg = String(error?.message ?? error ?? '');
   const code = Number(error?.status ?? msg.match(/(?:模型接口返回|HTTP|返回) (\d{3})/)?.[1]);
   const kind = errorKind(error);

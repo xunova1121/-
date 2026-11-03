@@ -179,3 +179,5 @@
 <!-- 2026-11-02 Codex安全批模型工作台旧测试迁移：CI380两项×两宽度仍拿旧固定凭证比较；改为严格比较浏览器已换发且HTTP确认有效的当前随机凭证。断网两次读取/失败类型/登录保持、搜索授权与上游Key分离均保留；新增两宽度换发有效性检查，54/54及后续设置导航83通过。 -->
 
 - 2026-11-03 Codex收尾：第六/七节涉及Claude名下taskContract/executionReview/dialoguePolicy及holdings日期接缝，只补计算识别、失败纠正、宽松日期与冷却证据；不改持仓规则、行情口径、写作或架构逻辑。新增time-calculation合成e2e接入原CI，发布仍走草稿直传。
+
+- 2026-11-03 Codex：按用户第八节授权追踪云端OpenRouter凭据保存→任务/备用→HTTP。涉及modelScopes/modelLibrary、serverMode/taskRunner/pcModelBridge、config/friendlyError必要接缝；新增服务端凭据解析与安全错误上下文，不读改用户jarvis.env或访问密码。第六/七节391已经发布，本次增量包含它们；保留草稿直传发布流程与全部原测试，真实用户Key仍待用户发版后验证。

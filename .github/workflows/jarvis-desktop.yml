@@ -377,6 +377,7 @@ jobs:
           node e2e/news-lookup.mjs "$RUNNER_TEMP/jarvis-e2e/news-lookup"
           node e2e/lookup-step1.mjs "$RUNNER_TEMP/jarvis-e2e/lookup-step1"
           node e2e/time-calculation.mjs "$RUNNER_TEMP/jarvis-e2e/time-calculation"
+          node e2e/model-credentials.mjs "$RUNNER_TEMP/jarvis-e2e/model-credentials"
           node e2e/server-mobile.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/conversation-flow.mjs
           node e2e/qwen-voices.mjs "$RUNNER_TEMP/jarvis-e2e"
@@ -473,7 +474,10 @@ jobs:
       - name: 写发布说明
         run: |
           cat > release-notes.md <<'NOTES'
-          ## 本版更新 · 行情冷却修复与时间计算
+          ## 本版更新 · 云端模型Key核对、行情冷却与时间计算
+          - 云端OpenRouter优先使用保存的Key，缺失时才读取环境变量；兼容自定义OpenRouter线路，不修改jarvis.env。
+          - 模型Key保存后读回核对，失败不报成功；401/403显示实际服务商、Key来源和末四位，地区限制单独说明。完整Key不进入错误、日志或聊天。
+          - 用户真实OpenRouter连接尚待升级后验证；自动化使用固定上游替身，不代表用户Key已连接成功。
           - 修复重复搜索、输入校验等本地拦截被误当网络故障的问题；报价与搜索分别统计健康，历史误判冷却自动忽略，保留诊断记录。
           - 冷却工具显示恢复时间，并从本轮可调用工具中暂时移除；换词也不能重复请求同一冷却入口。真实网络连续失败的保护仍保留。
           - 新增时间计算：小时/分钟加减、时差、星期、节日倒计时、时区、年龄、农历公历互转；默认北京时间。内置中国2025/2026节假日调休，其他年份明确说明只扣周末。

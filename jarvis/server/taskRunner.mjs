@@ -1,3 +1,4 @@
+import { serverModelConfig } from './modelCredentials.mjs';
 import { chargeSearchRequest, chargeEvaluation, evaluationAdapter, evaluationModelFetch } from './evaluationAccess.mjs';
 import { presentationOverview } from './presentationOverview.mjs';
 import { createStockImages } from './stockImages.mjs';
@@ -261,7 +262,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     console.log(`[任务] ${task.id} 开始：${task.text.slice(0, 40).replace(/\s+/g, ' ')}`);
     record(task, { type: 'task_state', status: 'running' });
     const session = await sessions.get(task.sessionId);
-    const cfg = withoutCodeCredentials(await getConfig());
+    const cfg = serverModelConfig(withoutCodeCredentials(await getConfig()));
     // 记忆按意思找：用能力表“记忆向量”那一项（服务器没有跨域限制）；没有就只按关键字
     memory.configureMemory({ llm: helper(cfg, 'write', task, 'memory'), embedder: createEmbedder(cfg, { direct: true }) });
     const taskRepos = task.evaluationAuthorization ? null : codeProjects ? await codeProjects.reposFor(session.id) : codeRepos;
@@ -436,7 +437,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
 
   /** 做完以后在后台：把这轮对话交给记忆整理（以后的对话能想起来），太长的对话把较早部分并进前情提要 */
   async function afterTask(task, text) {
-    const cfg = withoutCodeCredentials(await getConfig());
+    const cfg = serverModelConfig(withoutCodeCredentials(await getConfig()));
     const llm = helper(cfg, 'write');
     if (!task.evaluationId && cfg.autoMemory !== false) {
       memory.configureMemory({ llm, embedder: createEmbedder(cfg, { direct: true }) });

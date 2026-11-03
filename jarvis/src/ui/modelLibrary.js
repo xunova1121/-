@@ -1,3 +1,4 @@
+import { keySuffix } from '../llm/credentialContext.js';
 import { publicDataPanel } from './publicDataPanel.js';
 import { readinessPanel } from './readinessPanel.js';
 import './readinessPanel.css';
@@ -141,6 +142,7 @@ export function initModelLibrary({ root, workspace, toast }) {
     const model = node('input', { placeholder: '手动添加完整模型 ID（可选）', maxLength: 200, ariaLabel: '手动模型 ID' });
     // 服务档位：有的服务商用 service_tier 选快速档（如 TeamoRouter 填 fast），不填就是普通档
     const tier = node('input', { value: cfg.serviceTiers?.[provider] || '', placeholder: '可选，如 fast（按服务商说明填）', maxLength: 40, ariaLabel: '服务档位' });
+    const saveScope = workspace.scope;
     const save = button('保存服务商', () =>
       run(async () => {
         if (meta.custom) {
@@ -153,6 +155,7 @@ export function initModelLibrary({ root, workspace, toast }) {
           if (!/^https?:$/.test(url.protocol) || url.username || url.password)
             throw Object.assign(new Error('接口地址必须是HTTP或HTTPS，不能包含账号密码'), { kind: 'api', code: 'INVALID_BASE_URL' });
         }
+        const savedSuffix = secret.value.trim() ? keySuffix(secret.value.trim()) : '';
         await workspace.patch((value) => {
           let next = {
             ...value,
@@ -167,9 +170,9 @@ export function initModelLibrary({ root, workspace, toast }) {
             if (!favoriteLines(next).some((item) => sameLine(item, { provider, model: id }))) next = toggleFavorite(next, { provider, model: id });
           }
           return next;
-        });
+        }, saveScope);
         secret.value = '';
-        notice = '已保存；当前默认模型不变';
+        notice = `已保存${saveScope === 'server' ? '到云服务器并读回核对' : '到本机'}：${meta.name}${savedSuffix ? `；Key 末4位：${savedSuffix}` : ''}；当前默认模型不变`;
       })
     );
     const editor = node(

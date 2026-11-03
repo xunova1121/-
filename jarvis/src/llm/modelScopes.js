@@ -40,7 +40,13 @@ export function createModelScopes({ getLocal, saveLocal, getClient, onServerSave
         const after = update(before);
         const delta = configDelta(before, after);
         if (Object.keys(delta).length) await client.putConfig(delta);
-        serverConfig = await client.getConfig();
+        const confirmed = await client.getConfig();
+        for (const [id, key] of Object.entries(delta.keys || {})) {
+          if (typeof key !== 'string' || !key.trim() || key.startsWith('••••')) continue;
+          if (confirmed.keys?.[id] !== `••••${key.trim().slice(-4)}`)
+            throw Object.assign(new Error('云服务器Key读回核对不一致，未确认保存；请刷新后重试'), { code: 'MODEL_KEY_SAVE' });
+        }
+        serverConfig = confirmed;
         onServerSaved(serverConfig);
         return serverConfig;
       };

@@ -10,6 +10,8 @@ import { createMockAdapter } from './mock.js';
 import { selectVoiceEngine } from '../perception/voiceSelection.js';
 import { GENTLE_VOICES } from '../perception/voiceProfile.js';
 
+import { usableModelKey, credentialInfo, credentialText, withCredentialErrors, CREDENTIAL_CONTEXT } from './credentialContext.js';
+
 const KEY = 'jarvis.llm.v1';
 const store = (() => { try { return globalThis.localStorage ?? null; } catch { return null; } })();
 
@@ -60,6 +62,15 @@ export function displayName(cfg) {
  * @returns {{ adapter, model, problem?: string }}
  */
 export function createAdapter(cfg, { gateway = null } = {}) {
+  const normalized = { ...cfg, keys: { ...cfg.keys, [cfg.provider]: usableModelKey(cfg.keys?.[cfg.provider]) } };
+  const info = credentialInfo(normalized);
+  const result = configuredAdapter(normalized, { gateway });
+  if (result.problem && normalized[CREDENTIAL_CONTEXT] && !normalized.keys[cfg.provider]) result.problem += `；${credentialText(info)}`;
+  // 本机网关的环境Key只有网关知道；不能在浏览器里把未知来源误报成“没有Key”。
+  return result.adapter && normalized[CREDENTIAL_CONTEXT] ? { ...result, adapter: withCredentialErrors(result.adapter, info) } : result;
+}
+
+function configuredAdapter(cfg, { gateway = null } = {}) {
   const p = providerById(cfg.provider);
   const model = modelOf(cfg);
   if (p.kind === 'mock') return { adapter: createMockAdapter(), model };
