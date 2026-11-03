@@ -16,7 +16,7 @@ export function marketIndex(text) {
 /** 只提取用户确实说过的地点。无定位、无城市时交模型追问，绝不默认北京/南京。 */
 export function weatherPlace(text, params = {}) {
   if (params.city) return params.city;
-  const value = String(text).replace(/[，,。！？?!]+$/, '').trim();
+  const value = String(text).replace(/^(?:再试试|再试一次|再查一下|再查下|重新查|再查)\s*/, '').replace(/[，,。！？?!]+$/, '').trim();
   const place = value.match(/^(?:请|麻烦)?(?:帮我|给我)?(?:查一?下|查询|看看|看一?下)?\s*(.{1,32}?)(?:今天|今日|明天|后天|现在|这周|本周|未来\d+天)?(?:的)?(?:天气|气温|空气质量)/)?.[1]?.trim();
   if (!place || /^(?:今天|今日|明天|后天|现在|这里|这边|当地|附近|我这|我们这|这个|最近|未来|的|集团年)$/.test(place)) return null;
   if (/天气|带伞|下雨|下雪|怎么|什么|请问|这几天|未来|小时|昨天/.test(place)) return null;
@@ -39,7 +39,7 @@ export function lookupPlan(intent, { text, getTool, now = Date.now() }) {
   } else if (intent.kind === 'weather') {
     const place = weatherPlace(text, params);
     // 与天气操作同一额度，不能外层先取消地点解析和免费备用源。
-    return place && getTool('get_weather') ? { name: 'get_weather', args: { place }, timeoutMs: WEATHER_FETCH_MS } : null;
+    return place && getTool('get_weather') ? { name: 'get_weather', args: { place, ...(/空气质量|预警|逐小时|生活指数|紫外线|两小时降水/.test(text) ? { details: true } : {}) }, timeoutMs: WEATHER_FETCH_MS } : null;
   } else if (intent.kind === 'sports_live' && getTool('get_sports_scores')) {
     const args = sportsPreCall(text, now);
     if (args || params.period === 'forward_live') return { name: 'get_sports_scores', args: { ...args, ...(params.period === 'forward_live' && { period: params.period, window_minutes: params.window_minutes, sport: params.sport }) }, timeoutMs: 12000 };

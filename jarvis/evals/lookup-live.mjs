@@ -633,6 +633,11 @@ var LOCAL_CODES = /* @__PURE__ */ new Set([
   "RETRIEVAL_BUDGET",
   "ABORT_ERR",
   "LOOKUP_SOURCE_COOLING",
+  "PUBLIC_JSON_BLOCKED",
+  "PUBLIC_JSON_HOSTS",
+  "PUBLIC_JSON_URL",
+  "PUBLIC_JSON_CREDENTIALS",
+  "PUBLIC_JSON_GATEWAY_REQUIRED",
   "UNTRUSTED_JSON_HOST",
   "INVALID_STOCK_INPUT",
   "INVALID_QUOTE_INPUT",
@@ -2607,7 +2612,7 @@ function marketIndex(text2) {
 }
 function weatherPlace(text2, params = {}) {
   if (params.city) return params.city;
-  const value = String(text2).replace(/[，,。！？?!]+$/, "").trim();
+  const value = String(text2).replace(/^(?:再试试|再试一次|再查一下|再查下|重新查|再查)\s*/, "").replace(/[，,。！？?!]+$/, "").trim();
   const place = value.match(/^(?:请|麻烦)?(?:帮我|给我)?(?:查一?下|查询|看看|看一?下)?\s*(.{1,32}?)(?:今天|今日|明天|后天|现在|这周|本周|未来\d+天)?(?:的)?(?:天气|气温|空气质量)/)?.[1]?.trim();
   if (!place || /^(?:今天|今日|明天|后天|现在|这里|这边|当地|附近|我这|我们这|这个|最近|未来|的|集团年)$/.test(place)) return null;
   if (/天气|带伞|下雨|下雪|怎么|什么|请问|这几天|未来|小时|昨天/.test(place)) return null;
@@ -2626,7 +2631,7 @@ function lookupPlan(intent, { text: text2, getTool, now = Date.now() }) {
     }
   } else if (intent.kind === "weather") {
     const place = weatherPlace(text2, params);
-    return place && getTool("get_weather") ? { name: "get_weather", args: { place }, timeoutMs: WEATHER_FETCH_MS } : null;
+    return place && getTool("get_weather") ? { name: "get_weather", args: { place, .../空气质量|预警|逐小时|生活指数|紫外线|两小时降水/.test(text2) ? { details: true } : {} }, timeoutMs: WEATHER_FETCH_MS } : null;
   } else if (intent.kind === "sports_live" && getTool("get_sports_scores")) {
     const args = sportsPreCall(text2, now);
     if (args || params.period === "forward_live") return { name: "get_sports_scores", args: { ...args, ...params.period === "forward_live" && { period: params.period, window_minutes: params.window_minutes, sport: params.sport } }, timeoutMs: 12e3 };
@@ -3002,7 +3007,7 @@ function qweatherCode(icon) {
 }
 var num = (v) => v === void 0 || v === null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v);
 var loc = (lat, lon) => `${Number(lon).toFixed(2)},${Number(lat).toFixed(2)}`;
-async function fetchQWeather({ key, host, latitude, longitude, fetchImpl = (...a) => fetch(...a), signal, timeoutMs = 8e3 }) {
+async function fetchQWeather({ key, host, latitude, longitude, fetchImpl = (...a) => fetch(...a), signal, timeoutMs = 8e3, essentialOnly = false }) {
   const base = `https://${host}`;
   const at = loc(latitude, longitude);
   const lat = Number(latitude).toFixed(2), lon = Number(longitude).toFixed(2);
@@ -3030,6 +3035,10 @@ async function fetchQWeather({ key, host, latitude, longitude, fetchImpl = (...a
       return get(b);
     }
   };
+  if (essentialOnly) {
+    const [now2, daily2] = await Promise.all([get(`/v7/weather/now?location=${at}`), get(`/v7/weather/7d?location=${at}`)]);
+    return { source: "qweather", now: now2, daily: daily2 };
+  }
   const [now, daily, hourly, air, indices, alerts, minutely] = await Promise.allSettled([
     get(`/v7/weather/now?location=${at}`),
     get(`/v7/weather/7d?location=${at}`),
@@ -3195,7 +3204,7 @@ function formatWttr(placeName, j, days = 3, dataUrl = "") {
   if (dataUrl) lines.push(`\u672C\u6B21\u6570\u636E\u94FE\u63A5\uFF08\u5F15\u7528\u6765\u6E90\u65F6\u7ED9\u8FD9\u4E2A\uFF0C\u4E0D\u8981\u53EA\u7ED9\u9996\u9875\uFF09\uFF1A${dataUrl}`);
   return lines.join("\n");
 }
-async function getWeather(place, { get, days = 3, signal, retrieval, qweather = null, health }) {
+async function getWeather(place, { get, days = 3, signal, retrieval, qweather = null, health, details = false }) {
   if (!String(place || "").trim()) throw Object.assign(new Error("\u7F3A\u5C11\u5730\u70B9\uFF0C\u8BF7\u63D0\u4F9B\u57CE\u5E02\u6216\u5B9A\u4F4D\u7ED3\u679C\uFF0C\u4E0D\u80FD\u9ED8\u8BA4\u731C\u6D4B\u57CE\u5E02"), { code: "WEATHER_LOCATION_REQUIRED", name: "ValidationError" });
   const raw = String(place || "").trim(), capital = provinceCapital(raw);
   const name = (capital || raw).replace(/(市|区|县)$/, "") || "\u5317\u4EAC";
@@ -3224,7 +3233,7 @@ async function getWeather(place, { get, days = 3, signal, retrieval, qweather = 
           const city = (await lookupQWeatherCity({ ...qweather, query: name, fetchImpl, signal: activeSignal }))[0];
           throwControl(null, activeSignal);
           if (!city) throw new Error(`\u6CA1\u627E\u5230\u5730\u70B9\u201C${name}\u201D`);
-          const data = parseQWeather(await fetchQWeather({ ...qweather, latitude: city.latitude, longitude: city.longitude, fetchImpl, signal: activeSignal }));
+          const data = parseQWeather(await fetchQWeather({ ...qweather, latitude: city.latitude, longitude: city.longitude, fetchImpl, signal: activeSignal, essentialOnly: !details }));
           return formatQWeather([city.name, city.region].filter(Boolean).join("\uFF0C"), data, days, city.link);
         }, { signal, timeoutMs: WEATHER_SOURCE_MS.qweather, health, ignoreCooling });
       } catch (e) {

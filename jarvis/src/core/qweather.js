@@ -34,7 +34,7 @@ const loc = (lat, lon) => `${Number(lon).toFixed(2)},${Number(lat).toFixed(2)}`;
  * 按经纬度一次取全。单项失败（如空气质量、预警不在套餐里）不影响其余；实况都拿不到才算失败
  * @returns {Promise<object>} 原始结果包（交给 parseQWeather）
  */
-export async function fetchQWeather({ key, host, latitude, longitude, fetchImpl = (...a) => fetch(...a), signal, timeoutMs = 8000 }) {
+export async function fetchQWeather({ key, host, latitude, longitude, fetchImpl = (...a) => fetch(...a), signal, timeoutMs = 8000, essentialOnly = false }) {
   const base = `https://${host}`;
   const at = loc(latitude, longitude);
   const lat = Number(latitude).toFixed(2), lon = Number(longitude).toFixed(2);
@@ -56,6 +56,11 @@ export async function fetchQWeather({ key, host, latitude, longitude, fetchImpl 
     }
   };
   const tryBoth = async (a, b) => { try { return await get(a); } catch (e) { if (signal?.aborted) throw e; return get(b); } };
+  // 对话普通天气只取实况和预报，附加套餐接口不能拖垮必要结果；首页仍取全量。
+  if (essentialOnly) {
+    const [now, daily] = await Promise.all([get(`/v7/weather/now?location=${at}`), get(`/v7/weather/7d?location=${at}`)]);
+    return { source: 'qweather', now, daily };
+  }
   const [now, daily, hourly, air, indices, alerts, minutely] = await Promise.allSettled([
     get(`/v7/weather/now?location=${at}`),
     get(`/v7/weather/7d?location=${at}`),

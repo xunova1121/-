@@ -61,7 +61,7 @@ export function formatWttr(placeName, j, days = 3, dataUrl = '') {
  * @param {string} place 地名（中文或英文）
  * @param {{ get: (url: string) => Promise<Response>, days?: number }} o
  */
-export async function getWeather(place, { get, days = 3, signal, retrieval, qweather = null, health }) {
+export async function getWeather(place, { get, days = 3, signal, retrieval, qweather = null, health, details = false }) {
   if (!String(place || '').trim()) throw Object.assign(new Error('缺少地点，请提供城市或定位结果，不能默认猜测城市'), { code: 'WEATHER_LOCATION_REQUIRED', name: 'ValidationError' });
   // 问的是省份：天气接口只认城市，按省会查并写明（用户 2026-11-01：“河南的天气”直接说查不到）
   const raw = String(place || '').trim(), capital = provinceCapital(raw);
@@ -82,7 +82,7 @@ export async function getWeather(place, { get, days = 3, signal, retrieval, qwea
         const city = (await lookupQWeatherCity({ ...qweather, query: name, fetchImpl, signal: activeSignal }))[0];
         throwControl(null, activeSignal);
         if (!city) throw new Error(`没找到地点“${name}”`);
-        const data = parseQWeather(await fetchQWeather({ ...qweather, latitude: city.latitude, longitude: city.longitude, fetchImpl, signal: activeSignal }));
+        const data = parseQWeather(await fetchQWeather({ ...qweather, latitude: city.latitude, longitude: city.longitude, fetchImpl, signal: activeSignal, essentialOnly: !details }));
         return formatQWeather([city.name, city.region].filter(Boolean).join('，'), data, days, city.link);
       }, { signal, timeoutMs: WEATHER_SOURCE_MS.qweather, health, ignoreCooling });
     } catch (e) { throwControl(e, signal); firstErr = e; }
