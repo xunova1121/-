@@ -17,6 +17,7 @@ export const DOCUMENT_TOOLS = new Set(['write_long_document', 'create_document',
 
 /** 常驻工具：系统提示里点名的、几乎每天都用的 */
 export const CORE = new Set([
+  'time_calc',
   'build_architecture', 'create_diagram', 'export_diagram', 'render_diagram', 'list_work_records',
   'write_professional_document', 'generate_task_brief',
   'verify_numbers', 'get_stock_kline', 'get_market_quote', 'record_holding', 'list_holdings', 'holding_profit', 'get_sports_scores', 'check_search_terms', 'review_task', 'execution_capabilities', 'run_project_tests', 'get_current_time', 'get_weather', 'remember', 'recall', 'core_memory_update', 'save_skill', 'use_skill',
@@ -52,15 +53,22 @@ function score(tool, query) {
  * @param {Array<{ name: string, description: string }>} tools
  * @param {{ limit?: number }} [o]
  */
-export function createToolLoader(tools, { limit = LIMIT, defer = null, core = CORE } = {}) {
+export function createToolLoader(tools, { limit = LIMIT, defer = null, core = CORE, now = Date.now } = {}) {
   const all = new Map(tools.map((t) => [t.name, t]));
+  const cooldowns = new Map();
+  const cooldownUntil = name => {
+    const until = cooldowns.get(name) || 0;
+    if (until <= now()) { cooldowns.delete(name); return 0; }
+    return until;
+  };
+  const available = tool => !cooldownUntil(tool.name);
   const deferredMode = tools.length > limit;
   // 用户自己连的 MCP 服务是特意要用的：工具不多（≤ MCP_CORE 个）时也常驻
   const mcp = tools.filter((t) => t.name.startsWith('mcp_'));
   // defer：这一轮多半用不上的常驻工具也先只列名字（普通问答不带做文档的长说明，每步少发几千字）；直接按名字调用照样能用
   const keep = (t) => (core.has(t.name) && !defer?.has(t.name)) || (mcp.length <= MCP_CORE && t.name.startsWith('mcp_'));
   const active = new Set(deferredMode ? tools.filter(keep).map((t) => t.name) : tools.map((t) => t.name));
-  const deferred = () => tools.filter((t) => !active.has(t.name));
+  const deferred = () => tools.filter((t) => !active.has(t.name) && available(t));
 
   const searchTool = {
     name: 'tool_search',
@@ -75,9 +83,9 @@ export function createToolLoader(tools, { limit = LIMIT, defer = null, core = CO
     },
     run: async ({ query = '', names = [] }) => {
       const picked = [];
-      for (const n of Array.isArray(names) ? names : []) if (all.has(n) && !picked.includes(n)) picked.push(n);
+      for (const n of Array.isArray(names) ? names : []) if (all.has(n) && !cooldownUntil(n) && !picked.includes(n)) picked.push(n);
       if (query) {
-        for (const t of tools.map((t) => [t, score(t, query)]).filter(([, s]) => s > 0).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t]) => t)) {
+        for (const t of tools.filter(available).map((t) => [t, score(t, query)]).filter(([, s]) => s > 0).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t]) => t)) {
           if (!picked.includes(t.name)) picked.push(t.name);
         }
       }
@@ -89,8 +97,14 @@ export function createToolLoader(tools, { limit = LIMIT, defer = null, core = CO
 
   return {
     deferredMode,
+    /** 只影响本轮已证实冷却的工具；不删除工具、不到期重新曝光，也不连带其他入口。 */
+    cool(name, until) {
+      if (all.has(name) && Number.isFinite(until) && until > now()) cooldowns.set(name, Math.max(until, cooldowns.get(name) || 0));
+    },
+    cooldownUntil,
+    cooled: () => [...cooldowns].filter(([name]) => cooldownUntil(name)).map(([tool, until]) => ({ tool, until })),
     /** 这一步发给模型的工具 */
-    list: () => (deferredMode ? [...tools.filter((t) => active.has(t.name)), searchTool] : tools),
+    list: () => (deferredMode ? [...tools.filter((t) => active.has(t.name) && available(t)), searchTool] : tools.filter(available)),
     /** 按名字找工具（包括还没加载的，调用时自动加载） */
     get(name) {
       if (name === 'tool_search' && deferredMode) return searchTool;

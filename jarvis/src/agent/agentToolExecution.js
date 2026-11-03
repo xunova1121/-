@@ -52,6 +52,8 @@ export async function executeToolCalls(
     try {
       if (closing && (!retrieval.extensive || webTools.has(c.name))) throw new Error('联网检索已经结束，请直接整理已有资料回答，不要继续调用工具');
       if (!tool) throw new Error(`没有名为 ${c.name} 的工具`);
+      const cooldownUntil = loader.cooldownUntil?.(c.name);
+      if (cooldownUntil) throw Object.assign(new Error(`此工具冷却至北京时间${new Date(cooldownUntil).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}，本次未执行。不要重复调用或换参数重试，改用其他可用工具。`), { code: 'LOOKUP_SOURCE_COOLING', cooldownUntil, tool: c.name });
       if (!allowWebSearch && (webTools.has(c.name) || c.name === 'delegate_task'))
         throw Object.assign(new Error('当前描述/创作无需检索，请直接依据图片和材料回答；用户明确要求外部核实后再联网'), { code: 'SEARCH_NOT_REQUESTED', kind: 'api' });
       // 无状态相同参数最多2次；已声明的状态续接最多4次同参，仍执行自身额度/材料/阶段检查，不把新状态误作旧结果。
@@ -60,7 +62,7 @@ export async function executeToolCalls(
       const scopeIssue = review.toolBlock?.(c.name);
       if (scopeIssue) throw Object.assign(new Error(scopeIssue), { code: 'TASK_SCOPE_AFTER_DENIAL', kind: 'input' });
       const bad = c.parseError || validateArgs(tool, c.args);
-      if (bad) throw Object.assign(new Error(`${bad}。请检查参数后重新调用。`), isDiagramTool(c.name) ? { code: 'DIAGRAM_INPUT', kind: 'input' } : {});
+      if (bad) throw Object.assign(new Error(`${bad}。请检查参数后重新调用。`), isDiagramTool(c.name) ? { code: 'DIAGRAM_INPUT', kind: 'input' } : { name: 'ValidationError', code: 'INVALID_TOOL_ARGS', kind: 'input' });
       await assertArchitectureToolCall(c.name, c.args, { signal });
       // 文件已验过可用（能读回、没报错、之后没改过）且已经核实过一次：不再读，免得“读取 → 核实 → 再核实”绕圈
       if (review.rereadBlocked?.(c.name, c.args)) {
@@ -119,6 +121,11 @@ export async function executeToolCalls(
       lookupRecovery = e.lookupRecovery;
       if (e.code === 'RETRIEVAL_BUDGET') retrieval.close(e.message);
       output = `错误：${e.message || e}`;
+      if (['verify_numbers', 'time_calc'].includes(c.name) && (e.name === 'ValidationError' || /^INVALID_/.test(e.code || ''))) output += '\n请按参数说明改写后重试一次。仍无法计算时必须给用户明确答复；能推算的注明“工具没能计算，以下按常识推算”，列基准和算式，不能称工具已核验，不能只说正在处理。';
+    }
+    if (failure?.code === 'LOOKUP_SOURCE_COOLING') loader.cool?.(c.name, failure.cooldownUntil);
+    for (const attempt of lookupRecovery?.attempts || []) {
+      if (attempt.failure === 'cooling') loader.cool?.(attempt.tool, attempt.cooldownUntil);
     }
     const recovery = diagramRecovery?.record(c.name, c.args, failure);
     const diagnostics = diagramFailureDetails(failure);
@@ -134,7 +141,7 @@ export async function executeToolCalls(
     emit({ type: 'tool_end', id: c.id, name: c.name, ok, output, ...(failure && { errorKind: errorKind(failure), code: failure.code }), ms: Date.now() - t0 });
     if (failure?.code !== 'RETRIEVAL_BUDGET') throwControl(failure, signal);
     review.record({ name: c.name, args: c.args, ok, output, code: failure?.code, lookupRecovery });
-    return { c, ok, output, outImages, ...(lookupRecovery && { lookupRecovery }), ...(failure && { failure: { code: failure.code, name: failure.name, kind: failure.kind, status: failure.status } }), ...(recovery?.stopped && { recoveryStop: recovery.message }) };
+    return { c, ok, output, outImages, ...(lookupRecovery && { lookupRecovery }), ...(failure && { failure: { code: failure.code, name: failure.name, kind: failure.kind, status: failure.status, cooldownUntil: failure.cooldownUntil, tool: failure.tool } }), ...(recovery?.stopped && { recoveryStop: recovery.message }) };
   };
   // 互不影响的只读调用（搜索、读文件、读网页……）同时做；其余按顺序一个个做
   const results = [];

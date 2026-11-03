@@ -20,6 +20,8 @@ import { createDocumentTools } from './documentTools.js';
 import { searchRequest, screenSearchHits } from './retrievalQuality.js';
 import { createStockKlineTool } from './stockKline.js';
 import { createMarketQuoteTool } from './marketQuote.js';
+import { createTimeCalcTool } from './timeCalc.js';
+import { normalizeToolFormats } from './toolInputFormats.js';
 import { createSportsScoresTool } from './sportsScores.js';
 import { createHoldingTools } from './holdings.js';
 import { queryGuardTool, guardQuery } from './queryGuard.js';
@@ -125,7 +127,8 @@ export function createTools(ctx) {
   const overwriteWarned = new Set();
   const tools = [
     ...(ctx.convertLegacyDoc ? [legacyDocumentTool(ctx)] : []),
-    createVerificationTool(),
+    createVerificationTool(ctx),
+    createTimeCalcTool(ctx),
     createWorkRecordsTool(),
     createSongTool(ctx),
     createOcrTool(ctx),
@@ -796,7 +799,7 @@ export function normalizeArgs(tool, args) {
     args[k] = v;
     delete args[alt];
   }
-  return args;
+  return normalizeToolFormats(tool, args);
 }
 
 export function validateArgs(tool, args) {

@@ -3,6 +3,7 @@ import { lookupIntent } from './intent.js';
 import { recoveryText } from './recoveryData.js';
 import { withWebDeadline } from './request.js';
 import { WEATHER_FETCH_MS } from './weatherLimits.js';
+import { localLookupFailure } from './healthPolicy.js';
 
 /** 沿用原工具的提供者、凭据和回执；记录的是整项查询健康，不冒充单个上游可用性。 */
 export const LOOKUP_OPERATIONS = [
@@ -37,7 +38,7 @@ export async function runLookupOperation(tool, args, execution, lookup = {}) {
     if (signal?.aborted) throw signal.reason;
     const status = await lookup.health?.get(source.id);
     if (signal?.aborted) throw signal.reason;
-    if (status?.cooling) throw Object.assign(new Error(`${source.label}连续连接失败，冷却至${new Date(status.cooldownUntil).toISOString()}；可换原有来源或稍后重试`), { code: 'LOOKUP_SOURCE_COOLING' });
+    if (status?.cooling) throw Object.assign(new Error(`${source.label}连续连接失败，冷却至${new Date(status.cooldownUntil).toISOString()}；冷却期间不要再调用此工具，可改用其他可用来源`), { code: 'LOOKUP_SOURCE_COOLING', cooldownUntil: status.cooldownUntil, tool: tool.name });
     const timeoutMs = Math.min(source.timeoutMs, retrieval?.remaining ?? Infinity);
     if (timeoutMs <= 0) throw Object.assign(new Error('本轮查询时间已用完，未发起新请求'), { code: 'RETRIEVAL_BUDGET' });
     try {
@@ -47,8 +48,8 @@ export async function runLookupOperation(tool, args, execution, lookup = {}) {
       return result;
     } catch (error) {
       // 输入不合法、用户取消或次数耗尽不属于提供者故障，不能因此冷却整个查询入口。
-      if (!signal?.aborted && !['AbortError', 'ValidationError'].includes(error.name) && !['RETRIEVAL_BUDGET', 'LOOKUP_SOURCE_COOLING', 'UNTRUSTED_JSON_HOST', 'INVALID_STOCK_INPUT'].includes(error.code)) {
-        await lookup.health?.record(source.id, { state: 'failed', code: [401, 402, 403, 429].includes(error.status) ? 'LOOKUP_AUTH' : error.code || error.name, elapsedMs: performance.now() - started }, { signal });
+      if (!signal?.aborted && !localLookupFailure(error)) {
+        await lookup.health?.record(source.id, { state: error.connected === true ? 'empty' : 'failed', code: [401, 402, 403, 429].includes(error.status) ? 'LOOKUP_AUTH' : error.code || error.name, sourceFailures: error.sourceFailures, elapsedMs: performance.now() - started }, { signal });
       }
       throw error;
     }
@@ -80,7 +81,7 @@ export function connectLookupTools(tools, lookup) {
             return { ok: true, output: typeof value === 'object' && 'text' in value ? value.text : String(value) };
           } catch (error) {
             if (execution.signal?.aborted) throw error;
-            return { ok: false, failure: { name: error.name, code: error.code, kind: error.kind, status: error.status } };
+            return { ok: false, failure: { name: error.name, code: error.code, kind: error.kind, status: error.status, cooldownUntil: error.cooldownUntil, tool: error.tool } };
           }
         }))
       });

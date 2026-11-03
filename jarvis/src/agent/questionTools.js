@@ -22,5 +22,5 @@ export function questionToolProfile(text, { images = [], history: priorMessages 
 
 export function toolsForQuestion(tools, profile) {
   if (!profile) return tools;
-  return profile === 'calculation' ? tools.filter(tool => tool.name === 'verify_numbers') : [];
+  return profile === 'calculation' ? tools.filter(tool => ['verify_numbers', 'time_calc', 'get_current_time'].includes(tool.name)) : [];
 }

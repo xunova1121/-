@@ -1,5 +1,6 @@
 import { shortSourceRetry } from './lookup/sourceRetry.js';
 import { httpError, throwControl } from '../core/networkRequest.js';
+import { parseMoment, momentInfo } from './timeMoment.js';
 
 const invalid = (message) => Object.assign(new Error(message), { name: 'ValidationError', code: 'INVALID_STOCK_INPUT' });
 export function stockSymbol(code) {
@@ -7,7 +8,7 @@ export function stockSymbol(code) {
     .trim()
     .toLowerCase();
   if (/^(sh|sz|bj)\d{6}$/.test(value)) return value;
-  if (!/^\d{6}$/.test(value)) throw invalid('请提供六位证券代码，不凭名称猜测代码');
+  if (!/^\d{6}$/.test(value)) throw invalid('请提供六位证券代码（如600519），不凭名称猜测代码；按名字查请用get_market_quote');
   if (/^6/.test(value)) return 'sh' + value;
   if (/^[03]/.test(value)) return 'sz' + value;
   if (/^[48]|^92/.test(value)) return 'bj' + value;
@@ -92,9 +93,9 @@ export function createStockKlineTool(ctx = {}) {
     input_schema: {
       type: 'object',
       properties: {
-        code: { type: 'string' },
-        start: { type: 'string' },
-        end: { type: 'string' },
+        code: { type: 'string', description: '六位证券代码，如600519或sh600519；按名字查实时报价用get_market_quote' },
+        start: { type: 'string', description: '北京时间起始日期，接受2026/11/3、11月3日、昨天等' },
+        end: { type: 'string', description: '北京时间结束日期，接受2026-11-03、今天等' },
         adjustment: { type: 'string', enum: ['none', 'qfq', 'hfq'] },
         limit: { type: 'integer', minimum: 1, maximum: 120 }
       },
@@ -103,12 +104,16 @@ export function createStockKlineTool(ctx = {}) {
     },
     run: async ({ code, start, end, adjustment = 'none', limit = 60 }, { signal, retrieval } = {}) => {
       const symbol = stockSymbol(code);
+      const requestTime = typeof ctx.now === 'function' ? ctx.now() : Date.now();
+      try {
+        if (start) start = momentInfo(parseMoment(start, requestTime)).date;
+        if (end) end = momentInfo(parseMoment(end, requestTime)).date;
+      } catch { throw invalid('日期无效，接受2026-11-03、2026/11/3、11月3日、今天；日期必须真实存在'); }
       if (start) day(start);
       if (end) day(end);
       if (start && end && start > end) throw invalid('开始日期不能晚于结束日期');
       if (!['none', 'qfq', 'hfq'].includes(adjustment) || !Number.isInteger(limit) || limit < 1 || limit > 120) throw invalid('复权方式或条数不合法');
       const mode = adjustment === 'none' ? '' : adjustment;
-      const requestTime = typeof ctx.now === 'function' ? ctx.now() : Date.now();
       const providers = [
         {
           source: '腾讯行情',

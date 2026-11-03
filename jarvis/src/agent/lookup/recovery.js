@@ -11,6 +11,7 @@ export async function recoverLookup(intent, plan, options) {
   const { signal, text = '', execute, getTool, lastGood, clock, retrieval } = options;
   const now = options.nowFn || Date.now;
   const attempts = [];
+  const cooled = new Set();
   const key = lastGoodKey(intent, plan, text);
   const left = () => Math.min(clock?.retrievalRemaining() ?? Infinity, retrieval?.remaining ?? Infinity);
   // 有时钟/预算时按剩余时间给（最多20秒）；没有任何时钟约束时保持原短超时，避免无界等待
@@ -18,7 +19,7 @@ export async function recoverLookup(intent, plan, options) {
   const check = () => { if (signal?.aborted) throw signal.reason || Object.assign(new Error('已停止'), { name: 'AbortError' }); };
   async function attempt(call, label, timeoutMs) {
     check();
-    if (!getTool(call.name) || left() <= 250) return null;
+    if (cooled.has(call.name) || !getTool(call.name) || left() <= 250) return null;
     try {
       const [row] = await withWebDeadline(s => execute([{ id: `lookup-recovery-${attempts.length}`, ...call }], s), { signal, timeoutMs: Math.min(timeoutMs, left()) });
       check();
@@ -32,7 +33,8 @@ export async function recoverLookup(intent, plan, options) {
       check();
       if (error.code === 'RETRIEVAL_BUDGET') { attempts.push({ label, failure: 'budget' }); return null; }
       const failure = failureKind(error);
-      attempts.push({ label, failure });
+      if (failure === 'cooling') cooled.add(call.name);
+      attempts.push({ label, failure, ...(failure === 'cooling' && { tool: call.name, cooldownUntil: error.cooldownUntil }) });
       if (failure === 'input') return { tool: plan.name, args: plan.args, output: intent.kind === 'weather' ? '你想查哪个城市或区县的天气？' : '请告诉我证券代码和要查询的价格口径。', recovery: { state: 'input', attempts } };
       return null;
     }

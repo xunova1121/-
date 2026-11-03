@@ -42,7 +42,11 @@ function hints(kind, place = '') {
 }
 
 /** 交给模型的话：真实经过 + 要它自己想办法 + 收尾规矩 */
-export function selfDriveNote({ kind = 'general', place = '', tried = '' } = {}) {
+export function selfDriveNote({ kind = 'general', place = '', tried = '', cooled = [] } = {}) {
+  if (cooled.length) {
+    const blocked = cooled.map(row => `${LABEL[row.tool] || row.tool}冷却至北京时间${new Date(row.until).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}`).join('；');
+    return `（系统：快查没有取得结果。${tried ? `已经试过：${tried}。` : ''}${blocked}。这些工具已临时移出可调用列表，冷却期间不能换参数重试。只可使用仍可用的其他工具读取已知可靠来源；没有可用路径时直接说明缺少实时数据，不编造数字，不为了凑次数继续调用。）`;
+  }
   return `（系统：程序的快查没拿到可用结果${tried ? `。已经试过：${tried}` : ''}。这些路这轮不要原样重试。普通查询时限已解除，你还有约${SELF_DRIVE_MS / 60000}分钟：自己想办法把问题查到——换搜索词、换来源、直接打开可靠网页。${hints(kind, place)}每次失败先想清原因再换办法，至少换两种不同办法；查到就直接回答并给来源和数据时间。真的都失败，只用一句话说清试过哪几种办法、各卡在哪，不要编造原因；也不要说“额度用完”“明天再查”。）`;
 }
 

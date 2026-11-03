@@ -363,7 +363,9 @@ var QUERY_LABELS = { weather: "\u5929\u6C14\u670D\u52A1", market: "\u884C\u60C5\
 function failureSentence(kind, attempts) {
   const routes = [...new Set(attempts.map((a) => a.label))].slice(0, 4).join("\u3001") || QUERY_LABELS[kind] || "\u67E5\u8BE2\u6765\u6E90";
   const reasons = [...new Set(attempts.map((a) => a.failure === "auth" ? "\u6388\u6743\u6216\u989D\u5EA6\u4E0D\u8DB3" : a.failure === "transient" ? "\u8FDE\u63A5\u8D85\u65F6\u6216\u4E0D\u7A33\u5B9A" : a.failure === "cooling" ? "\u6682\u65F6\u4E0D\u53EF\u7528" : "\u672A\u53D6\u5F97\u6709\u6548\u5185\u5BB9"))].join("\u3001");
-  return `${routes}\u90FD\u6CA1\u53D6\u5F97\u53EF\u7528\u7ED3\u679C\uFF08${reasons || "\u6682\u65F6\u65E0\u6CD5\u8FDE\u63A5"}\uFF09\uFF0C\u53EF\u4EE5\u7A0D\u540E\u518D\u8BD5\u3002`;
+  const cooling = attempts.filter((a) => a.failure === "cooling" && Number.isFinite(a.cooldownUntil));
+  const note = cooling.map((a) => `${a.label}\u51B7\u5374\u81F3\u5317\u4EAC\u65F6\u95F4${new Date(a.cooldownUntil).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}`).join("\uFF1B");
+  return `${routes}\u90FD\u6CA1\u53D6\u5F97\u53EF\u7528\u7ED3\u679C\uFF08${reasons || "\u6682\u65F6\u65E0\u6CD5\u8FDE\u63A5"}\uFF09\uFF0C\u53EF\u4EE5\u7A0D\u540E\u518D\u8BD5\u3002${note ? `${note}\uFF1B\u51B7\u5374\u671F\u95F4\u4E0D\u8981\u91CD\u590D\u8C03\u7528\u8FD9\u4E9B\u5DE5\u5177\uFF0C\u6362\u53C2\u6570\u4E5F\u4E0D\u80FD\u6062\u590D\u3002` : ""}`;
 }
 function usefulReceipt(found) {
   if (!found?.output?.trim()) return false;
@@ -1006,11 +1008,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 // src/agent/lookup/sourceRetry.js
-async function shortSourceRetry(work, { signal, beforeRetry } = {}) {
+async function shortSourceRetry(work, { signal, beforeRetry, firstMs = 3500, retryMs = 1500 } = {}) {
   for (let attempt = 0; attempt < 2; attempt++) {
     if (signal?.aborted) throw signal.reason;
     try {
-      return await withWebDeadline(work, { signal, timeoutMs: attempt ? 1500 : 3500 });
+      return await withWebDeadline(work, { signal, timeoutMs: attempt ? retryMs : firstMs });
     } catch (error) {
       if (signal?.aborted || attempt || failureKind(error) !== "transient") throw error;
       beforeRetry?.();
@@ -1287,6 +1289,26 @@ function createLastGood({ storage = collection("kv"), now = Date.now } = {}) {
   };
 }
 
+// src/agent/lookup/healthPolicy.js
+var LOCAL_CODES = /* @__PURE__ */ new Set([
+  "REPEATED_SEARCH",
+  "RETRIEVAL_BUDGET",
+  "ABORT_ERR",
+  "LOOKUP_SOURCE_COOLING",
+  "UNTRUSTED_JSON_HOST",
+  "INVALID_STOCK_INPUT",
+  "INVALID_QUOTE_INPUT",
+  "SEARCH_NOT_REQUESTED",
+  "ValidationError",
+  "AbortError"
+]);
+var localLookupFailure = (error) => LOCAL_CODES.has(error?.code) || ["AbortError", "ValidationError"].includes(error?.name);
+function consecutiveLookupFailures(samples) {
+  const network = samples.filter((sample) => !localLookupFailure(sample));
+  const last = network.slice(-3);
+  return last.length === 3 && last.every((sample) => !sample.connected);
+}
+
 // src/agent/lookup/health.js
 var LOOKUP_COOLDOWN_MS = 30 * 60 * 1e3;
 var KEY = "lookup.health.";
@@ -1309,7 +1331,7 @@ function createLookupHealth({ storage = collection("kv"), now = Date.now } = {})
   }
   function view(id, record) {
     const samples = Array.isArray(record?.samples) ? record.samples.slice(-10) : [];
-    const cooldownUntil = Number(record?.cooldownUntil) || 0;
+    const cooldownUntil = consecutiveLookupFailures(samples) ? Number(record?.cooldownUntil) || 0 : 0;
     const lastConnectedAt = samples.reduce((at, sample) => sample.connected ? Math.max(at, sample.at) : at, 0);
     const successRate = samples.length ? samples.filter((s) => s.state === "ok").length / samples.length : null;
     const averageMs = samples.length ? Math.round(samples.reduce((n, s) => n + s.elapsedMs, 0) / samples.length) : null;
@@ -1324,7 +1346,7 @@ function createLookupHealth({ storage = collection("kv"), now = Date.now } = {})
     },
     async record(id, result, { signal } = {}) {
       if (signal?.aborted) throw signal.reason;
-      if (result.state === "skipped" || ["RETRIEVAL_BUDGET", "ABORT_ERR"].includes(result.code)) return;
+      if (result.state === "skipped" || localLookupFailure(result)) return;
       const previous = queues.get(id) || Promise.resolve();
       const update = previous.catch(() => {
       }).then(async () => {
@@ -1337,10 +1359,11 @@ function createLookupHealth({ storage = collection("kv"), now = Date.now } = {})
           connected: result.state !== "failed",
           state: result.state,
           elapsedMs: Math.max(0, Math.min(6e4, Number(result.elapsedMs) || 0)),
-          code: String([401, 402, 403, 429].includes(result.status) ? "LOOKUP_AUTH" : result.code || "").slice(0, 60)
+          code: String([401, 402, 403, 429].includes(result.status) ? "LOOKUP_AUTH" : result.code || "").slice(0, 60),
+          // 只接受行情模块的固定来源标签和状态码，不写URL、请求参数、错误正文或配置。
+          ...Array.isArray(result.sourceFailures) && { sourceFailures: result.sourceFailures.filter((row) => /^(?:上海金|伦敦金|东方财富外汇|参考汇率|名字查代码|腾讯行情|(?:恒生.*指数|道琼斯工业指数|纳斯达克综合指数|标普500指数|日经225指数)（(?:腾讯行情|东方财富行情)）)$/.test(row.source) && /^[A-Za-z0-9_]{1,60}$/.test(row.code)).slice(0, 8).map((row) => ({ source: row.source, code: row.code })) }
         }].slice(-10);
-        const failures = samples.slice(-3);
-        const cooling = failures.length === 3 && failures.every((s) => !s.connected);
+        const cooling = consecutiveLookupFailures(samples);
         const record = { id: sourceKey(id), samples, cooldownUntil: cooling ? at + LOOKUP_COOLDOWN_MS : 0 };
         volatile.set(record.id, record);
         if (volatile.size > 128) volatile.delete(volatile.keys().next().value);
@@ -1393,6 +1416,7 @@ async function recoverLookup(intent, plan, options) {
   const { signal, text: text2 = "", execute, getTool, lastGood, clock, retrieval } = options;
   const now = options.nowFn || Date.now;
   const attempts = [];
+  const cooled = /* @__PURE__ */ new Set();
   const key = lastGoodKey(intent, plan, text2);
   const left = () => Math.min(clock?.retrievalRemaining() ?? Infinity, retrieval?.remaining ?? Infinity);
   const searchMs = (fallback) => Number.isFinite(left()) ? Math.min(RECOVERY_SEARCH_MS, left()) : fallback;
@@ -1401,7 +1425,7 @@ async function recoverLookup(intent, plan, options) {
   };
   async function attempt(call, label2, timeoutMs) {
     check();
-    if (!getTool(call.name) || left() <= 250) return null;
+    if (cooled.has(call.name) || !getTool(call.name) || left() <= 250) return null;
     try {
       const [row] = await withWebDeadline((s) => execute([{ id: `lookup-recovery-${attempts.length}`, ...call }], s), { signal, timeoutMs: Math.min(timeoutMs, left()) });
       check();
@@ -1418,7 +1442,8 @@ async function recoverLookup(intent, plan, options) {
         return null;
       }
       const failure = failureKind(error);
-      attempts.push({ label: label2, failure });
+      if (failure === "cooling") cooled.add(call.name);
+      attempts.push({ label: label2, failure, ...failure === "cooling" && { tool: call.name, cooldownUntil: error.cooldownUntil } });
       if (failure === "input") return { tool: plan.name, args: plan.args, output: intent.kind === "weather" ? "\u4F60\u60F3\u67E5\u54EA\u4E2A\u57CE\u5E02\u6216\u533A\u53BF\u7684\u5929\u6C14\uFF1F" : "\u8BF7\u544A\u8BC9\u6211\u8BC1\u5238\u4EE3\u7801\u548C\u8981\u67E5\u8BE2\u7684\u4EF7\u683C\u53E3\u5F84\u3002", recovery: { state: "input", attempts } };
       return null;
     }
@@ -1525,7 +1550,7 @@ async function runLookupOperation(tool, args, execution, lookup = {}) {
     if (signal?.aborted) throw signal.reason;
     const status = await lookup.health?.get(source.id);
     if (signal?.aborted) throw signal.reason;
-    if (status?.cooling) throw Object.assign(new Error(`${source.label}\u8FDE\u7EED\u8FDE\u63A5\u5931\u8D25\uFF0C\u51B7\u5374\u81F3${new Date(status.cooldownUntil).toISOString()}\uFF1B\u53EF\u6362\u539F\u6709\u6765\u6E90\u6216\u7A0D\u540E\u91CD\u8BD5`), { code: "LOOKUP_SOURCE_COOLING" });
+    if (status?.cooling) throw Object.assign(new Error(`${source.label}\u8FDE\u7EED\u8FDE\u63A5\u5931\u8D25\uFF0C\u51B7\u5374\u81F3${new Date(status.cooldownUntil).toISOString()}\uFF1B\u51B7\u5374\u671F\u95F4\u4E0D\u8981\u518D\u8C03\u7528\u6B64\u5DE5\u5177\uFF0C\u53EF\u6539\u7528\u5176\u4ED6\u53EF\u7528\u6765\u6E90`), { code: "LOOKUP_SOURCE_COOLING", cooldownUntil: status.cooldownUntil, tool: tool.name });
     const timeoutMs = Math.min(source.timeoutMs, retrieval?.remaining ?? Infinity);
     if (timeoutMs <= 0) throw Object.assign(new Error("\u672C\u8F6E\u67E5\u8BE2\u65F6\u95F4\u5DF2\u7528\u5B8C\uFF0C\u672A\u53D1\u8D77\u65B0\u8BF7\u6C42"), { code: "RETRIEVAL_BUDGET" });
     try {
@@ -1534,8 +1559,8 @@ async function runLookupOperation(tool, args, execution, lookup = {}) {
       await lookup.health?.record(source.id, { state: "ok", elapsedMs: performance.now() - started }, { signal });
       return result;
     } catch (error) {
-      if (!signal?.aborted && !["AbortError", "ValidationError"].includes(error.name) && !["RETRIEVAL_BUDGET", "LOOKUP_SOURCE_COOLING", "UNTRUSTED_JSON_HOST", "INVALID_STOCK_INPUT"].includes(error.code)) {
-        await lookup.health?.record(source.id, { state: "failed", code: [401, 402, 403, 429].includes(error.status) ? "LOOKUP_AUTH" : error.code || error.name, elapsedMs: performance.now() - started }, { signal });
+      if (!signal?.aborted && !localLookupFailure(error)) {
+        await lookup.health?.record(source.id, { state: error.connected === true ? "empty" : "failed", code: [401, 402, 403, 429].includes(error.status) ? "LOOKUP_AUTH" : error.code || error.name, sourceFailures: error.sourceFailures, elapsedMs: performance.now() - started }, { signal });
       }
       throw error;
     }
@@ -1569,7 +1594,7 @@ function connectLookupTools(tools, lookup) {
             return { ok: true, output: typeof value === "object" && "text" in value ? value.text : String(value) };
           } catch (error) {
             if (execution.signal?.aborted) throw error;
-            return { ok: false, failure: { name: error.name, code: error.code, kind: error.kind, status: error.status } };
+            return { ok: false, failure: { name: error.name, code: error.code, kind: error.kind, status: error.status, cooldownUntil: error.cooldownUntil, tool: error.tool } };
           }
         }))
       });
@@ -1850,6 +1875,105 @@ function newsMatchesRequest(item2, request = "") {
   return !resultOnly || Boolean(item2.verified === "page" && String(item2.summary || "").length >= 80);
 }
 
+// src/agent/timeMoment.js
+var DAY_MS = 864e5;
+var TIME_ZONE = "Asia/Shanghai";
+var timeInputError = (message) => Object.assign(new Error(`${message}\u3002\u53EF\u7528\u5199\u6CD5\uFF1A2026/11/3\u300111\u67083\u65E5\u4E0B\u53483\u70B950\u3001\u660E\u5929\u3001\u4E0B\u5468\u4E94\uFF1B\u4F8B\u5982 date="2026-11-03 15:50"\u3002`), { name: "ValidationError", code: "INVALID_TIME_INPUT" });
+var ZONES = {
+  \u5317\u4EAC: TIME_ZONE,
+  \u5317\u4EAC\u65F6\u95F4: TIME_ZONE,
+  \u4E0A\u6D77: TIME_ZONE,
+  \u4E2D\u56FD: TIME_ZONE,
+  \u7EBD\u7EA6: "America/New_York",
+  \u6D1B\u6749\u77F6: "America/Los_Angeles",
+  \u4F26\u6566: "Europe/London",
+  \u4E1C\u4EAC: "Asia/Tokyo",
+  \u6089\u5C3C: "Australia/Sydney",
+  \u5DF4\u9ECE: "Europe/Paris",
+  \u8FEA\u62DC: "Asia/Dubai",
+  \u65B0\u52A0\u5761: "Asia/Singapore",
+  \u9999\u6E2F: "Asia/Hong_Kong",
+  UTC: "UTC"
+};
+function timeZone(value = TIME_ZONE) {
+  const zone = ZONES[value] || value;
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: zone }).format(0);
+  } catch {
+    throw timeInputError("\u65F6\u533A\u4E0D\u8BA4\u8BC6\uFF0C\u8BF7\u7ED9\u57CE\u5E02\u540D\u6216 IANA \u65F6\u533A\u540D\uFF08\u5982 America/New_York\uFF09");
+  }
+  return zone;
+}
+function civilParts(stamp, zone = TIME_ZONE) {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(new Date(stamp));
+  return Object.fromEntries(parts.filter((p) => p.type !== "literal").map((p) => [p.type, Number(p.value)]));
+}
+function civilStamp(p) {
+  const date = /* @__PURE__ */ new Date(0);
+  date.setUTCFullYear(p.year, p.month - 1, p.day);
+  date.setUTCHours(p.hour || 0, p.minute || 0, p.second || 0, 0);
+  return date.getTime();
+}
+var same = (a, b) => ["year", "month", "day", "hour", "minute", "second"].every((key) => (a[key] || 0) === (b[key] || 0));
+function fromCivil(parts, zone = TIME_ZONE) {
+  const wall = civilStamp(parts);
+  if (!Number.isFinite(wall) || !same(civilParts(wall, "UTC"), parts)) throw timeInputError("\u65E5\u671F\u6216\u949F\u70B9\u4E0D\u5B58\u5728");
+  const offsets = new Set([-2, -1, 0, 1, 2].map((days) => {
+    const stamp = wall + days * DAY_MS;
+    return civilStamp(civilParts(stamp, zone)) - stamp;
+  }));
+  const matches = [...offsets].map((offset) => wall - offset).filter((stamp) => same(civilParts(stamp, zone), parts));
+  if (matches.length !== 1) throw timeInputError("\u8BE5\u65F6\u533A\u56E0\u590F\u4EE4\u65F6\u5B58\u5728\u91CD\u590D\u6216\u4E0D\u5B58\u5728\u7684\u949F\u70B9\uFF0C\u8BF7\u63D0\u4F9B\u5E26 UTC \u504F\u79FB\u7684 ISO \u65F6\u95F4");
+  return matches[0];
+}
+function momentInfo(stamp, zone = TIME_ZONE) {
+  const p = civilParts(stamp, zone);
+  const pad = (n) => String(n).padStart(2, "0");
+  return { date: `${p.year}-${pad(p.month)}-${pad(p.day)}`, time: `${pad(p.hour)}:${pad(p.minute)}:${pad(p.second)}`, weekday: new Intl.DateTimeFormat("zh-CN", { timeZone: zone, weekday: "long" }).format(stamp), timeZone: zone, iso: new Date(stamp).toISOString() };
+}
+function parseMoment(text2, now = Date.now(), zone = TIME_ZONE) {
+  if (typeof text2 !== "string" || !text2.trim()) throw timeInputError("\u8BF7\u63D0\u4F9B\u65E5\u671F\u6216\u65F6\u95F4");
+  const value = text2.trim().normalize("NFKC");
+  zone = timeZone(zone);
+  if (/^(现在|此刻|now)$/i.test(value)) return Number(now);
+  if (/^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d(?:\.\d{1,3})?)?(?:Z|[+-]\d\d:\d\d)$/.test(value)) {
+    const wall = value.replace(/(?:Z|[+-]\d\d:\d\d)$/, "");
+    parseMoment(wall, now, "UTC");
+    const stamp = Date.parse(value);
+    if (!Number.isFinite(stamp)) throw timeInputError("\u65F6\u95F4\u504F\u79FB\u4E0D\u5408\u6CD5");
+    return stamp;
+  }
+  const current = civilParts(Number(now), zone);
+  let p = { year: current.year, month: current.month, day: current.day, hour: 0, minute: 0, second: 0 };
+  let tail = value;
+  const absolute = value.match(/^(?:(\d{4})[-/年])?(\d{1,2})[-/月](\d{1,2})(?:日|号)?/);
+  if (absolute) {
+    p = { ...p, year: Number(absolute[1] || current.year), month: Number(absolute[2]), day: Number(absolute[3]) };
+    tail = value.slice(absolute[0].length);
+  } else {
+    const relative = value.match(/^(今天|明天|后天|昨天|前天|今晚|本月底|下周[一二三四五六日天])/);
+    if (relative) {
+      const word = relative[0];
+      const base = civilStamp(p);
+      const weekday2 = new Date(base).getUTCDay() || 7;
+      const offset = word.startsWith("\u4E0B\u5468") ? 7 - weekday2 + "\u4E00\u4E8C\u4E09\u56DB\u4E94\u516D\u65E5".indexOf(word.at(-1).replace("\u5929", "\u65E5")) + 1 : { \u4ECA\u5929: 0, \u4ECA\u665A: 0, \u660E\u5929: 1, \u540E\u5929: 2, \u6628\u5929: -1, \u524D\u5929: -2 }[word] || 0;
+      p = civilParts(word === "\u672C\u6708\u5E95" ? civilStamp({ year: p.year, month: p.month + 1, day: 1 }) - DAY_MS : base + offset * DAY_MS, "UTC");
+      tail = (word === "\u4ECA\u665A" ? "\u665A\u4E0A" : "") + value.slice(word.length);
+    }
+  }
+  tail = tail.replace(/^[T\s]+/, "").trim();
+  if (tail) {
+    const clock = tail.match(/^(凌晨|早上|上午|中午|下午|晚上)?\s*(\d{1,2})(?::|点|时)(?:(\d{1,2})(?:分)?)?(?::(\d{1,2})(?:\.\d{1,3})?|半|整)?$/);
+    if (!clock) throw timeInputError("\u65E0\u6CD5\u8BC6\u522B\u65E5\u671F\u6216\u949F\u70B9");
+    let hour = Number(clock[2]);
+    if (clock[1] && hour > 12) throw timeInputError("\u4E2D\u6587\u4E0A\u5348/\u4E0B\u5348\u949F\u70B9\u5E94\u4E3A0\u81F312\u70B9");
+    if (["\u4E0B\u5348", "\u665A\u4E0A", "\u4E2D\u5348"].includes(clock[1]) && hour < 12) hour += 12;
+    if (["\u51CC\u6668", "\u65E9\u4E0A", "\u4E0A\u5348"].includes(clock[1]) && hour === 12) hour = 0;
+    p = { ...p, hour, minute: tail.endsWith("\u534A") ? 30 : Number(clock[3] || 0), second: Number(clock[4] || 0) };
+  } else if (!absolute && !/^(今天|明天|后天|昨天|前天|本月底|下周[一二三四五六日天])$/.test(value)) throw timeInputError("\u65E0\u6CD5\u8BC6\u522B\u65E5\u671F");
+  return fromCivil(p, zone);
+}
+
 // src/agent/sportsZhibo8.js
 var ZHIBO8_URL = "https://bifen4pc.qiumibao.com/json/list.htm";
 var STATE = { 1: "\u672A\u5F00\u8D5B", 2: "\u8FDB\u884C\u4E2D", 3: "\u5B8C\u573A", 4: "\u5EF6\u671F", 6: "\u53D6\u6D88", 7: "\u5F85\u5B9A" };
@@ -2125,17 +2249,22 @@ var GROUPS = { \u4E94\u5927\u8054\u8D5B: ["eng.1", "esp.1", "ger.1", "ita.1", "f
 var NOT_COVERED = "CBA\u3001\u4E2D\u7532\u3001\u4E2D\u4E59\u3001\u5973\u8DB3\u8054\u8D5B\u3001\u7F51\u7403\u3001\u6392\u7403\u3001\u4E52\u4E53\u7403\u3001\u7FBD\u6BDB\u7403\u3001F1\u3001\u7535\u7ADE\u3001\u65AF\u8BFA\u514B";
 var MAX_DAYS = 3;
 var BEIJING_MS = 8 * 36e5;
-var DAY_MS = 24 * 36e5;
+var DAY_MS2 = 24 * 36e5;
 var invalid = (message) => Object.assign(new Error(message), { name: "ValidationError", code: "INVALID_SPORTS_INPUT" });
 var beijingDate = (ms) => new Date(ms + BEIJING_MS).toISOString().slice(0, 10);
 var beijingClock = (ms) => new Date(ms + BEIJING_MS).toISOString().slice(11, 16);
-function checkDate(value) {
+function checkDate(value, now) {
+  try {
+    value = momentInfo(parseMoment(value, now)).date;
+  } catch {
+    throw invalid("\u65E5\u671F\u65E0\u6548\uFF0C\u53EF\u5199YYYY-MM-DD\uFF08\u59822026-11-03\uFF09\u30012026/11/3\u300111\u67083\u65E5\u3001\u4ECA\u5929\uFF08\u5317\u4EAC\u65F6\u95F4\uFF09");
+  }
   const v = String(value);
   const ms = Date.parse(`${v}T00:00:00Z`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || !Number.isFinite(ms) || new Date(ms).toISOString().slice(0, 10) !== v) throw invalid("\u65E5\u671F\u8981\u5199\u6210 YYYY-MM-DD\uFF08\u5317\u4EAC\u65F6\u95F4\uFF09");
   return v;
 }
-var shiftDate = (date, days) => new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10);
+var shiftDate = (date, days) => new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY_MS2).toISOString().slice(0, 10);
 function pickLeagues({ sport = "all", leagues } = {}) {
   const wanted = (Array.isArray(leagues) ? leagues : leagues ? [leagues] : []).map((x) => String(x).trim()).filter(Boolean);
   if (wanted.length) {
@@ -2152,16 +2281,16 @@ function pickLeagues({ sport = "all", leagues } = {}) {
   return s ? LEAGUES.filter((l) => l.sport === s) : LEAGUES;
 }
 async function getSportsScores(args = {}, { get, signal, retrieval, now = Date.now(), progress, onScores, refresh = false } = {}) {
-  let from = args.date ? checkDate(args.date) : beijingDate(now);
+  let from = args.date ? checkDate(args.date, now) : beijingDate(now);
   const window = sportsWindow(args, now);
-  let to = args.end_date ? checkDate(args.end_date) : from;
+  let to = args.end_date ? checkDate(args.end_date, now) : from;
   if (["around", "forward_live"].includes(window.period)) {
     from = beijingDate(now - window.minutes * 6e4);
     to = beijingDate(now + window.minutes * 6e4);
   }
   if (window.period === "upcoming" && !args.end_date && from === beijingDate(now)) to = beijingDate(now + window.minutes * 6e4);
   if (to < from) throw invalid("\u7ED3\u675F\u65E5\u671F\u4E0D\u80FD\u65E9\u4E8E\u5F00\u59CB\u65E5\u671F");
-  if ((Date.parse(to) - Date.parse(from)) / DAY_MS >= MAX_DAYS) throw invalid(`\u4E00\u6B21\u6700\u591A\u67E5 ${MAX_DAYS} \u5929`);
+  if ((Date.parse(to) - Date.parse(from)) / DAY_MS2 >= MAX_DAYS) throw invalid(`\u4E00\u6B21\u6700\u591A\u67E5 ${MAX_DAYS} \u5929`);
   const selected = Array.isArray(args.teams) ? args.teams.filter((t) => typeof t === "string" && t.trim()).slice(0, 12) : [];
   if (args.teams && (!Array.isArray(args.teams) || args.teams.length > 12 || selected.length !== args.teams.length)) throw invalid("teams\u9700\u4E3A\u6700\u591A12\u4E2A\u975E\u7A7A\u961F\u540D");
   const asked = pickLeagues(args);
@@ -3039,7 +3168,7 @@ var invalid2 = (message) => Object.assign(new Error(message), { name: "Validatio
 function stockSymbol(code) {
   const value = String(code ?? "").trim().toLowerCase();
   if (/^(sh|sz|bj)\d{6}$/.test(value)) return value;
-  if (!/^\d{6}$/.test(value)) throw invalid2("\u8BF7\u63D0\u4F9B\u516D\u4F4D\u8BC1\u5238\u4EE3\u7801\uFF0C\u4E0D\u51ED\u540D\u79F0\u731C\u6D4B\u4EE3\u7801");
+  if (!/^\d{6}$/.test(value)) throw invalid2("\u8BF7\u63D0\u4F9B\u516D\u4F4D\u8BC1\u5238\u4EE3\u7801\uFF08\u5982600519\uFF09\uFF0C\u4E0D\u51ED\u540D\u79F0\u731C\u6D4B\u4EE3\u7801\uFF1B\u6309\u540D\u5B57\u67E5\u8BF7\u7528get_market_quote");
   if (/^6/.test(value)) return "sh" + value;
   if (/^[03]/.test(value)) return "sz" + value;
   if (/^[48]|^92/.test(value)) return "bj" + value;
@@ -3112,9 +3241,9 @@ function createStockKlineTool(ctx = {}) {
     input_schema: {
       type: "object",
       properties: {
-        code: { type: "string" },
-        start: { type: "string" },
-        end: { type: "string" },
+        code: { type: "string", description: "\u516D\u4F4D\u8BC1\u5238\u4EE3\u7801\uFF0C\u5982600519\u6216sh600519\uFF1B\u6309\u540D\u5B57\u67E5\u5B9E\u65F6\u62A5\u4EF7\u7528get_market_quote" },
+        start: { type: "string", description: "\u5317\u4EAC\u65F6\u95F4\u8D77\u59CB\u65E5\u671F\uFF0C\u63A5\u53D72026/11/3\u300111\u67083\u65E5\u3001\u6628\u5929\u7B49" },
+        end: { type: "string", description: "\u5317\u4EAC\u65F6\u95F4\u7ED3\u675F\u65E5\u671F\uFF0C\u63A5\u53D72026-11-03\u3001\u4ECA\u5929\u7B49" },
         adjustment: { type: "string", enum: ["none", "qfq", "hfq"] },
         limit: { type: "integer", minimum: 1, maximum: 120 }
       },
@@ -3123,12 +3252,18 @@ function createStockKlineTool(ctx = {}) {
     },
     run: async ({ code, start, end, adjustment = "none", limit = 60 }, { signal, retrieval } = {}) => {
       const symbol = stockSymbol(code);
+      const requestTime = typeof ctx.now === "function" ? ctx.now() : Date.now();
+      try {
+        if (start) start = momentInfo(parseMoment(start, requestTime)).date;
+        if (end) end = momentInfo(parseMoment(end, requestTime)).date;
+      } catch {
+        throw invalid2("\u65E5\u671F\u65E0\u6548\uFF0C\u63A5\u53D72026-11-03\u30012026/11/3\u300111\u67083\u65E5\u3001\u4ECA\u5929\uFF1B\u65E5\u671F\u5FC5\u987B\u771F\u5B9E\u5B58\u5728");
+      }
       if (start) day(start);
       if (end) day(end);
       if (start && end && start > end) throw invalid2("\u5F00\u59CB\u65E5\u671F\u4E0D\u80FD\u665A\u4E8E\u7ED3\u675F\u65E5\u671F");
       if (!["none", "qfq", "hfq"].includes(adjustment) || !Number.isInteger(limit) || limit < 1 || limit > 120) throw invalid2("\u590D\u6743\u65B9\u5F0F\u6216\u6761\u6570\u4E0D\u5408\u6CD5");
       const mode = adjustment === "none" ? "" : adjustment;
-      const requestTime = typeof ctx.now === "function" ? ctx.now() : Date.now();
       const providers = [
         {
           source: "\u817E\u8BAF\u884C\u60C5",
@@ -3474,13 +3609,13 @@ function parseSo360(html) {
   return out;
 }
 var CN_TZ = /^Asia\/(Shanghai|Chongqing|Chungking|Harbin|Urumqi|Kashgar)$/;
-async function detectRegion(fetchImpl, { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone, timeoutMs = 3500 } = {}) {
+async function detectRegion(fetchImpl, { timeZone: timeZone2 = Intl.DateTimeFormat().resolvedOptions().timeZone, timeoutMs = 3500 } = {}) {
   const probe = Promise.race([
     fetchImpl("https://www.google.com/generate_204").then((r) => r.status === 204 || r.ok),
     new Promise((resolve) => setTimeout(() => resolve(false), timeoutMs))
   ]).catch(() => false);
   if (!await probe) return "cn";
-  return CN_TZ.test(timeZone || "") ? "cn" : "global";
+  return CN_TZ.test(timeZone2 || "") ? "cn" : "global";
 }
 var FRESH_DAYS = { day: 1, week: 7, month: 30, year: 365 };
 var DESKTOP_HEADERS = {

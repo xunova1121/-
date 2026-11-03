@@ -9,6 +9,7 @@
  *   - A 股 T+1：当天买的当天不能卖
  */
 import { collection, uid } from './store.js';
+import { parseMoment, momentInfo } from './timeMoment.js';
 
 const kv = collection('kv');
 const KEY = 'holdings';
@@ -38,8 +39,8 @@ const positive = (n, what) => {
 };
 const dayOf = (date, now) => {
   if (!date) return bjDate(now);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) throw invalid('日期写成 YYYY-MM-DD');
-  return String(date);
+  try { return momentInfo(parseMoment(date, now)).date; }
+  catch { throw invalid('日期需真实存在，可写2026-11-03、2026/11/3、11月3日或今天（北京时间）'); }
 };
 
 /**

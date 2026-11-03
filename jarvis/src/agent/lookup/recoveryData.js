@@ -11,7 +11,9 @@ export const QUERY_LABELS = { weather: '天气服务', market: '行情服务', s
 export function failureSentence(kind, attempts) {
   const routes = [...new Set(attempts.map(a => a.label))].slice(0, 4).join('、') || QUERY_LABELS[kind] || '查询来源';
   const reasons = [...new Set(attempts.map(a => a.failure === 'auth' ? '授权或额度不足' : a.failure === 'transient' ? '连接超时或不稳定' : a.failure === 'cooling' ? '暂时不可用' : '未取得有效内容'))].join('、');
-  return `${routes}都没取得可用结果（${reasons || '暂时无法连接'}），可以稍后再试。`;
+  const cooling = attempts.filter(a => a.failure === 'cooling' && Number.isFinite(a.cooldownUntil));
+  const note = cooling.map(a => `${a.label}冷却至北京时间${new Date(a.cooldownUntil).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}`).join('；');
+  return `${routes}都没取得可用结果（${reasons || '暂时无法连接'}），可以稍后再试。${note ? `${note}；冷却期间不要重复调用这些工具，换参数也不能恢复。` : ''}`;
 }
 export function usefulReceipt(found) {
   if (!found?.output?.trim()) return false;

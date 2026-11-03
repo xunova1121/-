@@ -172,7 +172,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   const rereadBlocked = (name, args = {}) => VERIFY_TOOLS.test(name) && verified(args.path) && (reads.get(String(args.path).slice(0, 400)) ?? 0) >= 1;
   const required = () => {
     const contract = taskContract(request);
-    return Boolean(contract.media) || Boolean(concreteSourceRequirement(request)) || answerIssues.length > 0 || contract.formats.length > 0 || contract.coding || contract.remembering || contract.askingMemory || files.size > 0 || artifacts.size > 0 || receipts.some(receipt => receipt.tool === 'verify_numbers' && !receipt.ok || receipt.ok && /^(?:create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet|write_file|edit_file|run_javascript|run_python|computer_run|run_project_tests)$/.test(receipt.tool));
+    return Boolean(contract.media) || Boolean(concreteSourceRequirement(request)) || answerIssues.length > 0 || contract.formats.length > 0 || contract.coding || contract.remembering || contract.askingMemory || files.size > 0 || artifacts.size > 0 || receipts.some(receipt => ['verify_numbers', 'time_calc'].includes(receipt.tool) && !receipt.ok || receipt.ok && /^(?:create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet|write_file|edit_file|run_javascript|run_python|computer_run|run_project_tests)$/.test(receipt.tool));
   };
   const contractNote = () => {
     if (!required()) return '';
@@ -185,7 +185,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     const codeFiles = [...files.values()].filter((file) => /\.(?:[cm]?js|jsx|tsx?|py|html|css|json)$/i.test(file.path) || file.workspaceId && /\.(?:vue|svelte|sh|ya?ml|toml)$/i.test(file.path));
     const lastWrite = Math.max(0, ...codeFiles.map((file) => file.written));
     const current = receipts.filter((receipt) => receipt.version === version);
-    const lastNumeric = current.filter(receipt => receipt.tool === 'verify_numbers').at(-1);
+    const lastNumeric = current.filter(receipt => ['verify_numbers', 'time_calc'].includes(receipt.tool)).at(-1);
     const latest = new Map(current.map((receipt) => [receipt.key, receipt]));
     // 算“失败回执”的只有改东西、跑测试的操作：查资料没查到（门票没搜到）是信息缺口，在交付里标明即可；
     // 后来同一个工具又成功了（换了文件名重新生成）也算已解决
@@ -232,7 +232,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
           ? 'saved'
           : 'not_saved',
       memoryChecked: !taskContract(request).askingMemory || current.some((receipt) => receipt.ok && receipt.tool === 'recall'),
-      calculation: lastNumeric && !lastNumeric.ok ? 'failed' : receipts.some((receipt) => receipt.version === version && receipt.ok && /^(?:verify_numbers|run_javascript|run_python)$/.test(receipt.tool))
+      calculation: lastNumeric && !lastNumeric.ok ? 'failed' : receipts.some((receipt) => receipt.version === version && receipt.ok && /^(?:verify_numbers|time_calc|run_javascript|run_python)$/.test(receipt.tool))
         ? 'tool_checked'
         : 'not_checked',
       contract: taskContract(request),

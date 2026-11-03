@@ -1,4 +1,5 @@
 import { sportsWindow, inSportsWindow, inferSportsWindow } from './sportsWindow.js';
+import { parseMoment, momentInfo } from './timeMoment.js';
 import { throwControl } from '../core/networkRequest.js';
 import { fetchZhibo8, zhibo8Result } from './sportsZhibo8.js';
 import { selectedTeam } from './sportsFollowup.js';
@@ -85,7 +86,9 @@ const beijingClock = (ms) => new Date(ms + BEIJING_MS).toISOString().slice(11, 1
 const WEEK = '日一二三四五六';
 const weekday = (date) => `周${WEEK[new Date(`${date}T00:00:00Z`).getUTCDay()]}`;
 
-function checkDate(value) {
+function checkDate(value, now) {
+  try { value = momentInfo(parseMoment(value, now)).date; }
+  catch { throw invalid('日期无效，可写YYYY-MM-DD（如2026-11-03）、2026/11/3、11月3日、今天（北京时间）'); }
   const v = String(value);
   const ms = Date.parse(`${v}T00:00:00Z`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || !Number.isFinite(ms) || new Date(ms).toISOString().slice(0, 10) !== v) throw invalid('日期要写成 YYYY-MM-DD（北京时间）');
@@ -118,9 +121,9 @@ export const clearScoresCache = clearScheduleCache;
  * @param {{ get: (url: string, init?: object) => Promise<Response>, signal?: AbortSignal, retrieval?: object, now?: number, progress?: (m: string) => void }} o
  */
 export async function getSportsScores(args = {}, { get, signal, retrieval, now = Date.now(), progress, onScores, refresh = false } = {}) {
-  let from = args.date ? checkDate(args.date) : beijingDate(now);
+  let from = args.date ? checkDate(args.date, now) : beijingDate(now);
   const window = sportsWindow(args, now);
-  let to = args.end_date ? checkDate(args.end_date) : from;
+  let to = args.end_date ? checkDate(args.end_date, now) : from;
   if (['around', 'forward_live'].includes(window.period)) {
     // 当前窗口跨午夜时同时读前后两天；不能先按“今天”裁掉昨晚仍在进行的比赛。
     from = beijingDate(now - window.minutes * 60_000);

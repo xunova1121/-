@@ -277,7 +277,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   if (sportsNewsOnly) tools = tools.filter(tool => tool.name !== 'get_sports_scores' && (tool.name !== 'get_today_news' || supportsSportsNews(tool)));
   const capabilities = capabilityBlock(availableTools);
   // 环境完全没有产物/计算核验能力时，直接说明未验收，不空转两轮模型。
-  const canReview = availableTools.some(tool => /^(?:create_document|write_long_document|edit_office_document|read_file|write_file|run_javascript|run_python|computer_run|computer_read_file|verify_numbers|create_diagram|export_diagram|generate_image|sing_song|generate_video|code_read|code_edit|code_write|code_run)$/.test(tool.name));
+  const canReview = availableTools.some(tool => /^(?:create_document|write_long_document|edit_office_document|read_file|write_file|run_javascript|run_python|computer_run|computer_read_file|verify_numbers|time_calc|create_diagram|export_diagram|generate_image|sing_song|generate_video|code_read|code_edit|code_write|code_run)$/.test(tool.name));
   const review = createExecutionReview(requirementText, { visual: images.length > 0 || history.some(message => message.images?.length) });
   const retrieval = createRetrievalBudget(codeWork?.enabled ? '代码开发' : images.length ? `逐项核验 ${requirementText}` : retrievalText ?? requirementText, { now, timeBudgetMs, clock: lookupControl });
   let lookupDelivery = createLookupDelivery(requirementText, now);
@@ -421,7 +421,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     retrieval.extend(SELF_DRIVE_MS);
     emit({ type: 'tool_progress', text: SELF_DRIVE_PROGRESS });
     emit({ type: 'diagnostic', phase: 'self_drive', tried: (recovery?.attempts?.length || 0) + triedCalls.length });
-    return selfDriveNote({ kind: retrieval.intent?.kind || 'general', place: preFound?.args?.place || '', tried: triedSummary({ recovery, calls: triedCalls }) });
+    return selfDriveNote({ kind: retrieval.intent?.kind || 'general', place: preFound?.args?.place || '', tried: triedSummary({ recovery, calls: triedCalls }), cooled: loader.cooled() });
   };
   // 严格架构流水线只在用户明确要逐条核对需求原文时接管；平时架构图由主模型直接 create_diagram 出图（见 diagramPlanning.js）
   if (depth === 0 && !images.length && strictArchitecture(userText)) {
@@ -634,7 +634,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     }
     if (guardedAnswer && !r.toolCalls.length && r.stop !== 'pause_turn') {
       const issues = review.checkAnswer(held, now());
-      const canCheckNumbers = availableTools.some(tool => /^(?:verify_numbers|run_javascript|run_python)$/.test(tool.name));
+      const canCheckNumbers = availableTools.some(tool => /^(?:verify_numbers|time_calc|run_javascript|run_python)$/.test(tool.name));
       if (issues.length && answerRepairs < 1 && !closing && !signal?.aborted && cur.adapter.kind !== 'mock' && (!review.report().calculationIssue || canCheckNumbers)) {
         answerRepairs++;
         // 评测统计：这次重写是哪条核对规则触发的（只记规则名，不记回答）
@@ -655,7 +655,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       const blocking = review.report().answerIssues.filter((issue) => !SOFT_ANSWER_RULES.has(rewriteRule(issue)));
       if (blocking.length) held = safeNewsPartial(requirementText, held, now()) || (lookupDelivery.hasResults ? lookupDelivery.text() : '') || newsCandidateLinks(requirementText, review.newsCandidates()) || '本轮未能生成符合当前要求的答复，请重新生成。';
       if (review.report().styleIssues.length) held = held.trimEnd() + '\n\n' + review.styleCorrection();
-      if (review.report().calculation === 'failed') held = '关键数值校验失败，请人工复核。';
+      if (review.report().calculation === 'failed' && !(/工具没能计算[，,；;。\s]*以下按常识推算/.test(held) && !/已通过.*校验|校验(?:已)?通过|工具(?:已)?(?:验证|核验|计算)成功/.test(held))) held = '关键数值校验失败，请人工复核。';
       else if (review.report().calculationIssue && ACK_ONLY.test(held.trim())) held = '关键数值尚未完成工具校验，请人工复核。';
     }
     if (!r.toolCalls.length && holding) {
@@ -762,7 +762,7 @@ function repeats(before, after) {
 /** 只回了一句“收到 / 好的” */
 const ACK_ONLY = /^(?:收到|好的|好|明白|了解|OK|ok|嗯)[。！!.]?$/;
 
-export const PARALLEL_SAFE = new Set(['get_today_news', 'fetch_json', 'get_stock_kline', 'get_market_quote', 'get_sports_scores', 'review_task', 'check_search_terms', 'web_search', 'fetch_url', 'read_evidence', 'read_file', 'list_files', 'find_files', 'search_in_files', 'kb_search', 'recall', 'search_conversations', 'list_my_messages', 'read_conversation', 'get_weather', 'get_current_time', 'verify_numbers', 'read_skill_file', 'computer_read_file', 'computer_list_dir']);
+export const PARALLEL_SAFE = new Set(['get_today_news', 'fetch_json', 'get_stock_kline', 'get_market_quote', 'get_sports_scores', 'review_task', 'check_search_terms', 'web_search', 'fetch_url', 'read_evidence', 'read_file', 'list_files', 'find_files', 'search_in_files', 'kb_search', 'recall', 'search_conversations', 'list_my_messages', 'read_conversation', 'get_weather', 'get_current_time', 'verify_numbers', 'time_calc', 'read_skill_file', 'computer_read_file', 'computer_list_dir']);
 const CODE_FILE = /\.(m?js|ts|py|html?)$/i;
 /** 回答结尾是“我现在开始 / 接下来生成 / 马上做 / 稍等”这类预告（说了要做但还没做） */
 /** “需要的话我可以接着做 PPT”这类询问不算（那是在问用户） */

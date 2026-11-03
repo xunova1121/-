@@ -116,17 +116,23 @@ export function quoteLine(row) {
 export function createMarketQuoteTool(ctx = {}) {
   const get = ctx.fetchViaGateway ?? ctx.fetchImpl ?? ((...args) => fetch(...args));
   const nowFn = typeof ctx.now === 'function' ? ctx.now : Date.now;
-  async function read(url, { signal, retrieval, source, gbk = false }) {
+  async function read(url, { signal, retrieval, source, gbk = false, onConnected }) {
     return shortSourceRetry(async requestSignal => {
       retrieval?.consume('read');
       const response = await get(url, { signal: requestSignal });
       if (!response.ok) throw httpError(response.status, '', source);
-      if (!gbk || typeof response.arrayBuffer !== 'function') return response.text();
+      if (!gbk || typeof response.arrayBuffer !== 'function') {
+        const text = await response.text();
+        onConnected?.();
+        return text;
+      }
       const bytes = await response.arrayBuffer();
+      onConnected?.();
       // 腾讯接口一般是 GBK；经网关或手机原生网络可能已转成 UTF-8。先严格按 UTF-8 解，不合法再按 GBK
       try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { /* 不是 UTF-8 */ }
       try { return new TextDecoder('gbk').decode(bytes); } catch { return new TextDecoder().decode(bytes); }
-    }, { signal });
+    // 用户国内服务器2026-11-03实测每日汇率约4.1秒，原3.5秒会过早中止；仍受整轮预算约束。
+    }, { signal, ...(source === '参考汇率' && { firstMs: 6000, retryMs: 1000 }) });
   }
   return {
     name: 'get_market_quote',
@@ -142,22 +148,35 @@ export function createMarketQuoteTool(ctx = {}) {
       if (!value) throw invalid('请说明要查哪只股票、哪个指数、金价还是哪种货币的汇率');
       const parsed = quoteTarget(value) || (/^[A-Z]{3}$/.test(value) ? { kind: 'fx', target: value } : { kind: 'stock', target: value });
       const failed = [];
+      const sourceFailures = [];
+      let connected = false;
+      const onConnected = () => { connected = true; };
       const rows = [];
       const sources = [];
       const tencent = async symbols => {
         const url = 'https://qt.gtimg.cn/q=' + symbols.join(',');
-        const list = parseTencentQuote(await read(url, { signal, retrieval, source: '腾讯行情', gbk: true }));
+        const list = parseTencentQuote(await read(url, { signal, retrieval, source: '腾讯行情', gbk: true, onConnected }));
         if (list.length) sources.push('腾讯行情 ' + url);
         return list;
       };
       const east = async (secid, extra = {}) => {
         const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${encodeURIComponent(secid)}&fltt=2&invt=2&fields=f43,f44,f45,f46,f58,f60,f86,f169,f170`;
-        const row = parseEastQuote(await read(url, { signal, retrieval, source: '东方财富行情' }), secid);
+        const row = parseEastQuote(await read(url, { signal, retrieval, source: '东方财富行情', onConnected }), secid);
         if (row) { rows.push({ ...row, ...extra }); sources.push('东方财富行情 ' + url); }
         return row;
       };
       const tryStep = async (label, work) => {
-        try { return await work(); } catch (error) { throwControl(error, signal); failed.push(label + '：' + String(error.code || error.status || error.name || '失败').slice(0, 60)); return null; }
+        try {
+          const value = await work();
+          if (!value || Array.isArray(value) && !value.length) sourceFailures.push({ source: label, code: 'EMPTY_OR_UNRECOGNIZED' });
+          return value;
+        } catch (error) {
+          throwControl(error, signal);
+          const code = String(error.cause?.code || error.code || error.status || error.name || '失败').slice(0, 60);
+          sourceFailures.push({ source: label, code });
+          failed.push(label + '：' + code);
+          return null;
+        }
       };
       let note = '免费公开行情接口，可能延迟几秒到15分钟，不是交易所逐笔成交。';
       if (parsed.kind === 'gold') {
@@ -170,7 +189,7 @@ export function createMarketQuoteTool(ctx = {}) {
         const live = await tryStep('东方财富外汇', () => east(`133.${code}CNH`, { name: `${code}/人民币（离岸）`, unit: '' }));
         if (!live) await tryStep('参考汇率', async () => {
           const url = `https://open.er-api.com/v6/latest/${code}`;
-          const data = JSON.parse(await read(url, { signal, retrieval, source: '参考汇率' }));
+          const data = JSON.parse(await read(url, { signal, retrieval, source: '参考汇率', onConnected }));
           const rate = Number(data?.rates?.CNY);
           if (data?.result !== 'success' || !(rate > 0)) throw Object.assign(new Error('参考汇率无效'), { code: 'NO_MARKET_DATA' });
           rows.push({ symbol: code + 'CNY', name: `1 ${code} 兑人民币（每日参考价）`, price: +rate.toFixed(4), prevClose: null, change: null, changePct: null, time: String(data.time_last_update_utc || '').slice(0, 25), unit: '元', reference: true });
@@ -196,7 +215,7 @@ export function createMarketQuoteTool(ctx = {}) {
         else if (/^\d{6}$/.test(raw)) symbol = (/^[65]/.test(raw) ? 'sh' : /^[48]|^92/.test(raw) ? 'bj' : 'sz') + raw;
         if (!symbol) {
           const url = 'https://smartbox.gtimg.cn/s3/?v=2&t=all&q=' + encodeURIComponent(parsed.target);
-          const hits = await tryStep('名字查代码', async () => parseTencentSuggest(await read(url, { signal, retrieval, source: '腾讯代码查询', gbk: true })));
+          const hits = await tryStep('名字查代码', async () => parseTencentSuggest(await read(url, { signal, retrieval, source: '腾讯代码查询', gbk: true, onConnected })));
           symbol = hits?.[0]?.symbol || '';
           if (!symbol && !failed.length) throw invalid(`没找到“${parsed.target}”对应的股票，请给出代码或完整名称`);
         }
@@ -205,7 +224,7 @@ export function createMarketQuoteTool(ctx = {}) {
           if (got) rows.push(got);
         }
       }
-      if (!rows.length) throw Object.assign(new Error(`报价来源都没取到数据（${failed.join('；') || '无结果'}）`), { code: 'NO_MARKET_DATA', kind: 'network' });
+      if (!rows.length) throw Object.assign(new Error(`报价来源都没取到数据（${failed.join('；') || '无结果'}）`), { code: 'NO_MARKET_DATA', kind: connected ? 'data' : 'network', connected, sourceFailures });
       return [
         `报价（取数时间 ${beijingNow(nowFn())} 北京时间）`,
         ...rows.map(row => (row.reference ? `${row.name}：${row.price} 元${row.time ? `（更新于 ${row.time}）` : ''}` : quoteLine(row))),

@@ -1,4 +1,5 @@
 import { mediaRequirement } from './actionDelivery.js';
+import { addedCalculationRequest } from './timeIntent.js';
 /** 合约只提取明确交付类型，完整要求仍由需求账本保存，不用它猜用户意图。 */
 /** 带数字的方案比较（“选哪个 / 哪个划算 / 值不值”，题里本来就要求有数字）：也要用工具算，第一轮 30 题实测决策题结论对、差额算错 */
 const CHOICE_MATH = /选哪个|哪个(?:更)?(?:划算|便宜|省钱|合适|好)|划不划算|(?:更|还是[^，,。？?]{0,12})划算|合算|值不值|哪种方案更/;
@@ -29,7 +30,7 @@ export function taskContract(text = '') {
   const codeOnly = /代码|函数|JavaScript|TypeScript|Python/i.test(value) && /不运行|不执行|直接展示|只给代码/.test(value);
   // 用户贴进来的长文（交接记录、报告原文）里顺带出现“计算”“百分比”不算要算数：长文只看开头是不是在请你算
   const askText = value.length > 600 ? value.slice(0, 200) : value;
-  const calculation = !codeOnly && (value.length <= 600 || /计算|核算|验算|算一下|算出|求出|合计|加起来/.test(askText)) && (!formats.length || /计算|核算|验算|算出|算式|求出|数值校验/.test(value)) && /\d/.test(value) && (/计算|算式|净重|货款|净盈利|手续费|相隔|权重|盈亏|收益率|孕周|多少天|相差|日期差|百分比|合计|加起来/.test(value) || CHOICE_MATH.test(value));
+  const calculation = !codeOnly && (value.length <= 600 || /计算|核算|验算|算一下|算出|求出|合计|加起来/.test(askText)) && (!formats.length || /计算|核算|验算|算出|算式|求出|数值校验/.test(value)) && (addedCalculationRequest(askText) || /\d/.test(value) && (/计算|算式|净重|货款|净盈利|手续费|相隔|权重|盈亏|收益率|孕周|多少天|相差|日期差|百分比|合计|加起来/.test(value) || CHOICE_MATH.test(value)));
   // 用户要她记住（不是在问“记住了吗”）：必须真的调用记忆工具；问有没有记住：必须先查
   const asking =
     /(?:记住|记下|记进去|放进记忆|记到记忆|记得)(?:了)?(?:吗|么|没有|没)[？?]?\s*$/m.test(value) || /有没有(?:记|放进)|你有(?:记|放进)[^。！!]*[吗么]/.test(value);
@@ -45,7 +46,7 @@ export function taskContract(text = '') {
     researching: /查|搜索|核实|调研|研究|最新|今天|行情/.test(value),
     criteria: [
       ...(media ? [`实际调用${media.tool}并取得${media.label}文件回执，排队或口头承诺不算完成`] : []),
-      ...(calculation ? ['先用verify_numbers或代码核对数值和日期基准，再给结论'] : []),
+      ...(calculation ? ['先用time_calc、verify_numbers或代码核对数值和日期基准，再给结论'] : []),
       ...(/日K|K线|最高价|最低价/i.test(value) ? ['历史日K优先get_stock_kline，明确证券代码、日期、复权和返回范围，不用搜索摘要冒充日K数据'] : []),
       ...(formats.length ? ['实际文件存在且可读回', '分别报告结构、内容、渲染和未解决问题'] : []),
       ...(creating && /代码|程序|脚本|网页|网站/.test(value)
