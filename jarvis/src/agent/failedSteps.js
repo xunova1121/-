@@ -28,7 +28,9 @@ export function recentWorkLog(history = []) {
     const when = m.ts ? new Date(m.ts).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '';
     const facts = [t.totalMs != null && `总耗时${sec(t.totalMs)}`, t.firstTextMs != null && `首字${sec(t.firstTextMs)}`, t.contextMs >= 300 && `准备上下文${sec(t.contextMs)}`, t.modelMs != null && `等模型${sec(t.modelMs)}`, t.toolCalls && `工具${t.toolCalls}次`, t.failedTools && `失败${t.failedTools}次`, t.retries && `重试${t.retries}次`, t.fallbacks && `换备用模型${t.fallbacks}次`].filter(Boolean).join('，');
     const fails = (m.failures || []).slice(-4).map((f) => `${f.tool}：${f.error}`).join('；');
-    return `- ${when ? when + ' ' : ''}回答“${String(m.content || '').replace(/\s+/g, ' ').slice(0, 30)}…”${facts ? `：${facts}` : ''}${fails ? `；失败步骤：${fails}` : ''}`;
+    // 换了哪个模型：A → B（原因），按发生顺序（用户 2026-11-03：只记“换备用模型2次”，问换成谁答不上来）
+    const swaps = (t.fallbackSteps || []).map((f) => `${f.from} → ${f.to}${f.reason ? `（${f.reason}）` : ''}`).join('；');
+    return `- ${when ? when + ' ' : ''}回答“${String(m.content || '').replace(/\s+/g, ' ').slice(0, 30)}…”${facts ? `：${facts}` : ''}${swaps ? `；换模型经过：${swaps}` : ''}${fails ? `；失败步骤：${fails}` : ''}`;
   });
   return `## 最近几轮的执行记录（系统真实记录）\n${lines.join('\n')}\n用户问“为什么慢 / 为什么查不到 / 为什么失败”时，只按这些记录说具体原因；记录里没有的就说“记录里看不到原因”，不许猜测，也不要把失败编成自己的操作失误。`;
 }

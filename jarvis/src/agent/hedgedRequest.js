@@ -16,7 +16,8 @@ export const HEDGE_MS = 10_000;
  * @param {() => void} [o.onSwitch]  备用模型胜出时
  * @returns {Promise<{ result: object, used: 'primary' | 'backup' }>}
  */
-export function runHedged({ primary, onPrimaryActivity, makeBackup, input, hedgeMs = HEDGE_MS, onText, onHedge, onSwitch }) {
+/** backupInput：备用模型用自己的系统说明（写着它自己的名字）；不给就和主模型共用 */
+export function runHedged({ primary, onPrimaryActivity, makeBackup, input, backupInput = null, hedgeMs = HEDGE_MS, onText, onHedge, onSwitch }) {
   return new Promise((resolve, reject) => {
     let winner = null;
     let backup = null;
@@ -66,7 +67,7 @@ export function runHedged({ primary, onPrimaryActivity, makeBackup, input, hedge
         },
         onActivity: () => choose('backup')
       });
-      backup.run(input).then(
+      backup.run(backupInput || input).then(
         (result) => {
           if (winner === 'primary') return;
           choose('backup');

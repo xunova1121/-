@@ -10,7 +10,7 @@
 export const REPO = 'xunova1121/-';
 export const RELEASE_REPO = 'xunova1121/weiyang-release';
 export const UPDATE_REPOS = [REPO, RELEASE_REPO];
-export const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`;
+export const RELEASES_PAGE = `https://github.com/${RELEASE_REPO}/releases/latest`; // 代码仓库已改私密，下载页用公开的安装包仓库
 const releases = (repo = REPO) => `https://github.com/${repo}/releases`;
 // 镜像依次试：一个连不上换下一个（用户 2026-11-01：ghfast.top 在服务器上连不上，加国内备用）
 export const MIRRORS = [(u) => u, (u) => `https://ghfast.top/${u}`, (u) => `https://gh-proxy.com/${u}`, (u) => `https://ghproxy.net/${u}`];

@@ -5,6 +5,7 @@ export function createTaskTiming(createdAt, now = Date.now) {
   let startedAt = null, endedAt = null, firstTextAt = null, contextMs = 0;
   let modelMs = 0, toolMs = 0, modelOpen = null, toolOpen = null;
   let modelCalls = 0, toolCalls = 0, failedTools = 0, retries = 0, fallbacks = 0, nativeSearchCalls = 0;
+  const fallbackSteps = []; // 换了哪个模型、为什么（最多5条；问“为啥慢、用的谁”时照实说）
   let inputChars = 0, inputCharSamples = 0, helperModelCalls = 0, helperInputChars = 0;
   let inputTextChars = 0, inputTextSamples = 0, systemChars = 0, toolSchemaChars = 0;
   let delegateTasks = 0;
@@ -84,7 +85,7 @@ export function createTaskTiming(createdAt, now = Date.now) {
         if (!activeTools.size) { toolMs += elapsed(toolOpen, t); toolOpen = null; }
       }
       if (e.type === 'retry') retries++;
-      if (e.type === 'fallback') fallbacks++;
+      if (e.type === 'fallback') { fallbacks++; if (fallbackSteps.length < 5) fallbackSteps.push({ from: String(e.from || '').slice(0, 80), to: String(e.to || '').slice(0, 80), reason: String(e.reason || '').slice(0, 80) }); }
       if (e.type === 'server_tool' && /search/.test(e.name || '')) nativeSearchCalls++;
     },
     finish() { if (endedAt == null) endedAt = now(); return this.snapshot(); },
@@ -106,6 +107,7 @@ export function createTaskTiming(createdAt, now = Date.now) {
         inputTextSamples, systemChars, toolSchemaChars,
         helperModelCalls, helperInputChars, delegateTasks,
         inputCharSamples, modelCalls, toolCalls, failedTools, retries, fallbacks, nativeSearchCalls,
+        ...(fallbackSteps.length && { fallbackSteps: fallbackSteps.map((row) => ({ ...row })) }),
         tools: structuredClone(byTool),
         backgroundModelCalls,
         rewrites: { ...rewrites },

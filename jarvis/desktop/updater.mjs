@@ -9,7 +9,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-export const RELEASES_URL = 'https://github.com/xunova1121/-/releases/latest';
+// 代码仓库已改私密（2026-11-03），下载页改指向公开的安装包仓库
+export const RELEASES_URL = 'https://github.com/xunova1121/weiyang-release/releases/latest';
 /** 安装包另放的公开仓库（用户 2026-11-02：代码仓库以后改私密）。原仓库检查失败时改从这里更新 */
 export const RELEASE_FEED = { provider: 'github', owner: 'xunova1121', repo: 'weiyang-release', releaseType: 'release' };
 const FIRST_CHECK_MS = 30_000;

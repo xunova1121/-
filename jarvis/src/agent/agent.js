@@ -549,8 +549,13 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     // 主模型 hedgeMs 内没反应：同时问备用模型，谁先有反应用谁（写文件的任务前面本来就要等很久，不这样做）
     if (!phase && hedgeMs > 0 && backups.length && !holding && !makingFile) {
       const next = backups[0];
+      // 备用模型的系统说明里写它自己的名字：原先两边共用主模型那份，备用模型答完却自称是另一个模型
+      const backupNote = modelNote ? `${modelNote}\n（原定的 ${model} 出错或太慢，这一轮实际由 ${next.model} 回答。）` : '';
+      const swapNote = (part) => typeof part === 'string' ? part.replace(usingNote, backupNote) : part;
+      const backupInput = usingNote && backupNote ? { ...input, system: Array.isArray(input.system) ? input.system.map(swapNote) : swapNote(input.system) } : input;
       const { result } = await runHedged({
         primary: request,
+        backupInput,
         onPrimaryActivity: (fn) => { primaryActivity = fn; },
         makeBackup: ({ onText, onActivity }) => makeRequest(next, onText, onActivity),
         input,
