@@ -1,5 +1,5 @@
 import { collection } from '../store.js';
-import { consecutiveLookupFailures, localLookupFailure } from './healthPolicy.js';
+import { consecutiveLookupFailures, localLookupFailure, providerLookupFailure } from './healthPolicy.js';
 
 export const LOOKUP_COOLDOWN_MS = 30 * 60 * 1000;
 const KEY = 'lookup.health.';
@@ -20,7 +20,7 @@ export function createLookupHealth({ storage = collection('kv'), now = Date.now 
   }
   function view(id, record) {
     const samples = Array.isArray(record?.samples) ? record.samples.slice(-10) : [];
-    // 保留旧样本供诊断，但忽略本地重复搜索造成的错误冷却；真实连续网络失败仍保留。
+    // 旧样本没有明确连接故障证据就不继续冷却，保留原始样本供诊断而不删记录。
     const cooldownUntil = consecutiveLookupFailures(samples) ? Number(record?.cooldownUntil) || 0 : 0;
     const lastConnectedAt = samples.reduce((at, sample) => sample.connected ? Math.max(at, sample.at) : at, 0);
     const successRate = samples.length ? samples.filter(s => s.state === 'ok').length / samples.length : null;
@@ -46,6 +46,9 @@ export function createLookupHealth({ storage = collection('kv'), now = Date.now 
         const samples = [...(Array.isArray(old?.samples) ? old.samples : []), {
           at, connected: result.state !== 'failed', state: result.state,
           elapsedMs: Math.max(0, Math.min(60000, Number(result.elapsedMs) || 0)),
+          // 无code的旧record({state:'failed'})调用表示调用方已判定连接失败；实际适配器提供明确分类。
+          providerFailure: result.providerFailure ?? (result.state === 'failed' && (!result.code && !result.status && !result.kind || providerLookupFailure(result))),
+          ...(Number.isInteger(result.status) && { status: result.status }),
           code: String([401, 402, 403, 429].includes(result.status) ? 'LOOKUP_AUTH' : result.code || '').slice(0, 60),
           // 只接受行情模块的固定来源标签和状态码，不写URL、请求参数、错误正文或配置。
           ...(Array.isArray(result.sourceFailures) && { sourceFailures: result.sourceFailures.filter(row => /^(?:上海金|伦敦金|东方财富外汇|参考汇率|名字查代码|腾讯行情|(?:恒生.*指数|道琼斯工业指数|纳斯达克综合指数|标普500指数|日经225指数)（(?:腾讯行情|东方财富行情)）)$/.test(row.source) && /^[A-Za-z0-9_]{1,60}$/.test(row.code)).slice(0, 8).map(row => ({ source: row.source, code: row.code })) })

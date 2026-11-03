@@ -19,7 +19,8 @@ export function newsSubject(text) {
   // 定时任务开头的说明里还套着【无需通知】，按“以】结尾的第一行”整行去掉，不能只去到第一个】
   const value = String(text).replace(/^(?:【这是定时任务)?[^\n]*】\n/, '').replace(/^【这是定时任务[\s\S]*?】\s*/, '').trim();
   if (value.length > 40) return '';
-  const rest = value.replace(/(?:不要|不用|不需要|别|无需)[^，。,]{0,12}/g, '').replace(GENERIC_NEWS, ' ').replace(/\s+/g, ' ').trim();
+  const rest = value.replace(/^(?:(?:请|帮我|麻烦)?\s*(?:再试(?:一次|一下|一遍|试)?|重试|重新(?:查一?下|查查|查|搜索|搜)?|再(?:查一?下|查查|查|搜索|搜))\s*)+/, '')
+    .replace(/(?:不要|不用|不需要|别|无需)[^，。,]{0,12}/g, '').replace(GENERIC_NEWS, ' ').replace(/\s+/g, ' ').trim();
   const words = rest.split(' ').filter(word => word.length >= 2 || /^[A-Za-z]{2,}$/.test(word));
   return words.length <= 4 ? words.join(' ').slice(0, 60) : '';
 }

@@ -22,7 +22,13 @@ export function createLookupService({ storage, get, now = Date.now } = {}) {
   ].flat().map(source => [source.id, source])).values()];
   let checking = false;
   const status = async (region = 'auto') => ({ region, resolvedRegion: lookupRegion(region),
-    operations: await Promise.all([...LOOKUP_OPERATIONS, ...WEATHER_HEALTH].map(async source => ({ id: source.id, label: source.label, region: source.region, validation: source.validation, validationNote: '随真实查询更新，主动检查不猜地点/代码或请求模型', ...(await health.get(source.id)) }))),
+    operations: await Promise.all([...LOOKUP_OPERATIONS, ...WEATHER_HEALTH].map(async source => {
+      const snapshot = await health.get(source.id);
+      const aggregate = ['query_search', 'query_quote', 'query_market', 'query_weather', 'query_sports'].includes(source.id);
+      return { id: source.id, label: source.label, region: source.region, validation: source.validation,
+        validationNote: aggregate ? '聚合入口不整体停用；旧样本仅供诊断，退避由单个上游管理' : '随真实查询更新，主动检查不猜地点/代码或请求模型',
+        ...snapshot, ...(aggregate && { cooling: false, cooldownUntil: 0, historicalCooldownUntil: snapshot.cooldownUntil }) };
+    })),
     sources: await Promise.all(all().map(async source => ({ id: source.id, label: source.label, category: source.category,
       region: source.region, validation: source.validation, validationNote: source.validationNote || '', ...(await health.get(source.id)) }))) });
   return {

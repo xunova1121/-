@@ -224,7 +224,7 @@ var GENERIC_NEWS = /最新|今日|今天|今早|今晚|昨晚|最近|近期|近�
 function newsSubject(text2) {
   const value = String(text2).replace(/^(?:【这是定时任务)?[^\n]*】\n/, "").replace(/^【这是定时任务[\s\S]*?】\s*/, "").trim();
   if (value.length > 40) return "";
-  const rest = value.replace(/(?:不要|不用|不需要|别|无需)[^，。,]{0,12}/g, "").replace(GENERIC_NEWS, " ").replace(/\s+/g, " ").trim();
+  const rest = value.replace(/^(?:(?:请|帮我|麻烦)?\s*(?:再试(?:一次|一下|一遍|试)?|重试|重新(?:查一?下|查查|查|搜索|搜)?|再(?:查一?下|查查|查|搜索|搜))\s*)+/, "").replace(/(?:不要|不用|不需要|别|无需)[^，。,]{0,12}/g, "").replace(GENERIC_NEWS, " ").replace(/\s+/g, " ").trim();
   const words = rest.split(" ").filter((word) => word.length >= 2 || /^[A-Za-z]{2,}$/.test(word));
   return words.length <= 4 ? words.join(" ").slice(0, 60) : "";
 }
@@ -627,6 +627,91 @@ function officialQueries(query, hits) {
   return [...new Set(sites)].slice(0, 3).map((site) => `${query} site:${site}`);
 }
 
+// src/agent/lookup/healthPolicy.js
+var LOCAL_CODES = /* @__PURE__ */ new Set([
+  "REPEATED_SEARCH",
+  "RETRIEVAL_BUDGET",
+  "ABORT_ERR",
+  "LOOKUP_SOURCE_COOLING",
+  "UNTRUSTED_JSON_HOST",
+  "INVALID_STOCK_INPUT",
+  "INVALID_QUOTE_INPUT",
+  "PRIVATE_NETWORK_BLOCKED",
+  "REDIRECT_BLOCKED",
+  "EVAL_QUOTA",
+  "EVAL_EXPIRED",
+  "SEARCH_NOT_REQUESTED",
+  "ValidationError",
+  "AbortError"
+]);
+var localLookupFailure = (error) => LOCAL_CODES.has(error?.code) || ["AbortError", "ValidationError"].includes(error?.name);
+function providerLookupFailure(value = {}) {
+  if (localLookupFailure(value)) return false;
+  if (Number.isInteger(value.status)) return value.status >= 500 || [401, 403, 429].includes(value.status);
+  if (["network", "timeout"].includes(value.kind) || ["TypeError", "TimeoutError", "NetworkError"].includes(value.name)) return true;
+  return /^(?:LOOKUP_AUTH|LOOKUP_TIMEOUT|LOOKUP_NETWORK|TimeoutError|TypeError|NetworkError|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|UND_ERR_CONNECT_TIMEOUT|UND_ERR_SOCKET)$/.test(value.code || "");
+}
+function consecutiveLookupFailures(samples) {
+  const network = samples.filter((sample) => !localLookupFailure(sample));
+  const last = network.slice(-3);
+  return last.length === 3 && last.every((sample) => !sample.connected && (sample.providerFailure ?? providerLookupFailure(sample)));
+}
+
+// src/agent/searchPolicy.js
+var SEARCH_WINDOW_MS = 2e4;
+var turnFailures = /* @__PURE__ */ new WeakMap();
+function searchRetryAfter(response, now = Date.now()) {
+  const value = response.headers?.get?.("retry-after");
+  if (!value) return 0;
+  const seconds = Number(value);
+  const delay = Number.isFinite(seconds) ? seconds * 1e3 : Date.parse(value) - now;
+  return Number.isFinite(delay) ? Math.max(0, delay) : 0;
+}
+function searchBackoff(error) {
+  if (localLookupFailure(error)) return 0;
+  if ([401, 402, 403, 429].includes(error.status)) return Math.max(18e4, error.retryAfterMs || 0);
+  if (error.status >= 500 || ["network", "timeout"].includes(error.kind) || ["TypeError", "TimeoutError", "NetworkError"].includes(error.name)) return 3e4;
+  return 0;
+}
+function guardedSearchRoute(engine, id, now = Date.now) {
+  if (!engine) return null;
+  let until = 0;
+  let failures = 0;
+  return {
+    ...engine,
+    async search(query, count, options = {}) {
+      if (options.signal?.aborted) throw options.signal.reason;
+      const context = options.routeContext;
+      let failed;
+      if (context && typeof context === "object") {
+        if (!turnFailures.has(context)) turnFailures.set(context, /* @__PURE__ */ new Set());
+        failed = turnFailures.get(context);
+      }
+      if (until > now() || failed?.has(id)) {
+        throw Object.assign(new Error(`${engine.name}\u672C\u8F6E\u6682\u505C\uFF0C\u7EE7\u7EED\u5176\u4ED6\u641C\u7D22\u6765\u6E90`), { code: "SEARCH_ROUTE_PAUSED", skipped: true });
+      }
+      try {
+        const result = await engine.search(query, count, options);
+        failures = 0;
+        return result;
+      } catch (error) {
+        if (options.signal?.aborted || error.name === "AbortError" || ["RETRIEVAL_BUDGET", "EVAL_QUOTA", "EVAL_EXPIRED"].includes(error.code)) throw error;
+        const delay = searchBackoff(error);
+        if (delay || error.skipped) failed?.add(id);
+        if (delay && (++failures >= 3 || [401, 402, 403, 429].includes(error.status))) until = now() + delay;
+        throw error;
+      }
+    }
+  };
+}
+function searchFailureLabel(error) {
+  if (error.skipped) return "\u672C\u8F6E\u6682\u505C\uFF0C\u5DF2\u8F6C\u5176\u4ED6\u6765\u6E90";
+  if (Number.isInteger(error.status)) return `HTTP ${error.status}`;
+  if (error.name === "TimeoutError" || error.kind === "timeout") return "\u8BF7\u6C42\u8D85\u65F6";
+  if (["network"].includes(error.kind) || ["NetworkError", "TypeError"].includes(error.name)) return "\u8FDE\u63A5\u5931\u8D25";
+  return "\u672A\u53D6\u5F97\u6709\u6548\u7ED3\u679C";
+}
+
 // src/agent/qianfanSearch.js
 var QIANFAN_ENDPOINT = "https://qianfan.baidubce.com/v2/ai_search/web_search";
 var secret = (value) => typeof value === "string" && !value.startsWith("\u2022\u2022\u2022\u2022") ? value.trim() : "";
@@ -697,7 +782,7 @@ function createQianfanSearch({ qianfanSearchKey, qianfanSearchTopK = 10, fetchVi
   return {
     name: "\u767E\u5EA6\u5343\u5E06\u641C\u7D22",
     async search(query, count = 10, options = {}) {
-      if (unavailableUntil > now()) throw Object.assign(new Error("\u767E\u5EA6\u641C\u7D22\u6682\u4E0D\u53EF\u7528\uFF0C3\u5206\u949F\u5185\u5148\u7528\u5176\u4ED6\u6765\u6E90"), { code: "QIANFAN_UNAVAILABLE", kind: "api", skipped: true });
+      if (unavailableUntil > now()) throw Object.assign(new Error("\u767E\u5EA6\u641C\u7D22\u77ED\u6682\u9000\u907F\uFF0C\u5148\u7528\u5176\u4ED6\u6765\u6E90"), { code: "QIANFAN_UNAVAILABLE", kind: "api", skipped: true });
       try {
         const request = qianfanRequest(query, { ...options, topK: options.topK ?? qianfanSearchTopK, now: now() });
         const data = await withWebDeadline(async (signal) => {
@@ -706,13 +791,14 @@ function createQianfanSearch({ qianfanSearchKey, qianfanSearchTopK = 10, fetchVi
             response = await get(QIANFAN_ENDPOINT, { method: "POST", redirect: "error", signal, headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" }, body: JSON.stringify(request) });
           } catch (failure) {
             throwControl(failure, signal);
+            if (localLookupFailure(failure)) throw failure;
             if (["EVAL_QUOTA", "EVAL_EXPIRED"].includes(failure.code)) throw failure;
             throw Object.assign(new Error("\u767E\u5EA6\u641C\u7D22\u7F51\u7EDC\u8FDE\u63A5\u5931\u8D25"), { kind: "network", code: "QIANFAN_NETWORK" });
           }
           if (!response.ok) {
             await response.body?.cancel?.();
             const detail = [401, 403].includes(response.status) ? "Key\u65E0\u6548\u3001\u65E0\u6743\u8BBF\u95EE\u6216\u672A\u751F\u6548\uFF0C\u8BF7\u6838\u5BF9\u670D\u52A1\u5668\u8BBE\u7F6E" : [402, 429].includes(response.status) ? "\u989D\u5EA6\u4E0D\u8DB3\u6216\u670D\u52A1\u5546\u9650\u6D41\uFF0C\u8BF7\u6838\u5BF9\u670D\u52A1\u5546\u8D26\u6237" : "\u670D\u52A1\u6682\u65F6\u4E0D\u53EF\u7528";
-            throw httpError(response.status, detail, "\u767E\u5EA6\u641C\u7D22");
+            throw Object.assign(httpError(response.status, detail, "\u767E\u5EA6\u641C\u7D22"), { retryAfterMs: searchRetryAfter(response, now()) });
           }
           const bytes = await webBody(response, 2 * 1024 * 1024, signal);
           let parsed;
@@ -739,7 +825,8 @@ function createQianfanSearch({ qianfanSearchKey, qianfanSearchTopK = 10, fetchVi
       } catch (failure) {
         throwControl(failure, options.signal);
         if (["EVAL_QUOTA", "EVAL_EXPIRED"].includes(failure.code)) throw failure;
-        if ([401, 403, 429].includes(failure.status) || failure.status >= 500 || ["timeout", "network"].includes(failure.kind) || failure.name === "TimeoutError") unavailableUntil = now() + 18e4;
+        const delay = searchBackoff(failure);
+        if (delay) unavailableUntil = now() + delay;
         throw failure;
       }
     }
@@ -747,6 +834,19 @@ function createQianfanSearch({ qianfanSearchKey, qianfanSearchTopK = 10, fetchVi
 }
 
 // src/agent/retrievalQuality.js
+var newsToday = (text2) => /今天|今日/.test(text2) && /新闻|资讯|时事/.test(text2);
+function screenSearchHits(hits, requestText = "") {
+  const input = Array.isArray(hits) ? hits.slice(0, 20) : [];
+  const dated = input.filter((hit) => datedSearchHits([hit], requestText).length > 0);
+  if (!newsToday(String(requestText))) return { hits: dated, rejected: input.length - dated.length };
+  const kept = dated.filter((hit) => {
+    const title = String(hit.title || "").trim();
+    const reference = /^\d{4}年(?:概况|日历|节假日|全年|放假安排)|关于\d{4}年部分节假日安排/.test(title);
+    const reported = /今日|今天|报道|消息|发布|公布/.test(title);
+    return !reference || reported;
+  });
+  return { hits: kept, rejected: input.length - kept.length };
+}
 function createQueryLedger() {
   const seen = /* @__PURE__ */ new Set();
   return (query) => {
@@ -999,7 +1099,7 @@ async function readLookupSource(source, { get = (...args) => fetch(...args), now
     };
   } catch (error) {
     if (signal?.aborted || error.code === "RETRIEVAL_BUDGET" || error.name === "AbortError") throw error;
-    return { source: source.id, label: source.label, url: source.url, state: "failed", items: [], reason: error.name === "TimeoutError" ? "\u8D85\u65F6\uFF08\u6765\u6E90\u603B\u671F\u96505\u79D2\uFF09" : error.code === "LOOKUP_PARSE" ? error.message : error.status ? "\u6765\u6E90\u8FD4\u56DEHTTP " + error.status : "\u8FDE\u4E0D\u4E0A\uFF1A" + String(error.message).slice(0, 100), status: error.status, code: error.code || (error.name === "TimeoutError" ? "LOOKUP_TIMEOUT" : "LOOKUP_NETWORK"), elapsedMs: Math.round(performance.now() - started), requests };
+    return { source: source.id, label: source.label, url: source.url, state: "failed", providerFailure: providerLookupFailure(error), items: [], reason: error.name === "TimeoutError" ? "\u8D85\u65F6\uFF08\u6765\u6E90\u603B\u671F\u96505\u79D2\uFF09" : error.code === "LOOKUP_PARSE" ? error.message : error.status ? "\u6765\u6E90\u8FD4\u56DEHTTP " + error.status : "\u8BFB\u53D6\u672A\u5B8C\u6210\uFF1A" + String(error.message).slice(0, 100), status: error.status, code: error.code || (error.name === "TimeoutError" ? "LOOKUP_TIMEOUT" : "LOOKUP_NETWORK"), elapsedMs: Math.round(performance.now() - started), requests };
   }
 }
 
@@ -1042,7 +1142,7 @@ async function weatherProvider(id, work, { signal, timeoutMs, health, ignoreCool
     await health?.record(id, { state: "ok", elapsedMs: performance.now() - started }, { signal });
     return result;
   } catch (error) {
-    if (!signal?.aborted && error.code !== "RETRIEVAL_BUDGET" && error.name !== "AbortError") await health?.record(id, { state: "failed", code: failureKind(error) === "auth" ? "LOOKUP_AUTH" : error.code || error.name, elapsedMs: performance.now() - started }, { signal });
+    if (!signal?.aborted && error.code !== "RETRIEVAL_BUDGET" && error.name !== "AbortError") await health?.record(id, { state: "failed", providerFailure: providerLookupFailure(error), status: error.status, code: failureKind(error) === "auth" ? "LOOKUP_AUTH" : error.code || error.name, elapsedMs: performance.now() - started }, { signal });
     throw error;
   }
 }
@@ -1289,26 +1389,6 @@ function createLastGood({ storage = collection("kv"), now = Date.now } = {}) {
   };
 }
 
-// src/agent/lookup/healthPolicy.js
-var LOCAL_CODES = /* @__PURE__ */ new Set([
-  "REPEATED_SEARCH",
-  "RETRIEVAL_BUDGET",
-  "ABORT_ERR",
-  "LOOKUP_SOURCE_COOLING",
-  "UNTRUSTED_JSON_HOST",
-  "INVALID_STOCK_INPUT",
-  "INVALID_QUOTE_INPUT",
-  "SEARCH_NOT_REQUESTED",
-  "ValidationError",
-  "AbortError"
-]);
-var localLookupFailure = (error) => LOCAL_CODES.has(error?.code) || ["AbortError", "ValidationError"].includes(error?.name);
-function consecutiveLookupFailures(samples) {
-  const network = samples.filter((sample) => !localLookupFailure(sample));
-  const last = network.slice(-3);
-  return last.length === 3 && last.every((sample) => !sample.connected);
-}
-
 // src/agent/lookup/health.js
 var LOOKUP_COOLDOWN_MS = 30 * 60 * 1e3;
 var KEY = "lookup.health.";
@@ -1359,6 +1439,9 @@ function createLookupHealth({ storage = collection("kv"), now = Date.now } = {})
           connected: result.state !== "failed",
           state: result.state,
           elapsedMs: Math.max(0, Math.min(6e4, Number(result.elapsedMs) || 0)),
+          // 无code的旧record({state:'failed'})调用表示调用方已判定连接失败；实际适配器提供明确分类。
+          providerFailure: result.providerFailure ?? (result.state === "failed" && (!result.code && !result.status && !result.kind || providerLookupFailure(result))),
+          ...Number.isInteger(result.status) && { status: result.status },
           code: String([401, 402, 403, 429].includes(result.status) ? "LOOKUP_AUTH" : result.code || "").slice(0, 60),
           // 只接受行情模块的固定来源标签和状态码，不写URL、请求参数、错误正文或配置。
           ...Array.isArray(result.sourceFailures) && { sourceFailures: result.sourceFailures.filter((row) => /^(?:上海金|伦敦金|东方财富外汇|参考汇率|名字查代码|腾讯行情|(?:恒生.*指数|道琼斯工业指数|纳斯达克综合指数|标普500指数|日经225指数)（(?:腾讯行情|东方财富行情)）)$/.test(row.source) && /^[A-Za-z0-9_]{1,60}$/.test(row.code)).slice(0, 8).map((row) => ({ source: row.source, code: row.code })) }
@@ -1411,7 +1494,7 @@ function relevantRecoverySearch(output, intent, args = {}, request = "") {
 }
 
 // src/agent/lookup/recovery.js
-var RECOVERY_SEARCH_MS = 2e4;
+var RECOVERY_SEARCH_MS = SEARCH_WINDOW_MS;
 async function recoverLookup(intent, plan, options) {
   const { signal, text: text2 = "", execute, getTool, lastGood, clock, retrieval } = options;
   const now = options.nowFn || Date.now;
@@ -1427,7 +1510,8 @@ async function recoverLookup(intent, plan, options) {
     check();
     if (cooled.has(call.name) || !getTool(call.name) || left() <= 250) return null;
     try {
-      const [row] = await withWebDeadline((s) => execute([{ id: `lookup-recovery-${attempts.length}`, ...call }], s), { signal, timeoutMs: Math.min(timeoutMs, left()) });
+      const sourceManaged = call.name === "web_search" && getTool(call.name)?.sourceHealthManaged;
+      const [row] = await withWebDeadline((s) => execute([{ id: `lookup-recovery-${attempts.length}`, ...call }], s), { signal, timeoutMs: Math.min(sourceManaged ? SEARCH_WINDOW_MS : timeoutMs, left()) });
       check();
       if (!row?.ok) throw Object.assign(new Error("\u6765\u6E90\u672A\u53D6\u5F97\u7ED3\u679C"), row?.failure || {});
       const found2 = { tool: call.name, args: call.args, query: call.args.query || "", output: String(row.output || "") };
@@ -1460,7 +1544,7 @@ async function recoverLookup(intent, plan, options) {
     await lastGood?.put(key, intent.kind, found2, { signal });
     return found2;
   }
-  const label = QUERY_LABELS[intent.kind] || "\u67E5\u8BE2\u6765\u6E90";
+  const label = plan.name === "web_search" ? "\u516C\u5F00\u641C\u7D22" : QUERY_LABELS[intent.kind] || "\u67E5\u8BE2\u6765\u6E90";
   let found = await attempt({ name: plan.name, args: plan.args }, label, plan.timeoutMs);
   if (found) return found.recovery?.state === "input" ? found : finish(found);
   if (!["get_weather", "get_stock_kline", "get_market_quote", "web_search"].includes(plan.name) && attempts.at(-1)?.failure === "transient") {
@@ -1545,13 +1629,14 @@ async function runLookupOperation(tool, args, execution, lookup = {}) {
   const source = LOOKUP_OPERATIONS.find((row) => row.tools.includes(tool.name));
   if (!source || execution.retrieval?.extensive) return tool.run(args, execution);
   const { signal, retrieval } = execution;
+  const perSource = tool.sourceHealthManaged === true;
   const started = performance.now();
   const work = async () => {
     if (signal?.aborted) throw signal.reason;
-    const status = await lookup.health?.get(source.id);
+    const status = perSource ? null : await lookup.health?.get(source.id);
     if (signal?.aborted) throw signal.reason;
     if (status?.cooling) throw Object.assign(new Error(`${source.label}\u8FDE\u7EED\u8FDE\u63A5\u5931\u8D25\uFF0C\u51B7\u5374\u81F3${new Date(status.cooldownUntil).toISOString()}\uFF1B\u51B7\u5374\u671F\u95F4\u4E0D\u8981\u518D\u8C03\u7528\u6B64\u5DE5\u5177\uFF0C\u53EF\u6539\u7528\u5176\u4ED6\u53EF\u7528\u6765\u6E90`), { code: "LOOKUP_SOURCE_COOLING", cooldownUntil: status.cooldownUntil, tool: tool.name });
-    const timeoutMs = Math.min(source.timeoutMs, retrieval?.remaining ?? Infinity);
+    const timeoutMs = Math.min(perSource && tool.name === "web_search" ? SEARCH_WINDOW_MS : source.timeoutMs, retrieval?.remaining ?? Infinity);
     if (timeoutMs <= 0) throw Object.assign(new Error("\u672C\u8F6E\u67E5\u8BE2\u65F6\u95F4\u5DF2\u7528\u5B8C\uFF0C\u672A\u53D1\u8D77\u65B0\u8BF7\u6C42"), { code: "RETRIEVAL_BUDGET" });
     try {
       const result = await withWebDeadline((activeSignal) => tool.run(args, { ...execution, signal: activeSignal }), { signal, timeoutMs });
@@ -1560,7 +1645,7 @@ async function runLookupOperation(tool, args, execution, lookup = {}) {
       return result;
     } catch (error) {
       if (!signal?.aborted && !localLookupFailure(error)) {
-        await lookup.health?.record(source.id, { state: error.connected === true ? "empty" : "failed", code: [401, 402, 403, 429].includes(error.status) ? "LOOKUP_AUTH" : error.code || error.name, sourceFailures: error.sourceFailures, elapsedMs: performance.now() - started }, { signal });
+        await lookup.health?.record(source.id, { state: error.connected === true ? "empty" : "failed", providerFailure: !perSource && error.connected !== true, code: [401, 402, 403, 429].includes(error.status) ? "LOOKUP_AUTH" : error.code || error.name, sourceFailures: error.sourceFailures, elapsedMs: performance.now() - started }, { signal });
       }
       throw error;
     }
@@ -1824,7 +1909,19 @@ function createLookupService({ storage, get, now = Date.now } = {}) {
   const status = async (region = "auto") => ({
     region,
     resolvedRegion: lookupRegion(region),
-    operations: await Promise.all([...LOOKUP_OPERATIONS, ...WEATHER_HEALTH].map(async (source) => ({ id: source.id, label: source.label, region: source.region, validation: source.validation, validationNote: "\u968F\u771F\u5B9E\u67E5\u8BE2\u66F4\u65B0\uFF0C\u4E3B\u52A8\u68C0\u67E5\u4E0D\u731C\u5730\u70B9/\u4EE3\u7801\u6216\u8BF7\u6C42\u6A21\u578B", ...await health.get(source.id) }))),
+    operations: await Promise.all([...LOOKUP_OPERATIONS, ...WEATHER_HEALTH].map(async (source) => {
+      const snapshot = await health.get(source.id);
+      const aggregate = ["query_search", "query_quote", "query_market", "query_weather", "query_sports"].includes(source.id);
+      return {
+        id: source.id,
+        label: source.label,
+        region: source.region,
+        validation: source.validation,
+        validationNote: aggregate ? "\u805A\u5408\u5165\u53E3\u4E0D\u6574\u4F53\u505C\u7528\uFF1B\u65E7\u6837\u672C\u4EC5\u4F9B\u8BCA\u65AD\uFF0C\u9000\u907F\u7531\u5355\u4E2A\u4E0A\u6E38\u7BA1\u7406" : "\u968F\u771F\u5B9E\u67E5\u8BE2\u66F4\u65B0\uFF0C\u4E3B\u52A8\u68C0\u67E5\u4E0D\u731C\u5730\u70B9/\u4EE3\u7801\u6216\u8BF7\u6C42\u6A21\u578B",
+        ...snapshot,
+        ...aggregate && { cooling: false, cooldownUntil: 0, historicalCooldownUntil: snapshot.cooldownUntil }
+      };
+    })),
     sources: await Promise.all(all().map(async (source) => ({
       id: source.id,
       label: source.label,
@@ -3344,11 +3441,14 @@ function createDeepseekSearch({ deepseekSearchEnabled, deepseekSearchKey, fetchV
   const unavailableUntil = { search: 0, fetch: 0 };
   async function request(kind, body, { signal, consume } = {}) {
     if (unavailableUntil[kind] > Date.now())
-      throw Object.assign(new Error("DeepSeek " + (kind === "search" ? "\u641C\u7D22" : "\u8BFB\u7F51\u9875") + "\u63A5\u53E3\u521A\u521A\u8FDE\u7EED\u51FA\u9519\uFF0C3 \u5206\u949F\u5185\u5148\u8D70\u5176\u4ED6\u7EBF\u8DEF"), { code: "DEEPSEEK_UNAVAILABLE", kind: "api", skipped: true });
+      throw Object.assign(new Error("DeepSeek " + (kind === "search" ? "\u641C\u7D22" : "\u8BFB\u7F51\u9875") + "\u63A5\u53E3\u77ED\u6682\u9000\u907F\uFF0C\u5148\u8D70\u5176\u4ED6\u7EBF\u8DEF"), { code: "DEEPSEEK_UNAVAILABLE", kind: "api", skipped: true });
     try {
       return await requestOnce(kind, body, { signal, consume });
     } catch (error) {
-      if (error.status >= 500 || ["network", "timeout"].includes(error.kind) || error.name === "TimeoutError") unavailableUntil[kind] = Date.now() + 3 * 6e4;
+      if (!signal?.aborted && error.name !== "AbortError") {
+        const delay = searchBackoff(error);
+        if (delay) unavailableUntil[kind] = Date.now() + (kind === "fetch" ? Math.max(18e4, delay) : delay);
+      }
       throw error;
     }
   }
@@ -3374,7 +3474,7 @@ function createDeepseekSearch({ deepseekSearchEnabled, deepseekSearchKey, fetchV
         if (!response.ok) {
           await response.body?.cancel?.();
           const reason = response.status === 401 ? "\u5B98\u65B9Key\u65E0\u6548" : response.status === 402 ? "\u670D\u52A1\u5546\u8D26\u6237\u4F59\u989D\u4E0D\u8DB3" : response.status === 429 ? "\u8BF7\u6C42\u53D7\u5230\u9650\u6D41" : "\u63A5\u53E3\u6682\u4E0D\u53EF\u7528";
-          throw httpError(response.status, reason, "DeepSeek Search/Fetch");
+          throw Object.assign(httpError(response.status, reason, "DeepSeek Search/Fetch"), { retryAfterMs: searchRetryAfter(response) });
         }
         const bytes = await webBody(response, 2 * 1024 * 1024, activeSignal);
         try {
@@ -3649,13 +3749,14 @@ function searchPlan(query, region, freshness = "", now = Date.now()) {
 }
 function createSearch(options = {}) {
   const { bochaKey, tavilyKey, fetchViaGateway, searchRegion = "auto" } = options;
-  const qianfan = createQianfanSearch(options);
-  const deepseek = createDeepseekSearch(options);
-  const keyless = keylessSearch(fetchViaGateway, searchRegion);
-  const bocha = bochaKey ? bochaSearch(bochaKey, fetchViaGateway) : null;
-  const tavily = tavilyKey ? tavilySearch(tavilyKey, fetchViaGateway) : null;
+  const guard = (engine, id) => guardedSearchRoute(engine, id, options.now);
+  const qianfan = guard(createQianfanSearch(options), "qianfan");
+  const deepseek = guard(createDeepseekSearch(options), "deepseek");
+  const keyless = guard(keylessSearch(fetchViaGateway, searchRegion), "keyless");
+  const bocha = guard(bochaKey ? bochaSearch(bochaKey, fetchViaGateway) : null, "bocha");
+  const tavily = guard(tavilyKey ? tavilySearch(tavilyKey, fetchViaGateway) : null, "tavily");
   const all = [qianfan, deepseek, bocha, tavily, keyless].filter(Boolean);
-  if (all.length <= 1) return all[0] ?? null;
+  if (!all.length) return null;
   return {
     get name() {
       return all.map((e) => e.name).join(" + ");
@@ -3665,7 +3766,7 @@ function createSearch(options = {}) {
       if (opts.signal?.aborted) throw opts.signal.reason;
       const zh = /[\u4e00-\u9fff]/.test(query);
       const order = (zh ? [qianfan, deepseek, bocha, keyless, tavily] : [deepseek, qianfan, tavily, bocha, keyless]).filter(Boolean);
-      return staggeredSearch(order, query, n, opts, order[0] === qianfan ? qianfan : deepseek);
+      return staggeredSearch(order, query, n, opts, [qianfan, deepseek].filter(Boolean));
     }
   };
 }
@@ -3695,17 +3796,17 @@ function staggeredSearch(order, query, n, opts = {}, preferred = null, staggerMs
     const launch = () => {
       if (done || started >= order.length) return;
       const e = order[started++];
-      if (e === preferred) opts.progress?.(e.name === "\u767E\u5EA6\u5343\u5E06\u641C\u7D22" ? "\u6B63\u5728\u8C03\u7528\u767E\u5EA6\u5343\u5E06\u641C\u7D22" : "\u6B63\u5728\u8C03\u7528DeepSeek\u641C\u7D22");
-      Promise.resolve().then(() => e.search(query, n, { ...opts, signal: ctrl.signal })).then((list) => {
+      opts.progress?.("\u6B63\u5728\u5C1D\u8BD5" + e.name);
+      Promise.resolve().then(() => e.search(query, n, { ...opts, signal: ctrl.signal })).then((raw) => {
+        const list = screenSearchHits(raw, opts.requestText || query).hits;
         for (const h of list ?? []) if (!hits.some((x) => x.url === h.url)) hits.push(h);
-        if (e === preferred) {
-          preferredHit = Boolean(list?.length);
-          opts.progress?.(list?.length ? `${e.name === "\u767E\u5EA6\u5343\u5E06\u641C\u7D22" ? "\u767E\u5EA6\u641C\u7D22" : "DeepSeek\u641C\u7D22"}\u8FD4\u56DE${list.length}\u6761\u7ED3\u679C` : (e.name === "\u767E\u5EA6\u5343\u5E06\u641C\u7D22" ? "\u767E\u5EA6\u641C\u7D22" : "DeepSeek\u641C\u7D22") + "\u65E0\u7ED3\u679C\uFF0C\u5C1D\u8BD5\u539F\u641C\u7D22\u7EBF\u8DEF");
-        }
+        if ((Array.isArray(preferred) ? preferred : [preferred]).includes(e)) preferredHit = Boolean(list.length);
+        const label = e.name === "\u767E\u5EA6\u5343\u5E06\u641C\u7D22" ? "\u767E\u5EA6\u641C\u7D22" : e.name.startsWith("DeepSeek Search") ? "DeepSeek\u641C\u7D22" : e.name;
+        opts.progress?.(`${label}\u8FD4\u56DE${list.length}\u6761\u7ED3\u679C\uFF08\u7B5B\u9009\u540E\uFF09${list.length ? "" : "\uFF0C\u7EE7\u7EED\u5176\u4ED6\u6765\u6E90"}`);
       }).catch((err) => {
         if (done) return;
         errors.push(err);
-        if (e === preferred) opts.progress?.((e.name === "\u767E\u5EA6\u5343\u5E06\u641C\u7D22" ? "\u767E\u5EA6\u641C\u7D22" : "DeepSeek\u641C\u7D22") + "\u672A\u53D6\u5F97\u7ED3\u679C\uFF0C\u5C1D\u8BD5\u539F\u641C\u7D22\u7EBF\u8DEF\uFF1A" + err.message);
+        opts.progress?.(`${e.name}\uFF1A${searchFailureLabel(err)}`);
       }).finally(() => {
         settled++;
         if (done) return;

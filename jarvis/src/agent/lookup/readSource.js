@@ -2,6 +2,7 @@ import { failureKind } from './recoveryData.js';
 import { withWebDeadline } from '../retrievalBudget.js';
 import { webBody } from '../webBody.js';
 import { decodeLookupBody } from './content.js';
+import { providerLookupFailure } from './healthPolicy.js';
 
 /** 统一单来源读取：列表和正文共用一个5秒期限，迟到/取消不回写结果，不执行网页脚本。 */
 export async function readLookupSource(source, { get = (...args) => fetch(...args), now = Date.now(), params = {}, signal, retrieval, detailLimit = 3, requestLimit = Infinity } = {}) {
@@ -50,6 +51,6 @@ export async function readLookupSource(source, { get = (...args) => fetch(...arg
       reason: value.items.length ? '' : value.failures.length ? value.failures.slice(0, 2).join('；') : '当前时间范围无可验证内容，或列表没有明确发布时间', elapsedMs: Math.round(performance.now() - started), requests };
   } catch (error) {
     if (signal?.aborted || error.code === 'RETRIEVAL_BUDGET' || error.name === 'AbortError') throw error;
-    return { source: source.id, label: source.label, url: source.url, state: 'failed', items: [], reason: error.name === 'TimeoutError' ? '超时（来源总期限5秒）' : error.code === 'LOOKUP_PARSE' ? error.message : error.status ? '来源返回HTTP ' + error.status : '连不上：' + String(error.message).slice(0, 100), status: error.status, code: error.code || (error.name === 'TimeoutError' ? 'LOOKUP_TIMEOUT' : 'LOOKUP_NETWORK'), elapsedMs: Math.round(performance.now() - started), requests };
+    return { source: source.id, label: source.label, url: source.url, state: 'failed', providerFailure: providerLookupFailure(error), items: [], reason: error.name === 'TimeoutError' ? '超时（来源总期限5秒）' : error.code === 'LOOKUP_PARSE' ? error.message : error.status ? '来源返回HTTP ' + error.status : '读取未完成：' + String(error.message).slice(0, 100), status: error.status, code: error.code || (error.name === 'TimeoutError' ? 'LOOKUP_TIMEOUT' : 'LOOKUP_NETWORK'), elapsedMs: Math.round(performance.now() - started), requests };
   }
 }

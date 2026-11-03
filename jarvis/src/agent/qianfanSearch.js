@@ -7,6 +7,8 @@ import { newsDate, newsPlain } from './newsSources.js';
 import { DOMESTIC_NEWS_CANDIDATES } from './lookup/sourceCatalog.js';
 import { internationalNewsFeeds } from './newsFeeds.js';
 import { mergeSearchHits } from './officialSources.js';
+import { searchBackoff, searchRetryAfter } from './searchPolicy.js';
+import { localLookupFailure } from './lookup/healthPolicy.js';
 
 export const QIANFAN_ENDPOINT = 'https://qianfan.baidubce.com/v2/ai_search/web_search';
 const secret = value => typeof value === 'string' && !value.startsWith('••••') ? value.trim() : '';
@@ -96,7 +98,7 @@ export function createQianfanSearch({ qianfanSearchKey, qianfanSearchTopK = 10, 
   return {
     name: '百度千帆搜索',
     async search(query, count = 10, options = {}) {
-      if (unavailableUntil > now()) throw Object.assign(new Error('百度搜索暂不可用，3分钟内先用其他来源'), { code: 'QIANFAN_UNAVAILABLE', kind: 'api', skipped: true });
+      if (unavailableUntil > now()) throw Object.assign(new Error('百度搜索短暂退避，先用其他来源'), { code: 'QIANFAN_UNAVAILABLE', kind: 'api', skipped: true });
       try {
         const request = qianfanRequest(query, { ...options, topK: options.topK ?? qianfanSearchTopK, now: now() });
         const data = await withWebDeadline(async signal => {
@@ -104,13 +106,14 @@ export function createQianfanSearch({ qianfanSearchKey, qianfanSearchTopK = 10, 
           try { response = await get(QIANFAN_ENDPOINT, { method: 'POST', redirect: 'error', signal, headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(request) }); }
           catch (failure) {
             throwControl(failure, signal);
+            if (localLookupFailure(failure)) throw failure;
             if (['EVAL_QUOTA', 'EVAL_EXPIRED'].includes(failure.code)) throw failure;
             throw Object.assign(new Error('百度搜索网络连接失败'), { kind: 'network', code: 'QIANFAN_NETWORK' });
           }
           if (!response.ok) {
             await response.body?.cancel?.();
             const detail = [401, 403].includes(response.status) ? 'Key无效、无权访问或未生效，请核对服务器设置' : [402, 429].includes(response.status) ? '额度不足或服务商限流，请核对服务商账户' : '服务暂时不可用';
-            throw httpError(response.status, detail, '百度搜索');
+            throw Object.assign(httpError(response.status, detail, '百度搜索'), { retryAfterMs: searchRetryAfter(response, now()) });
           }
           const bytes = await webBody(response, 2 * 1024 * 1024, signal);
           let parsed;
@@ -132,7 +135,8 @@ export function createQianfanSearch({ qianfanSearchKey, qianfanSearchTopK = 10, 
       } catch (failure) {
         throwControl(failure, options.signal);
         if (['EVAL_QUOTA', 'EVAL_EXPIRED'].includes(failure.code)) throw failure;
-        if ([401, 403, 429].includes(failure.status) || failure.status >= 500 || ['timeout', 'network'].includes(failure.kind) || failure.name === 'TimeoutError') unavailableUntil = now() + 180_000;
+        const delay = searchBackoff(failure);
+        if (delay) unavailableUntil = now() + delay;
         throw failure;
       }
     }

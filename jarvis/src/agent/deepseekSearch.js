@@ -2,6 +2,7 @@
 import { isPrivateHost } from '../../shared/providers.js';
 import { retryRead, throwControl, httpError } from '../core/networkRequest.js';
 import { webBody } from './webBody.js';
+import { searchBackoff, searchRetryAfter } from './searchPolicy.js';
 
 const ORIGIN = 'https://api.deepseek.com/v1/tools/';
 const secret = (value) => (typeof value === 'string' && !value.startsWith('••••') ? value.trim() : '');
@@ -42,16 +43,18 @@ function publicUrl(address) {
 export function createDeepseekSearch({ deepseekSearchEnabled, deepseekSearchKey, fetchViaGateway, fetchImpl = (...args) => globalThis.fetch(...args) } = {}) {
   if (!deepseekSearchEnabled) return null;
   const get = fetchViaGateway || fetchImpl;
-  // 熔断：服务商自身出错（5xx / 连不上）后 3 分钟内不再先试它，直接走下一条线路，
-  // 免得每次都先撞一次坏接口、白扣用户的查询额度（用户 2026-10-29 实测 DeepSeek Fetch 连续 500）
+  // 普通故障短退避；授权/限流按较长间隔。只影响本服务，搜索与读网页也分别计时。
   const unavailableUntil = { search: 0, fetch: 0 };
   async function request(kind, body, { signal, consume } = {}) {
     if (unavailableUntil[kind] > Date.now())
-      throw Object.assign(new Error('DeepSeek ' + (kind === 'search' ? '搜索' : '读网页') + '接口刚刚连续出错，3 分钟内先走其他线路'), { code: 'DEEPSEEK_UNAVAILABLE', kind: 'api', skipped: true });
+      throw Object.assign(new Error('DeepSeek ' + (kind === 'search' ? '搜索' : '读网页') + '接口短暂退避，先走其他线路'), { code: 'DEEPSEEK_UNAVAILABLE', kind: 'api', skipped: true });
     try {
       return await requestOnce(kind, body, { signal, consume });
     } catch (error) {
-      if (error.status >= 500 || ['network', 'timeout'].includes(error.kind) || error.name === 'TimeoutError') unavailableUntil[kind] = Date.now() + 3 * 60_000;
+      if (!signal?.aborted && error.name !== 'AbortError') {
+        const delay = searchBackoff(error);
+        if (delay) unavailableUntil[kind] = Date.now() + (kind === 'fetch' ? Math.max(180_000, delay) : delay);
+      }
       throw error;
     }
   }
@@ -85,7 +88,7 @@ export function createDeepseekSearch({ deepseekSearchEnabled, deepseekSearchKey,
                 : response.status === 429
                   ? '请求受到限流'
                   : '接口暂不可用';
-          throw httpError(response.status, reason, 'DeepSeek Search/Fetch');
+          throw Object.assign(httpError(response.status, reason, 'DeepSeek Search/Fetch'), { retryAfterMs: searchRetryAfter(response) });
         }
         const bytes = await webBody(response, 2 * 1024 * 1024, activeSignal);
         try {

@@ -683,6 +683,7 @@ export function createTools(ctx) {
   if (engine) {
     tools.push({
       name: 'web_search',
+      sourceHealthManaged: true,
       description: `联网搜索最新信息（比分赛果、新闻、价格、版本、事件等时效性内容；搜索源：${engine.name}）。外国的队名、人名、公司用原文或英文搜；多个对象（如几场比赛）放进 queries 一次并行搜。结果不够时用 fetch_url 读原文。回答时注明来源链接。需要全面、有出处的研究时改用 deep_research。`,
       input_schema: S({
         query: str('搜索词'),
@@ -698,7 +699,7 @@ export function createTools(ctx) {
             const selected = searchRequest(q, requestText, freshness);
             retrieval?.registerQuery?.(selected.query);
             retrieval?.consume('search');
-            const rawHits = await withWebDeadline((s) => engine.search(selected.query, list.length > 1 ? 5 : 6, { freshness: selected.freshness, requestText, signal: s, progress, consume: kind => retrieval?.consume(kind) }), { signal, timeoutMs: 40000 });
+            const rawHits = await withWebDeadline((s) => engine.search(selected.query, list.length > 1 ? 5 : 6, { freshness: selected.freshness, requestText, signal: s, progress, routeContext: retrieval, consume: kind => retrieval?.consume(kind) }), { signal, timeoutMs: 40000 });
             const screened = screenSearchHits(rawHits, requestText);
             const hits = screened.hits;
             if (!hits.length && screened.rejected) throw Object.assign(new Error('检索结果与今日新闻不对应，请换原始报道来源，不用年度日历代替新闻'), { code: 'IRRELEVANT_SEARCH_RESULTS', kind: 'api' });
@@ -776,7 +777,9 @@ export function createTools(ctx) {
       }
     });
   }
-  return connectLookupTools(tools, ctx.lookup);
+  // 这些是多来源聚合入口；来源内部负责有界重试/退避，不再让入口旧冷却挡住所有备用。
+  const aggregateLookups = new Set(['web_search', 'get_weather', 'get_sports_scores', 'get_stock_kline', 'get_market_quote', 'get_today_news']);
+  return connectLookupTools(tools.map(tool => aggregateLookups.has(tool.name) ? { ...tool, sourceHealthManaged: true } : tool), ctx.lookup);
 }
 
 /** 校验参数：必填项存在、类型正确、枚举值合法 */

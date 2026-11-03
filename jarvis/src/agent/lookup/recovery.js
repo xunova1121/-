@@ -3,9 +3,10 @@ import { relevantRecoverySearch } from './recoverySearch.js';
 import { withWebDeadline } from './request.js';
 import { lastGoodKey } from './lastGood.js';
 import { failureKind, failureSentence, usefulReceipt, receiptLinks, recoveryText, QUERY_LABELS } from './recoveryData.js';
+import { SEARCH_WINDOW_MS } from '../searchPolicy.js';
 
 /** 后备搜索单次上限：不再是5秒/3秒，仍受本轮剩余时间约束 */
-export const RECOVERY_SEARCH_MS = 20_000;
+export const RECOVERY_SEARCH_MS = SEARCH_WINDOW_MS;
 /** 程序负责有界自救；全部操作共用调用方的时钟、次数账本和取消信号。 */
 export async function recoverLookup(intent, plan, options) {
   const { signal, text = '', execute, getTool, lastGood, clock, retrieval } = options;
@@ -21,7 +22,8 @@ export async function recoverLookup(intent, plan, options) {
     check();
     if (cooled.has(call.name) || !getTool(call.name) || left() <= 250) return null;
     try {
-      const [row] = await withWebDeadline(s => execute([{ id: `lookup-recovery-${attempts.length}`, ...call }], s), { signal, timeoutMs: Math.min(timeoutMs, left()) });
+      const sourceManaged = call.name === 'web_search' && getTool(call.name)?.sourceHealthManaged;
+      const [row] = await withWebDeadline(s => execute([{ id: `lookup-recovery-${attempts.length}`, ...call }], s), { signal, timeoutMs: Math.min(sourceManaged ? SEARCH_WINDOW_MS : timeoutMs, left()) });
       check();
       if (!row?.ok) throw Object.assign(new Error('来源未取得结果'), row?.failure || {});
       const found = { tool: call.name, args: call.args, query: call.args.query || '', output: String(row.output || '') };
@@ -48,7 +50,7 @@ export async function recoverLookup(intent, plan, options) {
     await lastGood?.put(key, intent.kind, found, { signal });
     return found;
   }
-  const label = QUERY_LABELS[intent.kind] || '查询来源';
+  const label = plan.name === 'web_search' ? '公开搜索' : QUERY_LABELS[intent.kind] || '查询来源';
   let found = await attempt({ name: plan.name, args: plan.args }, label, plan.timeoutMs);
   if (found) return found.recovery?.state === 'input' ? found : finish(found);
   // 原天气/行情/搜索已含逐源重试与后备，不重新跑整条链；其他偶发只短重试一次。

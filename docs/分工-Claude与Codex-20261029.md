@@ -181,3 +181,5 @@
 - 2026-11-03 Codex收尾：第六/七节涉及Claude名下taskContract/executionReview/dialoguePolicy及holdings日期接缝，只补计算识别、失败纠正、宽松日期与冷却证据；不改持仓规则、行情口径、写作或架构逻辑。新增time-calculation合成e2e接入原CI，发布仍走草稿直传。
 
 - 2026-11-03 Codex：按用户第八节授权追踪云端OpenRouter凭据保存→任务/备用→HTTP。涉及modelScopes/modelLibrary、serverMode/taskRunner/pcModelBridge、config/friendlyError必要接缝；新增服务端凭据解析与安全错误上下文，不读改用户jarvis.env或访问密码。第六/七节391已经发布，本次增量包含它们；保留草稿直传发布流程与全部原测试，真实用户Key仍待用户发版后验证。
+
+- 2026-11-03 Codex：用户追加“今天新闻/日本新闻没有结果，专用工具无结果也要走千帆和DeepSeek”，授权修复搜索回退。改lookup入口健康隔离与时限、重试措辞、webSearch逐引擎回退及安全进度；不改Claude模型自主搜索协议，不放宽新闻日期/相关性筛选，不读用户Key。旧测试保留，新增冷却后真实适配器请求回归，与OpenRouter并发保存补丁统一验收发布。

@@ -4,6 +4,7 @@ import { recoveryText } from './recoveryData.js';
 import { withWebDeadline } from './request.js';
 import { WEATHER_FETCH_MS } from './weatherLimits.js';
 import { localLookupFailure } from './healthPolicy.js';
+import { SEARCH_WINDOW_MS } from '../searchPolicy.js';
 
 /** 沿用原工具的提供者、凭据和回执；记录的是整项查询健康，不冒充单个上游可用性。 */
 export const LOOKUP_OPERATIONS = [
@@ -33,13 +34,15 @@ export async function runLookupOperation(tool, args, execution, lookup = {}) {
   // 长文档、逐项核验和开发等继续使用原工具的请求上限，不套普通查询的8秒门槛。
   if (!source || execution.retrieval?.extensive) return tool.run(args, execution);
   const { signal, retrieval } = execution;
+  // 搜索聚合器逐引擎管理退避。旧query_search记录只留诊断，不能拦住新配置的可用API。
+  const perSource = tool.sourceHealthManaged === true;
   const started = performance.now();
   const work = async () => {
     if (signal?.aborted) throw signal.reason;
-    const status = await lookup.health?.get(source.id);
+    const status = perSource ? null : await lookup.health?.get(source.id);
     if (signal?.aborted) throw signal.reason;
     if (status?.cooling) throw Object.assign(new Error(`${source.label}连续连接失败，冷却至${new Date(status.cooldownUntil).toISOString()}；冷却期间不要再调用此工具，可改用其他可用来源`), { code: 'LOOKUP_SOURCE_COOLING', cooldownUntil: status.cooldownUntil, tool: tool.name });
-    const timeoutMs = Math.min(source.timeoutMs, retrieval?.remaining ?? Infinity);
+    const timeoutMs = Math.min(perSource && tool.name === 'web_search' ? SEARCH_WINDOW_MS : source.timeoutMs, retrieval?.remaining ?? Infinity);
     if (timeoutMs <= 0) throw Object.assign(new Error('本轮查询时间已用完，未发起新请求'), { code: 'RETRIEVAL_BUDGET' });
     try {
       const result = await withWebDeadline(activeSignal => tool.run(args, { ...execution, signal: activeSignal }), { signal, timeoutMs });
@@ -49,7 +52,8 @@ export async function runLookupOperation(tool, args, execution, lookup = {}) {
     } catch (error) {
       // 输入不合法、用户取消或次数耗尽不属于提供者故障，不能因此冷却整个查询入口。
       if (!signal?.aborted && !localLookupFailure(error)) {
-        await lookup.health?.record(source.id, { state: error.connected === true ? 'empty' : 'failed', code: [401, 402, 403, 429].includes(error.status) ? 'LOOKUP_AUTH' : error.code || error.name, sourceFailures: error.sourceFailures, elapsedMs: performance.now() - started }, { signal });
+        // 聚合入口继续留诊断，但绝不把多个来源的总失败写成可停用整个入口的故障。
+        await lookup.health?.record(source.id, { state: error.connected === true ? 'empty' : 'failed', providerFailure: !perSource && error.connected !== true, code: [401, 402, 403, 429].includes(error.status) ? 'LOOKUP_AUTH' : error.code || error.name, sourceFailures: error.sourceFailures, elapsedMs: performance.now() - started }, { signal });
       }
       throw error;
     }

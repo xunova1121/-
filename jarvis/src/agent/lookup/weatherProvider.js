@@ -1,5 +1,6 @@
 import { withWebDeadline } from './request.js';
 import { failureKind } from './recoveryData.js';
+import { providerLookupFailure } from './healthPolicy.js';
 export const WEATHER_HEALTH = [
   { id: 'weather_qweather', label: '和风天气', region: 'cn', validation: 'existing' },
   { id: 'weather_openmeteo', label: 'Open-Meteo', region: 'global', validation: 'existing' },
@@ -22,7 +23,7 @@ export async function weatherProvider(id, work, { signal, timeoutMs, health, ign
     await health?.record(id, { state: 'ok', elapsedMs: performance.now() - started }, { signal });
     return result;
   } catch (error) {
-    if (!signal?.aborted && error.code !== 'RETRIEVAL_BUDGET' && error.name !== 'AbortError') await health?.record(id, { state: 'failed', code: failureKind(error) === 'auth' ? 'LOOKUP_AUTH' : error.code || error.name, elapsedMs: performance.now() - started }, { signal });
+    if (!signal?.aborted && error.code !== 'RETRIEVAL_BUDGET' && error.name !== 'AbortError') await health?.record(id, { state: 'failed', providerFailure: providerLookupFailure(error), status: error.status, code: failureKind(error) === 'auth' ? 'LOOKUP_AUTH' : error.code || error.name, elapsedMs: performance.now() - started }, { signal });
     throw error;
   }
 }
