@@ -56,4 +56,9 @@ describe('问大盘先取指数，兜底不贴搜索原文',()=>{
       expect(d.text(),q).toContain('a.cn/good');expect(d.text(),q).not.toContain('a.cn/bad');expect(d.text(),q).not.toContain('不对题');
     }
   });
+  it('今日新闻汇总的条目不受搜索摘要5条上限限制，照旧最多12条（e2e lookup-step1 要求至少5条原文链接）',()=>{
+    const items=Array.from({length:8},(_,i)=>({title:'虚构体育报道第'+i+'项',url:'https://www.chinanews.com.cn/ty/'+i,summary:'',newsFeed:true}));
+    expect(digestRows(items,'体育资讯').length).toBe(8);
+    expect(digestRows(Array.from({length:15},(_,i)=>({...items[0],title:'条目'+i,url:'https://a.cn/'+i})),'体育资讯').length).toBe(12);
+  });
 });

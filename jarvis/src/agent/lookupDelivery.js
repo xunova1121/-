@@ -16,7 +16,7 @@ export function oneLine(text) {
   const cut = value.slice(0, 90).search(/[。！？!?](?=[^。！？!?]*$)/);
   return cut >= 15 ? value.slice(0, cut + 1) : value.slice(0, 88) + '…';
 }
-/** 兜底条目：去重标题、剔除和问题不对题的（问行情时剔除金价/楼盘），最多5条。 */
+/** 兜底条目：去重标题、剔除和问题不对题的（问行情时剔除金价/楼盘）。搜索摘要最多5条；今日新闻汇总的已核日期条目照旧最多12条。 */
 export function digestRows(items, request) {
   // 只有问“大盘/沪指/深成/创业板”才按指数话题筛；金价、汇率、油价、个股名字按问题里的关键词筛（前两个字出现即可）
   const market = lookupIntent(request).kind === 'market';
@@ -31,7 +31,7 @@ export function digestRows(items, request) {
     if (/^\s*[{[]/.test(item.title)) return false; // 接口原始JSON当标题的，不给人看
     if (index) return MARKET_TOPIC.test(text) && !MARKET_OFF.test(item.title);
     return !terms.length || terms.some(term => text.includes(term));
-  }).slice(0, 5);
+  }).slice(0, items.some(item => item.newsFeed) ? 12 : 5);
 }
 /** 本轮最多12条短证据，只存于执行期；不用模型旧回复填补失败，不把正文放入检查点。 */
 export function createLookupDelivery(request, now = Date.now) {
@@ -64,7 +64,7 @@ export function createLookupDelivery(request, now = Date.now) {
           const recent = lookupIntent(request).params.dateMode === 'recent24h' && !answerConstraints(request).todayNews;
           for (const item of (result.items || []).slice(0, 24)) {
             const at = Date.parse(item.publishedAt);
-            if (item.publishedAt?.startsWith(result.date) && at <= now() || recent && result.range?.mode === 'recent24h' && at >= now() - 86400000 && at <= now()) add(item);
+            if (item.publishedAt?.startsWith(result.date) && at <= now() || recent && result.range?.mode === 'recent24h' && at >= now() - 86400000 && at <= now()) add({ ...item, newsFeed: true });
           }
           for (const source of result.sources || []) if (source.error && failures.length < 4) {
             failures.push(source.source + '：' + source.error);
