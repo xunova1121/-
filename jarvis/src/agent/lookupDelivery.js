@@ -6,6 +6,28 @@ import { todayNewsIntent } from './newsIntent.js';
 import { newsDate } from './newsSources.js';
 import { lookupIntent } from './lookup/intent.js';
 import { weatherFallback, marketFallback } from './lookup/fallback.js';
+const MARKET_TOPIC = /指数|沪指|上证|深成|深证|创业板|科创|A股|大A|两市|股市|成交|涨停|跌停|券商|板块|收盘|开盘|行情|个股/;
+const MARKET_OFF = /金价|黄金|回收|楼盘|小区|学区|房价|二手房/;
+/** 一句话摘要：按句号截断，最多90字，去掉话题标签。 */
+export function oneLine(text) {
+  const value = String(text || '').replace(/#[^#\s]{1,30}#?/g, '').replace(/\s+/g, ' ').trim();
+  if (value.length <= 90) return value;
+  const cut = value.slice(0, 90).search(/[。！？!?](?=[^。！？!?]*$)/);
+  return cut >= 15 ? value.slice(0, cut + 1) : value.slice(0, 88) + '…';
+}
+/** 兜底条目：去重标题、剔除和问题不对题的（问行情时剔除金价/楼盘），最多5条。 */
+export function digestRows(items, request) {
+  const market = lookupIntent(request).kind === 'market';
+  const seen = new Set();
+  return items.filter(item => {
+    const key = String(item.title).replace(/\s+/g, '').slice(0, 40);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    const text = item.title + ' ' + (item.summary || '');
+    if (/^\s*[{[]/.test(item.title)) return false; // 接口原始JSON当标题的，不给人看
+    return !market || MARKET_TOPIC.test(text) && !MARKET_OFF.test(item.title);
+  }).slice(0, 5);
+}
 /** 本轮最多12条短证据，只存于执行期；不用模型旧回复填补失败，不把正文放入检查点。 */
 export function createLookupDelivery(request, now = Date.now) {
   const rows = new Map(), failures = [], direct = [], failedSources = [];
@@ -84,7 +106,12 @@ export function createLookupDelivery(request, now = Date.now) {
         return safe(text) ? text : '';
       }
       if (!rows.size) return failures.length ? `本轮还没有确切结果（${failedSources.length ? failedSources.join('、') : '查询来源暂时未能提供可用资料'}），可以稍后再试。` : '';
-      const text = '先给你已经取得的内容：\n\n' + [...rows.values()].map(item => `- **${item.title}**\n${item.summary || '来源只提供了这一标题，未取得报道正文，不补写细节。'}\n${item.publishedAt ? (item.timeBasis || '发布时间') + '：' + item.publishedAt.replace('T', ' ').replace('+08:00', '') + '（北京时间）；' : ''}来源：${item.source || ''} ${item.url}\n${['page_read', 'json_read'].includes(item.verification) ? '已读取该来源，未做独立交叉核验。' : '待核实：尚未读取报道原文。'}`).join('\n\n');
+      // 用户 2026-11-03：问大盘，到点后贴出6段300多字的搜索原文，还混着金价“大盘价”、楼盘“核心大盘”、重复条目。
+      // 兜底只给相关的、去重后的最多5条，每条一句话；“未读原文”统一写在末尾，不逐条重复。
+      const picked = digestRows([...rows.values()], request);
+      if (!picked.length) return '这次搜到的条目都和你问的不对题，我没有拿它们凑答案。可以回“再查”，或者换个说法再问一次。';
+      const unread = picked.some(item => !['page_read', 'json_read'].includes(item.verification));
+      const text = '先给你已经取得的内容（模型没来得及整理，以下是搜到的相关条目）：\n\n' + picked.map(item => `- **${item.title}**：${oneLine(item.summary) || '来源只提供了这一标题，未取得报道正文，不补写细节。'}${item.publishedAt ? `（${item.timeBasis || '发布时间'} ${item.publishedAt.replace('T', ' ').replace('+08:00', '')}，北京时间）` : ''}\n  ${item.source ? item.source + ' ' : ''}${item.url}`).join('\n') + (unread ? '\n\n待核实：尚未读取报道原文，以上只是搜索摘要。' : '\n\n已读取该来源，未做独立交叉核验。');
       return safe(text) ? text : '';
     },
     substitute(text) {

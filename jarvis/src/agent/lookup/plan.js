@@ -3,6 +3,15 @@ import { supportsSportsNews } from '../newsIntent.js';
 import { wantsPreSearch, preSearchQuery } from './prefetch.js';
 import { WEATHER_FETCH_MS } from './weatherLimits.js';
 
+/** “大盘/沪指/深成指/创业板”对应的指数代码；问金价、汇率、港美股、楼盘等不算。 */
+export function marketIndex(text) {
+  const value = String(text);
+  if (/金价|黄金|汇率|油价|币价|港股|恒生|美股|纳斯达克|道琼斯|标普|楼盘|小区|房价|学区/.test(value)) return '';
+  if (/创业板/.test(value)) return 'sz399006';
+  if (/深成|深证成指|深证指数/.test(value)) return 'sz399001';
+  return /大盘|沪指|上证|A股|股市|两市|大A/i.test(value) ? 'sh000001' : '';
+}
+
 /** 只提取用户确实说过的地点。无定位、无城市时交模型追问，绝不默认北京/南京。 */
 export function weatherPlace(text, params = {}) {
   if (params.city) return params.city;
@@ -36,6 +45,9 @@ export function lookupPlan(intent, { text, getTool, now = Date.now() }) {
   } else if (intent.kind === 'market' && getTool('get_stock_kline')) {
     const code = String(text).match(/(?<![\dA-Za-z])((?:sh|sz|bj)?\d{6})(?!\d)/i)?.[1];
     if (code && !/实时|分时|汇率|金价|油价|币价|港股|美股|分钟|去年|今年|历史|最高|最低|过去|近\d|20\d{2}/.test(text)) return { name: 'get_stock_kline', args: { code, adjustment: 'none', limit: 3 }, timeoutMs: 8000 };
+    // 用户 2026-11-03：“今天大盘的情况”没取指数，只拿原话去搜，回来金价“大盘价”、楼盘“核心大盘”。大盘一律先取指数日K
+    const index = !code && marketIndex(text);
+    if (index) return { name: 'get_stock_kline', args: { code: index, adjustment: 'none', limit: 3 }, timeoutMs: 8000 };
   }
   return getTool('web_search') && (intent.sure || wantsPreSearch(text)) ? { name: 'web_search', args: { query: preSearchQuery(text) }, timeoutMs: 6000 } : null;
 }

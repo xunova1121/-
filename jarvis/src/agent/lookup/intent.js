@@ -50,7 +50,7 @@ export const LOOKUP_RULES = [
   { id: 'sports_news', kind: 'sports_news', test: t => SPORT.test(t) && NEWS.test(t), params: t => ({ ...newsParams(t, true), includeScores: LIVE.test(withoutNegativeScores(t)) }) },
   { id: 'sports_live', kind: 'sports_live', test: t => LIVE.test(t), params: sportsParams },
   { id: 'news', kind: 'news', test: t => NEWS.test(t), params: t => newsParams(t) },
-  { id: 'market', kind: 'market', test: t => /股价|行情|大盘|收盘价|汇率|油价|金价|币价|上证|深证|股票|持仓盈亏/.test(t), params: () => ({}) }
+  { id: 'market', kind: 'market', test: t => /股价|行情|大盘|收盘价|汇率|油价|金价|币价|上证|深证|沪指|深成指|创业板|A股|大A|股市|股票|持仓盈亏/.test(t), params: () => ({}) }
 ];
 export function lookupIntent(text = '', { history = [], preferences = [] } = {}) {
   const original = String(text).trim();

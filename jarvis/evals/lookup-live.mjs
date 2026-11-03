@@ -255,7 +255,7 @@ var LOOKUP_RULES = [
   { id: "sports_news", kind: "sports_news", test: (t) => SPORT.test(t) && NEWS.test(t), params: (t) => ({ ...newsParams(t, true), includeScores: LIVE.test(withoutNegativeScores(t)) }) },
   { id: "sports_live", kind: "sports_live", test: (t) => LIVE.test(t), params: sportsParams },
   { id: "news", kind: "news", test: (t) => NEWS.test(t), params: (t) => newsParams(t) },
-  { id: "market", kind: "market", test: (t) => /股价|行情|大盘|收盘价|汇率|油价|金价|币价|上证|深证|股票|持仓盈亏/.test(t), params: () => ({}) }
+  { id: "market", kind: "market", test: (t) => /股价|行情|大盘|收盘价|汇率|油价|金价|币价|上证|深证|沪指|深成指|创业板|A股|大A|股市|股票|持仓盈亏/.test(t), params: () => ({}) }
 ];
 function lookupIntent(text2 = "", { history = [], preferences = [] } = {}) {
   const original = String(text2).trim();
@@ -329,10 +329,20 @@ var LOOKUP_INTENT_EXAMPLES = [
 ].map(([text2, kind]) => ({ text: text2, kind }));
 
 // src/agent/lookup/fallback.js
+var INDEX_NAMES = { sh000001: "\u4E0A\u8BC1\u6307\u6570", sz399001: "\u6DF1\u8BC1\u6210\u6307", sz399006: "\u521B\u4E1A\u677F\u6307" };
+var pct = (value, base) => `${value >= base ? "\u6DA8" : "\u8DCC"}${Math.abs((value - base) / base * 100).toFixed(2)}%`;
 function marketFallback(output) {
   try {
     const row = JSON.parse(output);
     if (!row.symbol || !Number.isFinite(row.latestClose) || !row.priceDate || !row.sourceUrl) return "";
+    const name = INDEX_NAMES[row.symbol];
+    const last = Array.isArray(row.bars) ? row.bars.at(-1) : null;
+    const live = name && last && last.date > row.priceDate && Number.isFinite(last.close) ? `${last.date}\u76D8\u4E2D\uFF08\u53D6\u6570\u65F6\uFF09\uFF1A${last.close}\uFF0C\u8F83\u4E0A\u4E00\u6536\u76D8${pct(last.close, row.latestClose)}\uFF1B\u4ECA\u65E5\u6700\u9AD8${last.high}\u3001\u6700\u4F4E${last.low}\u3002
+` : "";
+    if (name) return `${name}
+${live}${row.priceDate}\u6536\u76D8\uFF1A${row.latestClose}${Number.isFinite(row.previousClose) ? `\uFF0C${pct(row.latestClose, row.previousClose)}` : ""}\u3002
+\u6765\u6E90\uFF1A${row.source || ""} ${row.sourceUrl}
+${live ? "\u76D8\u4E2D\u6570\u5B57\u662F\u53D6\u6570\u90A3\u4E00\u523B\u7684\u65E5K\uFF0C\u4E0D\u662F\u9010\u7B14\u5B9E\u65F6\u884C\u60C5\u3002" : "\u65E5K\u6536\u76D8\u6570\u636E\uFF0C\u4E0D\u662F\u5B9E\u65F6\u884C\u60C5\u3002"}`;
     return `${row.symbol} ${row.priceDate}\u6536\u76D8\u4EF7\uFF1A${row.latestClose}\uFF1B${Number.isFinite(row.previousClose) ? `\u4E0A\u4E00\u4EA4\u6613\u8BB0\u5F55\uFF08${row.previousPriceDate}\uFF09\u6536\u76D8\u4EF7\uFF1A${row.previousClose}\uFF1B` : ""}\u590D\u6743\u65B9\u5F0F\uFF1A${row.adjustment || "\u672A\u6CE8\u660E"}\u3002
 \u6765\u6E90\uFF1A${row.source || ""} ${row.sourceUrl}
 \u65E5K\u6536\u76D8\u6570\u636E\uFF0C\u4E0D\u662F\u5B9E\u65F6\u884C\u60C5\u3002`;
@@ -2315,6 +2325,13 @@ async function preSearch({ run, text: text2, signal, timeoutMs = PRE_SEARCH_MS, 
 }
 
 // src/agent/lookup/plan.js
+function marketIndex(text2) {
+  const value = String(text2);
+  if (/金价|黄金|汇率|油价|币价|港股|恒生|美股|纳斯达克|道琼斯|标普|楼盘|小区|房价|学区/.test(value)) return "";
+  if (/创业板/.test(value)) return "sz399006";
+  if (/深成|深证成指|深证指数/.test(value)) return "sz399001";
+  return /大盘|沪指|上证|A股|股市|两市|大A/i.test(value) ? "sh000001" : "";
+}
 function weatherPlace(text2, params = {}) {
   if (params.city) return params.city;
   const value = String(text2).replace(/[，,。！？?!]+$/, "").trim();
@@ -2343,6 +2360,8 @@ function lookupPlan(intent, { text: text2, getTool, now = Date.now() }) {
   } else if (intent.kind === "market" && getTool("get_stock_kline")) {
     const code = String(text2).match(/(?<![\dA-Za-z])((?:sh|sz|bj)?\d{6})(?!\d)/i)?.[1];
     if (code && !/实时|分时|汇率|金价|油价|币价|港股|美股|分钟|去年|今年|历史|最高|最低|过去|近\d|20\d{2}/.test(text2)) return { name: "get_stock_kline", args: { code, adjustment: "none", limit: 3 }, timeoutMs: 8e3 };
+    const index = !code && marketIndex(text2);
+    if (index) return { name: "get_stock_kline", args: { code: index, adjustment: "none", limit: 3 }, timeoutMs: 8e3 };
   }
   return getTool("web_search") && (intent.sure || wantsPreSearch(text2)) ? { name: "web_search", args: { query: preSearchQuery(text2) }, timeoutMs: 6e3 } : null;
 }

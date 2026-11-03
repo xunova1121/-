@@ -23,10 +23,18 @@ export function weatherFallback(output, request, now) {
 }
 
 /** 日K只选已取得字段；JSON和工具使用说明不直接作为回答。 */
+const INDEX_NAMES = { sh000001: '上证指数', sz399001: '深证成指', sz399006: '创业板指' };
+const pct = (value, base) => `${value >= base ? '涨' : '跌'}${Math.abs((value - base) / base * 100).toFixed(2)}%`;
 export function marketFallback(output) {
   try {
     const row = JSON.parse(output);
     if (!row.symbol || !Number.isFinite(row.latestClose) || !row.priceDate || !row.sourceUrl) return '';
+    const name = INDEX_NAMES[row.symbol];
+    const last = Array.isArray(row.bars) ? row.bars.at(-1) : null;
+    // 指数：今天盘中那条日K（日期晚于最近收盘日）照实写成“盘中”，不冒充收盘
+    const live = name && last && last.date > row.priceDate && Number.isFinite(last.close)
+      ? `${last.date}盘中（取数时）：${last.close}，较上一收盘${pct(last.close, row.latestClose)}；今日最高${last.high}、最低${last.low}。\n` : '';
+    if (name) return `${name}\n${live}${row.priceDate}收盘：${row.latestClose}${Number.isFinite(row.previousClose) ? `，${pct(row.latestClose, row.previousClose)}` : ''}。\n来源：${row.source || ''} ${row.sourceUrl}\n${live ? '盘中数字是取数那一刻的日K，不是逐笔实时行情。' : '日K收盘数据，不是实时行情。'}`;
     return `${row.symbol} ${row.priceDate}收盘价：${row.latestClose}；${Number.isFinite(row.previousClose) ? `上一交易记录（${row.previousPriceDate}）收盘价：${row.previousClose}；` : ''}复权方式：${row.adjustment || '未注明'}。\n来源：${row.source || ''} ${row.sourceUrl}\n日K收盘数据，不是实时行情。`;
   } catch { return ''; }
 }
