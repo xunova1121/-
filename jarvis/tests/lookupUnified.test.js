@@ -29,12 +29,18 @@ it('新闻/天气/赛程/股票/汇率在同一个runner选择原工具，不猜
     ['集团年天气', 'get_weather', { place: '南京' }],
     ['今天足球赛程', 'get_sports_scores', { sport: 'football', period: 'forward_live', window_minutes: 120 }],
     ['600519收盘价', 'get_stock_kline', { code: '600519', adjustment: 'none' }],
-    ['茅台今天股价', 'web_search', { query: '茅台今天股价' }],
-    ['美元兑人民币汇率', 'web_search', { query: '美元兑人民币汇率' }],
+    // 用户 2026-11-03 要求：按名字问个股、问汇率先取实时报价（名字由行情接口查代码，不由模型猜）；没有报价工具时仍走搜索（见下方）
+    ['茅台今天股价', 'get_market_quote', { target: '茅台' }],
+    ['美元兑人民币汇率', 'get_market_quote', { target: 'USD' }],
     ['体育资讯', 'get_today_news', { categories: ['体育'], date_mode: 'recent24h' }]
   ]) {
     const result = await runLookup(lookupIntent(text), { text, execute, getTool, now });
     expect(result.tool).toBe(tool); expect(result.args).toMatchObject(args);
+  }
+  const withoutQuote = name => name === 'get_market_quote' ? null : getTool(name);
+  for (const [text, args] of [['茅台今天股价', { query: '茅台今天股价' }], ['美元兑人民币汇率', { query: '美元兑人民币汇率' }]]) {
+    const result = await runLookup(lookupIntent(text), { text, execute, getTool: withoutQuote, now });
+    expect(result.tool).toBe('web_search'); expect(result.args).toMatchObject(args);
   }
   for (const text of ['今天天气', '你在干嘛', '发个新闻那么慢', '帮我写一份天气报告']) {
     const before = execute.mock.calls.length;

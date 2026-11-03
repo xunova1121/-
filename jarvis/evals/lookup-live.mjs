@@ -255,7 +255,7 @@ var LOOKUP_RULES = [
   { id: "sports_news", kind: "sports_news", test: (t) => SPORT.test(t) && NEWS.test(t), params: (t) => ({ ...newsParams(t, true), includeScores: LIVE.test(withoutNegativeScores(t)) }) },
   { id: "sports_live", kind: "sports_live", test: (t) => LIVE.test(t), params: sportsParams },
   { id: "news", kind: "news", test: (t) => NEWS.test(t), params: (t) => newsParams(t) },
-  { id: "market", kind: "market", test: (t) => /股价|行情|大盘|收盘价|汇率|油价|金价|币价|上证|深证|沪指|深成指|创业板|A股|大A|股市|股票|持仓盈亏/.test(t), params: () => ({}) }
+  { id: "market", kind: "market", test: (t) => /股价|行情|大盘|收盘价|汇率|油价|金价|币价|上证|深证|沪指|深成指|创业板|A股|大A|股市|股票|持仓盈亏|港股|美股|恒生|恒指|纳斯达克|纳指|道琼斯|道指|标普|日经|黄金|兑人民币|人民币兑|(?:美元|欧元|日元|英镑|港币|港元|澳元)(?:汇率|多少|价格|今天|现在|最新|$)/.test(t), params: () => ({}) }
 ];
 function lookupIntent(text2 = "", { history = [], preferences = [] } = {}) {
   const original = String(text2).trim();
@@ -353,7 +353,7 @@ ${live ? "\u76D8\u4E2D\u6570\u5B57\u662F\u53D6\u6570\u90A3\u4E00\u523B\u7684\u65
 
 // src/agent/lookup/recoveryData.js
 function failureKind(error = {}) {
-  if (error.name === "ValidationError" || ["WEATHER_LOCATION_REQUIRED", "INVALID_STOCK_INPUT"].includes(error.code)) return "input";
+  if (error.name === "ValidationError" || ["WEATHER_LOCATION_REQUIRED", "INVALID_STOCK_INPUT", "INVALID_QUOTE_INPUT"].includes(error.code)) return "input";
   if ([401, 402, 403, 429].includes(Number(error.status)) || /AUTH|QUOTA|RATE_LIMIT/.test(error.code || "")) return "auth";
   if (error.code === "LOOKUP_SOURCE_COOLING") return "cooling";
   if (["TimeoutError", "TypeError"].includes(error.name) || ["timeout", "network"].includes(error.kind) || Number(error.status) >= 500 || /TIMEOUT|ECONN|ENOTFOUND|EAI_AGAIN|NETWORK/.test(error.code || "") || error instanceof TypeError) return "transient";
@@ -1247,7 +1247,7 @@ function createLastGood({ storage = collection("kv"), now = Date.now } = {}) {
     async put(key, kind, found, { signal } = {}) {
       if (kind === "sports_live" && /espn/i.test(found.output || "")) return;
       if (!key || /(?:Bearer\s+[A-Za-z0-9]|[?&](?:key|token|api_key|access_token)=)/i.test(found.output || "") || !usefulReceipt(found) || found.output.length > 1e5 || found.recovery?.state === "cached" || signal?.aborted) return;
-      if (!["get_weather", "get_stock_kline", "get_sports_scores", "get_today_news"].includes(found.tool) || !/https?:\/\//.test(found.output)) return;
+      if (!["get_weather", "get_stock_kline", "get_market_quote", "get_sports_scores", "get_today_news"].includes(found.tool) || !/https?:\/\//.test(found.output)) return;
       let output = found.output;
       try {
         const data = JSON.parse(output);
@@ -1438,7 +1438,7 @@ async function recoverLookup(intent, plan, options) {
   const label = QUERY_LABELS[intent.kind] || "\u67E5\u8BE2\u6765\u6E90";
   let found = await attempt({ name: plan.name, args: plan.args }, label, plan.timeoutMs);
   if (found) return found.recovery?.state === "input" ? found : finish(found);
-  if (!["get_weather", "get_stock_kline", "web_search"].includes(plan.name) && attempts.at(-1)?.failure === "transient") {
+  if (!["get_weather", "get_stock_kline", "get_market_quote", "web_search"].includes(plan.name) && attempts.at(-1)?.failure === "transient") {
     found = await attempt({ name: plan.name, args: plan.args }, label + "\u77ED\u91CD\u8BD5", 2e3);
     if (found) return finish(found);
   }
@@ -1497,6 +1497,7 @@ var LOOKUP_OPERATIONS = [
   { id: "query_weather", label: "\u5929\u6C14\u67E5\u8BE2\uFF08\u548C\u98CE\u53CA\u539F\u6709\u5907\u7528\uFF09", kinds: ["weather"], tools: ["get_weather"], region: "cn", priority: 1, timeoutMs: WEATHER_FETCH_MS, needsKey: false, optionalKey: true, validation: "existing" },
   { id: "query_sports", label: "\u8D5B\u7A0B\u67E5\u8BE2\uFF08\u76F4\u64AD\u5427\u63A5\u53E3\u53CA\u8D5B\u7A0B\u9875\uFF09", kinds: ["sports_live"], tools: ["get_sports_scores"], region: "cn", priority: 1, timeoutMs: 12e3, needsKey: false, validation: "existing" },
   { id: "query_market", label: "\u80A1\u7968\u65E5K\u67E5\u8BE2\uFF08\u539F\u6709\u540C\u6E90\u53E3\u5F84\uFF09", kinds: ["market"], tools: ["get_stock_kline"], region: "cn", priority: 1, timeoutMs: 1e4, needsKey: false, validation: "existing" },
+  { id: "query_quote", label: "\u5B9E\u65F6\u62A5\u4EF7\uFF08\u817E\u8BAF/\u4E1C\u65B9\u8D22\u5BCC\u516C\u5F00\u884C\u60C5\uFF09", kinds: ["market"], tools: ["get_market_quote"], region: "cn", priority: 1, timeoutMs: 1e4, needsKey: false, validation: "existing" },
   { id: "query_search", label: "\u901A\u7528\u641C\u7D22\uFF08\u5DF2\u914D\u7F6E\u5F15\u64CE\uFF09", kinds: ["general", "market"], tools: ["web_search"], region: "cn", priority: 2, timeoutMs: 8e3, needsKey: false, optionalKey: true, validation: "existing" },
   { id: "query_page", label: "\u7F51\u9875\u8BFB\u53D6\uFF08\u539F\u5B89\u5168\u7F51\u5173\uFF09", kinds: ["general"], tools: ["fetch_url"], region: "global", priority: 2, timeoutMs: 8e3, needsKey: false, validation: "existing" },
   { id: "query_json", label: "\u516C\u5F00JSON\uFF08\u539F\u4FE1\u4EFB\u57DF\u767D\u540D\u5355\uFF09", kinds: ["general", "market"], tools: ["fetch_json"], region: "cn", priority: 2, timeoutMs: 8e3, needsKey: false, validation: "existing" }
@@ -1541,7 +1542,7 @@ async function runLookupOperation(tool, args, execution, lookup = {}) {
   };
   return lookup.queue ? lookup.queue(work) : work();
 }
-var RECOVERY_TOOLS = /* @__PURE__ */ new Set(["get_weather", "get_sports_scores", "get_stock_kline", "get_today_news", "web_search"]);
+var RECOVERY_TOOLS = /* @__PURE__ */ new Set(["get_weather", "get_sports_scores", "get_stock_kline", "get_market_quote", "get_today_news", "web_search"]);
 function connectLookupTools(tools, lookup) {
   if (!lookup) return tools;
   const raw = (name) => tools.find((tool) => tool.name === name);
@@ -1553,8 +1554,8 @@ function connectLookupTools(tools, lookup) {
       const request = execution.requestText || "";
       const intent = execution.retrieval?.intent || lookupIntent(request);
       if (!request || !intent.lookup || execution.retrieval?.extensive) return guarded(args, execution);
-      const kind = { get_weather: "weather", get_stock_kline: "market", get_sports_scores: "sports_live" }[tool.name] || intent.kind;
-      const timeoutMs = tool.name === "get_weather" ? WEATHER_FETCH_MS : tool.name === "get_sports_scores" ? 12e3 : ["get_stock_kline", "get_today_news", "get_sports_scores"].includes(tool.name) ? 1e4 : 5e3;
+      const kind = { get_weather: "weather", get_stock_kline: "market", get_market_quote: "market", get_sports_scores: "sports_live" }[tool.name] || intent.kind;
+      const timeoutMs = tool.name === "get_weather" ? WEATHER_FETCH_MS : tool.name === "get_sports_scores" ? 12e3 : ["get_stock_kline", "get_market_quote", "get_today_news", "get_sports_scores"].includes(tool.name) ? 1e4 : 5e3;
       const found = await recoverLookup({ ...intent, kind }, { name: tool.name, args, timeoutMs }, {
         text: request,
         signal: execution.signal,
@@ -2324,6 +2325,52 @@ async function preSearch({ run, text: text2, signal, timeoutMs = PRE_SEARCH_MS, 
   }
 }
 
+// src/agent/marketQuote.js
+var INDEXES = [
+  { test: /恒生科技|恒科/, name: "\u6052\u751F\u79D1\u6280\u6307\u6570", tencent: ["hkHSTECH"], east: "124.HSTECH" },
+  { test: /国企指数|恒生中国企业/, name: "\u6052\u751F\u4E2D\u56FD\u4F01\u4E1A\u6307\u6570", tencent: ["hkHSCEI"], east: "100.HSCEI" },
+  { test: /恒生|恒指|港股大盘|港股指数/, name: "\u6052\u751F\u6307\u6570", tencent: ["hkHSI"], east: "100.HSI" },
+  { test: /纳斯达克|纳指/, name: "\u7EB3\u65AF\u8FBE\u514B\u7EFC\u5408\u6307\u6570", tencent: ["usIXIC", "us.IXIC"], east: "100.NDX" },
+  { test: /道琼斯|道指/, name: "\u9053\u743C\u65AF\u5DE5\u4E1A\u6307\u6570", tencent: ["usDJI", "us.DJI"], east: "100.DJIA" },
+  { test: /标普|标准普尔/, name: "\u6807\u666E500\u6307\u6570", tencent: ["usINX", "us.INX"], east: "100.SPX" },
+  { test: /日经/, name: "\u65E5\u7ECF225\u6307\u6570", tencent: [], east: "100.N225" }
+];
+var INDEX_GROUPS = { \u6E2F\u80A1: ["\u6052\u751F\u6307\u6570", "\u6052\u751F\u79D1\u6280\u6307\u6570"], \u7F8E\u80A1: ["\u9053\u743C\u65AF\u5DE5\u4E1A\u6307\u6570", "\u7EB3\u65AF\u8FBE\u514B\u7EFC\u5408\u6307\u6570", "\u6807\u666E500\u6307\u6570"] };
+var CURRENCIES = [
+  ["\u7F8E\u5143", "USD"],
+  ["\u6B27\u5143", "EUR"],
+  ["\u65E5\u5143", "JPY"],
+  ["\u82F1\u9551", "GBP"],
+  ["\u6E2F\u5E01", "HKD"],
+  ["\u6E2F\u5143", "HKD"],
+  ["\u6FB3\u5143", "AUD"],
+  ["\u52A0\u5143", "CAD"],
+  ["\u745E\u90CE", "CHF"],
+  ["\u65B0\u52A0\u5761\u5143", "SGD"],
+  ["\u97E9\u5143", "KRW"],
+  ["\u6CF0\u94E2", "THB"],
+  ["\u5362\u5E03", "RUB"]
+];
+var GOLD = /金价|黄金|金条|au9999|伦敦金|国际金/i;
+var FX = /汇率|兑人民币|兑换人民币|人民币兑|(?:美元|欧元|日元|英镑|港币|港元|澳元|加元|瑞郎|新加坡元|韩元|泰铢|卢布)(?:多少|价格|行情|今天|现在|最新|$)/;
+var FILLER = /今天|今日|现在|目前|当前|最新|实时|刚才|最近|帮我|给我|查一?下|查询|查查|查|看一?下|看看|告诉我|一下|多少钱?|多少|是多少|怎么样|如何|咋样|情况|走势|表现|行情|报价|价格|价位|股价|股票|个股|涨跌幅?|涨了|跌了|涨没涨|收盘价?|开盘价?|的|了|吗|呢|啊|呀|[？?。！!，,、\s]/g;
+function quoteTarget(text2) {
+  const value = String(text2 || "").trim();
+  if (!value || value.length > 60) return null;
+  if (/油价|汽油|柴油|比特币|币价|以太坊|基金净值|房价/.test(value)) return null;
+  if (GOLD.test(value)) return { kind: "gold", target: "\u91D1\u4EF7" };
+  const currency = CURRENCIES.find(([word]) => value.includes(word));
+  if (FX.test(value) || currency && /汇率|兑/.test(value)) return currency ? { kind: "fx", target: currency[1] } : { kind: "fx", target: "USD" };
+  const index = INDEXES.find((row) => row.test.test(value));
+  if (index) return { kind: "index", target: index.name };
+  const code = value.match(/(?<![A-Za-z\d])((?:sh|sz|bj)\d{6}|\d{6}|hk\d{5}|us[A-Z][A-Z.]{0,7})(?![A-Za-z\d])/)?.[1];
+  if (code) return { kind: "stock", target: code };
+  const rest = value.replace(FILLER, "").replace(/大盘|指数|市场|整体/g, "");
+  if (INDEX_GROUPS[rest]) return { kind: "index", target: rest };
+  const name = value.replace(/港股|美股|A股/g, "").replace(FILLER, "").trim();
+  return name.length >= 2 && name.length <= 12 && /股价|股票|行情|报价|涨|跌|收盘|开盘|多少钱/.test(value) ? { kind: "stock", target: name } : null;
+}
+
 // src/agent/lookup/plan.js
 function marketIndex(text2) {
   const value = String(text2);
@@ -2362,6 +2409,11 @@ function lookupPlan(intent, { text: text2, getTool, now = Date.now() }) {
     if (code && !/实时|分时|汇率|金价|油价|币价|港股|美股|分钟|去年|今年|历史|最高|最低|过去|近\d|20\d{2}/.test(text2)) return { name: "get_stock_kline", args: { code, adjustment: "none", limit: 3 }, timeoutMs: 8e3 };
     const index = !code && marketIndex(text2);
     if (index) return { name: "get_stock_kline", args: { code: index, adjustment: "none", limit: 3 }, timeoutMs: 8e3 };
+  }
+  if (intent.kind === "market" && !/去年|今年|历史|最高|最低|过去|近\d|20\d{2}|分时|分钟|持仓|盈亏/.test(text2)) {
+    const quote = getTool("get_market_quote") && quoteTarget(text2);
+    if (quote) return { name: "get_market_quote", args: { target: quote.target }, timeoutMs: 1e4 };
+    if (/油价|汽油|柴油/.test(text2) && getTool("web_search")) return { name: "web_search", args: { query: `\u4ECA\u65E5\u6CB9\u4EF7 92\u53F7 95\u53F7\u6C7D\u6CB9 \u6BCF\u5347 \u6700\u65B0\u8C03\u4EF7 ${new Date(now + 8 * 36e5).getUTCFullYear()}\u5E74` }, timeoutMs: 6e3 };
   }
   return getTool("web_search") && (intent.sure || wantsPreSearch(text2)) ? { name: "web_search", args: { query: preSearchQuery(text2) }, timeoutMs: 6e3 } : null;
 }

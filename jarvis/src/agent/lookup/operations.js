@@ -9,6 +9,7 @@ export const LOOKUP_OPERATIONS = [
   { id: 'query_weather', label: '天气查询（和风及原有备用）', kinds: ['weather'], tools: ['get_weather'], region: 'cn', priority: 1, timeoutMs: WEATHER_FETCH_MS, needsKey: false, optionalKey: true, validation: 'existing' },
   { id: 'query_sports', label: '赛程查询（直播吧接口及赛程页）', kinds: ['sports_live'], tools: ['get_sports_scores'], region: 'cn', priority: 1, timeoutMs: 12000, needsKey: false, validation: 'existing' },
   { id: 'query_market', label: '股票日K查询（原有同源口径）', kinds: ['market'], tools: ['get_stock_kline'], region: 'cn', priority: 1, timeoutMs: 10000, needsKey: false, validation: 'existing' },
+  { id: 'query_quote', label: '实时报价（腾讯/东方财富公开行情）', kinds: ['market'], tools: ['get_market_quote'], region: 'cn', priority: 1, timeoutMs: 10000, needsKey: false, validation: 'existing' },
   { id: 'query_search', label: '通用搜索（已配置引擎）', kinds: ['general', 'market'], tools: ['web_search'], region: 'cn', priority: 2, timeoutMs: 8000, needsKey: false, optionalKey: true, validation: 'existing' },
   { id: 'query_page', label: '网页读取（原安全网关）', kinds: ['general'], tools: ['fetch_url'], region: 'global', priority: 2, timeoutMs: 8000, needsKey: false, validation: 'existing' },
   { id: 'query_json', label: '公开JSON（原信任域白名单）', kinds: ['general', 'market'], tools: ['fetch_json'], region: 'cn', priority: 2, timeoutMs: 8000, needsKey: false, validation: 'existing' }
@@ -55,7 +56,7 @@ export async function runLookupOperation(tool, args, execution, lookup = {}) {
   return lookup.queue ? lookup.queue(work) : work();
 }
 
-const RECOVERY_TOOLS = new Set(['get_weather', 'get_sports_scores', 'get_stock_kline', 'get_today_news', 'web_search']);
+const RECOVERY_TOOLS = new Set(['get_weather', 'get_sports_scores', 'get_stock_kline', 'get_market_quote', 'get_today_news', 'web_search']);
 export function connectLookupTools(tools, lookup) {
   if (!lookup) return tools;
   // 配置不回传给模型，不复制凭据进schema；每次调用保留原工具的参数/卡片/失败码。
@@ -68,8 +69,8 @@ export function connectLookupTools(tools, lookup) {
       const request = execution.requestText || '';
       const intent = execution.retrieval?.intent || lookupIntent(request);
       if (!request || !intent.lookup || execution.retrieval?.extensive) return guarded(args, execution);
-      const kind = { get_weather: 'weather', get_stock_kline: 'market', get_sports_scores: 'sports_live' }[tool.name] || intent.kind;
-      const timeoutMs = tool.name === 'get_weather' ? WEATHER_FETCH_MS : tool.name === 'get_sports_scores' ? 12000 : ['get_stock_kline', 'get_today_news', 'get_sports_scores'].includes(tool.name) ? 10000 : 5000;
+      const kind = { get_weather: 'weather', get_stock_kline: 'market', get_market_quote: 'market', get_sports_scores: 'sports_live' }[tool.name] || intent.kind;
+      const timeoutMs = tool.name === 'get_weather' ? WEATHER_FETCH_MS : tool.name === 'get_sports_scores' ? 12000 : ['get_stock_kline', 'get_market_quote', 'get_today_news', 'get_sports_scores'].includes(tool.name) ? 10000 : 5000;
       const found = await recoverLookup({ ...intent, kind }, { name: tool.name, args, timeoutMs }, {
         text: request, signal: execution.signal, retrieval: execution.retrieval, lastGood: lookup.lastGood, nowFn: lookup.now,
         getTool: raw,

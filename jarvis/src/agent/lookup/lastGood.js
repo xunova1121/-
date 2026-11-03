@@ -40,7 +40,7 @@ export function createLastGood({ storage = collection('kv'), now = Date.now } = 
       if (kind === 'sports_live' && /espn/i.test(found.output || '')) return;
       if (!key || /(?:Bearer\s+[A-Za-z0-9]|[?&](?:key|token|api_key|access_token)=)/i.test(found.output || '') || !usefulReceipt(found) || found.output.length > 100000 || found.recovery?.state === 'cached' || signal?.aborted) return;
       // 搜索摘要不作为结构化天气/比分/日K缓存；新闻必须有明确发布时间。
-      if (!['get_weather', 'get_stock_kline', 'get_sports_scores', 'get_today_news'].includes(found.tool) || !/https?:\/\//.test(found.output)) return;
+      if (!['get_weather', 'get_stock_kline', 'get_market_quote', 'get_sports_scores', 'get_today_news'].includes(found.tool) || !/https?:\/\//.test(found.output)) return;
       let output = found.output;
       try {
         const data = JSON.parse(output);

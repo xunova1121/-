@@ -64,6 +64,8 @@ export function reusesPreSearch(call, found) {
     const defaults = found.tool === 'get_weather' ? { days: 3 } : { adjustment: 'none', limit: 60 };
     return JSON.stringify({ ...defaults, ...call.args }) === JSON.stringify({ ...defaults, ...found.args });
   }
+  // 实时报价：同一个对象就直接用先查的结果，不重复取数
+  if (found?.tool === 'get_market_quote') return call?.name === found.tool && String(call.args?.target || '').trim() === String(found.args?.target || '').trim();
   // 赛程比分：参数和先查的一样就直接用先查的结果
   if (found?.tool === 'get_sports_scores') return call?.name === found.tool && JSON.stringify(call.args ?? {}) === JSON.stringify(found.args ?? {});
   if (found?.tool === 'get_today_news') {

@@ -746,7 +746,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
 
 /** 保留旧导出的深度研究预算；普通查询默认预算见 retrievalBudget.js。 */
 export const TIME_BUDGET_MS = 8 * 60e3;
-const WEB_TOOLS = new Set(['get_today_news', 'fetch_json', 'get_weather', 'get_stock_kline', 'get_sports_scores', 'web_search', 'fetch_url', 'fact_check', 'deep_research']);
+const WEB_TOOLS = new Set(['get_today_news', 'fetch_json', 'get_weather', 'get_stock_kline', 'get_market_quote', 'get_sports_scores', 'web_search', 'fetch_url', 'fact_check', 'deep_research']);
 
 /** 可以同时执行的只读工具（不改文件、不操作电脑、不需要用户确认） */
 /** 比较两段回答是不是同一段：去掉空白和 Markdown 符号 */
@@ -762,7 +762,7 @@ function repeats(before, after) {
 /** 只回了一句“收到 / 好的” */
 const ACK_ONLY = /^(?:收到|好的|好|明白|了解|OK|ok|嗯)[。！!.]?$/;
 
-export const PARALLEL_SAFE = new Set(['get_today_news', 'fetch_json', 'get_stock_kline', 'get_sports_scores', 'review_task', 'check_search_terms', 'web_search', 'fetch_url', 'read_evidence', 'read_file', 'list_files', 'find_files', 'search_in_files', 'kb_search', 'recall', 'search_conversations', 'list_my_messages', 'read_conversation', 'get_weather', 'get_current_time', 'verify_numbers', 'read_skill_file', 'computer_read_file', 'computer_list_dir']);
+export const PARALLEL_SAFE = new Set(['get_today_news', 'fetch_json', 'get_stock_kline', 'get_market_quote', 'get_sports_scores', 'review_task', 'check_search_terms', 'web_search', 'fetch_url', 'read_evidence', 'read_file', 'list_files', 'find_files', 'search_in_files', 'kb_search', 'recall', 'search_conversations', 'list_my_messages', 'read_conversation', 'get_weather', 'get_current_time', 'verify_numbers', 'read_skill_file', 'computer_read_file', 'computer_list_dir']);
 const CODE_FILE = /\.(m?js|ts|py|html?)$/i;
 /** 回答结尾是“我现在开始 / 接下来生成 / 马上做 / 稍等”这类预告（说了要做但还没做） */
 /** “需要的话我可以接着做 PPT”这类询问不算（那是在问用户） */

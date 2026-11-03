@@ -50,7 +50,7 @@ export async function recoverLookup(intent, plan, options) {
   let found = await attempt({ name: plan.name, args: plan.args }, label, plan.timeoutMs);
   if (found) return found.recovery?.state === 'input' ? found : finish(found);
   // 原天气/行情/搜索已含逐源重试与后备，不重新跑整条链；其他偶发只短重试一次。
-  if (!['get_weather', 'get_stock_kline', 'web_search'].includes(plan.name) && attempts.at(-1)?.failure === 'transient') {
+  if (!['get_weather', 'get_stock_kline', 'get_market_quote', 'web_search'].includes(plan.name) && attempts.at(-1)?.failure === 'transient') {
     found = await attempt({ name: plan.name, args: plan.args }, label + '短重试', 2000);
     if (found) return finish(found);
   }

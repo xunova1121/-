@@ -50,7 +50,7 @@ export function createLookupDelivery(request, now = Date.now) {
         if (!safe(recoveredText)) recoveredText = '这次取得的资料尚未满足你指定的范围，可以补充具体地点、日期或来源后再查。';
         if (lookupRecovery.state === 'failed' || lookupRecovery.state === 'input' || lookupRecovery.state === 'cached' || lookupRecovery.tool !== toolName) return;
       }
-      if (['get_weather', 'get_stock_kline', 'get_sports_scores'].includes(toolName)) {
+      if (['get_weather', 'get_stock_kline', 'get_market_quote', 'get_sports_scores'].includes(toolName)) {
         if (ok && String(output).trim() && safe(String(output)) && direct.length < 3) direct.push({ name: toolName, output: String(output).slice(0, 8000) });
         else if (!ok && failures.length < 4) failures.push(toolName + '：' + String(output).slice(0, 150));
         return;
@@ -107,7 +107,7 @@ export function createLookupDelivery(request, now = Date.now) {
     text() {
       if (recovery && recoveredText) return recoveredText;
       if (direct.length) {
-        const text = direct.map(row => row.name === 'get_weather' ? weatherFallback(row.output, request, now()).text : row.name === 'get_stock_kline' ? marketFallback(row.output) : sportsAnswerTable(row.output, request)).filter(Boolean).join('\n\n');
+        const text = direct.map(row => row.name === 'get_weather' ? weatherFallback(row.output, request, now()).text : row.name === 'get_stock_kline' ? marketFallback(row.output) : row.name === 'get_market_quote' ? row.output : sportsAnswerTable(row.output, request)).filter(Boolean).join('\n\n');
         return safe(text) ? text : '';
       }
       if (!rows.size) return failures.length ? `本轮还没有确切结果（${failedSources.length ? failedSources.join('、') : '查询来源暂时未能提供可用资料'}），可以稍后再试。` : '';

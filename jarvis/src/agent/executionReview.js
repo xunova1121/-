@@ -214,7 +214,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
         (format) => ![...artifacts.values()].some((item) => item.format === format && item.readback === 'passed' && !item.errors)
       ),
       request,
-      retrievalReceipts: receipts.filter((receipt) => receipt.version === version && receipt.ok && receipt.dataRetrieved !== false && /^(?:get_today_news|fetch_json|web_search|fetch_url|fact_check|deep_research|get_weather|get_stock_kline|get_sports_scores|read_evidence)$/.test(receipt.tool)).length,
+      retrievalReceipts: receipts.filter((receipt) => receipt.version === version && receipt.ok && receipt.dataRetrieved !== false && /^(?:get_today_news|fetch_json|web_search|fetch_url|fact_check|deep_research|get_weather|get_stock_kline|get_market_quote|get_sports_scores|read_evidence)$/.test(receipt.tool)).length,
       version,
       calls: sequence,
       answerIssues: [...answerIssues],

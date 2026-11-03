@@ -2,6 +2,7 @@ import { sportsPreCall } from '../sportsScores.js';
 import { supportsSportsNews } from '../newsIntent.js';
 import { wantsPreSearch, preSearchQuery } from './prefetch.js';
 import { WEATHER_FETCH_MS } from './weatherLimits.js';
+import { quoteTarget } from '../marketQuote.js';
 
 /** “大盘/沪指/深成指/创业板”对应的指数代码；问金价、汇率、港美股、楼盘等不算。 */
 export function marketIndex(text) {
@@ -48,6 +49,13 @@ export function lookupPlan(intent, { text, getTool, now = Date.now() }) {
     // 用户 2026-11-03：“今天大盘的情况”没取指数，只拿原话去搜，回来金价“大盘价”、楼盘“核心大盘”。大盘一律先取指数日K
     const index = !code && marketIndex(text);
     if (index) return { name: 'get_stock_kline', args: { code: index, adjustment: 'none', limit: 3 }, timeoutMs: 8000 };
+  }
+  if (intent.kind === 'market' && !/去年|今年|历史|最高|最低|过去|近\d|20\d{2}|分时|分钟|持仓|盈亏/.test(text)) {
+    // 用户 2026-11-03：金价、汇率、按名字问个股、港美股原先只能搜文章再找数字。先取实时报价，取不到再由流程退回搜索
+    const quote = getTool('get_market_quote') && quoteTarget(text);
+    if (quote) return { name: 'get_market_quote', args: { target: quote.target }, timeoutMs: 10000 };
+    // 油价没有免费接口：搜索词限定成调价公告口径，不用原话（原话常搜回自媒体和旧文）
+    if (/油价|汽油|柴油/.test(text) && getTool('web_search')) return { name: 'web_search', args: { query: `今日油价 92号 95号汽油 每升 最新调价 ${new Date(now + 8 * 3600_000).getUTCFullYear()}年` }, timeoutMs: 6000 };
   }
   return getTool('web_search') && (intent.sure || wantsPreSearch(text)) ? { name: 'web_search', args: { query: preSearchQuery(text) }, timeoutMs: 6000 } : null;
 }
