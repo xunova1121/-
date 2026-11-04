@@ -2,7 +2,7 @@
 import './serverSecurityPanel.css';
 export function createServerUsersPanel({ client, toast }) {
   const node = (tag, text = '', props = {}) => Object.assign(document.createElement(tag), { textContent: text, ...props });
-  const panel = node('details', '', { className: 'server-security server-users' });
+  const panel = node('details', '', { className: 'server-users' });
   const status = node('p', '', { role: 'status' });
   const controls = node('div', '', { hidden: true });
   const name = node('input', '', { placeholder: '例如：小李', maxLength: 40, ariaLabel: '用户名称' });
@@ -10,7 +10,7 @@ export function createServerUsersPanel({ client, toast }) {
   for (const n of [1, 2, 3, 4]) concurrency.append(node('option', `${n} 个任务${n === 2 ? '（建议起步值）' : ''}`, { value: String(n) }));
   concurrency.value = '2';
   const rows = node('div');
-  const issued = node('div', '', { hidden: true, className: 'server-security-issued' });
+  const issued = node('div', '', { hidden: true, className: 'server-users-issued' });
   const code = node('textarea', '', { readOnly: true, rows: 2, ariaLabel: '本次生成的个人访问码', autocomplete: 'off', spellcheck: false });
   const identity = node('p');
   let busy = false;
@@ -42,7 +42,7 @@ export function createServerUsersPanel({ client, toast }) {
     status.textContent = `已绑定 ${users.length} 位成员。主人的原数据和登录保持有效。`;
     rows.replaceChildren();
     for (const user of users) {
-      const row = node('div', '', { className: 'server-security-row' });
+      const row = node('div', '', { className: 'server-users-row' });
       row.append(node('p', user.name + (user.disabled ? '（已停用）' : '')), node('p', user.id, { className: 'muted small' }));
       row.append(button(user.disabled ? '启用' : '停用', async () => { clear(); await client().updateUser(user.id, user.disabled ? 'enable' : 'disable'); await refresh(); }),
         button('重置访问码', async () => { clear(); const result = await client().updateUser(user.id, 'reset'); reveal(result); await refresh(); }));
