@@ -36,11 +36,15 @@ import { parseDoc, plain } from './docModel.js';
 import { imageInfo } from './imageInfo.js';
 import { recordSlide, layoutIssues, fitText } from './slidePreview.js';
 import { styleTokens, chapterMark, mix as mix2 } from './pptStyles.js';
+import { REPORT_THEMES } from './themes.js';
+import { applyGradients } from './pptGradient.js';
+import { KEY_LINE, cnNumber, splitReportTitle, reportHeader, reportPageNo, reportCover, reportSection, reportEnd, reportAgenda, reportKpis, reportCards } from './pptReport.js';
+import { imageColumn, tagPanels, labelRows } from './pptReportPanels.js';
 
 const W = 13.333;
 const H = 7.5;
 const FONT = '微软雅黑';
-const NUM_ITEM = /^(?:\*\*)?([-+]?\d[\d,.]*(?:\s*[/／]\s*\d[\d,.]*)?\s*(?:%|万亿元|亿元|万元|千元|万亿|亿|万|千|元|个|家|人次|人|倍|天|小时|分钟|项|台|套|支|次|集|章|回|段|件|部|篇|位|名|条|座|种|场)?)(?:\*\*)?(?:\s*[：:]\s*|\s+|(?<=[场支个家人倍项台套次件部篇位名条座种元万亿千])(?=[\u4e00-\u9fff]))(.+)$/;
+const NUM_ITEM = /^(?:\*\*)?([-+]?\d[\d,.]*(?:\s*[/／]\s*\d[\d,.]*)?\s*(?:%|万亿元|亿元|万元|千元|万亿|亿|万|千|元|个|家|人次|人|倍|天|小时|分钟|项|台|套|支|次|集|章|回|段|件|部|篇|位|名|条|座|种|场|平方公里|公顷|公里|亩|吨|路|块|秒)?)(?:\*\*)?(?:\s*[：:]\s*|\s+|(?<=[场支个家人倍项台套次件部篇位名条座种元万亿千顷里亩吨路块秒])(?=[\u4e00-\u9fff]))(.+)$/;
 /** 以日期开头的一条：“10-19 支架到货”“11月1日：初验”“2026年3月 上线”“第 3 周：联调” */
 const DATE_ITEM = /^(?:\*\*)?(\d{1,2}\s*[-月]\s*\d{1,2}\s*日?|\d{4}\s*[-./年]\s*\d{1,2}(?:\s*[-./月]\s*\d{1,2}\s*日?)?\s*月?|\d{1,2}\s*月(?:上旬|中旬|下旬|底|初)?|第\s*\d+\s*(?:周|月|季度))(?:\*\*)?(?:\s*[：:]\s*|\s+)(.{2,})$/;
 /** “名称：85%”“集成测试 83.3%（回归）”：进度条 */
@@ -122,6 +126,21 @@ function takeDirective(inlines) {
   });
   if (!layout) return null;
   return { layout, word, inlines: rest.flatMap((ln, k) => (k ? [{ text: '\n' }, ...ln] : ln)) };
+}
+
+/**
+ * 防一个字单独成行（用户 2026-11-05 看样例时发现“交付物”的“物”掉到下一行）：
+ * 按中文字宽≈1.05 个字号、扣掉文本框内边距估算每行字数，最后一行只剩一两个字时把字号减一号再算，最多减到 13 号
+ */
+export function orphanSafeSize(text, width, size) {
+  const chars = [...String(text).replace(/\s+/g, '')].reduce((n, c) => n + (/[\u0000-\u00ff]/.test(c) ? 0.55 : 1), 0);
+  for (let s = size; s > 13; s--) {
+    // 文本框左右各约 0.1 寸内边距；中文字实际占宽约 1.05 个字号
+    const perLine = Math.floor(((width - 0.2) * 72) / (s * 1.05));
+    const rest = perLine > 0 ? chars % perLine : 0;
+    if (chars <= perLine || rest === 0 || rest > 2) return s;
+  }
+  return 13;
 }
 
 /** 按页拆开，每页保留原始块，供选版式 */
@@ -351,7 +370,10 @@ function chartColumns(table) {
  * @param {{ title: string, content: string, theme: object, subtitle?: string, author?: string, date?: string, loadImage?: (src: string) => Promise<Uint8Array|null> }} o
  * @returns {Promise<{ blob: Blob, info: { slides: number, layouts: string[], missingImages: string[], preview: object[], layoutIssues: object[] } }>}
  */
-export async function makePptx({ title, content, theme, subtitle = '', author = '', date = '', loadImage = null, style = 'business', expectedSlides = null, maxSlides = null, requireCover = false, forbidCover = false, typography = {}, renderSvg = null, signal, pictureLayout = 'legacy' }) {
+export async function makePptx({ title, content, theme, subtitle = '', author = '', date = '', loadImage = null, style = 'business', expectedSlides = null, maxSlides = null, requireCover = false, forbidCover = false, typography = {}, renderSvg = null, signal, pictureLayout = 'legacy', printFriendly = false }) {
+  // 政企汇报没指定配色（默认商务蓝）时用科技蓝
+  if (style === 'report' && (!theme || theme.id === 'business')) theme = REPORT_THEMES['tech-blue'];
+  const report = style === 'report';
   const PptxGenJS = (await import('pptxgenjs')).default;
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
@@ -449,7 +471,14 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     if (bytes <= 16e6) { imageCache.set(src, image); cacheBytes += bytes; }
     return image;
   };
-  if (pictureLayout === 'aesthetic') slides = await preparePicturePages(slides, { load: loadPicture, style, bodySize: typography.body?.size, onOmitted: text => missingImages.push(text) });
+  // 政企汇报：每页第一段“结论：……”放到标题下面那一行（原文保留在可编辑底稿里）
+  if (report) slides = slides.map(sl0 => {
+    const b0 = sl0.blocks[0];
+    const text = b0?.type === 'paragraph' ? b0.inlines.map(r => (r.bold ? `**${r.text}**` : r.text)).join('').trim() : '';
+    const m = KEY_LINE.exec(text);
+    return m ? { ...sl0, key: m[1].trim(), keyBlock: b0, blocks: sl0.blocks.slice(1) } : sl0;
+  });
+  if (pictureLayout === 'aesthetic' && !report) slides = await preparePicturePages(slides, { load: loadPicture, style, bodySize: typography.body?.size, onOmitted: text => missingImages.push(text) });
   if (pictureLayout === 'aesthetic' && typography.body?.size < 14 && slides.some(s => s.picture)) throw Object.assign(new Error('图片页正文至少14磅，与指定字号冲突；请提高字号'), { code: 'PPT_IMAGE_FONT', kind: 'validation' });
   const budget = slideBudget(slides.length, expectedSlides, requireCover, forbidCover, maxSlides);
   const imageLayouts = [];
@@ -486,7 +515,10 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     if (png) sl.addImage({ objectName: 'wy-icon-' + name, data: `image/png;base64,${png}`, x: x + d * 0.25, y: y + d * 0.25, w: d * 0.5, h: d * 0.5 });
   };
   /** 标题栏：plain 左上标题；rule 大标题 + 短线；band 顶部色带；story 楷体标题 + 金色细线 + 章节编号 */
+  let pageKey = '';
+  let reportLead = '';
   const titleBar = (sl, text) => {
+    if (report) { reportHeader(sl, rctx, { title: text, unit: author, key: pageKey, section: reportLead }); return; }
     sl.background = { color: light };
     const w = W - (sectionTag ? 3.9 : 1.8);
     if (T.titleBar === 'band') {
@@ -514,6 +546,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   };
   const mixSoft = C.soft;
   const pageNo = (sl, n) => {
+    if (report) { reportPageNo(sl, rctx, n); return; }
     if (T.id === 'story') {
       sl.addShape(pptx.ShapeType.line, { x: 0.8, y: H - 0.5, w: W - 1.6, h: 0, line: { color: T.border, width: 0.5 } });
       sl.addText(footTitle, { x: 0.8, y: H - 0.45, w: 8, h: 0.3, fontSize: 9, color: muted, fontFace: HFONT, valign: 'middle' });
@@ -526,6 +559,12 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   /** 重点横条：“标签：内容”的标签用点缀色；留白风格是左边一道色条、不铺底色 */
   const highlight = (sl, text, { x = 0.6, y, w = W - 1.2, h = 0.62 } = {}) => {
     const m = LABEL.exec(text);
+    if (report) {
+      sl.addShape(pptx.ShapeType.rect, { x, y, w, h, fill: { color: T.soft }, line: { color: T.soft } });
+      const runs = m ? [{ text: `${m[1].trim()}：`, options: { bold: true, color: T.hot } }, { text: m[2].trim(), options: { bold: true, color: head } }] : [{ text, options: { bold: true, color: head } }];
+      sl.addText(runs, { x: x + 0.3, y, w: w - 0.6, h, fontSize: 15, fontFace: FONT, align: 'center', valign: 'middle', fit: 'shrink' });
+      return;
+    }
     if (T.id === 'minimal') {
       sl.addShape(pptx.ShapeType.rect, { x, y: y + 0.08, w: 0.06, h: h - 0.16, fill: { color: accent }, line: { color: accent } });
       const runs = m ? [{ text: `${m[1].trim()}　`, options: { bold: true, color: accent } }, { text: m[2].trim(), options: { color: ink } }] : [{ text, options: { color: ink } }];
@@ -586,10 +625,11 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     const pick = iconPicker(preferredIcons);
     const parsed = items.map(labelOf);
     // 同一页的卡片说明用同一个字号（取放得下的最小值），不要一张大一张小
-    const descSize = Math.min(...parsed.map(({ text }) => {
+    const fitSize = Math.min(...parsed.map(({ text }) => {
       const guess = Math.max(13, Math.min(18, Math.floor(Math.sqrt(((w - 0.56) * descH * 5200) / Math.max(20, text.length * 1.3)))));
       return fitText(text, { w: w - 0.56, h: descH, fontSize: guess, lineSpacingMultiple: 1.3 }).o.fontSize;
     }));
+    const descSize = Math.min(fitSize, ...parsed.map(({ text }) => orphanSafeSize(text, w - 0.56, fitSize)));
     parsed.forEach(({ label, text }, k) => {
       const x = left + (k % cols) * (w + gap);
       const y = top + Math.floor(k / cols) * (h + gap);
@@ -748,6 +788,8 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     });
   };
 
+  // 政企汇报画法用到的零件（pptReport.js / pptReportPanels.js）
+  const rctx = { pptx, T, FONT, HFONT, W, H, iconCircle, labelOf, plain, load: imageData, get pick() { return iconPicker(preferredIcons); } };
   let localDecoration = null;
   const localVisualIssues = [];
   try { localDecoration = await decorationData(title + content.slice(0, 500), accent, renderSvg, signal); }
@@ -767,6 +809,8 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     cover.addText(title, { x: 0.9, y: 2.1, w: 11.5, h: 1.8, fontSize: 40, bold: true, color: 'FFFFFF', fontFace: HFONT, fit: 'shrink' });
     if (subtitle) cover.addText(subtitle, { x: 0.9, y: 4.15, w: 11.5, h: 1.1, fontSize: 20, color: 'FFFFFF', fontFace: FONT });
     cover.addText([author, coverDate].filter(Boolean).join(' · '), { x: 0.9, y: 6.1, w: 11.5, h: 0.5, fontSize: 14, color: 'FFFFFF', fontFace: FONT });
+  } else if (T.cover === 'gradient') {
+    reportCover(cover, rctx, { title, subtitle, author, date: coverDate, print: printFriendly });
   } else if (T.cover === 'centered') {
     cover.background = { color: light };
     ornament(cover, pw, true);
@@ -803,16 +847,39 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     if (subtitle) cover.addText(subtitle, { x: 0.8, y: 4.1, w: pw - 1.4, h: 1.0, fontSize: 16, color: C.soft, fontFace: FONT, valign: 'top', fit: 'shrink' });
     if (coverDate) cover.addText(coverDate, { objectName: 'wy-cover-meta', x: 0.8, y: H - 1.1, w: pw - 1.4, h: 0.4, fontSize: 12, color: C.soft, fontFace: FONT });
   }
-  if (localDecoration && !coverImages.length) cover.addImage({ data: localDecoration, x: 10.7, y: 4.2, w: 2.7 * 560 / 960, h: 2.7, sizing: { type: 'cover', w: 2.0, h: 2.7 }, objectName: 'wy-decoration-cover' });
+  if (localDecoration && !coverImages.length && !report) cover.addImage({ data: localDecoration, x: 10.7, y: 4.2, w: 2.7 * 560 / 960, h: 2.7, sizing: { type: 'cover', w: 2.0, h: 2.7 }, objectName: 'wy-decoration-cover' });
   layouts.push('cover');
   }
 
   if (!budget.cover && coverImages.length) for (const image of coverImages) missingImages.push(`${image.src}（当前页数约束未包含封面）`);
   // ---------- 汇报提纲：有两个以上“第 X 部分”时自动加
   const kinds = slides.map((s, i) => layoutOf(s, { last: i === slides.length - 1 }));
+  // 政企汇报：页内有 2–3 个 ### 小标题（每组下面有要点）：画成竖标签面板，有图时左图右面板
+  const groupsOf = (s) => {
+    const groups = [];
+    for (const b of s.blocks) {
+      if (b.type === 'heading' && b.level >= 3) groups.push({ title: plain(b.inlines), items: [] });
+      else if (groups.length && (b.type === 'list' || b.type === 'paragraph')) groups.at(-1).items.push(...entriesOf([b]));
+    }
+    return groups;
+  };
+  if (report) slides.forEach((s, i) => {
+    const g = groupsOf(s);
+    if (!['section', 'end', 'chart', 'table', 'progress'].includes(kinds[i]) && g.length >= 2 && g.length <= 3 && g.every(x => x.items.length)) kinds[i] = 'panel';
+    // 有图片又有文字：左图右文（卡片、要点、大数字页都一样）
+    else if (['cards', 'bullets', 'statement', 'stats', 'steps'].includes(kinds[i]) && s.blocks.some(b => b.type === 'image')) kinds[i] = 'imageText';
+  });
   const sections = slides.filter((s, i) => kinds[i] === 'section');
   const shortTitle = (t) => String(t).replace(SECTION, '').replace(/^[\s:：、.，,]+/, '').trim() || String(t);
-  if (!budget.strict && sections.length >= 2) {
+  // 政企汇报：没有“第X部分”章节页时，按“一、……：”这类标题里的章节名列提纲
+  const derived = report && sections.length < 2 ? [...new Set(slides.map(s => splitReportTitle(s.title).section).filter(Boolean))] : [];
+  if (!budget.strict && report && (sections.length >= 2 || derived.length >= 2)) {
+    const sl = addSlide('汇报提纲');
+    titleBar(sl, '汇报提纲');
+    reportAgenda(sl, rctx, sections.length >= 2 ? sections.map(s => ({ title: shortTitle(s.title), sub: s.blocks.flatMap(blockLines).filter(Boolean)[0] || '' })) : derived.map(title => ({ title, sub: '' })));
+    pageNo(sl, records.length);
+    layouts.push('agenda');
+  } else if (!budget.strict && sections.length >= 2) {
     const sl = addSlide('汇报提纲');
     titleBar(sl, '汇报提纲');
     const n = Math.min(sections.length, 6);
@@ -836,6 +903,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   const cardVariants = []; // 连续卡片页各用了哪种版式；中间隔了别的版式就重新开始
   for (const [i, s] of slides.entries()) {
     const kind = kinds[i];
+    pageKey = s.key || '';
     preferredIcons = s.iconNames || [];
     if (kind !== 'cards') cardVariants.length = 0;
     if (kind !== 'bullets') listRun = 0;
@@ -846,7 +914,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     const why = ignoredLayout(s, kind);
     if (why) ignored.push({ level: 'warn', slide: n, text: `第 ${n} 页${why}` });
     const images = s.blocks.filter(block => block.type === 'image');
-    if (pictureLayout === 'aesthetic' && images.length) {
+    if (pictureLayout === 'aesthetic' && images.length && !report) {
       const plan = s.picture;
       sl.background = { color: light };
       if (plan.name !== 'hero') titleBar(sl, s.title);
@@ -877,14 +945,19 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
       continue;
     }
     const summary = kind === 'table' && !images.length ? summarizeTable(s.blocks.find(block => block.type === 'table')) : null;
-    const restoreImageSpace = (images.length || summary) && !['image', 'imageText'].includes(kind) ? reserveImageColumn(sl) : () => {};
+    // 政企汇报自己摆图（左图右文、图下说明条），不走通用的右侧窄栏
+    const reportImages = report && ['image', 'imageText', 'panel'].includes(kind);
+    const restoreImageSpace = (images.length || summary) && !['image', 'imageText', 'panel'].includes(kind) ? reserveImageColumn(sl) : () => {};
     const lines = s.blocks.flatMap(blockLines).filter(Boolean);
     switch (kind) {
       case 'section': {
         sectionNo++;
         const mark = chapterMark(T, sectionNo - 1);
         sectionTag = `${mark} ${shortTitle(s.title)}`.slice(0, 24);
-        if (T.section === 'story') {
+        reportLead = `${cnNumber(sectionNo - 1)}、${shortTitle(s.title)}`;
+        if (T.section === 'gradient') {
+          reportSection(sl, rctx, { mark: String(sectionNo).padStart(2, '0'), title: shortTitle(s.title), lines, print: printFriendly });
+        } else if (T.section === 'story') {
           sl.background = { color: light };
           ornament(sl, pw, true, mark);
           sl.addText(`第${mark}章`, { x: 1.2, y: 1.9, w: 5, h: 0.7, fontSize: 22, color: gold, fontFace: HFONT, valign: 'bottom' });
@@ -908,6 +981,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
       }
       case 'end': {
         const words = s.title || '谢谢';
+        if (T.cover === 'gradient') { reportEnd(sl, rctx, { words, lines, author, print: printFriendly }); break; }
         if (T.cover !== 'split') {
           // 其他风格的结尾页：和封面同一种构图，居中或靠左的大字
           sl.background = { color: T.cover === 'band' ? C.primary : light };
@@ -942,6 +1016,12 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
         const cw = (W - 1.2 - gap * (cols - 1)) / cols;
         const ch = rows === 1 ? 3.6 : foot.length ? 2.15 : 2.45;
         const top = rows === 1 ? 1.9 : 1.55;
+        if (report) {
+          reportKpis(sl, rctx, items.map(m => ({ num: m[1].trim(), label: m[2].trim() })), { bottom: foot.length ? 6.05 : 6.85 });
+          if (foot.length) highlight(sl, foot.join('；'), { y: 6.25 });
+          pageNo(sl, n);
+          break;
+        }
         const pick = iconPicker(preferredIcons);
         items.forEach((m, k) => {
           const x = 0.6 + (k % cols) * (cw + gap);
@@ -995,6 +1075,14 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
           ...other.map((c) => `${plain(t.header[c])}：${rows.map((r) => `${plain(r[0])} ${plain(r[c] ?? [])}`).join('，')}`),
           ...s.blocks.filter((b) => b.type !== 'table').flatMap(blockLines).filter(Boolean)
         ].filter((x) => !/：$/.test(x));
+        // 政企汇报：自动标出要点（最高的一项；按时间排的写首尾变化），放进右边说明
+        if (report && cols.length === 1 && rows.length >= 2) {
+          const vals = data[0].values, top = vals.indexOf(Math.max(...vals));
+          const unit = (plain(t.header[cols[0]]).match(UNIT) ?? [''])[0];
+          const first = vals[0], last = vals.at(-1);
+          if (rows.every((r) => PERIOD.test(plain(r[0] ?? []))) && first > 0) note.unshift(`${labels[0]}到${labels.at(-1)}：从 ${first} 到 ${last}${unit}，${last >= first ? '增长' : '下降'} ${Math.abs(Math.round(((last - first) / first) * 1000) / 10)}%`);
+          else note.unshift(`最高：${labels[top]} ${vals[top]}${unit}`);
+        }
         const chartW = note.length ? 8.2 : W - 1.2;
         // 图形按数据选：占比 / 构成 → 环形图；按时间排的（月、季度、年）→ 折线；其余柱状图。页内写“版式：饼图 / 折线图”也行
         const shareOnly = cols.length === 1 && /占比|比重|构成|份额/.test(plain(t.header[cols[0]])) && rows.length >= 2 && rows.length <= 6;
@@ -1048,9 +1136,32 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
         pageNo(sl, n);
         break;
       }
+      case 'panel': {
+        // 政企汇报：竖标签面板；有图片时左边图片列（图下说明条），右边面板
+        titleBar(sl, s.title);
+        const area = images.length ? { x: 5.5, w: W - 6.1 } : {};
+        if (images.length) await imageColumn(sl, rctx, images, { w: 4.6 });
+        tagPanels(sl, rctx, groupsOf(s), area);
+        pageNo(sl, n);
+        break;
+      }
       case 'imageText':
       case 'image': {
         titleBar(sl, s.title);
+        if (report) {
+          const items = entriesOf(s.blocks.filter((b) => b.type !== 'image'));
+          if (kind === 'image' || !items.length) await imageColumn(sl, rctx, images, { x: 0.6, w: W - 1.2 });
+          else {
+            await imageColumn(sl, rctx, images, { w: 4.6 });
+            if (items.filter(it => labelOf(it).label).length >= 2) labelRows(sl, rctx, items);
+            else {
+              const size = fontFor(items.length, lines.join('').length) - 2;
+              sl.addText(bulletRuns(items, size), { x: 5.5, y: 1.7, w: W - 6.1, h: 5.1, fontSize: size, color: ink, fontFace: FONT, valign: 'top', fit: 'shrink' });
+            }
+          }
+          pageNo(sl, n);
+          break;
+        }
         if (kind === 'imageText') {
           const items = textOf(s.blocks.filter((b) => b.type !== 'image')).flatMap((b) => b.items);
           const size = fontFor(items.length, lines.join('').length) - 2;
@@ -1067,7 +1178,14 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
         const isSummary = (it) => SUMMARY.test(labelOf(it).label);
         const main = all.filter((it) => LABEL.test(plain(it.inlines)) && !(isSummary(it) && kind === 'cards'));
         const foot = all.filter((it) => !main.includes(it)).map((it) => plain(it.inlines));
-        if (kind === 'cards') {
+        if (kind === 'cards' && report) {
+          // 政企汇报：三条用三栏面板，四条在痛点四宫格和编号四宫格之间轮换，其余编号网格
+          const its = main.map(labelOf);
+          const choices = its.length === 3 ? ['columns', 'pain'] : its.length === 4 ? ['pain', 'numbered'] : ['numbered', 'pain'];
+          const variant = choices.find(v => v !== cardVariants.at(-1)) ?? choices[0];
+          reportCards(sl, rctx, its, variant, { bottom: foot.length ? 6.05 : 6.85 });
+          cardVariants.push(variant);
+        } else if (kind === 'cards') {
           // 连续几页都是卡片：换着用不同的版式（参照用户给的样例：一排大圆、长条、左右分栏、卡片网格）
           const its = main.map(labelOf);
           const fits = {
@@ -1143,8 +1261,10 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
         const { label, text } = labelOf(chainIt);
         const nodes = (label && isChain(text) ? text : plain(chainIt.inlines)).split(ARROW).map((x) => x.trim()).filter(Boolean);
         if (label && isChain(text)) sl.addText(label, { x: 0.6, y: 1.35, w: W - 1.2, h: 0.4, fontSize: 16, bold: true, color: head, fontFace: FONT });
-        chevrons(sl, nodes, { y: 1.85 });
         const rest = all.filter((it) => it !== chainIt);
+        // 只有一条链路、没有别的内容：箭头放大、放在页面中间，不留大块空白
+        if (!rest.length) chevrons(sl, nodes, { y: 3.0, h: 1.5, nodeSize: nodes.length > 5 ? 18 : 22 });
+        else chevrons(sl, nodes, { y: 1.85 });
         if (rest.length >= 3 && rest.length <= 6 && rest.every((it) => LABEL.test(plain(it.inlines)))) cardGrid(sl, rest, { top: 3.1 });
         else if (rest.length) {
           const size = Math.min(22, fontFor(rest.length, rest.map((it) => plain(it.inlines)).join('').length));
@@ -1222,20 +1342,21 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
       sl.addChart(pptx.ChartType.bar, [{ name: '条数', labels: summary.labels, values: summary.values }], { x: 10.05, y: 2.25, w: 2.65, h: 3.6, catAxisLabelFontSize: 12, valAxisLabelFontSize: 12, showValue: true, showLegend: false, chartColors: [accent], showTitle: false });
       sl.addText(`由本页${summary.total}条记录汇总`, { objectName: 'wy-caption', x: 10.05, y: 6.1, w: 2.65, h: 0.5, fontSize: 12, color: muted, fontFace: FONT });
     }
-    if (['table', 'imageText', 'image'].includes(kind)) iconCircle(sl, W - 0.9, 0.35, 0.4, iconPicker(preferredIcons)(s.title), accent);
-    await placeSlideImages(sl, images, kind, { load: imageData, missingImages });
+    if (!report && ['table', 'imageText', 'image'].includes(kind)) iconCircle(sl, W - 0.9, 0.35, 0.4, iconPicker(preferredIcons)(s.title), accent);
+    if (!reportImages) await placeSlideImages(sl, images, kind, { load: imageData, missingImages });
     if (s.notes.length) sl.addNotes(s.notes.join('\n'));
   }
-  const blob = await pptx.write({ outputType: 'blob' });
+  // 政企汇报：封面、章节、结尾、指标条的纯色占位形状改写成原生渐变
+  const blob = (await applyGradients(await pptx.write({ outputType: 'blob' }), { expected: report ? 1 : 0 })).blob;
   const preview = records.map(({ n, title: t, items, slide }) => ({ n, title: t, items, background: slide.background?.color }));
-  return { blob, info: { slides: records.length, expectedSlides, layouts, imageLayouts, coverMetadata: { subtitle, author, date: date || today() }, editableContent: presentationMarkdown(slides, { title, cover: budget.cover, coverImages, agenda: !budget.strict && sections.length >= 2 ? sections.map(s => s.title) : [] }), missingImages, preview, layoutIssues: [...layoutIssues(preview), ...monotony(pages, MONOTONY_RUN[T.id] ?? 3), ...ignored, ...localVisualIssues], style: T.id } };
+  return { blob, info: { slides: records.length, expectedSlides, layouts, imageLayouts, coverMetadata: { subtitle, author, date: date || today() }, editableContent: presentationMarkdown(slides.map(s0 => (s0.keyBlock ? { ...s0, blocks: [s0.keyBlock, ...s0.blocks] } : s0)), { title, cover: budget.cover, coverImages, agenda: !budget.strict && sections.length >= 2 ? sections.map(s => s.title) : [] }), missingImages, preview, layoutIssues: [...layoutIssues(preview), ...monotony(pages, MONOTONY_RUN[T.id] ?? 3), ...ignored, ...localVisualIssues], style: T.id } };
 }
 
 /**
  * 连续 3 页以上都是普通要点列表：看着单调，提醒换版式（交给模型改一轮）。
  * 其他风格的要点页会轮换构图（见 listPage），连着 4 页才提醒；叙事风格的情节本来就是一件件往下讲，连着 6 页才提醒
  */
-const MONOTONY_RUN = { business: 3, minimal: 4, data: 4, story: 6 };
+const MONOTONY_RUN = { business: 3, minimal: 4, data: 4, story: 6, report: 3 };
 export function monotony(pages, run = 3) {
   const out = [];
   for (let i = 0; i < pages.length;) {

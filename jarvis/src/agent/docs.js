@@ -11,7 +11,7 @@ import { ext, isText } from './workspace.js';
 import { parseDoc, images } from './docModel.js';
 import { htmlDocument } from './htmlWriter.js';
 import { makeDocx } from './docxWriter.js';
-import { resolveTheme } from './themes.js';
+import { resolveTheme, REPORT_THEMES } from './themes.js';
 import { imageInfo } from './imageInfo.js';
 import { makeXlsx, makeCsv } from './xlsxWriter.js';
 import { makePptx } from './pptxWriter.js';
@@ -214,7 +214,7 @@ function toBase64(bytes) {
  * @param {Uint8Array|ArrayBuffer} [o.template]  Word 模板（沿用它的样式）
  * @returns {Promise<{blob: Blob, ext: string, note?: string, theme: object, info?: object}>}
  */
-export async function generate(format, { title = '未命名', content = '', theme: themeName = '', cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, toPdf = null, template = null, layout = 'report', issuer = '', docNo = '', style = 'business', sheetStyle = '', kind = '', expectedSlides = null, maxSlides = null, requireCover = false, forbidCover = false, typography = {}, renderSvg = null, signal, pictureLayout = 'legacy', noRules = false, scale = 0 } = {}) {
+export async function generate(format, { title = '未命名', content = '', theme: themeName = '', cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, toPdf = null, template = null, layout = 'report', issuer = '', docNo = '', style = 'business', sheetStyle = '', kind = '', expectedSlides = null, maxSlides = null, requireCover = false, forbidCover = false, typography = {}, renderSvg = null, signal, pictureLayout = 'legacy', noRules = false, scale = 0, printFriendly = false } = {}) {
   const theme = resolveTheme(themeName, `${title}\n${content}`);
   const page = { theme, cover, subtitle, author, date, toc, layout };
   switch (format) {
@@ -240,8 +240,10 @@ export async function generate(format, { title = '未命名', content = '', them
       return { blob: r.blob, ext: 'docx', theme, info: r.info };
     }
     case 'pptx': {
-      const r = await makePptx({ title, content, theme, subtitle, author, date, loadImage, style, expectedSlides, maxSlides, requireCover, forbidCover, typography, renderSvg, signal, pictureLayout });
-      return { blob: r.blob, ext: 'pptx', theme, info: r.info };
+      // 政企汇报没指定配色：用科技蓝（公文主题照旧）
+      const pptTheme = style === 'report' && !themeName && !theme.official ? REPORT_THEMES['tech-blue'] : theme;
+      const r = await makePptx({ title, content, theme: pptTheme, subtitle, author, date, loadImage, style, expectedSlides, maxSlides, requireCover, forbidCover, typography, renderSvg, signal, pictureLayout, printFriendly });
+      return { blob: r.blob, ext: 'pptx', theme: pptTheme, info: r.info };
     }
     case 'xlsx': {
       const r = await makeXlsx(content, { theme, kind, sheetStyle, typography });

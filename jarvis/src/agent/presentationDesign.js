@@ -1,4 +1,4 @@
-import { STYLE_IDS, STYLE_NAMES } from './pptStyles.js';
+import { STYLE_IDS, ALL_STYLE_IDS, STYLE_NAMES } from './pptStyles.js';
 import { chooseDesign } from './documentDesign.js';
 import { documentError } from './documentPlan.js';
 import { styleRequest } from './documentStyleRequest.js';
@@ -8,7 +8,9 @@ const EXPRESSIONS = [
   ['minimal', /简约|极简|留白|干净一点|苹果风|简洁风/gi],
   ['story', /故事感|叙事|氛围感|古风|国风|电影感|有氛围/gi],
   ['data', /数据报告|数据风|图表为主|多用图表|仪表盘/gi],
-  ['business', /稳重商务|商务风|正式一点|稳重|政务|汇报风/gi]
+  ['report', /政企汇报|政企风|政企|路演|国企风|央企风|运营商风/gi],
+  // “政企汇报风格”里的“汇报风”不算稳重商务
+  ['business', /稳重商务|商务风|正式一点|稳重|政务|(?<!政企)汇报风/gi]
 ];
 export function presentationRequest(text = '') {
   return styleRequest(text, EXPRESSIONS);
@@ -37,7 +39,7 @@ export async function presentationDesign(ctx, request, options, signal) {
     ...STYLE_IDS.map(style => [style, '避开你排除的风格'])
   ];
   for (const [style, reason, required = false] of candidates) {
-    if (STYLE_IDS.includes(style) && !excluded.has(style)) return { style, label: STYLE_NAMES[style], reason, required, excluded: [...excluded] };
+    if (ALL_STYLE_IDS.includes(style) && !excluded.has(style)) return { style, label: STYLE_NAMES[style], reason, required, excluded: [...excluded] };
   }
   throw documentError('四种PPT风格均被排除，请明确允许的风格；未生成文件', 'DOCUMENT_DESIGN');
 }

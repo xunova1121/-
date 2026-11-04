@@ -64,11 +64,22 @@ export const THEMES = {
 
 export const THEME_IDS = Object.keys(THEMES);
 
+/**
+ * 政企汇报三套配色（未央自有，用户 2026-11-05 参考运营商政企汇报稿）：单独登记，不参与按内容自动选色；
+ * 政企汇报风格没指定配色时用科技蓝；也可以按 id 或中文名（科技蓝 / 政务红 / 生态绿）指定。extra 是副标题色
+ */
+export const REPORT_THEMES = {
+  'tech-blue': T('tech-blue', '科技蓝', { primary: '0B4EA2', accent: '1677D9', soft: 'EAF2FC', bg: 'F5F8FC', extra: '2FA35A' }, 'sans', [], '政企汇报、项目路演、解决方案'),
+  'gov-red': T('gov-red', '政务红', { primary: 'A31A1A', accent: 'C8282B', soft: 'FBEDED', bg: 'FDF7F6', extra: 'B8862B' }, 'sans', [], '党政机关、国企工作汇报'),
+  'eco-green': T('eco-green', '生态绿', { primary: '1F6B3A', accent: '2E8B57', soft: 'E9F4EC', bg: 'F5FAF6', extra: '1565C0' }, 'sans', [], '农业、环保、乡村振兴汇报'),
+};
+export const REPORT_THEME_IDS = Object.keys(REPORT_THEMES);
+
 /** 按 id 或中文名找主题；找不到返回 null */
 export function findTheme(name) {
   const s = String(name ?? '').trim();
   if (!s) return null;
-  return THEMES[s] ?? Object.values(THEMES).find((t) => t.name === s || s.includes(t.name)) ?? null;
+  return THEMES[s] ?? REPORT_THEMES[s] ?? [...Object.values(THEMES), ...Object.values(REPORT_THEMES)].find((t) => t.name === s || s.includes(t.name)) ?? null;
 }
 
 /**

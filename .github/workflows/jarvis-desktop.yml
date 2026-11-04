@@ -313,6 +313,8 @@ jobs:
         run: node e2e/word-typography.mjs "$RUNNER_TEMP/jarvis-e2e/word-typography"
       - name: 验证四种PPT风格、可编辑元素与真实PDF
         run: node e2e/presentation-styles.mjs "$RUNNER_TEMP/jarvis-e2e/presentation-styles"
+      - name: 验证政企汇报风格、原生渐变与真实PDF
+        run: node e2e/presentation-report.mjs "$RUNNER_TEMP/jarvis-e2e/presentation-report"
       - name: 验证六份PPT图片美学版式、真实PDF与逐页截图
         run: node e2e/ppt-image-layout.mjs "$RUNNER_TEMP/jarvis-e2e/ppt-image-layout"
       - name: 验证四种Excel样式、公式筛选与真实PDF
@@ -478,11 +480,13 @@ jobs:
       - name: 写发布说明
         run: |
           cat > release-notes.md <<'NOTES'
-          ## 本版更新 · OpenRouter 线路选择
-          - 用 OpenRouter 的模型时，请求会让 OpenRouter 在同一模型的多家线路里挑首字最快的（延迟优先，默认）。
-          - 设置 → 模型 → 服务商与 Key → OpenRouter → 配置，新增“OpenRouter 线路选择”：延迟优先（默认）、出字速度优先、价格优先。本机和云服务器分别设置。
-          - 只对 OpenRouter（含指向 openrouter.ai 的自定义线路）生效；其他服务商不变。线路不认这个参数时自动去掉重发。
-          - 已通过单元测试和浏览器测试；对真实 OpenRouter 的提速效果未实测，请更新后对比回答底部的“首字”时间。
+          ## 本版更新 · PPT 新增“政企汇报”风格
+          - 说“做成政企汇报风格”“路演用的PPT”时自动使用：左上“二、章节：小标题”双色标题，右上单位名，标题下一句结论（关键词标红、数字标蓝）。
+          - 封面、章节页、结尾页整页渐变（PowerPoint、WPS 里可编辑）；要打印时说“打印用”，改白底省墨。
+          - 新版式：汇报提纲、大数字指标条、痛点四宫格、编号四宫格、三栏面板、左边竖标签的分组面板、左图右文（图下说明条）、成效页；图表自动写出最高项或增长幅度。
+          - 配色：科技蓝（默认）、政务红、生态绿，可以直接说“用政务红”。
+          - 所有风格：只有一条流程的页面箭头放大居中，不再大片空白；卡片说明避免一个字单独成行。
+          - 已通过单元测试、浏览器测试和 LibreOffice 真实转 PDF 检查；真实模型写稿效果、PowerPoint/WPS 真机打开效果待你实际做一份确认。
 
           ## 更新与使用
           先在设置里“立即更新服务器”，再更新电脑和手机。仅安装APK不会替换远端服务器代码。

@@ -8,7 +8,7 @@ import { detectRole, roleGuide, roleKey, ROLES } from './writingRoles.js';
 import { createWorkflowStore } from './workflowStore.js';
 import { documentWordBudget } from '../../agent/documentWordBudget.js';
 import { writeLongDocument } from '../../agent/longDoc.js';
-import { STYLE_IDS } from '../../agent/pptStyles.js';
+import { ALL_STYLE_IDS } from '../../agent/pptStyles.js';
 import { SHEET_STYLE_IDS } from '../../agent/spreadsheetDesign.js';
 
 function newState(input, execution) {
@@ -17,7 +17,7 @@ function newState(input, execution) {
   const format = input.format || 'docx';
   const role = input.role === 'internal' ? null : roleKey(input.role) || detectRole(task);
   if (!['docx', 'pdf', 'html', 'md', 'pptx', 'xlsx'].includes(format)) throw workflowError('不支持的文档格式', 'DOCUMENT_INPUT');
-  if (format === 'pptx' && input.style && !STYLE_IDS.includes(input.style)) throw workflowError('PPT风格参数无效', 'DOCUMENT_INPUT');
+  if (format === 'pptx' && input.style && !ALL_STYLE_IDS.includes(input.style)) throw workflowError('PPT风格参数无效', 'DOCUMENT_INPUT');
   if (format === 'xlsx' && input.sheet_style && !SHEET_STYLE_IDS.includes(input.sheet_style)) throw workflowError('Excel风格参数无效', 'DOCUMENT_INPUT');
   const id = globalThis.crypto.randomUUID();
   const referenceTime = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' });

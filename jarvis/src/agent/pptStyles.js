@@ -6,6 +6,8 @@
  *   minimal   简洁留白：纯白底、大标题配一道短线、不用卡片阴影，用细线和编号分隔；封面大字留白
  *   story     叙事氛围：整页深色底、楷体标题、金色点缀和细线框、章节编号“壹贰叁”；适合剧情、人物、历史、文化
  *   data      数据报告：顶部色带标题、直角浅灰面板、紧凑网格；数字和图表优先，适合经营、财务、统计
+ *   report    政企汇报：白底、“二、章节：小标题”双色标题、标题下一句结论（关键词标红）、右上单位；
+ *             封面/章节/结尾整页原生渐变；页面排满（指标条、痛点四宫格、竖标签面板、左图右文），画法见 pptReport.js
  */
 
 /** 颜色混合：a 和 b 按 t（0–1，越大越接近 b）混 */
@@ -16,8 +18,10 @@ export function mix(a, b, t) {
 }
 const lum = (c) => { const [r, g, b] = [0, 2, 4].map((i) => parseInt(String(c).slice(i, i + 2), 16) / 255); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
 
+/** 通用四种风格；政企汇报（report）只在明确要求或内容很对口时用，不参与“都排除了就报错”的兜底轮换 */
 export const STYLE_IDS = ['business', 'minimal', 'story', 'data'];
-export const STYLE_NAMES = { business: '稳重商务', minimal: '简洁留白', story: '叙事氛围', data: '数据报告' };
+export const ALL_STYLE_IDS = [...STYLE_IDS, 'report'];
+export const STYLE_NAMES = { business: '稳重商务', minimal: '简洁留白', story: '叙事氛围', data: '数据报告', report: '政企汇报' };
 
 /**
  * 按主题配色算出这种风格的全部设计规范
@@ -38,13 +42,25 @@ export function styleTokens(id, theme) {
     titleBar: 'plain', icon: 'circle', cover: 'split', section: 'dark', chapter: 'number',
     titleSize: 24, ornament: true, footer: true
   };
-  if (official || id === 'business' || !STYLE_IDS.includes(id)) return base;
+  if (official || id === 'business' || !ALL_STYLE_IDS.includes(id)) return base;
   if (id === 'minimal') {
     return {
       ...base, id, name: STYLE_NAMES.minimal,
       bg: 'FFFFFF', surface: 'FFFFFF', border: mix(C.accent, 'FFFFFF', 0.78), shadow: false, radius: 0,
       soft: mix(C.soft, 'FFFFFF', 0.4), strong: C.primary,
       titleBar: 'rule', icon: 'number', cover: 'airy', section: 'light', titleSize: 28, ornament: false
+    };
+  }
+  if (id === 'report') {
+    // 重点色：关键词标红；渐变由主色压暗到强调色提亮，保证白字对比度
+    const deep = mix(C.primary, '000000', lum(C.primary) > 0.3 ? 0.45 : 0.15);
+    return {
+      ...base, id, name: STYLE_NAMES.report,
+      bg: 'FFFFFF', surface: 'FFFFFF', border: 'DCE3ED', shadow: false, radius: 0.04,
+      head: C.primary, sub: '4A5568', muted: '8A94A6', accent: C.accent, strong: C.primary, gold: C.extra,
+      soft: mix(C.accent, 'FFFFFF', 0.9), panel: 'F4F7FB', hot: 'D9261C', subtitle: C.extra,
+      gradient: [deep, C.primary, mix(C.accent, 'FFFFFF', 0.25)], gradientSoft: [C.primary, C.accent, mix(C.accent, 'FFFFFF', 0.45)],
+      titleBar: 'report', icon: 'circle', cover: 'gradient', section: 'gradient', titleSize: 22, ornament: false, footer: false
     };
   }
   if (id === 'data') {

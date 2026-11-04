@@ -3,20 +3,23 @@
  * 优先级：调用时指定的 > 用户原话里明说的（“简约一点”“做成数据报告”）> 按内容判断 > 默认。
  * 只做判断，不画东西；画法分别在 pptStyles.js、docxWriter.js、xlsxWriter.js。
  */
-import { STYLE_IDS, STYLE_NAMES } from './pptStyles.js';
+import { ALL_STYLE_IDS, STYLE_NAMES } from './pptStyles.js';
 
 /** PPT 风格：用户原话里的说法 */
 const STYLE_ASK = [
   ['minimal', /简约|简洁|极简|留白|干净一点|苹果风/],
   ['story', /故事感|叙事|氛围感|古风|国风|电影感|有氛围/],
   ['data', /数据报告|数据风|图表为主|多用图表|仪表盘/],
-  ['business', /商务风|正式一点|稳重|政务|汇报风/]
+  // 政企汇报（用户 2026-11-05）：说了政企、路演、国企/运营商风格才用，普通“汇报风”仍是稳重商务
+  ['report', /政企|路演|国企风|央企风|运营商风|项目汇报风格|解决方案汇报/],
+  ['business', /商务风|正式一点|稳重|政务|(?<!政企)汇报风/]
 ];
 /** PPT 风格：内容是什么 */
 const STYLE_TOPIC = [
   ['story', /剧情|动漫|动画|小说|电视剧|电影|番剧|仙侠|修仙|武侠|玄幻|人物传|传记|历史故事|游记|旅行|旅游|攻略|读书笔记|诗词|传统文化|非遗|神话|典故|角色/],
   ['data', /经营分析|财务|营收|利润|销售额|同比|环比|报表|指标|数据分析|统计|KPI|预算执行|业绩/i],
   ['minimal', /产品发布|发布会|作品集|设计稿|品牌|新品|设计方案|摄影|艺术/],
+  ['report', /路演|解决方案汇报|政企项目|示范项目|标杆项目|项目成效汇报|申报答辩/],
   ['business', /汇报|方案|立项|决策|述职|总结|计划|建设|项目|工作/]
 ];
 
@@ -50,13 +53,13 @@ export function chooseDesign({ format, title = '', content = '', requirements = 
   const ask = String(requirements ?? '');
   const head = `${title}\n${String(content).slice(0, 3000)}`;
   if (format === 'pptx') {
-    if (STYLE_IDS.includes(style)) return { style, label: STYLE_NAMES[style], reason: '按指定的风格' };
+    if (ALL_STYLE_IDS.includes(style)) return { style, label: STYLE_NAMES[style], reason: '按指定的风格' };
     const asked = firstHit(STYLE_ASK, ask);
     if (asked) return { style: asked, label: STYLE_NAMES[asked], reason: '按你说的要求' };
     // 表格多、数字密：数据报告
     if (tableCount(content) >= 2) return { style: 'data', label: STYLE_NAMES.data, reason: '内容里表格和数字多' };
     const topic = firstHit(STYLE_TOPIC, `${ask}\n${head}`) || 'business';
-    return { style: topic, label: STYLE_NAMES[topic], reason: topic === 'story' ? '内容是故事、剧情、人物类' : topic === 'data' ? '内容是经营、财务、统计类' : topic === 'minimal' ? '内容是产品、设计、品牌类' : '内容是工作汇报、方案类' };
+    return { style: topic, label: STYLE_NAMES[topic], reason: topic === 'story' ? '内容是故事、剧情、人物类' : topic === 'data' ? '内容是经营、财务、统计类' : topic === 'minimal' ? '内容是产品、设计、品牌类' : topic === 'report' ? '内容是政企项目路演、解决方案汇报' : '内容是工作汇报、方案类' };
   }
   if (['docx', 'pdf', 'html'].includes(format)) {
     if (DOC_KINDS[kind]) return { kind, label: DOC_KINDS[kind], reason: '按指定的文种' };
