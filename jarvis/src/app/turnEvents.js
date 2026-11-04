@@ -61,7 +61,12 @@ export function createTurnEvents(app) {
         st.usedModel = e.to;
         st.fellFrom = st.fellFrom || e.from;
         st.fellSlow = st.fellSlow ?? Boolean(e.slow);
-        const note = e.slow ? `${e.from} ${e.reason}，已换用备用模型 ${e.to}` : `${e.from} 出错（${e.reason}），已换成 ${e.to} 接着做`;
+        st.capabilityUpgraded = Boolean(e.capability);
+        const note = e.capability
+          ? `任务需要更多能力，已换成配置的 ${e.to} 继续`
+          : e.slow
+            ? `${e.from} ${e.reason}，已换用备用模型 ${e.to}`
+            : `${e.from} 出错（${e.reason}），已换成 ${e.to} 接着做`;
         app.hud.think(`⇄ ${note}`, 'sub');
         toast(note);
         app.setTask('processing', `已换成 ${e.to}`.slice(0, 30));

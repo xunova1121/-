@@ -378,6 +378,7 @@ jobs:
           node e2e/news-lookup.mjs "$RUNNER_TEMP/jarvis-e2e/news-lookup"
           node e2e/lookup-step1.mjs "$RUNNER_TEMP/jarvis-e2e/lookup-step1"
           node e2e/time-calculation.mjs "$RUNNER_TEMP/jarvis-e2e/time-calculation"
+          node e2e/task-cost.mjs "$RUNNER_TEMP/jarvis-e2e/task-cost"
           node e2e/search-fallback.mjs "$RUNNER_TEMP/jarvis-e2e/search-fallback"
           node e2e/model-credentials.mjs "$RUNNER_TEMP/jarvis-e2e/model-credentials"
           node e2e/server-mobile.mjs "$RUNNER_TEMP/jarvis-e2e"

@@ -29,9 +29,15 @@ export function initRoutingPanel({ getConfig, patchConfig, toast, patchServer })
     const cfg = getConfig();
     $('#fast-chat').checked = cfg.fastChat !== false;
     $('#hedge-backup').checked = cfg.hedgeBackup !== false;
+    if ($('#capability-upgrade')) $('#capability-upgrade').checked = cfg.capabilityUpgrade !== false;
   }
 
   $('#fast-chat').addEventListener('change', () => patchConfig((c) => ({ ...c, fastChat: $('#fast-chat').checked })));
+  $('#capability-upgrade')?.addEventListener('change', () => {
+    const enabled = $('#capability-upgrade').checked;
+    patchConfig(c => ({ ...c, capabilityUpgrade: enabled }));
+    patchServer?.({ capabilityUpgrade: enabled })?.catch?.(() => toast('服务器上的能力切换设置未保存，请刷新后重试'));
+  });
   $('#hedge-backup').addEventListener('change', () => {
     patchConfig((c) => ({ ...c, hedgeBackup: $('#hedge-backup').checked }));
     // 服务器模式：服务器上的任务也照这个开关

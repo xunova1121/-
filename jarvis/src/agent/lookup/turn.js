@@ -7,6 +7,7 @@ import { reviewOutcome } from '../reviewOutcome.js';
 import { needsComputer } from '../../llm/router.js';
 import { followsImage } from '../../core/imageFollowup.js';
 import { creativeWithoutLookup } from '../../core/imageFollowup.js';
+import { resolveTaskIntent } from '../../core/taskIntent.js';
 /** 普通信息查询的总时限：包含上下文、模型等待/重试、检索和收尾；不是只计网页耗时。 */
 export const LOOKUP_TOTAL_MS = 60_000;
 export const COMPLEX = /深度|深入|全面|详细|长篇|长文|\d+\s*[千万元]?\s*字|调研|研究报告|生成|制作|创作|画|设计|样式|效果图|界面|网页|网站|PPT|Word|Excel|文档|报告|方案|论文|查原文|核实原文|核对原文|原文核实|逐条核[实验对]|逐项|逐一|交叉核[验对]|多来源核[验对]|(?:写|生成|制作|编制|导出|保存为|整理成).{0,16}(?:报告|文档|论文|PPT|Word|Excel|文件)|代码|编程|开发|安装|部署/i;
@@ -45,6 +46,9 @@ export function moreTimeRequest(text, history = []) {
 const abortError = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
 
 export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_MS, profiles = false } = {}) {
+  const taskIntent = options.taskIntent || resolveTaskIntent(options.requirementText ?? options.userText, { history: options.history, state: options.summary?.taskContext, images: options.images?.length });
+  if (taskIntent.inherited) options = { ...options, taskIntent, requirementText: taskIntent.requirementText };
+  if (taskIntent.category === 'code' || taskIntent.inherited && taskIntent.category === 'work' && !isQuickLookup(taskIntent.goal)) return run(options);
   if (options.codeWork?.enabled) return run(options); // 代码任务有独立硬期限，不叠普通查询时限。
   // “再查”：按原问题重查，不再套一分钟时限（联网最多 3 分钟）
   const again = moreTimeRequest(options.userText, options.history);
@@ -52,8 +56,9 @@ export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_
     const task = `${again}（上次一分钟内没查完，用户要求再查一会儿：全面一些，多看几个来源、读原文核实；上次已经查到的不用重复，直接补充和更正）`;
     return run({ ...options, userText: `${options.userText}\n\n${task}`, requirementText: task, retrievalText: again, timeBudgetMs: options.timeBudgetMs ?? MORE_TIME_MS });
   }
-  const text = lookupRequirement(options.requirementText ?? options.userText, options.history);
-  if(text !== (options.requirementText ?? options.userText)) options = { ...options, requirementText: text };
+  // 总时限看原任务类别，不能让补入的“本轮要求：继续”字样绕过查询期限。
+  const text = taskIntent.inherited ? taskIntent.goal : lookupRequirement(options.requirementText ?? options.userText, options.history);
+  if(!taskIntent.inherited && text !== (options.requirementText ?? options.userText)) options = { ...options, requirementText: text };
   const hasComputer=options.tools?.some(t=>t.name==='computer_look'||t.name==='computer_search');
   if(options.computerTask||hasComputer&&needsComputer(text,{history:options.history||[]}))return run(options.computerTask?options:{...options,computerTask:true});
   if (followsImage(text, options.history || [], new Map((options.history || []).filter(message => message.images?.length || message.thumbs?.length).map(message => [message.ts, true])))) return run(options);

@@ -1,4 +1,8 @@
 import { DOCUMENT_TASK_CORE, documentRouteNote } from './documentToolProfile.js';
+import { taskToolCore } from './taskToolProfile.js';
+import { resolveTaskIntent } from '../core/taskIntent.js';
+import { estimateTokens, contextBudget } from './contextBudget.js';
+import { createCapabilityUpgrade, UPGRADE_CALLS } from './capabilityUpgrade.js';
 import { answerConstraintIssues as lookupAnswerIssues } from './answerRequirements.js';
 import { lookupComplaint, todayNewsIntent, sportsNewsIntent, supportsSportsNews } from './newsIntent.js';
 import { lookupIntent } from './lookup/intent.js';
@@ -254,7 +258,8 @@ export function trimComputerScreenshots(messages,keep=2) {
   for(const m of shots.slice(0,Math.max(0,shots.length-keep))){delete m.images;m.content=`${m.content}\n（旧界面截图已从模型输入移除；请以最新截图为准。）`;}
 }
 
-async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, maxTotalSteps = null, codeWork = null, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, isolated = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false, describeImages = null, visionLabel = '看图模型', readImageText = null, modelNote = '', hedgeMs = 0, lookupModel = null, retrievalText = null, lookupPreferences = null, lookupClassifier = null }) {
+async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, maxTotalSteps = null, codeWork = null, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, isolated = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false, describeImages = null, visionLabel = '看图模型', readImageText = null, modelNote = '', hedgeMs = 0, lookupModel = null, retrievalText = null, lookupPreferences = null, lookupClassifier = null, taskIntent = null, capabilityRoutes = [] }) {
+  taskIntent ||= resolveTaskIntent(requirementText, { history, state: summary?.taskContext, images: images.length });
   const workStartedAt = Date.now();
   const workAnswer = await answerWorkHistory(requirementText, sessionId, { signal, now: now(), onStart: () => emit({ type: 'tool_start', id: 'work-history', name: 'list_work_records', args: {} }) });
   if (workAnswer) {
@@ -337,11 +342,14 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   // 画一张图也算单件交付：不给外层任务清单（实测一张架构图列清单、改清单用了 5 轮模型）
   const oneFile = (singleDocumentTask(requirementText) && String(requirementText).length <= 150 && !/方案|调研|研究|论文/.test(requirementText)) || (!pipelineContext && /架构图|流程图|示意图|拓扑图|关系图/.test(requirementText) && String(requirementText).length <= 300);
   const executionScope = {};
+  // 本批只在文字任务升级；不能把正在看图/操作电脑的上下文切给未知看图能力的线路。
+  const capabilityUpgrade = createCapabilityUpgrade({ routes: images.length || computerTask || history.some(message => message.images?.length) ? [] : capabilityRoutes, intent: taskIntent, signal, emit });
   const own = [...(oneFile ? [] : [plan.tool]), review.tool, executionTool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: sportsNewsOnly ? tools : availableTools })] : []), ...(lookupDeadline && lookupControl?.release ? [moreTimeTool] : [])].filter((t) => !tools.some((x) => x.name === t.name));
+  if (capabilityUpgrade.tool) own.push(capabilityUpgrade.tool);
   // 工具按需加载：工具多时只带常用的完整说明，其余列名字、用 tool_search 加载（见 toolLoader.js）
   // 普通问答、查资料：做文档的工具先只列名字（用到时按名字调用或 tool_search 加载）
   // “字大点 / 不要横线”这类短句是在改刚做的文件：做文档的工具要常驻（第一轮 30 题实测：被当成普通问答，先搜工具、再找文件、先试改文字失败，一道题 15 次调用）
-  let loader = createToolLoader(light ? [] : questionProfile ? tools : [...tools, ...own], { defer: isQuickLookup(requirementText, images) && !styleRequests(requirementText).length ? DOCUMENT_TOOLS : null, ...(codeWork?.enabled ? { core: CODE_TASK_CORE } : makingFile && !pipelineContext && !images.length && !/架构图|流程图|关系图|拓扑图|生成图片/.test(requirementText) ? { core: DOCUMENT_TASK_CORE } : {}) });
+  let loader = createToolLoader(light ? [] : questionProfile ? tools : [...tools, ...own], { defer: isQuickLookup(requirementText, images) && !styleRequests(requirementText).length ? DOCUMENT_TOOLS : null, core: codeWork?.enabled ? new Set([...CODE_TASK_CORE, ...taskToolCore(taskIntent, requirementText)]) : makingFile && !pipelineContext && !images.length && !/架构图|流程图|关系图|拓扑图|生成图片/.test(requirementText) ? DOCUMENT_TASK_CORE : taskToolCore(taskIntent, requirementText, { images, computerTask, strict: pipelineContext }) });
   const loadGUI=()=>{if(availableTools.some(t=>t.name==='computer_look'))for(const name of ['computer_look','computer_click','computer_type','computer_key','computer_scroll','computer_drag'])loader.get(name);};
   if(!light&&(computerTask==='gui'||computerTaskKind(requirementText,{history})==='gui'))loadGUI();
   let outputRepairs = 0;
@@ -367,6 +375,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   let stuck = false;
   // 当前用的模型；出错时换成备用模型（fallbacks，按顺序），这一轮剩下的步骤都用新模型
   let cur = { adapter, model };
+  let upgraded = false, upgradeCalls = 0;
   const backups = [...fallbacks];
   let reminded = 0; // 上次中途提醒时调用了几次工具
   let currentRequest = userText;
@@ -491,7 +500,9 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       convo.push({ role: 'user', content: retrieval.note });
     }
     trimComputerScreenshots(convo);
-    compactToolResults(convo, { archive }); // 先保存有界原文，再缩短工作副本
+    const nonToolTokens = estimateTokens(convo.filter(m => m.role !== 'tool').map(m => m.content || '').join('\n'));
+    const compacted = compactToolResults(convo, { archive, preserveEvidence: true, budget: Math.min(60000, Math.max(4000, (contextBudget() - nonToolTokens) * 2)) });
+    if (compacted.saved) emit({ type: 'diagnostic', phase: 'context_compaction', savedChars: compacted.saved, sourceChars: compacted.total });
     let stepText = '';
     // 每一步模型输出都可能以 <emotion> 标签开头，每步用新的剥离器
     let stripper = new EmotionTagStripper();
@@ -530,7 +541,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     };
     let r;
     let primaryActivity = null;
-    const makeRequest = (current, onText, onActivity) => createModelRequest({ current, effort, signal, lookupDeadline, lookupControl, light, closing, retrieval, emit, allowWebSearch, onNativeSearch: () => { nativeSearchCalls++; }, onText, onActivity, onRetry: (attempt) => {
+    const makeRequest = (current, onText, onActivity) => createModelRequest({ current, effort, signal, lookupDeadline, lookupControl, light, closing, retrieval, emit, allowWebSearch, boundedUpgrade: upgraded, onNativeSearch: () => { nativeSearchCalls++; }, onText, onActivity, onRetry: (attempt) => {
       stripper = new EmotionTagStripper();
       emit({ type: 'retry', attempt, resume: Boolean(stepText.trim()) });
     } });
@@ -538,12 +549,13 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     // 测量实际发送的提示与工具说明，动态规则和短说明均计入字符数。
     // 用的哪个模型：中途换了备用的，也照实写
     const responseNote = [responseGuidance(currentRequest, history, { light, compact: Boolean(questionProfile), model: requestCurrent?.model || model, hasImages: images.length > 0, visibleText: String(convo.filter(m => m.role === 'user').at(-1)?.content || '').slice(0, 1800) })].filter(Boolean).join('\n');
-    const usingNote = phase ? `本次${phase === 'lookup_plan' ? '检索规划' : '资料取舍与回答'}使用已配置推理模型 ${requestCurrent.model}。` : modelNote && (cur.model !== model ? `${modelNote}\n（原定的 ${model} 出错了，这一轮实际换成了 ${cur.model}。）` : modelNote);
+    const usingNote = phase ? `本次${phase === 'lookup_plan' ? '检索规划' : '资料取舍与回答'}使用已配置推理模型 ${requestCurrent.model}。` : upgraded ? `当前由用户配置的能力模型 ${cur.model} 继续完成原任务；最多${UPGRADE_CALLS}次请求，原任务预算不增加。` : modelNote && (cur.model !== model ? `${modelNote}\n（原定的 ${model} 出错了，这一轮实际换成了 ${cur.model}。）` : modelNote);
     const measuredSystem = questionProfile ? [BASIC_ANSWER_PROMPT, [ctx.dynamic, usingNote, responseNote, imagePreferenceNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : light ? [LIGHT_PROMPT, [ctx.dynamic, usingNote, responseNote, imagePreferenceNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, usingNote, dialoguePolicy(review.report().request), responseNote, imagePreferenceNote, capabilities, computerNote, requirementContext, toolHint, singleDocumentTask(review.report().request) && '单份文档由文档引擎内部规划和检查；如需外层计划只列一次，不用update_plan逐节重复同步。有效产物回执可直接交付，不重复查找、读回或重做。', review.contractNote(), documentRouteNote(review.report().request), creativeWithoutLookup(currentRequest) && CREATIVE_NOTE, voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
     const measuredTools = lookupFinal ? [] : closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list();
     const requestTools = measuredTools.filter((tool) => allowWebSearch || !WEB_TOOLS.has(tool.name) && tool.name !== 'delegate_task').map(conciseTool);
     emit({ type: 'diagnostic', phase: 'model_start', model: requestCurrent.model, protocol: requestCurrent.adapter.kind, closing, purpose: phase || callPurpose(convo, closing), ...measureModelInput({ system: measuredSystem, messages: convo, tools: requestTools }), inputChars: convo.reduce((sum, item) => sum + String(item.content || '').length, 0) });
     try {
+    if (upgraded && ++upgradeCalls > UPGRADE_CALLS) throw Object.assign(new Error('本轮能力模型调用预算已用完，保留已完成的工作；未完成部分不能称已交付'), { code: 'CAPABILITY_BUDGET' });
     modelAttempts++;
     const input = { system: measuredSystem, messages: convo, tools: requestTools };
     // 主模型 hedgeMs 内没反应：同时问备用模型，谁先有反应用谁（写文件的任务前面本来就要等很久，不这样做）
@@ -710,6 +722,17 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     const reused = new Map(r.toolCalls.filter((c) => reusesPreSearch(c, preFound)).map((c) => [c, { c, ok: true, output: preFound.output, outImages: [] }]));
     const ran = await executeToolCalls(r.toolCalls.filter((c) => !reused.has(c)), { loader, emit, seen, diagramRecovery, executionScope, closing: closing || lookupFinal, retrieval, approve, signal, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch });
     const results = r.toolCalls.map((c) => reused.get(c) ?? ran.find((x) => x.c === c)).filter(Boolean);
+    capabilityUpgrade.observe(results);
+    const upgradedRoute = capabilityUpgrade.take();
+    if (upgradedRoute) {
+      const from = cur.model;
+      cur = upgradedRoute;
+      upgraded = true;
+      backups.length = 0;
+      hedgeMs = 0;
+      lookupModel = null;
+      emit({ type: 'fallback', from, to: cur.model, reason: '任务能力升级（最多一次）', capability: true });
+    }
     for (const { c, ok, output, outImages } of results) {
       toolCount++;
       if (WEB_TOOLS.has(c.name)) { retrieval.end(ok); triedCalls.push({ name: c.name, args: c.args, ok, output: ok ? '' : String(output).slice(0, 300) }); }

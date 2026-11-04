@@ -13,6 +13,7 @@ import { createAdapter, providerById } from '../llm/config.js';
 import { TASKS, fallbackRoutes, isSmallTalk } from '../llm/router.js';
 import { runTeam, shouldTeam } from '../agent/team.js';
 import { runAgent } from '../agent/agent.js';
+import { capabilityUpgradeRoutes } from '../llm/capabilityUpgrade.js';
 import { collectRequirements } from '../agent/taskRequirements.js';
 import { preApproved } from '../agent/commandSafety.js';
 import * as ws from '../agent/workspace.js';
@@ -282,7 +283,10 @@ export function createTurn(app) {
         checkpoint: turn.checkpoint
       });
 
-    const { computerKind, task, route, remotePC, model, adapter, problem, effort, here } = app.chooseTurnModel(text, turn, st, { imgs, withImages });
+    const { computerKind, task, taskIntent, route, remotePC, model, adapter, problem, effort, here } = app.chooseTurnModel(text, turn, st, {
+      imgs,
+      withImages
+    });
     if (problem && (!app.server || here)) {
       // 服务器模式：用服务器上的模型设置
       bubble.append(problem);
@@ -356,7 +360,11 @@ export function createTurn(app) {
         sessionId: app.session.id,
         summary: app.session.summary ?? null,
         requirements: collectRequirements(app.history, app.session.requirements),
-        requirementText: userText, // 保留斜杠命令展开前的原话，避免当成缺失历史重复注入
+        requirementText: taskIntent?.inherited ? taskIntent.requirementText : userText,
+        taskIntent,
+        capabilityRoutes: remotePC
+          ? []
+          : capabilityUpgradeRoutes(app.llmConfig, (cfg) => createAdapter(cfg, { gateway: app.gateway }), { provider: route.cfg.provider, model }),
         fallbacks,
         hedgeMs: app.llmConfig.hedgeBackup === false ? 0 : HEDGE_MS,
         modelNote: modelNote(app.llmConfig, { provider: route.cfg.provider, model }),
@@ -420,13 +428,13 @@ export function createTurn(app) {
       const remote = st.serverRoute;
       const modelTag =
         app.server && !here
-          ? `服务器 · ${seen}${remote ? `${st.fellFrom ? `${st.usedModel}（${remote.model} ${st.fellSlow ? '没反应' : '出错'}后换用）` : `${remote.model}${remote.routed ? `（${TASKS[remote.task]?.name ?? remote.task}）` : ''}`} · ` : ''}`
+          ? `服务器 · ${seen}${remote ? `${st.fellFrom ? `${st.usedModel}（${st.capabilityUpgraded ? '按任务切换能力模型' : `${remote.model} ${st.fellSlow ? '没反应' : '出错'}后换用`}）` : `${remote.model}${remote.routed ? `（${TASKS[remote.task]?.name ?? remote.task}）` : ''}`} · ` : ''}`
           : here
             ? `本机工具 · ${st.usedModel} · `
             : providerById(app.llmConfig.provider)?.kind === 'mock'
               ? ''
               : st.usedModel !== model
-                ? `${seen}${st.usedModel}（${model} ${st.fellSlow ? '没反应' : '出错'}后换用） · `
+                ? `${seen}${st.usedModel}（${st.capabilityUpgraded ? '按任务切换能力模型' : `${model} ${st.fellSlow ? '没反应' : '出错'}后换用`}） · `
                 : `${seen}${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
       bubble.done(
         `${modelTag}${tierTag}${team ? `团队 ${result.steps} 步 · ` : ''}${st.ctxMs !== null && st.ctxMs >= 300 ? `准备 ${(st.ctxMs / 1000).toFixed(1)}s · ` : ''}${st.firstToken ? `首字 ${((st.firstToken - t0) / 1000).toFixed(1)}s · ` : ''}${serverSlowTag(result.timing)}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}${MOBILE && st.textChunks ? ` · 分 ${st.textChunks} 次收到${globalThis.__jarvisNetVia?.(app.llmConfig.baseURLs?.[app.llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`,

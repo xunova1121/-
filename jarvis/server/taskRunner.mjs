@@ -47,6 +47,8 @@ import { runAgent } from '../src/agent/agent.js';
 import { createTools } from '../src/agent/tools.js';
 import * as sessions from '../src/agent/sessions.js';
 import { unsummarized, dueForCompression, updateSummary } from '../src/agent/compress.js';
+import { resolveTaskIntent } from '../src/core/taskIntent.js';
+import { capabilityUpgradeRoutes } from '../src/llm/capabilityUpgrade.js';
 import * as memory from '../src/agent/memory.js';
 import { collectRequirements } from '../src/agent/taskRequirements.js';
 import { createAdapter } from '../src/llm/config.js';
@@ -141,6 +143,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   let lastUser = null;
   const locks = new Map();
   const background = new Set(); // 做完后在后台整理记忆、压缩对话的活（settled() 等它们做完）
+  const summaryControllers = new Set(); // 后台摘要全局最多一个；新前台任务开始即取消。
   let lastActive = Date.now(); // 最近一次有任务开始或结束的时间
   const wakers = new Set(); // settled() 用：叫醒还在等空闲的整理活，马上做
   let flushing = 0; // settled() 进行中：整理活不再等空闲
@@ -278,14 +281,16 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     await editSession(task.sessionId,async s=>{s.taskCheckpoint=task.checkpoint;await sessions.save(s);});
     console.log(`[任务] ${task.id} 开始：${task.text.slice(0, 40).replace(/\s+/g, ' ')}`);
     record(task, { type: 'task_state', status: 'running' });
+    for (const controller of summaryControllers) controller.abort();
     const session = await sessions.get(task.sessionId);
     const cfg = serverModelConfig(withoutCodeCredentials(await getConfig()));
+    const taskIntent = resolveTaskIntent(task.text, { history: session.messages.slice(0, -1), state: session.taskContext, images: task.images.length });
     // 记忆按意思找：用能力表“记忆向量”那一项（服务器没有跨域限制）；没有就只按关键字
     memory.configureMemory({ llm: helper(cfg, 'write', task, 'memory'), embedder: createEmbedder(cfg, { direct: true }) });
     const taskRepos = task.evaluationAuthorization ? null : codeProjects ? await codeProjects.reposFor(session.id) : codeRepos;
-    const mayUseCode = Boolean((taskRepos || codeProjects) && !task.evaluationId && (codeFollowup(task.text) || codeTaskPolicy({ text: task.text, hasRepos: true, hasProjects: Boolean(codeProjects), projectBound: taskRepos !== codeRepos }).enabled));
+    const mayUseCode = Boolean((taskRepos || codeProjects) && !task.evaluationId && (codeFollowup(task.text) || codeTaskPolicy({ text: task.text, taskIntent, hasRepos: true, hasProjects: Boolean(codeProjects), projectBound: taskRepos !== codeRepos }).enabled));
     task.codeDeadline = mayUseCode ? setTimeout(() => { task.codeTimeout = true; task.ctrl.abort(Object.assign(new Error('代码任务达到总时限，保留工作副本，可继续'), { code: 'CODE_TASK_TIMEOUT', kind: 'timeout' })); }, Math.max(1, Math.min(20 * 60_000, Number(codeTaskMs) || CODE_TASK_MS))) : null;
-    const { policy, codeTaskId, scopedRepos, codeWork } = await prepareCodeWork({ text: task.text, images: task.images.length, sessionId: session.id, taskId: task.id, checkpoint: task.checkpoint, resume: task.resumeFrom, repos: taskRepos, hasProjects: Boolean(codeProjects), projectBound: taskRepos !== codeRepos, evaluationId: task.evaluationId, maxSteps, codeMaxSteps, signal: task.ctrl.signal });
+    const { policy, codeTaskId, scopedRepos, codeWork } = await prepareCodeWork({ text: task.text, taskIntent, images: task.images.length, sessionId: session.id, taskId: task.id, checkpoint: task.checkpoint, resume: task.resumeFrom, repos: taskRepos, hasProjects: Boolean(codeProjects), projectBound: taskRepos !== codeRepos, evaluationId: task.evaluationId, maxSteps, codeMaxSteps, signal: task.ctrl.signal });
     const kind = policy.kind;
     if (!policy.enabled) { clearTimeout(task.codeDeadline); task.codeDeadline = null; }
 
@@ -295,11 +300,12 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     }
     const route = routeFor(cfg, kind);
     const selected = makeAdapter(route.cfg);
+    const capabilityRoutes = capabilityUpgradeRoutes(cfg, value => { const picked = makeAdapter(value); return { ...picked, adapter: evaluationAdapter(picked.adapter) }; }, { provider: route.cfg.provider, model: selected.model });
     const { model, problem } = selected;
     const adapter = evaluationAdapter(selected.adapter);
     if (problem) return finish(task, session, { error: `服务器上的模型还没配置好：${problem}` });
     // 告诉手机这句话交给了谁（回答底下显示）
-    record(task, { type: 'route', model, task: kind, routed: route.routed });
+    record(task, { type: 'route', model, task: kind, routed: route.routed, reason: taskIntent.reason, category: taskIntent.category });
     const fallbacks = fallbackRoutes(cfg, { provider: route.cfg.provider, model, task: kind }).map((f) => ({ ...createAdapter(f.cfg), label: `${providerLabel(f.cfg, f.provider)} · ${f.model}` })).filter((f) => !f.problem && f.adapter && f.model).map(f => ({ ...f, adapter: evaluationAdapter(f.adapter) }));
     const history = session.messages.slice(0, -1); // 最后一条是这次的用户原话，单独作为 userText
     const taskLookup = task.evaluationId ? createLookupService({ storage: memoryLookupStorage(), get: publicFetch }) : lookupService;
@@ -371,7 +377,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       const r = await runAgent({
         adapter, model, fallbacks, lookupPreferences: () => taskLookup.preferences(), lookupModel: createLookupModel(cfg, value => { const picked = makeAdapter(value); return { ...picked, adapter: evaluationAdapter(picked.adapter) }; }), maxSteps: policy.maxSteps, maxTotalSteps: policy.maxTotalSteps, codeWork, ...sight(cfg, task), hedgeMs: cfg.hedgeBackup === false ? 0 : HEDGE_MS, modelNote: modelNote(cfg, { provider: route.cfg.provider, model }),
         history: unsummarized(history, session.summary).map(({ role, content }) => ({ role, content })),
-        userText: task.resumeFrom ? task.text+'\n\n'+checkpointRecoveryText(task.resumeFrom) : task.text, requirementText: task.text, images: task.images,
+        userText: task.resumeFrom ? task.text+'\n\n'+checkpointRecoveryText(task.resumeFrom) : task.text, requirementText: taskIntent.requirementText, taskIntent, capabilityRoutes, images: task.images,
         // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
         effort: effortFor(kind, task.text, cfg),
         // 语音对话：口语短答；“你好 / 谢谢”这类寒暄不带工具，回得快
@@ -462,11 +468,25 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       await memory.reflect([{ role: 'user', content: task.text }, ...task.notes.map((t) => ({ role: 'user', content: t })), { role: 'assistant', content: text }], { session: s && { id: s.id, title: s.title } });
       memory.maintain().catch(() => {}); // 每天最多整理一次记忆
     }
-    await editSession(task.sessionId, async (s) => {
-      if (!s || !dueForCompression(s.messages, s.summary).length) return;
-      const next = await updateSummary(s.messages, s.summary, { llm });
-      if (next && next !== s.summary) { s.summary = next; await sessions.save(s); }
-    });
+    if (summaryControllers.size || running || waiting.some(t => t.status === 'queued')) return;
+    const snapshot = await sessions.get(task.sessionId);
+    // 读取期间可能来了新任务或另一份后台摘要，拿到快照后再检查一次。
+    if (summaryControllers.size || running || waiting.some(t => t.status === 'queued')) return;
+    if (!snapshot || !dueForCompression(snapshot.messages, snapshot.summary).length) return;
+    const controller = new AbortController();
+    summaryControllers.add(controller);
+    try {
+      // 不在会话写锁内等模型，下一句话不必排在后台摘要后面。
+      const next = await updateSummary(snapshot.messages, snapshot.summary, { llm: helper(cfg, 'chat', task, 'memory'), signal: controller.signal });
+      await editSession(task.sessionId, async fresh => {
+        if (!fresh || controller.signal.aborted || (fresh.summary?.upTo || 0) !== (snapshot.summary?.upTo || 0)) return;
+        if (next && next !== snapshot.summary) { fresh.summary = next; await sessions.save(fresh); }
+      });
+    } catch (error) {
+      if (error.name !== 'AbortError') throw error;
+    } finally {
+      summaryControllers.delete(controller);
+    }
   }
 
   function pump() {

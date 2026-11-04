@@ -2,7 +2,8 @@
 import { MOBILE } from '../config.js';
 import { followsImage } from '../core/imageFollowup.js';
 import { createAdapter } from '../llm/config.js';
-import { classifyTask, routeFor, TASKS, effortFor, computerTaskKind } from '../llm/router.js';
+import { routeFor, TASKS, effortFor, computerTaskKind } from '../llm/router.js';
+import { resolveTaskIntent } from '../core/taskIntent.js';
 import { shouldTeam } from '../agent/team.js';
 import * as skillPacks from '../agent/skillPacks.js';
 import * as compress from '../agent/compress.js';
@@ -14,6 +15,7 @@ export function createTurnInputs(app) {
   const recentImages = new Map(); // 消息时间 → 最近两条带图消息，仅内存。
   /** 整理这一轮的输入：取走附件、显示并记下这句话、挑出要带给模型的历史和图片 */
   function takeInput(text, echo) {
+    app.cancelCompression?.();
     // 持续聊天也保持有界；先重画已完成的历史，再追加本轮，避免重复消息。
     if (MOBILE && (app.historyViewEnd !== null || $('#transcript').querySelectorAll('.msg').length >= app.visibleHistory().limit)) app.replayTranscript();
     const files = app.attachments.splice(0);
@@ -52,6 +54,7 @@ export function createTurnInputs(app) {
 
   /** 这一轮用哪个模型：按这句话的类型分工；服务器模式下动这台电脑的事留在本机做 */
   function chooseModel(text, turn, st, { imgs, withImages }) {
+    const taskIntent = resolveTaskIntent(text, { history: app.history.slice(0, -1), state: app.session.taskContext, images: imgs.length + withImages.size });
     // 模型分工：按这句话的类型换模型；日常对话让推理模型少想一点（首字更快）
     const computerKind = DESKTOP
       ? computerTaskKind(text, {
@@ -65,7 +68,7 @@ export function createTurnInputs(app) {
         ? 'vision'
         : shouldTeam(text, app.settings.teamMode === 'auto' && !app.helperLlm() ? 'off' : app.settings.teamMode)
           ? 'reason'
-          : classifyTask(text, { images: imgs.length + withImages.size });
+          : taskIntent.modelTask;
     const route = routeFor(app.llmConfig, task);
     const remotePC = Boolean(app.server && computerKind);
     const local = createAdapter(route.cfg, { gateway: app.gateway });
@@ -88,7 +91,7 @@ export function createTurnInputs(app) {
     const here = Boolean(app.server && DESKTOP && computerKind);
     turn.remote = Boolean(app.server && !here);
     if (here) app.hud.think('◇ 服务器模型推理，电脑工具在本机执行');
-    return { computerKind, task, route, remotePC, model, adapter, problem, effort, here };
+    return { computerKind, task, taskIntent, route, remotePC, model, adapter, problem, effort, here };
   }
 
   /** “/技能名 内容” → 明确要求模型使用该技能（界面上仍显示用户原话） */

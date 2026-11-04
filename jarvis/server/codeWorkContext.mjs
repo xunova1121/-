@@ -2,11 +2,11 @@ import { codeFollowup, codeTaskPolicy } from './codeTaskPolicy.mjs';
 import { codeError } from './codeGit.mjs';
 
 /** 续做只查服务器本会话索引。完成后的继续不重放旧计划，也不新建副本替代原文件。 */
-export async function prepareCodeWork({ text, images, sessionId, taskId, checkpoint, resume, repos, evaluationId, maxSteps, codeMaxSteps, signal, hasProjects = false, projectBound = false }) {
+export async function prepareCodeWork({ text, images, sessionId, taskId, checkpoint, resume, repos, evaluationId, maxSteps, codeMaxSteps, signal, hasProjects = false, projectBound = false, taskIntent = null }) {
   const previous = resume || (checkpoint.codeTaskId ? { codeTaskId: checkpoint.codeTaskId } : null);
-  const following = codeFollowup(text);
+  const following = codeFollowup(text) && (!taskIntent || taskIntent.category === 'code' || !taskIntent.inherited && !taskIntent.statusOnly && !taskIntent.cancelled);
   const codeReference = following && (previous || /代码|仓库|商城|网页|项目|工作副本|lint|test|npm/i.test(text));
-  const options = { text, images, resume: previous, maxSteps, codeMaxSteps, hasProjects, projectBound };
+  const options = { text, images, resume: previous, maxSteps, codeMaxSteps, hasProjects, projectBound, taskIntent };
   const candidate = codeTaskPolicy({ ...options, hasRepos: Boolean(repos && !evaluationId) });
   const eligible = Boolean(repos && !evaluationId && (candidate.enabled || codeReference));
   const connected = eligible && (repos.connected ? await repos.connected() : candidate.enabled);

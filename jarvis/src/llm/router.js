@@ -1,6 +1,7 @@
 import { lookupComplaint } from '../agent/newsIntent.js';
 import { isResponseRevision } from '../core/responseRevision.js';
 import { serverRepositoryIntent } from './repositoryIntent.js';
+import { classifyTaskText } from '../core/taskIntent.js';
 /**
  * 模型分工：不同的事交给更擅长的模型。
  *   日常对话 → 快模型（首字快，便宜）
@@ -52,9 +53,6 @@ export const TASKS = {
   vision: { name: '看图', hint: '发了图片、截屏分析' }
 };
 
-const CODE = /代码|编程|程序|函数|变量|bug|报错|异常|调试|脚本|编译|html|css|javascript|typescript|python|java\b|golang|rust|sql|正则|前端|后端|接口|api|部署|docker|git\b|网页|网站|小程序|```/i;
-const WRITE = /(写|起草|撰写|帮我写|生成)(一|个|篇|份|封)?.{0,6}(报告|文档|文章|周报|日报|月报|总结|邮件|方案|计划书?|简历|ppt|幻灯片|文案|合同|论文|稿|通知|公告|说明书|演讲)|润色|改写|翻译|摘要|纪要|扩写|缩写|word|ppt/i;
-const REASON = /调研|研究|分析|对比|比较|推理|证明|为什么|评估|权衡|策略|战略|规划|方案设计|数学|计算|推导|决策|利弊|深度|^\/团队/;
 
 /**
  * @param {string} text
@@ -62,12 +60,7 @@ const REASON = /调研|研究|分析|对比|比较|推理|证明|为什么|评�
  * @returns {'chat'|'code'|'write'|'reason'|'vision'}
  */
 export function classifyTask(text, { images = 0 } = {}) {
-  const t = String(text || '');
-  if (images > 0) return 'vision';
-  if (CODE.test(t)) return 'code';
-  if (WRITE.test(t)) return 'write';
-  if (REASON.test(t) || t.length > 400) return 'reason';
-  return 'chat';
+  return classifyTaskText(text, { images });
 }
 
 /** 简单寒暄（你好、谢谢、好的、晚安……）：不用工具，直接短答 */

@@ -59,22 +59,37 @@ export function createBackground(app) {
 
   /** 长对话压缩：回答完后在后台把较早的消息并进“前情提要”（见 compress.js），不影响当前对话 */
   let compressing = false;
-  async function compressHistory() {
+  let compressionTimer = null;
+  let compressionController = null;
+  function cancelCompression() {
+    clearTimeout(compressionTimer);
+    compressionController?.abort();
+  }
+  function compressHistory() {
+    clearTimeout(compressionTimer);
     if (app.server) return;
     const s = app.session;
+    compressionTimer = setTimeout(() => {
+      if (!app.active && !app.server) compressSession(s);
+    }, 20000);
+  }
+  async function compressSession(s) {
     if (compressing || !compress.dueForCompression(s.messages, s.summary).length) return;
     compressing = true;
+    const controller = new AbortController();
+    compressionController = controller;
     try {
-      const next = await compress.updateSummary(s.messages, s.summary, { llm: app.helperLlm() });
-      if (next && next !== s.summary) {
+      const next = await compress.updateSummary(s.messages, s.summary, { llm: app.helperLlm('chat'), signal: controller.signal });
+      if (!controller.signal.aborted && next && next !== s.summary) {
         s.summary = next;
         if (app.settings.saveSessions !== false) sessionsApi.save(s).catch(() => {});
         app.hud.think(`◆ 较早的对话已压缩成摘要${next.by === 'rule' ? '（本地规则）' : ''}`);
       }
     } catch (e) {
-      console.warn('[compress]', e);
+      if (e.name !== 'AbortError') console.warn('[compress]', e);
     } finally {
       compressing = false;
+      if (compressionController === controller) compressionController = null;
     }
   }
 
@@ -356,6 +371,7 @@ export function createBackground(app) {
     scheduleReflect,
     reflectNow,
     compressHistory,
+    cancelCompression,
     greetOnReturn,
     memorizeHabits,
     renderHabits,
