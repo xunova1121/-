@@ -367,6 +367,7 @@ jobs:
           node e2e/mobile-ui.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/product-refresh.mjs "$RUNNER_TEMP/jarvis-e2e/product-refresh"
           node e2e/home-history.mjs "$RUNNER_TEMP/jarvis-e2e/home-history"
+          node e2e/native-startup.mjs "$RUNNER_TEMP/jarvis-e2e/native-startup"
           node e2e/music-card.mjs "$RUNNER_TEMP/jarvis-e2e/music-card"
           node e2e/weather-card.mjs "$RUNNER_TEMP/jarvis-e2e/weather-card"
           node e2e/weather-seamless.mjs "$RUNNER_TEMP/jarvis-e2e/weather-seamless"

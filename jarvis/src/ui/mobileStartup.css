@@ -151,3 +151,16 @@ html[data-mode='mobile'] #app-splash .as-retry {
     400 13px/1.5 system-ui,
     sans-serif;
 }
+html[data-mode='mobile'] #app-splash .as-skip {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 16px);
+  right: 20px;
+  min-width: 60px;
+  min-height: 44px;
+  border: 1px solid #cad9e7;
+  border-radius: 24px;
+  color: #52657e;
+  background: #ffffffb8;
+  font: 14px/1.4 system-ui, sans-serif;
+  cursor: pointer;
+}

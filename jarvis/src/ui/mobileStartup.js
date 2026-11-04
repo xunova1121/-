@@ -1,3 +1,5 @@
+import { playNativeStartup } from './nativeStartup.js';
+
 /** 图片准备有界等待；加载失败时明确使用原始静态标志，不留下透明空头像。 */
 async function prepareMascotImages() {
   const images = ['./mascot-approved.webp', './mascot-startup.webp'].map((path) => {
@@ -21,10 +23,11 @@ async function prepareMascotImages() {
   ]);
   clearTimeout(timer);
   document.body.classList.toggle('mascot-unavailable', !ready);
+  return ready;
 }
 
 /** 原生桥会延迟主模块执行；始终保留浅色启动层，等布局和角色资源就绪再揭开。 */
-export function initMobileStartup({ prepareImages = prepareMascotImages } = {}) {
+export function initMobileStartup({ prepareImages = prepareMascotImages, native = document.documentElement.classList.contains('mobile-app') } = {}) {
   const root = document.documentElement;
   const splash = document.getElementById('app-splash');
   let finished = false;
@@ -39,12 +42,13 @@ export function initMobileStartup({ prepareImages = prepareMascotImages } = {}) 
     finish();
     return Promise.resolve();
   }
-  const reveal = () =>
+  const reveal = (imagesReady) =>
     new Promise((resolve) => {
       // 两帧后再展示，覆盖compact布局切换及首次角色绘制。
       requestAnimationFrame(() =>
-        requestAnimationFrame(() => {
+        requestAnimationFrame(async () => {
           root.classList.add('mobile-ui-ready');
+          clearTimeout(globalThis.__jarvisSplashWatchdog);
           const reduced =
             root.classList.contains('safe-render') ||
             document.body.classList.contains('reduced-motion') ||
@@ -52,6 +56,10 @@ export function initMobileStartup({ prepareImages = prepareMascotImages } = {}) 
           if (!splash || reduced) {
             finish();
           } else {
+            if (native && imagesReady !== false) {
+              try { await playNativeStartup(splash); }
+              catch { /* 旧WebView动效接口不可用时照常揭开首页，不让启动动画阻断使用。 */ }
+            }
             const from = splash.querySelector?.('.as-character')?.getBoundingClientRect();
             const to = document.querySelector?.('.topbar .brand-mark')?.getBoundingClientRect();
             if (from?.width && to?.width) {
@@ -67,5 +75,8 @@ export function initMobileStartup({ prepareImages = prepareMascotImages } = {}) 
         })
       );
     });
-  return prepareImages().then(reveal);
+  return prepareImages().catch(() => {
+    document.body.classList.toggle('mascot-unavailable', true);
+    return false;
+  }).then(reveal);
 }

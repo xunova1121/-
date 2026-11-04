@@ -50,7 +50,8 @@ export function createMascot(state = 'idle') {
 
 /** 只更新工作状态，不启动 WebGL；手机上的小图标由 CSS 动画驱动。 */
 export function initMascots() {
-  const marks = () => [...document.querySelectorAll('.brand-mark, .as-logo, .welcome-hero .cloud, .drawer-logo, .wb-mark, .wb-hero-mark')];
+  // 启动角色由mobileStartup独立播放；wy-brand的background!important会锁住它的图集帧。
+  const marks = () => [...document.querySelectorAll('.brand-mark, .welcome-hero .cloud, .drawer-logo, .wb-mark, .wb-hero-mark')];
   for (const mark of marks()) {
     mark.classList.add('wy-brand');
     if (mark.matches('.brand-mark, .welcome-hero .cloud, .wb-mark, .wb-hero-mark')) {
