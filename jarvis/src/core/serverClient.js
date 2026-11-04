@@ -1,3 +1,4 @@
+import { userStorageSuffix } from './userStorage.js';
 /**
  * 服务器模式的客户端：手机 / 电脑把任务交给自己的云服务器做（服务器端见 server/serverMode.mjs）。
  *
@@ -27,7 +28,7 @@ export function loadServerSettings(storage = globalThis.localStorage) {
   try { return { url: '', token: '', enabled: false, ...JSON.parse(storage?.getItem(KEY) || '{}') }; } catch { return { url: '', token: '', enabled: false }; }
 }
 export function saveServerSettings(s, storage = globalThis.localStorage) {
-  try { storage?.setItem(KEY, JSON.stringify({ url: s.url || '', token: s.token || '', enabled: Boolean(s.enabled) })); } catch { /* 存不了就算了 */ }
+  try { storage?.setItem(KEY, JSON.stringify({ url: s.url || '', token: s.token || '', enabled: Boolean(s.enabled), ...(s.userId && { userId: s.userId, role: s.role }) })); } catch { /* 存不了就算了 */ }
 }
 /** 网址整理成 https://域名（去掉结尾的 /） */
 export const normalizeUrl = (u) => {
@@ -195,6 +196,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
       return true;
     },
     base: root,
+    account: loadServerSettings(),
     timings,
     /** 唤醒连接：点输入框、回到 App 时先轻轻问一下服务器，断掉的旧连接在发消息前就换掉（30 秒内只问一次） */
     warm() {
@@ -203,6 +205,10 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
       req('/api/health', { timeout: 5000 }).catch(() => {});
     },
     /** @returns {Promise<string>} 令牌 */
+    loginAccount: password => req('/api/server/login', { method: 'POST', body: { password } }),
+    users: () => req('/api/server/users'),
+    createUser: name => req('/api/server/users', { method: 'POST', body: { name } }),
+    updateUser: (id, action) => req('/api/server/users/' + encodeURIComponent(id), { method: 'PATCH', body: { action } }),
     async login(password) { return (await req('/api/server/login', { method: 'POST', body: { password } })).token; },
     health: () => req('/api/health'),
     status: (signal) => req('/api/server/status',{signal}),
@@ -404,8 +410,9 @@ const CACHE_MESSAGES = 80;
 
 /** 对话的读写交给服务器：标题、钉住、删除改服务器上的；消息由服务器自己记，这里保存是空操作 */
 export function remoteSessions(client, { storage = globalThis.localStorage } = {}) {
+  const cacheKey = CACHE_KEY + userStorageSuffix(storage);
   let cache = { list: null, sessions: {} };
-  try { cache = { list: null, sessions: {}, ...JSON.parse(storage?.getItem(CACHE_KEY) || '{}') }; } catch { /* 坏了就从空的开始 */ }
+  try { cache = { list: null, sessions: {}, ...JSON.parse(storage?.getItem(cacheKey) || '{}') }; } catch { /* 坏了就从空的开始 */ }
   // 写副本合并成一次（切换对话、刷新时会连着改好几次）：少做大块的存储读写，手机上更稳
   let saveTimer = 0;
   const persist = () => { clearTimeout(saveTimer); saveTimer = setTimeout(writeNow, 800); };
@@ -415,7 +422,7 @@ export function remoteSessions(client, { storage = globalThis.localStorage } = {
       try {
         const keep = Object.entries(cache.sessions).sort((a, b) => (b[1].cachedAt ?? 0) - (a[1].cachedAt ?? 0)).slice(0, n);
         cache.sessions = Object.fromEntries(keep);
-        storage?.setItem(CACHE_KEY, JSON.stringify(cache));
+        storage?.setItem(cacheKey, JSON.stringify(cache));
         return;
       } catch { /* 再少存一点 */ }
     }

@@ -37,6 +37,7 @@ export function createModelScopes({ getLocal, saveLocal, getClient, onServerSave
         if (!client) throw missing();
         // 每次写前读当前配置，防止另一台设备刚换的型号被旧快照覆盖。
         const before = await client.getConfig();
+        if (before.readOnly) throw Object.assign(new Error('当前使用管理员共享模型；模型设置由管理员维护'), { status: 403, code: 'SHARED_MODELS' });
         const after = update(before);
         const delta = configDelta(before, after);
         if (Object.keys(delta).length) await client.putConfig(delta);

@@ -12,7 +12,7 @@ import * as habits from '../agent/habits.js';
 import * as agentMemory from '../agent/memory.js';
 import * as sessionsApi from '../agent/sessions.js';
 import { PANES } from './panels.js';
-import { $, body, DESKTOP, COMPACT, narrow, lowEnd, toast } from './env.js';
+import { $, body, DESKTOP, COMPACT, narrow, lowEnd, toast, storage } from './env.js';
 import { dropMemoryNotes } from '../mobile/exitReasons.js';
 
 export function createView(app) {
@@ -332,7 +332,7 @@ export function createView(app) {
       // 上次闪退的记录（mobile/boot.js 存的）：显示在版本这一栏，方便截图
       let crash = '';
       try {
-        crash = dropMemoryNotes(localStorage.getItem('jarvis.lastCrash') || '');
+        crash = dropMemoryNotes(storage?.getItem('jarvis.lastCrash') || '');
       } catch {
         /* 读不到就不显示 */
       }

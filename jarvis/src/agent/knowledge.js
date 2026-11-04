@@ -7,21 +7,20 @@
  *     （问“出差能报多少钱”能找到“差旅补贴标准”）
  *   - 两路结果用倒数排名融合（RRF）合并排序
  */
-import { collection, uid } from './store.js';
+import { collection, uid, scopedState } from './store.js';
 import { buildIndex, chunkText } from './search.js';
 
 const docs = collection('kbdocs');
 const chunks = collection('kbchunks');
-let cache = null; // { search, byId, all }
-let embedder = null; // { model, embed(texts) }
+const knowledgeState = scopedState('kbchunks', () => ({ cache: null, embedder: null }));
 const BATCH = 16;
 const RRF_K = 60;
 
 export function configureKnowledge({ embedder: e = null } = {}) {
-  if (e?.model !== embedder?.model) cache = null;
-  embedder = e;
+  if (e?.model !== knowledgeState().embedder?.model) knowledgeState().cache = null;
+  knowledgeState().embedder = e;
 }
-export const knowledgeEngine = () => ({ embeddings: embedder?.model ?? null });
+export const knowledgeEngine = () => ({ embeddings: knowledgeState().embedder?.model ?? null });
 
 function cosine(a, b) {
   let dot = 0;
@@ -34,7 +33,7 @@ function cosine(a, b) {
 async function embedAll(texts, onProgress) {
   const out = [];
   for (let i = 0; i < texts.length; i += BATCH) {
-    out.push(...(await embedder.embed(texts.slice(i, i + BATCH))));
+    out.push(...(await knowledgeState().embedder.embed(texts.slice(i, i + BATCH))));
     onProgress?.(Math.min(texts.length, i + BATCH), texts.length);
   }
   return out;
@@ -46,15 +45,15 @@ export async function addDocument({ name, text, source = 'upload' }, { onProgres
   const id = uid('d');
   const parts = chunkText(text);
   let vecs = null;
-  if (embedder) {
+  if (knowledgeState().embedder) {
     try { vecs = await embedAll(parts.map((c) => `${name}\n${c}`), onProgress); } catch { vecs = null; /* 向量服务出错：先只用关键词，之后可补算 */ }
   }
   for (const [i, c] of parts.entries()) {
-    await chunks.put({ id: `${id}:${i}`, docId: id, name, text: c, n: i, ...(vecs?.[i] && { embedding: vecs[i], embModel: embedder.model }) });
+    await chunks.put({ id: `${id}:${i}`, docId: id, name, text: c, n: i, ...(vecs?.[i] && { embedding: vecs[i], embModel: knowledgeState().embedder.model }) });
   }
   const doc = { id, name, source, chars: text.length, chunks: parts.length, ts: Date.now() };
   await docs.put(doc);
-  cache = null;
+  knowledgeState().cache = null;
   return doc;
 }
 
@@ -65,22 +64,22 @@ export async function listDocuments() {
 export async function removeDocument(id) {
   for (const c of await chunks.all()) if (c.docId === id) await chunks.delete(c.id);
   await docs.delete(id);
-  cache = null;
+  knowledgeState().cache = null;
 }
 
 /** 还没有当前模型向量的切块数 */
 export async function pendingEmbeddings() {
-  if (!embedder) return 0;
-  return (await chunks.all()).filter((c) => c.embModel !== embedder.model).length;
+  if (!knowledgeState().embedder) return 0;
+  return (await chunks.all()).filter((c) => c.embModel !== knowledgeState().embedder.model).length;
 }
 
 /** 给旧文档补算向量（换了向量模型或之前没配置时） */
 export async function reindex({ onProgress } = {}) {
-  if (!embedder) throw new Error('没有配置向量服务');
-  const todo = (await chunks.all()).filter((c) => c.embModel !== embedder.model);
+  if (!knowledgeState().embedder) throw new Error('没有配置向量服务');
+  const todo = (await chunks.all()).filter((c) => c.embModel !== knowledgeState().embedder.model);
   const vecs = await embedAll(todo.map((c) => `${c.name}\n${c.text}`), onProgress);
-  for (const [i, c] of todo.entries()) await chunks.put({ ...c, embedding: vecs[i], embModel: embedder.model });
-  cache = null;
+  for (const [i, c] of todo.entries()) await chunks.put({ ...c, embedding: vecs[i], embModel: knowledgeState().embedder.model });
+  knowledgeState().cache = null;
   return todo.length;
 }
 
@@ -91,24 +90,24 @@ export async function reindex({ onProgress } = {}) {
  * @returns {Promise<Array<{ id, docId, name, text, score, via: string[] }>>}
  */
 export async function search(query, k = 4, minScore = 1.2) {
-  if (!cache) {
+  if (!knowledgeState().cache) {
     const all = await chunks.all();
-    cache = { all, search: buildIndex(all.map((c) => ({ id: c.id, text: `${c.name}\n${c.text}` }))), byId: new Map(all.map((c) => [c.id, c])) };
+    knowledgeState().cache = { all, search: buildIndex(all.map((c) => ({ id: c.id, text: `${c.name}\n${c.text}` }))), byId: new Map(all.map((c) => [c.id, c])) };
   }
-  const kw = cache.search(query, Math.max(k * 3, 12)).filter((h) => h.score >= minScore);
+  const kw = knowledgeState().cache.search(query, Math.max(k * 3, 12)).filter((h) => h.score >= minScore);
   let sem = [];
-  const model = embedder?.model;
-  if (model && cache.all.some((c) => c.embModel === model)) {
+  const model = knowledgeState().embedder?.model;
+  if (model && knowledgeState().cache.all.some((c) => c.embModel === model)) {
     try {
-      const [q] = await embedder.embed([query]);
-      sem = cache.all.filter((c) => c.embModel === model)
+      const [q] = await knowledgeState().embedder.embed([query]);
+      sem = knowledgeState().cache.all.filter((c) => c.embModel === model)
         .map((c) => ({ id: c.id, score: cosine(q, c.embedding) }))
         .filter((h) => h.score >= 0.45)
         .sort((a, b) => b.score - a.score)
         .slice(0, Math.max(k * 3, 12));
     } catch { sem = []; }
   }
-  if (!sem.length) return kw.slice(0, k).map((h) => ({ ...cache.byId.get(h.id), embedding: undefined, score: h.score, via: ['关键词'] }));
+  if (!sem.length) return kw.slice(0, k).map((h) => ({ ...knowledgeState().cache.byId.get(h.id), embedding: undefined, score: h.score, via: ['关键词'] }));
   // 倒数排名融合：两路各自的名次越靠前，合并后的分越高
   const fused = new Map();
   kw.forEach((h, r) => fused.set(h.id, { score: 1 / (RRF_K + r + 1), via: ['关键词'] }));
@@ -119,5 +118,5 @@ export async function search(query, k = 4, minScore = 1.2) {
     fused.set(h.id, f);
   });
   return [...fused.entries()].sort((a, b) => b[1].score - a[1].score).slice(0, k)
-    .map(([id, f]) => ({ ...cache.byId.get(id), embedding: undefined, score: f.score * 100, via: f.via }));
+    .map(([id, f]) => ({ ...knowledgeState().cache.byId.get(id), embedding: undefined, score: f.score * 100, via: f.via }));
 }

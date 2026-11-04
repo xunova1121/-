@@ -1,3 +1,4 @@
+import { privateStorage } from '../core/userStorage.js';
 /**
  * 模型配置（只存在这台电脑的浏览器 localStorage 里）与适配器工厂。
  * 有本机网关（完整版）时请求经网关转发：没有浏览器跨域限制，也可以用网关环境变量里的密钥。
@@ -13,7 +14,7 @@ import { GENTLE_VOICES } from '../perception/voiceProfile.js';
 import { usableModelKey, credentialInfo, credentialText, withCredentialErrors, CREDENTIAL_CONTEXT } from './credentialContext.js';
 
 const KEY = 'jarvis.llm.v1';
-const store = (() => { try { return globalThis.localStorage ?? null; } catch { return null; } })();
+const store = (() => { try { return privateStorage(globalThis.localStorage); } catch { return null; } })();
 
 /** 语音：engine 为 auto 时按已有密钥自动挑最自然的云端声音，都没有就用浏览器自带 */
 export const DEFAULT_VOICE = { engine: 'auto', voices: GENTLE_VOICES, profile: 'gentle-child', fx: 'gentle', cues: true, browserVoice: '', qwenRegion: 'beijing' };

@@ -9,7 +9,7 @@
  *     - 开始工作时通常先打开什么
  *   结论会写进记忆（分类“习惯”），也用于主动问好时的建议。
  */
-import { collection } from './store.js';
+import { collection, scopedState } from './store.js';
 
 const kv = collection('kv');
 const KEY = 'habits';
@@ -99,29 +99,28 @@ export function hintFor(stats, now = new Date()) {
 }
 
 // ---------------------------------------------------------------- 存取（内存里攒着，每分钟写一次盘）
-let cache = null;
-let dirty = false;
+const habitState = scopedState('kv', () => ({ cache: null, dirty: false }));
 export async function load() {
-  cache ??= (await kv.get(KEY))?.stats ?? emptyStats();
-  return cache;
+  habitState().cache ??= (await kv.get(KEY))?.stats ?? emptyStats();
+  return habitState().cache;
 }
 export async function record(sample) {
   addSample(await load(), sample);
-  dirty = true;
+  habitState().dirty = true;
 }
 export async function flush() {
-  if (!dirty || !cache) return;
-  dirty = false;
-  await kv.put({ id: KEY, stats: cache, updatedAt: Date.now() });
+  if (!habitState().dirty || !habitState().cache) return;
+  habitState().dirty = false;
+  await kv.put({ id: KEY, stats: habitState().cache, updatedAt: Date.now() });
 }
 /** 同步后从存储重新读取（同步前先 flush，这里不再写盘，免得盖掉同步来的数据） */
 export async function reload() {
-  cache = null;
-  dirty = false;
+  habitState().cache = null;
+  habitState().dirty = false;
   return load();
 }
 export async function clear() {
-  cache = emptyStats();
-  dirty = false;
+  habitState().cache = emptyStats();
+  habitState().dirty = false;
   await kv.delete(KEY);
 }

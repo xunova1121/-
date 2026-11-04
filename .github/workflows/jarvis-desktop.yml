@@ -362,6 +362,7 @@ jobs:
       - name: 构建并验证手机版界面
         run: |
           npm run build:mobile
+          node e2e/multi-user.mjs "$RUNNER_TEMP/jarvis-e2e/multi-user"
           mkdir -p "$RUNNER_TEMP/jarvis-e2e"
           node e2e/mobile-ui.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/product-refresh.mjs "$RUNNER_TEMP/jarvis-e2e/product-refresh"

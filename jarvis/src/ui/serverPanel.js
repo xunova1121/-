@@ -1,3 +1,4 @@
+import { createServerUsersPanel } from './serverUsersPanel.js';
 /**
  * 设置 → 服务器模式：填网址和访问密码登录；开关；把本机的模型设置（含密钥）传到服务器。
  * 开关切换后重新加载页面：对话列表要换成服务器上的（或换回本机的）。
@@ -19,6 +20,8 @@ export function initServerPanel({ getLlmConfig, toast, reload = () => location.r
   const status = $('#server-status');
   const cfg = loadServerSettings();
   $('#server-url').value = cfg.url;
+  $('#server-pass').placeholder = '主人密码 / 个人访问码';
+  $('#server-pass').setAttribute('aria-label', '主人密码或个人访问码');
   on.checked = cfg.enabled;
   on.disabled = !cfg.token;
   const say = (t) => { status.textContent = t; };
@@ -29,7 +32,7 @@ export function initServerPanel({ getLlmConfig, toast, reload = () => location.r
     return createServerClient({ base: saved.url, token: saved.token });
   };
 
-  $('#server-net')?.after(createServerSecurityPanel({ client, toast }));
+  $('#server-net')?.after(createServerSecurityPanel({ client, toast }), createServerUsersPanel({ client, toast }));
 
   // 最近几次请求花了多久、走的哪种网络：还嫌慢时截图这一行，能看出卡在哪
   const NAMES = { '/api/sessions': '对话列表', '/api/server/config': '模型设置', '/api/server/status': '状态', '/api/server/update': '版本', '/api/tasks': '发任务', '/api/files/raw': '传文件' };
@@ -55,11 +58,11 @@ export function initServerPanel({ getLlmConfig, toast, reload = () => location.r
   $('#btn-server-login').addEventListener('click', async () => {
     const url = normalizeUrl($('#server-url').value);
     const pass = $('#server-pass').value;
-    if (!url || !pass) { say('请填网址和访问密码'); return; }
+    if (!url || !pass) { say('请填网址和主人密码或个人访问码'); return; }
     say('正在登录…');
     try {
-      const token = await createServerClient({ base: url }).login(pass);
-      saveServerSettings({ url, token, enabled: true });
+      const account = await createServerClient({ base: url }).loginAccount(pass);
+      saveServerSettings({ url, ...account, enabled: true });
       $('#server-pass').value = '';
       toast('已开启服务器模式，正在切换到服务器上的对话');
       reload();

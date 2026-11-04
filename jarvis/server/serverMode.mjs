@@ -1,3 +1,5 @@
+import { createUserStore, currentUser, PRIMARY_USER, runAsUser, userDataDir, userService } from './userScope.mjs';
+import { memberModelConfig } from './userRoutes.mjs';
 import { createEvaluationAccess } from './evaluationAccess.mjs';
 import { createAccessSecurity, legacyAccessToken } from './accessSecurity.mjs';
 import { createAccessRoutes } from './accessRoutes.mjs';
@@ -49,7 +51,6 @@ import { createCodeSandbox } from './codeSandbox.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createFileStore } from './fileStore.mjs';
 import { createTaskRunner, publicFetch } from './taskRunner.mjs';
 import { createServerSchedules, notices as scheduleNotices } from './serverSchedules.mjs';
 import * as scheduler from '../src/agent/scheduler.js';
@@ -91,6 +92,7 @@ export function mergeConfig(old, next) {
   next = modelSettings;
   if (Object.hasOwn(next, 'publicDataHosts')) next = { ...next, publicDataHosts: publicDataHosts(next.publicDataHosts) };
   if (Object.hasOwn(next, 'lookupRegion') && !LOOKUP_REGIONS.includes(next.lookupRegion)) throw Object.assign(new Error('查询地区只接受auto、cn或global'), { status: 400, code: 'LOOKUP_REGION' });
+  if (Object.hasOwn(next, 'taskConcurrency') && (!Number.isInteger(next.taskConcurrency) || next.taskConcurrency < 1 || next.taskConcurrency > 4)) throw Object.assign(new Error('同时执行任务数须为1至4'), { status: 400 });
   const keep = (n, o) => (!n || String(n).startsWith('••••') ? o ?? '' : n);
   const keys = { ...(old.keys ?? {}) };
   for (const [k, v] of Object.entries(next.keys ?? {})) {
@@ -116,31 +118,47 @@ export function mergeConfig(old, next) {
 /**
  * @param {{ dataDir: string, password: string, maxRunning?: number, runner?: object }} o
  */
-export function createServerMode({ dataDir, password, maxRunning = 1, runner: injected = null, appDir = APP_DIR, updateUnit = UPDATE_UNIT, makeModelAdapter, autoSchedules = false, codeHosting = createGitHubHost(), codeGit, codeSandbox = null, lookupService: injectedLookup = null, readinessRuntime, searchFetch } = {}) {
+export function createServerMode({ dataDir, password, maxRunning = 2, runner: injected = null, appDir = APP_DIR, updateUnit = UPDATE_UNIT, makeModelAdapter, makeTaskAdapter, autoSchedules = false, codeHosting = createGitHubHost(), codeGit, codeSandbox = null, lookupService: injectedLookup = null, readinessRuntime, searchFetch } = {}) {
   if (!password || String(password).length < 6) throw new Error('服务器模式需要设置 JARVIS_PASSWORD（至少 6 位）');
   const security = createAccessSecurity({ dataDir, password: String(password) });
-  const evaluationAccess = createEvaluationAccess({ store: createFileStore(path.join(dataDir, 'store')), dataDir, security });
+  const evaluationAccess = createEvaluationAccess({ store: createUserStore(dataDir), dataDir, security });
   const store = evaluationAccess.store;
   useBackend(store);
   // 内置技能（做 PPT、Word、Excel 的步骤和规范）：和手机 / 电脑一样装上，版本更新时跟着升级
-  const ready=seedBuiltins().catch((e) => console.warn('[服务器模式] 内置技能没装上：', e?.message || e));
+  const seeded = new Map(); // 用户最多50人；每人升级一次内置技能，不覆盖个人启停状态。
+  const initialize = () => {
+    const id = currentUser();
+    if (!seeded.has(id)) seeded.set(id, seedBuiltins());
+    return seeded.get(id);
+  };
+  const ready = initialize();
   const configFile = path.join(dataDir, 'config.json');
   const loadConfig = () => {
-    try { return { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(configFile, 'utf8')) }; } catch { return { ...DEFAULT_CONFIG }; }
+    let cfg;
+    try { cfg = { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(configFile, 'utf8')) }; } catch { cfg = { ...DEFAULT_CONFIG }; }
+    if (currentUser() !== PRIMARY_USER) {
+      // 只共享模型及工具配置，管理员GitHub授权与仓库绑定绝不借给成员。
+      delete cfg.codeAccount; delete cfg.codeRepos;
+      try { const own = JSON.parse(fs.readFileSync(path.join(userDataDir(dataDir), 'code-config.json'), 'utf8')); cfg.codeAccount = own.codeAccount; cfg.codeRepos = own.codeRepos; } catch { /* 新成员尚未连接自己的代码账户。 */ }
+    }
+    return cfg;
   };
   const saveConfig = (cfg) => {
-    const fd = fs.openSync(`${configFile}.tmp`, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, 0o600);
+    const target = currentUser() === PRIMARY_USER ? configFile : path.join(userDataDir(dataDir), 'code-config.json');
+    if (currentUser() !== PRIMARY_USER) cfg = { codeAccount: cfg.codeAccount, codeRepos: cfg.codeRepos };
+    fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+    const fd = fs.openSync(`${target}.tmp`, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, 0o600);
     try { fs.fchmodSync(fd, 0o600); fs.writeFileSync(fd, JSON.stringify(cfg, null, 2)); } finally { fs.closeSync(fd); }
-    fs.renameSync(`${configFile}.tmp`, configFile);
+    fs.renameSync(`${target}.tmp`, target);
   };
   // systemd的PrivateTmp不与Docker守护进程共享/tmp，必须把绑定源放到数据目录。
-  const sandbox = codeSandbox ?? createCodeSandbox({ image: process.env.JARVIS_CODE_SANDBOX_IMAGE, registry: process.env.JARVIS_CODE_NPM_REGISTRY, baseDir: path.join(dataDir, 'code-jobs') });
-  const browser = createCodeBrowser({ image: process.env.JARVIS_CODE_BROWSER_IMAGE, baseDir: path.join(dataDir, 'code-browser-jobs') });
-  const codeRepos = createCodeRepos({ browser, baseDir: path.join(dataDir, 'repos'), getConfig: loadConfig, hosting: codeHosting, editing: true, sandbox, ...(codeGit && { git: codeGit }) });
+  const sandbox = userService(() => codeSandbox ?? createCodeSandbox({ image: process.env.JARVIS_CODE_SANDBOX_IMAGE, registry: process.env.JARVIS_CODE_NPM_REGISTRY, baseDir: path.join(userDataDir(dataDir), 'code-jobs') }));
+  const browser = userService(() => createCodeBrowser({ image: process.env.JARVIS_CODE_BROWSER_IMAGE, baseDir: path.join(userDataDir(dataDir), 'code-browser-jobs') }));
+  const codeRepos = userService(() => createCodeRepos({ browser, baseDir: path.join(userDataDir(dataDir), 'repos'), getConfig: loadConfig, hosting: codeHosting, editing: true, sandbox, ...(codeGit && { git: codeGit }) }));
   // 技能脚本运行器：技能里的 Python / Node 命令在隔离的 Docker 里跑（没装 Docker 或镜像时照实告诉模型怎么装）
-  const skillRunner = createSkillRunner({ image: process.env.JARVIS_SKILL_RUNNER_IMAGE || SKILL_RUNNER_IMAGE, baseDir: path.join(dataDir, 'skill-runner') });
+  const skillRunner = userService(() => createSkillRunner({ image: process.env.JARVIS_SKILL_RUNNER_IMAGE || SKILL_RUNNER_IMAGE, baseDir: path.join(userDataDir(dataDir), 'skill-runner') }));
   let runner;
-  const projects = createCodeProjects({ dataDir, getConfig: loadConfig, saveConfig, legacyRepos: codeRepos, hosting: codeHosting, git: codeGit, sandbox, browser,
+  const projects = userService(() => createCodeProjects({ dataDir: userDataDir(dataDir), getConfig: loadConfig, saveConfig, legacyRepos: codeRepos, hosting: codeHosting, git: codeGit, sandbox, browser,
     validateSession: async sessionId => { if (!await sessions.get(sessionId)) throw Object.assign(new Error('请先开始服务器对话，再管理项目'), { code: 'CODE_SCOPE' }); },
     isBusy: sessionId => (runner?.list() || []).some(t => t.sessionId === sessionId && ['queued','running'].includes(t.status)),
     onBind: async (sessionId, projectId, taskId) => {
@@ -150,16 +168,17 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       if (taskId) s.taskCheckpoint = { text: 'GitHub项目开发', status: 'done', codeTaskId: taskId, taskId, steps: [], inFlight: [] };
       await sessions.save(s);
     }
-  });
-  const lookupService = injectedLookup ?? createLookupService({ storage: { get: id => store.get('kv', id), put: row => store.put('kv', row) }, get: publicFetch });
-  runner = injected ?? createTaskRunner({ codeProjects: projects, getConfig: async () => withoutCodeCredentials(loadConfig()), maxRunning, skillRunner, codeRepos, projectBaseDir: path.join(dataDir, 'project-jobs'), lookupService, evaluationAccess });
+  }));
+  const lookupService = userService(() => injectedLookup ?? createLookupService({ storage: { get: id => store.get('kv', id), put: row => store.put('kv', row) }, get: publicFetch }));
+  runner = injected ?? createTaskRunner({ ...(makeTaskAdapter && { makeAdapter: makeTaskAdapter }), codeProjects: projects, getConfig: async () => withoutCodeCredentials(loadConfig()), maxRunning: () => loadConfig().taskConcurrency ?? maxRunning, skillRunner, codeRepos, projectBaseDir: () => path.join(userDataDir(dataDir), 'project-jobs'), lookupService, evaluationAccess, userAccess: { current: currentUser, run: runAsUser, active: security.users.active } });
   // 定时任务 / 提醒：服务器自己按时执行（手机关着也做），见 serverSchedules.mjs；测试里不自动开始计时
-  const schedules = createServerSchedules({ runner });
-  if (autoSchedules) schedules.start();
+  const schedules = userService(() => createServerSchedules({ runner, active: () => security.users.active(currentUser()) }));
+  // 启动时为每个有效身份恢复提醒；新建成员的定时器在首次请求时启动。
+  if (autoSchedules) for (const id of security.users.ids()) runAsUser(id, () => schedules.start());
   let activePCModels = 0;
   let activeCatalogs = 0;
   // WebSocket等只需主人身份；普通HTTP由access逐项判定权限及403。
-  const authorized = req => security.authenticate(req)?.role === 'owner';
+  const authorized = req => ['owner', 'member'].includes(security.authenticate(req)?.role);
 
   const json = (res, status, body) => {
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -217,6 +236,13 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
 
   /** 处理服务器模式的接口；不是这些接口返回 false */
   async function handle(req, res, pathname) {
+    const principal = security.authenticate(req);
+    return runAsUser(principal?.userId || PRIMARY_USER, async () => {
+      if (principal) { await initialize(); if (autoSchedules) schedules.start(); }
+      return handleScoped(req, res, pathname);
+    });
+  }
+  async function handleScoped(req, res, pathname) {
     const url = new URL(req.url, 'http://x');
     if (url.searchParams.has('token')) { json(res, 401, { error: '网址不能携带登录凭证，请使用请求头' }); return true; }
     if (pathname === '/api/server/login' && req.method === 'POST') { login(req, res, await readJson(req)); return true; }
@@ -241,7 +267,7 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       if (!authorized(req)) { json(res, 401, { error: '服务器登录已失效' }); return true; }
       return codeRoutes(req, res, pathname);
     }
-    if (pathname === '/api/server/status' && req.method === 'GET') { json(res, 200, { ok: true, features:{evaluationMemoryIsolation:true,taskRequestIds:true,taskNotes:true,taskCheckpoints:true,pcModelBridge:true,skillSync:true}, running: runner.running, tasks: runner.list().filter((t) => t.status === 'running' || t.status === 'queued') }); return true; }
+    if (pathname === '/api/server/status' && req.method === 'GET') { json(res, 200, { ok: true, features:{evaluationMemoryIsolation:true,taskRequestIds:true,taskNotes:true,taskCheckpoints:true,pcModelBridge:true,skillSync:true,multiUser:true}, identity: security.users.identity(principal), running: runner.running, tasks: runner.list().filter((t) => t.status === 'running' || t.status === 'queued') }); return true; }
     if(pathname==='/api/server/pc-model'&&req.method==='POST'){
       if(!authorized(req)){json(res,401,{error:'服务器登录已失效'});return true;}
       if(activePCModels>=2){json(res,429,{error:'PC模型请求繁忙，请稍后重试'});return true;}
@@ -273,7 +299,7 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       json(res, 200, result); return true;
     }
     if (pathname === '/api/server/config') {
-      if (req.method === 'GET') { json(res, 200, maskConfig(loadConfig())); return true; }
+      if (req.method === 'GET') { json(res, 200, principal.role === 'member' ? memberModelConfig(loadConfig()) : maskConfig(loadConfig())); return true; }
       if (req.method === 'PUT') {
         // 请求正文尚未收完时，另一台设备可能刚保存了新Key。收完再读配置，
         // 同步合并/写盘，防止慢请求把先读到的旧Key覆盖回去。
@@ -522,5 +548,5 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     return false;
   }
 
-  return { authorized, watchAccess: (req, close) => { const principal = security.authenticate(req); return security.onRevoke(id => { if (id === principal?.id) close(); }); }, access: accessRoutes.access, handle, runner, schedules, store, ready, realtimeKey: () => loadConfig().keys?.qwen || '', qweather: () => qweatherConfig(loadConfig()) };
+  return { authorized, watchAccess: (req, close) => { const principal = security.authenticate(req); return security.onRevoke(id => { if (id === principal?.id) close(); }); }, access: req => runAsUser(security.authenticate(req)?.userId || PRIMARY_USER, () => accessRoutes.access(req)), handle, runner, schedules, store, ready, realtimeKey: () => loadConfig().keys?.qwen || '', qweather: () => qweatherConfig(loadConfig()) };
 }

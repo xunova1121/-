@@ -14,6 +14,7 @@ export function createServerSecurityPanel({ client, toast }) {
   const issued = node('div', '', { className: 'server-security-issued', hidden: true });
   const token = node('textarea', '', { readOnly: true, rows: 2, ariaLabel: '仅本次显示的评测令牌', autocomplete: 'off', spellcheck: false });
   const clear = () => { token.value = ''; issued.hidden = true; };
+  const adminSection = node('div');
   let loading = false;
   const run = async action => {
     if (loading) return;
@@ -30,6 +31,8 @@ export function createServerSecurityPanel({ client, toast }) {
   const date = at => at ? new Date(at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '尚未使用';
   async function refresh() {
     const current = await client().security();
+    adminSection.hidden = current.identity?.role === 'member';
+    if (adminSection.hidden) clear();
     devices.replaceChildren();
     evaluations.replaceChildren();
     warning.textContent = current.weakPassword ? '当前密码较短或简单。最低允许6位；建议你自行在 /opt/jarvis/jarvis.env 设置更长的密码，程序不会修改密码。' : '';
@@ -55,7 +58,8 @@ export function createServerSecurityPanel({ client, toast }) {
   issued.append(node('p', '此令牌只显示这一次。请只保存在评测机器的私有环境变量 JARVIS_EVAL_TOKEN 中，不要发到对话、日志或仓库。'), token,
     button('复制本次令牌', async () => { if (token.value) { await navigator.clipboard.writeText(token.value); toast('已复制，请保存在私有环境'); } }), button('已保存，隐藏令牌', async () => clear()));
   panel.append(message, warning, button('刷新安全状态', refresh), node('h4', '已登录设备'), devices,
-    button('退出所有其他设备', async () => { await client().revokeDevice('others'); await refresh(); }), node('h4', '评测专用授权'),
+    button('退出所有其他设备', async () => { await client().revokeDevice('others'); await refresh(); }));
+  adminSection.append(node('h4', '评测专用授权'),
     node('p', '只能读写自己的评测任务与会话；不能读取设置、文件、代码仓库或用户对话。模型调用和搜索共用每日限额。', { className: 'muted small' }),
     label('名称', name), label('有效期（天，最多30）', days), label('每日调用上限', dailyLimit),
     button('生成评测令牌', async () => {
@@ -68,6 +72,7 @@ export function createServerSecurityPanel({ client, toast }) {
       issued.hidden = false;
       await refresh();
     }), issued, evaluations);
+  panel.append(adminSection);
   panel.addEventListener('toggle', () => { if (panel.open) run(refresh); else clear(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) clear(); });
   return panel;

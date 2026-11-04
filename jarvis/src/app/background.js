@@ -14,7 +14,7 @@ import { executeScheduled, scheduledPrompt, notificationFor } from '../agent/sch
 import { preApproved } from '../agent/commandSafety.js';
 import { composeGreeting, GREET_GAP_MS } from '../core/greeting.js';
 import { initSchedulesPanel, serverScheduleStore } from '../ui/schedulesPanel.js';
-import { $, DESKTOP, toast, wp } from './env.js';
+import { $, DESKTOP, toast, wp, storage } from './env.js';
 
 export function createBackground(app) {
   /** 自动整理记忆：对话停下来 30 秒后、切到别的对话或 App 退到后台时，把这段对话交给记忆整理（抽取事实、写摘要）。
@@ -81,7 +81,7 @@ export function createBackground(app) {
   // ---------------------------------------------------------------- 主动问好：你回到电脑前时
   let lastGreetAt = (() => {
     try {
-      return Number(localStorage.getItem('jarvis.lastGreet')) || 0;
+      return Number(storage?.getItem('jarvis.lastGreet')) || 0;
     } catch {
       return 0;
     }
@@ -94,7 +94,7 @@ export function createBackground(app) {
     if (!force && (!app.settings.greetOnReturn || app.active || Date.now() - lastGreetAt < GREET_GAP_MS || awayMs < 10 * 60_000)) return null;
     lastGreetAt = Date.now();
     try {
-      localStorage.setItem('jarvis.lastGreet', String(lastGreetAt));
+      storage?.setItem('jarvis.lastGreet', String(lastGreetAt));
     } catch {
       /* 隐私模式 */
     }
@@ -147,14 +147,14 @@ export function createBackground(app) {
     const today = new Date().toDateString();
     let last = '';
     try {
-      last = localStorage.getItem('jarvis.habitsMemorized') || '';
+      last = storage?.getItem('jarvis.habitsMemorized') || '';
     } catch {
       /* 隐私模式 */
     }
     if (!manual && last === today) return 0;
     for (const text of r.insights) await agentMemory.remember(`用户${text}`, 'habit', { importance: 2, source: 'habits' });
     try {
-      localStorage.setItem('jarvis.habitsMemorized', today);
+      storage?.setItem('jarvis.habitsMemorized', today);
     } catch {
       /* 隐私模式 */
     }
@@ -286,7 +286,7 @@ export function createBackground(app) {
     try {
       let seen = 0;
       try {
-        seen = Number(localStorage.getItem(NOTICE_KEY)) || 0;
+        seen = Number(storage?.getItem(NOTICE_KEY)) || 0;
       } catch {
         /* 隐私模式 */
       }
@@ -304,7 +304,7 @@ export function createBackground(app) {
         notify(n.title, n.body, action);
       }
       try {
-        localStorage.setItem(NOTICE_KEY, String(Math.max(...list.map((n) => n.at))));
+        storage?.setItem(NOTICE_KEY, String(Math.max(...list.map((n) => n.at))));
       } catch {
         /* 隐私模式 */
       }

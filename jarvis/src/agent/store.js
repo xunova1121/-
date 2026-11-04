@@ -1,8 +1,9 @@
+import { userStorageSuffix } from '../core/userStorage.js';
 /**
  * 本地持久化：IndexedDB（浏览器）/ 内存 Map（Node 测试或存储被禁用时）。
  * 所有数据只在这台电脑的浏览器里，不上传。
  */
-const DB_NAME = 'jarvis';
+const DB_NAME = 'jarvis' + userStorageSuffix();
 // v2：packs（安装的技能）；v3：episodes（对话摘要）；v4：sessions（多会话）；v5：fileVersions（工作区文件的旧版本）
 // 升级只新建缺少的表，不动已有的表和数据（tests/storeUpgrade.test.js 模拟了从 v4 升级）
 const DB_VERSION = 5;
@@ -66,6 +67,17 @@ let backend = null;
  * backend 提供 all / get / put / delete / clear(集合名, …)
  */
 export function useBackend(b) { backend = b; }
+
+/** 私有缓存跟随集合后端；WeakMap在后端释放后一起回收，不保存其他用户的状态。 */
+export function scopedState(name, create) {
+  const states = new WeakMap();
+  const local = {};
+  return () => {
+    const key = backend?.scoped?.(name) || backend || local;
+    if (!states.has(key)) states.set(key, create());
+    return states.get(key);
+  };
+}
 
 /** 某个集合的增删查 */
 export function collection(name) {

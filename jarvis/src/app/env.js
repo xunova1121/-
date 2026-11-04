@@ -1,3 +1,4 @@
+import { privateStorage } from '../core/userStorage.js';
 /**
  * 前端各模块共用的运行环境和小工具（这里不放会变的状态）：
  * 取页面元素、当前时间、是不是手机 / 桌面版、本机存储、提示条、通知桌面背景、崩溃前操作记录。
@@ -13,7 +14,7 @@ export const DESKTOP = window.jarvisDesktop;
 export const COMPACT = MOBILE;
 export const storage = (() => {
   try {
-    return localStorage;
+    return privateStorage(localStorage);
   } catch {
     return null;
   }
@@ -68,7 +69,7 @@ export function wp(payload) {
 export function markActivity(what) {
   if (!MOBILE) return;
   try {
-    localStorage.setItem('jarvis.lastActivity', what ? `${new Date().toLocaleTimeString('zh-CN', { hour12: false })} ${what}` : '');
+    storage?.setItem('jarvis.lastActivity', what ? `${new Date().toLocaleTimeString('zh-CN', { hour12: false })} ${what}` : '');
   } catch {
     /* 存不了就算了 */
   }

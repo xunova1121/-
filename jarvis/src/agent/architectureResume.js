@@ -1,3 +1,4 @@
+import { scopedState } from './store.js';
 import * as workspace from './workspace.js';
 import { loadArchitecture } from './architectureProjection.js';
 import { reviewArchitecture } from './architectureReview.js';
@@ -5,14 +6,14 @@ import { throwControl } from '../core/networkRequest.js';
 import { architectureMarkdown } from './architecturePlan.js';
 
 // 最多16个并发底稿，不合并不同任务的停止信号；每份底稿仅恢复一次并提前落盘。
-const active = new Set();
+const activeState = scopedState('files', () => new Set());
 export async function resumeArchitectureReview(ctx, bundle, options = {}) {
   if (bundle.report.structure !== 'passed' || bundle.report.semantic !== 'not_checked') return bundle;
   if (!ctx.reasonLlm && !ctx.llm) return bundle;
   if (bundle.report.errorCode === 'ARCHITECTURE_REVIEW_SIZE') return bundle;
-  if (active.has(bundle.path) || active.size >= 16)
+  if (activeState().has(bundle.path) || activeState().size >= 16)
     throw Object.assign(new Error('该底稿正在审查，请勿同时重复提交'), { code: 'ARCHITECTURE_REVIEW_BUSY', kind: 'api' });
-  active.add(bundle.path);
+  activeState().add(bundle.path);
   try {
     throwControl(null, options.signal);
     // 获取并发占位后再读持久状态，另一个请求可能已经完成恢复，不能拿旧bundle重置次数。
@@ -39,6 +40,6 @@ export async function resumeArchitectureReview(ctx, bundle, options = {}) {
     ctx.onFileChanged?.(markdownPath);
     return current;
   } finally {
-    active.delete(bundle.path);
+    activeState().delete(bundle.path);
   }
 }

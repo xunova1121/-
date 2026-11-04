@@ -1,3 +1,5 @@
+import { createUserAccounts } from './userAccounts.mjs';
+import { PRIMARY_USER } from './userScope.mjs';
 /** 独立访问凭证账本：只持久化哈希，不混进模型配置、聊天或日志。 */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -42,7 +44,7 @@ export function createAccessSecurity({ dataDir, password, now = Date.now }) {
   // 只在启动时派生代际指纹，避免把6位密码的快速无盐摘要留在磁盘。
   const fingerprint = scryptSync(password, salt, 32).toString('hex');
   // 用户自己改环境密码后，旧会话、评测授权及迁移凭据一起失效。
-  if (!state || state.fingerprint !== fingerprint) state = { version: 1, salt, fingerprint, createdAt: now(), sessions: [], evaluations: [], migrations: [], failures: [], lockUntil: 0, notices: [] };
+  if (!state || state.fingerprint !== fingerprint) state = { version: 1, salt, fingerprint, createdAt: now(), sessions: [], evaluations: [], migrations: [], failures: [], lockUntil: 0, notices: [], users: state?.users || [] };
   if (state.version !== 1 || !['sessions', 'evaluations', 'migrations', 'failures', 'notices'].every(key => Array.isArray(state[key]))) throw error(503, 'AUTH_STATE', '登录状态文件格式错误');
   let savedAt = 0;
   function save(force = false) {
@@ -59,7 +61,8 @@ export function createAccessSecurity({ dataDir, password, now = Date.now }) {
   const ipFailures = new Map(); // 最多2000个地址，10分钟；总量账本另有20次/小时限制。
   const requestAuth = new WeakMap();
   const revokedListeners = new Set();
-  const active = row => !row.revoked && now() < row.createdAt + 90 * DAY && now() < row.lastUsedAt + 30 * DAY;
+  const users = createUserAccounts({ state, save, now, revoke: id => { for (const callback of revokedListeners) callback(id); } });
+  const active = row => users.active(row.userId || PRIMARY_USER) && !row.revoked && now() < row.createdAt + 90 * DAY && now() < row.lastUsedAt + 30 * DAY;
   const publicDevice = (row, current) => ({ id: row.id, device: row.device, ip: row.ip, createdAt: row.createdAt, lastUsedAt: row.lastUsedAt, current: row.id === current });
   const publicEvaluation = row => ({ id: row.id, name: row.name, createdAt: row.createdAt, expiresAt: row.expiresAt, dailyLimit: row.dailyLimit, used: row.used, lastUsedAt: row.lastUsedAt, revoked: Boolean(row.revoked), today: row.day === day() ? row.today : 0 });
   const day = () => new Date(now() + 8 * 3600_000).toISOString().slice(0, 10);
@@ -72,18 +75,18 @@ export function createAccessSecurity({ dataDir, password, now = Date.now }) {
     return row;
   }
 
-  function issueSession(req, migration = false) {
+  function issueSession(req, migration = false, userId = PRIMARY_USER) {
     state.sessions = state.sessions.filter(active);
     if (state.sessions.length >= 500) throw error(429, 'DEVICE_LIMIT', '已登录设备过多，请先退出旧设备');
     const token = opaque();
-    const row = { id: randomBytes(12).toString('hex'), hash: hash(token), device: deviceName(req), ip: loginAddress(req), createdAt: now(), lastUsedAt: now() };
+    const row = { userId, id: randomBytes(12).toString('hex'), hash: hash(token), device: deviceName(req), ip: loginAddress(req), createdAt: now(), lastUsedAt: now() };
     if (state.sessions.length) {
-      state.notices.push({ id: randomBytes(12).toString('hex'), at: now(), sessionId: row.id, device: row.device, ip: row.ip, migration });
+      state.notices.push({ id: randomBytes(12).toString('hex'), at: now(), sessionId: row.id, userId, device: row.device, ip: row.ip, migration });
       state.notices = state.notices.slice(-100);
     }
     state.sessions.push(row);
     save(true);
-    return { token, id: row.id };
+    return { token, id: row.id, userId, role: userId === PRIMARY_USER ? 'owner' : 'member' };
   }
 
   function login(req, supplied) {
@@ -96,6 +99,8 @@ export function createAccessSecurity({ dataDir, password, now = Date.now }) {
       ipFailures.delete(ip);
       return issueSession(req);
     }
+    const memberId = users.identify(supplied);
+    if (memberId) { ipFailures.delete(ip); return issueSession(req, false, memberId); }
     if (ipFailures.size >= 2000 && !ipFailures.has(ip)) ipFailures.delete(ipFailures.keys().next().value);
     ipFailures.set(ip, [...recent, now()]);
     state.failures.push(now());
@@ -117,19 +122,21 @@ export function createAccessSecurity({ dataDir, password, now = Date.now }) {
       if (session) {
         session.lastUsedAt = now();
         save();
-        principal = { role: 'owner', id: session.id };
+        principal = { role: (session.userId || PRIMARY_USER) === PRIMARY_USER ? 'owner' : 'member', id: session.id, userId: session.userId || PRIMARY_USER };
       } else if (evaluation) {
         evaluation.lastUsedAt = now();
         save();
-        principal = { role: 'evaluation', id: evaluation.id, scopePrefix: `ev_${evaluation.id}_` };
-      } else if (legacy() && equal(raw, legacyAccessToken(password))) principal = { role: 'owner', id: 'legacy', legacy: true };
+        principal = { role: 'evaluation', userId: PRIMARY_USER, id: evaluation.id, scopePrefix: `ev_${evaluation.id}_` };
+      } else if (legacy() && equal(raw, legacyAccessToken(password))) principal = { role: 'owner', userId: PRIMARY_USER, id: 'legacy', legacy: true };
     } else if (url.searchParams.has('ticket')) {
       const digest = hash(url.searchParams.get('ticket'));
       const ticket = tickets.get(digest);
       url.searchParams.delete('ticket');
-      if (ticket && ticket.until > now() && ticket.resource === req.method + ' ' + url.pathname + url.search && state.sessions.some(row => row.id === ticket.owner && active(row))) {
+      if (ticket && ticket.until > now() && ticket.resource === req.method + ' ' + url.pathname + (url.searchParams.size ? '?' + url.searchParams.toString() : '') && state.sessions.some(row => row.id === ticket.owner && active(row))) {
         tickets.delete(digest);
-        principal = { role: 'owner', id: ticket.owner, ticket: true };
+        const session = state.sessions.find(row => row.id === ticket.owner);
+        const userId = session.userId || PRIMARY_USER;
+        principal = { role: userId === PRIMARY_USER ? 'owner' : 'member', userId, id: ticket.owner, ticket: true };
       }
     }
     if (principal) requestAuth.set(req, principal);
@@ -139,6 +146,7 @@ export function createAccessSecurity({ dataDir, password, now = Date.now }) {
   return {
     authenticate,
     login,
+    users,
     migrate(req) {
       const principal = authenticate(req);
       owner(principal);
@@ -156,16 +164,16 @@ export function createAccessSecurity({ dataDir, password, now = Date.now }) {
       return session;
     },
     overview(principal) {
-      owner(principal);
-      return { minimumLength: 6, weakPassword: password.length < 12 || /^(.)\1+$/.test(password) || /^(?:123456|password|qwerty)/i.test(password), loginLockedUntil: state.lockUntil > now() ? state.lockUntil : 0, devices: state.sessions.filter(active).map(row => publicDevice(row, principal.id)), notices: state.notices.filter(row => row.sessionId !== principal.id && now() - row.at < 7 * DAY).map(row => ({ ...row })), evaluations: state.evaluations.map(publicEvaluation), legacyUntil: state.createdAt + 14 * DAY };
+      if (!['owner', 'member'].includes(principal?.role)) owner(principal);
+      return { minimumLength: 6, weakPassword: principal.role === 'owner' && (password.length < 12 || /^(.)\1+$/.test(password) || /^(?:123456|password|qwerty)/i.test(password)), loginLockedUntil: state.lockUntil > now() ? state.lockUntil : 0, identity: users.identity(principal), devices: state.sessions.filter(row => active(row) && (row.userId || PRIMARY_USER) === (principal.userId || PRIMARY_USER)).map(row => publicDevice(row, principal.id)), notices: state.notices.filter(row => (row.userId || PRIMARY_USER) === (principal.userId || PRIMARY_USER) && row.sessionId !== principal.id && now() - row.at < 7 * DAY).map(row => ({ ...row })), evaluations: principal.role === 'owner' ? state.evaluations.map(publicEvaluation) : [], legacyUntil: state.createdAt + 14 * DAY };
     },
     revokeSession(principal, id) {
-      owner(principal);
+      if (!['owner', 'member'].includes(principal?.role)) owner(principal);
       if (id === 'others' && principal.legacy) throw error(409, 'MIGRATION_REQUIRED', '请先升级当前设备登录，再退出其他设备');
       const removed = [];
-      for (const row of state.sessions) if (id === 'others' ? row.id !== principal.id : row.id === id) { row.revoked = true; removed.push(row.id); }
+      for (const row of state.sessions) if ((row.userId || PRIMARY_USER) === (principal.userId || PRIMARY_USER) && (id === 'others' ? row.id !== principal.id : row.id === id)) { row.revoked = true; removed.push(row.id); }
       // 用户明确退出其他设备后，旧的共享凭证也不能再换个设备编号重新进入。
-      if (id === 'others') { state.legacyRevoked = true; removed.push('legacy'); }
+      if (id === 'others' && principal.role === 'owner') { state.legacyRevoked = true; removed.push('legacy'); }
       save(true);
       for (const removedId of removed) for (const callback of revokedListeners) callback(removedId);
     },
@@ -218,14 +226,14 @@ export function createAccessSecurity({ dataDir, password, now = Date.now }) {
       save(true);
     },
     ticket(principal, resource) {
-      owner(principal);
+      if (!['owner', 'member'].includes(principal?.role)) owner(principal);
       if (principal.legacy) throw error(409, 'MIGRATION_REQUIRED', '请先升级此设备登录');
       const url = new URL(String(resource), 'http://x');
       if (url.origin !== 'http://x' || url.hash || url.searchParams.has('token') || url.searchParams.has('ticket') || !(/^\/api\/tasks\/[\w-]+\/events$/.test(url.pathname) || url.pathname === '/api/files/raw')) throw error(400, 'TICKET_RESOURCE', '票据仅用于任务事件或文件下载');
       for (const [key, row] of tickets) if (row.until <= now()) tickets.delete(key);
       if (tickets.size >= 200) throw error(429, 'TICKET_LIMIT', '短期票据过多，请稍后重试');
       const ticket = opaque();
-      tickets.set(hash(ticket), { owner: principal.id, resource: 'GET ' + url.pathname + url.search, until: now() + 60_000 });
+      tickets.set(hash(ticket), { owner: principal.id, resource: 'GET ' + url.pathname + (url.searchParams.size ? '?' + url.searchParams.toString() : ''), until: now() + 60_000 });
       return { ticket, expiresIn: 60 };
     }
   };

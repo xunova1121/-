@@ -1,5 +1,5 @@
 import { reviewPeriod } from './periodReview.js';
-import { collection, uid } from './store.js';
+import { collection, uid, scopedState } from './store.js';
 import { mediaReceipt } from './actionDelivery.js';
 import * as workspace from './workspace.js';
 
@@ -10,16 +10,16 @@ export const WORK_RECORD_LIMIT = 4096;
 const TOOLS =
   /^(sing_song|generate_image|generate_video|prepare_architecture_evidence|revise_architecture_plan|create_architecture_package|plan_architecture|create_diagram|export_diagram|create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet)$/;
 const scopes = new WeakMap();
-let tail = Promise.resolve();
-let pending = 0;
+const ledgerState = scopedState('kv', () => ({ tail: Promise.resolve(), pending: 0 }));
 
 function serial(job) {
-  if (pending >= 32) throw Object.assign(new Error('成果索引繁忙'), { code: 'WORK_LEDGER_BUSY', kind: 'storage' });
-  pending++;
-  const next = tail.catch(() => {}).then(job);
-  tail = next;
+  const state = ledgerState();
+  if (state.pending >= 32) throw Object.assign(new Error('成果索引繁忙'), { code: 'WORK_LEDGER_BUSY', kind: 'storage' });
+  state.pending++;
+  const next = state.tail.catch(() => {}).then(job);
+  state.tail = next;
   return next.finally(() => {
-    pending--;
+    state.pending--;
   });
 }
 async function recordId(scope, callId, files) {

@@ -417,7 +417,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   // 按需加载：桌面版、本机网关用不到服务器模式，不加载智能体那一大套代码
   // 服务器模式：定时任务、提醒、“今天 / 明天几点”都按北京时间算（云服务器常默认 UTC）；部署时自己设了 TZ 就照用
   if (process.env.JARVIS_DATA && !process.env.TZ) process.env.TZ = 'Asia/Shanghai';
-  const serverMode = process.env.JARVIS_DATA ? (await import('./serverMode.mjs')).createServerMode({ dataDir: path.resolve(process.env.JARVIS_DATA), password: process.env.JARVIS_PASSWORD, maxRunning: Number(process.env.JARVIS_MAX_TASKS || 1), autoSchedules: true }) : null;
+  const serverMode = process.env.JARVIS_DATA ? (await import('./serverMode.mjs')).createServerMode({ dataDir: path.resolve(process.env.JARVIS_DATA), password: process.env.JARVIS_PASSWORD, maxRunning: Number(process.env.JARVIS_MAX_TASKS || 2), autoSchedules: true }) : null;
   const mcp = process.env.JARVIS_NO_MCP || serverMode ? null : createMcpManager({ log: (m) => console.log(m) });
   const server = createServer({ mcp, serverMode });
   mcp?.startAll();
@@ -426,7 +426,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   process.on('SIGTERM', shutdown);
   server.listen(port, host, () => {
     console.log(`未央网关已启动: http://127.0.0.1:${port}`);
-    if (serverMode) console.log(`服务器模式已开启：数据目录 ${path.resolve(process.env.JARVIS_DATA)}，同时最多做 ${process.env.JARVIS_MAX_TASKS || 1} 个任务`);
+    if (serverMode) console.log(`服务器模式已开启：数据目录 ${path.resolve(process.env.JARVIS_DATA)}，同时最多做 ${process.env.JARVIS_MAX_TASKS || 2} 个任务`);
     const keys = Object.entries(ENV_KEYS).filter(([, env]) => process.env[env]).map(([id]) => providerById(id)?.name ?? id);
     if (keys.length) console.log(`网关已配置密钥：${keys.join('、')}`);
     console.log(process.env.ANTHROPIC_API_KEY ? `对话后端: Claude (${process.env.JARVIS_MODEL || 'claude-opus-5-5'})` : '对话后端: 本地演示智能体（设置 ANTHROPIC_API_KEY 以接入 Claude）');

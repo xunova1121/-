@@ -1,3 +1,4 @@
+import { scopedState } from './store.js';
 /**
  * 说一句话删某段时间的对话（用户 2026-10-30）：
  *   1. delete_conversations 先只列清单（标题、时间、几条消息），不动任何东西；
@@ -27,7 +28,7 @@ export const CONFIRM_DELETE = /确认删除|确定删除|确认删|确定删|删
  * 对话 → { key, ids, at }：上一次列给用户看的清单。
  * 放在模块里而不是每套工具里：服务器每条消息都新建一套工具，放在里面下一句“确认”就找不到清单了（用户 2026-10-30 实测：确认三次都被拒）
  */
-const listed = new Map();
+const listedState = scopedState('sessions', () => new Map());
 
 export function createConversationTrashTools() {
   const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
@@ -54,17 +55,17 @@ export function createConversationTrashTools() {
         const owner = execution.sessionId || 'local';
         if (!confirm) {
           if (!found.length) return `${from}${to && to !== from ? ` 到 ${to}` : ''}${keyword ? `、带“${keyword}”` : ''}没有找到对话，没有删任何东西。`;
-          listed.set(owner, { key, ids: found.map((s) => s.id), at: Date.now() });
+          listedState().set(owner, { key, ids: found.map((s) => s.id), at: Date.now() });
           return `找到 ${found.length} 段对话（还没删）：\n${found.map((s, i) => { const sp = sessions.sessionSpan(s); return `${i + 1}. 「${s.title}」 ${when(sp.from)}～${when(sp.to)}，${s.messages.length} 条${s.pinned ? '（已钉住）' : ''}`; }).join('\n')}\n把这份清单给用户看，问“确认删除这 ${found.length} 段吗？删了先放回收站，7 天内能恢复。”用户明确说确认后，再用同样的时间段${keyword ? '和关键词' : ''}、confirm:true 调用。`;
         }
-        const prior = listed.get(owner);
+        const prior = listedState().get(owner);
         if (!prior || prior.key !== key || Date.now() - prior.at > LIST_TTL) return '还没把这个时间段的清单给用户看过（或已过 30 分钟）：先不带 confirm 调用一次，列清单让用户确认。没有删任何东西。';
         if (!CONFIRM_DELETE.test(String(execution.rawRequestText || ''))) return '用户这句话没有明确确认删除（要说“确认删除”之类）。没有删任何东西；请先问用户是否确认。';
         // 只删刚才列给用户看过、现在还在的
         const ids = found.map((s) => s.id).filter((id) => prior.ids.includes(id));
         const done = [];
         for (const id of ids) { const r = await sessions.trash(id); if (r) done.push(r.title); }
-        listed.delete(owner);
+        listedState().delete(owner);
         return done.length ? `已删除 ${done.length} 段对话，放在回收站，7 天内能恢复（说“恢复刚才删的对话”或在对话列表的回收站里点恢复）：${done.map((t) => `「${t}」`).join('、')}` : '清单里的对话都已经不在了，没有删任何东西。';
       }
     },

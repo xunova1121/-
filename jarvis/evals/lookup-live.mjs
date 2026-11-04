@@ -1170,8 +1170,19 @@ async function weatherProvider(id, work, { signal, timeoutMs, health, ignoreCool
   }
 }
 
+// src/core/userStorage.js
+function userStorageSuffix(storage) {
+  try {
+    storage ??= globalThis.localStorage;
+    const account = JSON.parse(storage?.getItem("jarvis.server.v1") || "{}");
+    if (/^u_[a-f0-9]{24}$/.test(account.userId || "")) return ":user:" + encodeURIComponent(account.url || "") + ":" + account.userId;
+  } catch {
+  }
+  return "";
+}
+
 // src/agent/store.js
-var DB_NAME = "jarvis";
+var DB_NAME = "jarvis" + userStorageSuffix();
 var DB_VERSION = 5;
 var STORES = ["memories", "lessons", "skills", "packs", "episodes", "sessions", "kbdocs", "kbchunks", "files", "events", "kv", "fileVersions"];
 var dbPromise = null;

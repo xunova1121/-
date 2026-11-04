@@ -77,7 +77,7 @@ export function createEvaluationAccess({ store, dataDir, security }) {
   const stores = new Map(); // 最多32份热缓存，淘汰不删除私有评测结果。
   const selected = name => {
     const current = context.getStore();
-    if (!current || name === 'sessions' || name === 'packs') return store;
+    if (!current || name === 'sessions' || name === 'packs') return store.scoped?.(name) || store;
     if (!stores.has(current.scope)) {
       if (stores.size >= 32) stores.delete(stores.keys().next().value);
       stores.set(current.scope, createFileStore(path.join(dataDir, 'evaluations', current.scope, 'store')));

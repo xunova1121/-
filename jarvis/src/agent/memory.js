@@ -19,7 +19,7 @@ import { communicationScope, recordScope, communicationRecords } from './communi
  * 长期不用、重要度低的记忆会被归档（不删除，可在面板里看到）。
  */
 import { preferenceClaim, preferenceSupported, wasPreferenceRetracted } from './memoryPreference.js';
-import { collection, uid } from './store.js';
+import { collection, uid, scopedState } from './store.js';
 import { buildIndex, tokenize } from './search.js';
 import { createDocumentStyles } from './documentStyles.js';
 
@@ -39,17 +39,16 @@ export const CATEGORIES = { profile: '身份', preference: '偏好', habit: '习
 const CORE_LIMIT = 1200;
 
 // ---------------------------------------------------------------- 可选的大模型与向量服务（由界面按当前配置注入）
-let llm = null; // async ({ system, prompt }) => string
-let embedder = null; // { model: string, embed: async (texts: string[]) => number[][] }
+const memoryState = scopedState('memories', () => ({ llm: null, embedder: null, lastEmbedError: null }));
 export function configureMemory({ llm: l = null, embedder: e = null } = {}) {
-  llm = l;
-  embedder = e;
+  memoryState().llm = l;
+  memoryState().embedder = e;
 }
 /** 只换向量服务，不动整理用的大模型（服务器查向量状态时用） */
 export function setEmbedder(e = null) {
-  embedder = e;
+  memoryState().embedder = e;
 }
-export const memoryEngine = () => ({ llm: Boolean(llm), embeddings: embedder?.model ?? null });
+export const memoryEngine = () => ({ llm: Boolean(memoryState().llm), embeddings: memoryState().embedder?.model ?? null });
 
 async function log(kind, text) {
   await events.put({ id: uid('e'), kind, text, ts: Date.now() });
@@ -117,7 +116,7 @@ export async function decide(content, category, existing, vec = null) {
   let bestSim = 0;
   for (const m of cur) {
     const lex = lexicalSim(content, m.content);
-    const sem = vec && m.embedding && m.embModel === embedder?.model ? cosine(vec, m.embedding) : 0;
+    const sem = vec && m.embedding && m.embModel === memoryState().embedder?.model ? cosine(vec, m.embedding) : 0;
     const sim = Math.max(lex, sem * 0.98);
     if (sim > bestSim) { bestSim = sim; best = m; }
   }
@@ -196,7 +195,7 @@ export async function remember(content, category = 'fact', { importance = 3, sou
       validFrom: t,
       history: [...(target.history || []), { content: target.content, until: t }].slice(-10),
       embedding: vec ?? undefined,
-      embModel: vec ? embedder.model : undefined,
+      embModel: vec ? memoryState().embedder.model : undefined,
       source, evidence, pending, needsPreferenceConfirmation,
       supersedes: target.id, // 撤回时恢复它
       ...(sessionId && { sessionId })
@@ -211,7 +210,7 @@ export async function remember(content, category = 'fact', { importance = 3, sou
     uses: 0, history: [], source, evidence, pending, needsPreferenceConfirmation, pinned: false,
     ...(sessionId && { sessionId }),
     ...(action === 'UPDATE' && pending && !target.pending ? {conflictsWith:target.id} : {}),
-    ...(vec ? { embedding: vec, embModel: embedder.model } : {})
+    ...(vec ? { embedding: vec, embModel: memoryState().embedder.model } : {})
   };
   await memories.put(m);
   await log('memory', `记住：${content}`);
@@ -233,7 +232,7 @@ export async function updateMemory(id, patch) {
   if (patch.content && patch.content !== m.content) {
     next.history = [...(next.history || []), { content: m.content, until: now() }].slice(-10);
     const vec = await embedOne(patch.content);
-    if (vec) Object.assign(next, { embedding: vec, embModel: embedder.model });
+    if (vec) Object.assign(next, { embedding: vec, embModel: memoryState().embedder.model });
   }
   await memories.put(next);
   return next;
@@ -312,7 +311,7 @@ export async function addEpisode({ summary, topics = [], turns = 0, session = nu
     id: uid('ep'), summary, topics, turns, ts: now(),
     ...(session?.id && { sessionId: session.id, sessionTitle: session.title }),
     ...(open.length && { open: open.map(norm).filter(Boolean).slice(0, 5) }),
-    ...(vec ? { embedding: vec, embModel: embedder.model } : {})
+    ...(vec ? { embedding: vec, embModel: memoryState().embedder.model } : {})
   };
   await episodes.put(e);
   await log('episode', `记下一段对话：${summary.slice(0, 40)}`);
@@ -330,9 +329,9 @@ export async function reflect(turns, { episode = true, session = null, evaluatio
   if (!userLines.length) return { memories: [], episode: null };
   const styles = await documentStyles.learn(userLines, { sessionId: session?.id });
   const pending = await openItems({ exclude: session?.id, days: 30, k: 12 });
-  if (llm) {
+  if (memoryState().llm) {
     try {
-      const text = await llm({
+      const text = await memoryState().llm({
         system: '你是记忆整理器。只输出 JSON，不要解释。',
         prompt: `下面是一段用户与助手的对话。\n1. 抽取值得长期记住的“关于用户”的信息（身份、偏好、习惯、目标、重要事实），每条一句第三人称陈述（如“用户住在上海”），quote 填用户说过的、能证明这条的原话（从对话里一字不差地摘，找不到就留空，不要自己编）；临时性的问题、助手说的话、密码密钥等敏感信息不要记。\n2. 用一两句话概括这段对话做了什么。\n3. 列出这段对话里说好以后再做、还没做完的事（open），没有就空。\n4. 下面是之前对话里没做完的事，这段对话里已经完成或用户说不用做了的，原样列在 done 里。\n之前没做完的事：\n${pending.map((o) => `- ${o.text}`).join('\n') || '（无）'}\n\n输出格式：{"memories":[{"content":"…","quote":"用户原话","category":"profile|preference|fact|goal","importance":1-5}],"summary":"…","topics":["…"],"open":["…"],"done":["…"]}\n\n对话：\n${turns.map((t) => `${t.role === 'user' ? '用户' : '助手'}：${String(t.content).slice(0, 600)}`).join('\n').slice(-6000)}`
       });
@@ -507,10 +506,10 @@ export async function noteIssue(text) {
 
 // ---------------------------------------------------------------- 检索
 /** 向量服务上次出错（模型页显示，免得出错了谁也不知道） */
-let lastEmbedError = null;
+
 async function embedOne(text) {
-  if (!embedder) return null;
-  try { return (await embedder.embed([text]))[0] ?? null; } catch (e) { lastEmbedError = { message: String(e?.message || e).slice(0, 160), at: Date.now() }; return null; }
+  if (!memoryState().embedder) return null;
+  try { return (await memoryState().embedder.embed([text]))[0] ?? null; } catch (e) { memoryState().lastEmbedError = { message: String(e?.message || e).slice(0, 160), at: Date.now() }; return null; }
 }
 
 /**
@@ -518,17 +517,17 @@ async function embedOne(text) {
  * @returns {Promise<number>} 补了几条
  */
 export async function backfillVectors({ limit = 400 } = {}) {
-  if (!embedder) return 0;
-  const model = embedder.model;
+  if (!memoryState().embedder) return 0;
+  const model = memoryState().embedder.model;
   const missing = (await memories.all()).map(upgrade).filter(current).filter((m) => m.embModel !== model && m.content).slice(0, limit);
   let done = 0;
   for (let i = 0; i < missing.length; i += 16) {
     const batch = missing.slice(i, i + 16);
     let vecs;
     try {
-      vecs = await embedder.embed(batch.map((m) => m.content));
+      vecs = await memoryState().embedder.embed(batch.map((m) => m.content));
     } catch (e) {
-      lastEmbedError = { message: String(e?.message || e).slice(0, 160), at: Date.now() };
+      memoryState().lastEmbedError = { message: String(e?.message || e).slice(0, 160), at: Date.now() };
       break;
     }
     for (const [j, m] of batch.entries()) {
@@ -543,7 +542,7 @@ export async function backfillVectors({ limit = 400 } = {}) {
 /** 向量现在的情况：用哪个模型、多少条记忆算好了、上次出错 */
 export async function vectorStatus() {
   const all = (await memories.all()).map(upgrade).filter(current);
-  return { model: embedder?.model ?? null, total: all.length, embedded: embedder ? all.filter((m) => m.embModel === embedder.model).length : 0, lastError: lastEmbedError };
+  return { model: memoryState().embedder?.model ?? null, total: all.length, embedded: memoryState().embedder ? all.filter((m) => m.embModel === memoryState().embedder.model).length : 0, lastError: memoryState().lastEmbedError };
 }
 
 /**
@@ -580,7 +579,7 @@ export function score(items, query, text, { k = 8, vec = null, weights = true, a
   const out = [];
   for (const x of items) {
     const lex = (bm.get(x.id) ?? 0) / maxBm;
-    const sem = vec && x.embedding && x.embModel === embedder?.model ? Math.max(0, cosine(vec, x.embedding)) : null;
+    const sem = vec && x.embedding && x.embModel === memoryState().embedder?.model ? Math.max(0, cosine(vec, x.embedding)) : null;
     const relevance = sem == null ? lex : 0.45 * lex + 0.55 * sem;
     if (relevance < 0.12 && !x.pinned) continue;
     let s = relevance;
@@ -707,7 +706,7 @@ const TIDY = { every: DAY, pool: 60, merges: 5, drops: 5 };
  * @returns {Promise<{ merged: number, dropped: number } | null>} 没整理时返回 null
  */
 export async function consolidate({ at = now(), force = false } = {}) {
-  if (!llm) return null;
+  if (!memoryState().llm) return null;
   const last = await kv.get('memory:tidiedAt');
   if (!force && last?.at && at - last.at < TIDY.every) return null;
   await kv.put({ id: 'memory:tidiedAt', at });
@@ -716,7 +715,7 @@ export async function consolidate({ at = now(), force = false } = {}) {
     .sort((a, b) => b.updatedAt - a.updatedAt).slice(0, TIDY.pool);
   if (pool.length < 2) return { merged: 0, dropped: 0 };
   const byId = new Map(pool.map((m) => [m.id, m]));
-  const text = await llm({
+  const text = await memoryState().llm({
     system: '你是记忆整理器。只输出 JSON，不要解释。',
     prompt: `下面是关于用户的记忆，每行：id | 记下的时间 | 内容。请整理：
 1. merge：几条说的是同一件事（重复、换了说法、一条包含另一条），合成一句更准确简洁的第三人称陈述。不同的事不要合并。
@@ -745,7 +744,7 @@ ${pool.map((m) => `${m.id} | ${new Date(m.updatedAt).toISOString().slice(0, 10)}
       pending: olds.every((x) => x.pending), pinned: false,
       source: '整理时合并了 ' + olds.length + ' 条', evidence: olds.map((x) => x.evidence).filter(Boolean).join('\n').slice(0, 1000),
       mergedFrom: ids,
-      ...(vec ? { embedding: vec, embModel: embedder.model } : {})
+      ...(vec ? { embedding: vec, embModel: memoryState().embedder.model } : {})
     };
     for (const x of olds) await memories.put({ ...x, validTo: at, supersededBy: m.id, archivedReason: '整理时合并' });
     await memories.put(m);

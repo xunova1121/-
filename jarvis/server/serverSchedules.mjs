@@ -31,7 +31,7 @@ async function addNotice(n) {
 /**
  * @param {{ runner: object, tickMs?: number, now?: () => number, pollMs?: number }} o
  */
-export function createServerSchedules({ runner, tickMs = 30_000, now = Date.now, pollMs = 1000 }) {
+export function createServerSchedules({ runner, tickMs = 30_000, now = Date.now, pollMs = 1000, active = () => true }) {
   let busy = false;
   let timer = null;
 
@@ -76,6 +76,7 @@ export function createServerSchedules({ runner, tickMs = 30_000, now = Date.now,
   }
 
   async function tick() {
+    if (!active()) return;
     if (busy) return;
     busy = true;
     try {
@@ -92,6 +93,7 @@ export function createServerSchedules({ runner, tickMs = 30_000, now = Date.now,
 
   /** 用户点“立即运行”：后台去做，马上返回；已有定时任务在跑时返回 false */
   function runNow(s) {
+    if (!active()) return false;
     if (busy) return false;
     busy = true;
     runOne(s)

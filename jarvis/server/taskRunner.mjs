@@ -128,11 +128,17 @@ export function serverApproves(ask, text) {
   return false;
 }
 
-export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now, skillRunner = null, codeRepos = null, codeProjects = null, projectBaseDir, codeMaxSteps = 80, codeTaskMs = CODE_TASK_MS, lookupService = createLookupService({ get: publicFetch }), evaluationAccess = null }) {
-  const stockImages = createStockImages({ getConfig, fetchImpl: publicFetch });
+export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now, skillRunner = null, codeRepos = null, codeProjects = null, projectBaseDir, codeMaxSteps = 80, codeTaskMs = CODE_TASK_MS, lookupService = createLookupService({ get: publicFetch }), evaluationAccess = null, userAccess = null }) {
+  const stockByUser = new Map(); // 最多50个已绑定用户；缓存不能跨用户复用。
+  const stockForUser = () => {
+    const id = userAccess?.current() || 'owner';
+    if (!stockByUser.has(id)) stockByUser.set(id, createStockImages({ getConfig, fetchImpl: publicFetch }));
+    return stockByUser.get(id);
+  };
   const tasks = new Map();
   const waiting = [];
   let running = 0;
+  let lastUser = null;
   const locks = new Map();
   const background = new Set(); // 做完后在后台整理记忆、压缩对话的活（settled() 等它们做完）
   let lastActive = Date.now(); // 最近一次有任务开始或结束的时间
@@ -162,14 +168,18 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
 
   /** 同一段对话的“读出来 → 改 → 存回去”排队做：几处同时改时，后存的不会冲掉先存的 */
   function editSession(id, fn) {
-    const next = (locks.get(id) ?? Promise.resolve()).catch(() => {}).then(async () => fn(await sessions.get(id)));
-    locks.set(id, next);
-    next.finally(() => { if (locks.get(id) === next) locks.delete(id); }).catch(() => {});
+    const key = (userAccess?.current() || 'owner') + ':' + id;
+    const next = (locks.get(key) ?? Promise.resolve()).catch(() => {}).then(async () => fn(await sessions.get(id)));
+    locks.set(key, next);
+    next.finally(() => { if (locks.get(key) === next) locks.delete(key); }).catch(() => {});
     return next;
   }
 
   // 上次服务器重启时没做完的任务：存下的半截回答标成“没完成”，不会丢
-  const recovered = (async () => {
+  const recoveries = new Map();
+  function recover() {
+    const id = userAccess?.current() || 'owner';
+    if (!recoveries.has(id)) recoveries.set(id, (async () => {
     for (const one of await sessions.list().catch(() => [])) {
       if (!one.messages?.some((m) => m.draftOf) && !['running','queued'].includes(one.taskCheckpoint?.status)) continue;
       await editSession(one.id, async (s) => {
@@ -178,7 +188,10 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         await sessions.save(s);
       }).catch(() => {});
     }
-  })();
+    })());
+    return recoveries.get(id);
+  }
+  const recovered = recover();
 
   function record(task, e) {
     task.timing?.event(e);
@@ -252,8 +265,12 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     return problem || !adapter ? { readImageText } : { describeImages: createHelperLlm(task ? measuredAdapter(adapter, model, task, 'vision') : adapter, model), visionLabel: model, readImageText };
   }
 
-  const execute = task => evaluationAccess ? evaluationAccess.run(task, () => executeScoped(task)) : executeScoped(task);
+  const inTask = (task, work) => userAccess ? userAccess.run(task.userId, () => evaluationAccess ? evaluationAccess.run(task, work) : work()) : evaluationAccess ? evaluationAccess.run(task, work) : work();
+  const execute = task => inTask(task, () => executeScoped(task).catch(err => finish(task, null, { error: String(err?.message || err) })));
+  const visible = task => task && (!userAccess || task.userId === userAccess.current());
   async function executeScoped(task) {
+    if (userAccess && !userAccess.active(task.userId)) return finish(task, null, { stopped: true });
+    const stockImages = stockForUser();
     task.status = 'running';
     task.startedAt = now();
     task.timing.start();
@@ -316,7 +333,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       currentSessionId: () => session.id,
       scheduleHost: 'server'
     }).filter((t) => !SERVER_BLOCKED.has(t.name)), task.evaluationId, Boolean(task.evaluationAuthorization));
-    const projectTool = projectExecutionTool({ image: process.env.JARVIS_CODE_SANDBOX_IMAGE, baseDir: projectBaseDir });
+    const projectTool = projectExecutionTool({ image: process.env.JARVIS_CODE_SANDBOX_IMAGE, baseDir: typeof projectBaseDir === 'function' ? projectBaseDir() : projectBaseDir });
     if (projectTool && !task.evaluationAuthorization) tools.push(projectTool);
     if (taskRepos && !task.evaluationId) tools.push(...createCodeTools({ repos: scopedRepos, sessionId: session.id, taskId: task.checkpoint.codeTaskId || task.id, editing: taskRepos.writable === true, enableBrowser: true, saveBrowserArtifact: async (p, data, type) => { await ws.write(p, new Blob([data], { type })); task.files.add(p); record(task, { type: 'file', path: p }); } }));
     if (taskRepos?.adopt && taskRepos.writable === true && !task.evaluationId) tools.push(createRepoAdoptTool({ repos: taskRepos, sessionId: session.id })); // 别的对话里的副本接过来接着改
@@ -453,12 +470,19 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   }
 
   function pump() {
-    while (running < maxRunning && waiting.length) {
-      const task = waiting.shift();
-      if (task.status !== 'queued') continue;
+    while (running < Math.max(1, Math.min(4, Number(typeof maxRunning === 'function' ? maxRunning() : maxRunning) || 1)) && waiting.length) {
+      const activeUsers = new Set([...tasks.values()].filter(t => t.status === 'running').map(t => t.userId));
+      const eligible = t => t.status === 'queued' && (!userAccess || !activeUsers.has(t.userId));
+      let index = userAccess ? waiting.findIndex(t => eligible(t) && t.userId !== lastUser) : -1;
+      if (index < 0) index = waiting.findIndex(eligible);
+      if (index < 0) break;
+      const [task] = waiting.splice(index, 1);
+      lastUser = task.userId;
+      // 同一人的剩余请求移到队尾，空出的槽位轮到其他等候用户。
+      if (userAccess) { const own = waiting.filter(t => t.userId === task.userId); for (const t of own) waiting.splice(waiting.indexOf(t), 1); waiting.push(...own); }
       running++;
       lastActive = Date.now();
-      execute(task).catch((err) => finish(task, null, { error: String(err?.message || err) }));
+      execute(task).catch(err => console.error('[任务] 收尾失败：', err?.code || err?.name || 'unknown'));
     }
   }
 
@@ -471,7 +495,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       if (sessionId!==null&&!/^[\w-]{1,40}$/.test(String(sessionId))) throw Object.assign(new Error('对话编号不对'),{status:400});
       if (requestId!==null&&!/^[\w-]{1,80}$/.test(String(requestId))) throw Object.assign(new Error('请求编号不对'),{status:400});
       images=(Array.isArray(images)?images:[]).filter(i=>/^image\/(png|jpe?g|webp|gif)$/.test(i?.mime)&&typeof i.data==='string'&&i.data.length<=MAX_IMAGE_CHARS).slice(0,MAX_IMAGES).map(({mime,data})=>({mime,data}));
-      await recovered;
+      await recover();
+      if (userAccess && !userAccess.active(userAccess.current())) throw Object.assign(new Error('该用户已停用'), { status: 403 });
       const hash=createHash('sha256').update(JSON.stringify([text,images,Boolean(voice),targetTaskId,evaluationId])).digest('hex');
       const id=sessionId||(requestId?'c_'+createHash('sha256').update(requestId).digest('hex').slice(0,30):sessions.create().id);
       const result=await editSession(id,async session=>{
@@ -484,7 +509,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
           if(!tasks.has(prior.result.id))throw Object.assign(new Error('该请求已接收，服务器曾重启或记录已归档；请查看原会话，不要重复执行'),{status:409});
           return {...prior.result,duplicate:true};
         }
-        const busy=[...tasks.values()].find(t=>t.sessionId===id&&['queued','running'].includes(t.status));
+        const busy=[...tasks.values()].find(t=>visible(t)&&t.sessionId===id&&['queued','running'].includes(t.status));
         if(targetTaskId&&busy?.id!==targetTaskId)throw Object.assign(new Error('原任务已结束或中断，补充未执行；请作为新任务发送'),{status:409});
         const previous=session.taskCheckpoint;
         const incomplete=previous&&(['running','queued','interrupted','needs_review','error'].includes(previous.status) || previous.status==='stopped'&&previous.codeTaskId&&/^(继续|恢复|接着)/.test(text));
@@ -495,7 +520,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         }
         session.messages.push({role:'user',content:text,ts:now()});session.updatedAt=now();
         // 只有评测程序明确带了 evaluationId 的才按评测隔离；用户本人在评测会话里发的话照常读记忆（用户 2026-10-30：误进评测会话后“不知道我是谁”）
-        const task=busy||{id:uid('t'),sessionId:id,evaluationId:evaluationId?evaluationScope:null,...(evaluationAuthorization && { evaluationAuthorization: { id: evaluationAuthorization.id } }),text,status:'queued',seq:0,events:[],listeners:new Set(),files:new Set(),inbox:[],notes:[],images,voice:Boolean(voice),ctrl:new AbortController(),createdAt:now(),checkpoint:{text,notes:[],steps:[],inFlight:[],files:[],status:'queued',createdAt:now()}};
+        if (!busy && userAccess && ([...tasks.values()].filter(t => visible(t) && ['queued','running'].includes(t.status)).length >= 20 || tasks.size >= 1000)) throw Object.assign(new Error('任务过多，请等待已有任务完成'), { status: 429 });
+        const task=busy||{id:uid('t'),userId:userAccess?.current() || 'owner',sessionId:id,evaluationId:evaluationId?evaluationScope:null,...(evaluationAuthorization && { evaluationAuthorization: { id: evaluationAuthorization.id } }),text,status:'queued',seq:0,events:[],listeners:new Set(),files:new Set(),inbox:[],notes:[],images,voice:Boolean(voice),ctrl:new AbortController(),createdAt:now(),checkpoint:{text,notes:[],steps:[],inFlight:[],files:[],status:'queued',createdAt:now()}};
         if (!busy && codeFollowup(text) && (previous?.codeTaskId || codeTaskPolicy({ text: previous?.text || '', hasRepos: Boolean(codeRepos && !evaluationScope) }).enabled)) {
           task.checkpoint.codeTaskId = previous.codeTaskId || previous.taskId;
         }
@@ -514,29 +540,32 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     },
     get(id) {
       const t = tasks.get(id);
-      return t && { id: t.id, sessionId: t.sessionId, evaluationId: t.evaluationId || null, text: t.text, status: t.status, seq: t.seq, files: [...t.files], error: t.error || '', errorKind: t.errorType || '', review: t.review ?? null, timing: t.timing.snapshot(), createdAt: t.createdAt, startedAt: t.startedAt ?? null, endedAt: t.endedAt ?? null };
+      return visible(t) && { id: t.id, sessionId: t.sessionId, evaluationId: t.evaluationId || null, text: t.text, status: t.status, seq: t.seq, files: [...t.files], error: t.error || '', errorKind: t.errorType || '', review: t.review ?? null, timing: t.timing.snapshot(), createdAt: t.createdAt, startedAt: t.startedAt ?? null, endedAt: t.endedAt ?? null };
     },
-    list() { return [...tasks.keys()].map((id) => this.get(id)); },
-    events(id, after = 0) { return tasks.get(id)?.events.filter((e) => e.seq > after) ?? null; },
+    list() { return [...tasks.keys()].map((id) => this.get(id)).filter(Boolean); },
+    events(id, after = 0) { const t = tasks.get(id); return visible(t) ? t.events.filter(e => e.seq > after) : null; },
     subscribe(id, fn) {
       const t = tasks.get(id);
-      if (!t || t.status === 'done' || t.status === 'error' || t.status === 'stopped') return null;
+      if (!visible(t) || t.status === 'done' || t.status === 'error' || t.status === 'stopped') return null;
       t.listeners.add(fn);
       return () => t.listeners.delete(fn);
     },
     stop(id) {
       const t = tasks.get(id);
-      if (!t) return false;
-      if (t.status === 'queued') { t.status = 'stopped'; running++; finish(t, null, { stopped: true }); return true; }
+      if (!visible(t)) return false;
+      if (t.status === 'queued') { t.status = 'stopped'; running++; waiting.splice(waiting.indexOf(t), 1); inTask(t, () => finish(t, null, { stopped: true })); return true; }
       if (t.status === 'running') { t.ctrl.abort(); return true; }
       return false;
     },
-    get running() { return running; },
+    get busy() { return running > 0 || waiting.some(t => t.status === 'queued'); },
+    get running() { return userAccess ? [...tasks.values()].filter(t => visible(t) && t.status === 'running').length : running; },
+    stopUser(userId) { for (const t of tasks.values()) if (t.userId === userId) userAccess?.run(userId, () => this.stop(t.id)); },
     /** 改一段对话（和任务的读写排队，不互相冲掉）：截断、追加消息用 */
     edit: (id, fn) => editSession(id, fn),
     /** 等手上的活（恢复、排队和正在做的任务、做完后的整理）都结束：测试收尾、服务停止前用 */
     async settled() {
       await recovered;
+      await Promise.all(recoveries.values());
       flushing++;
       try {
         for (const wake of [...wakers]) wake();
