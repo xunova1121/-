@@ -29,6 +29,7 @@ import { mobileAbilityTable } from './mobileAbilityTable.js';
 import './mobileModelCenter.css';
 import { mobileModelNavigation } from './mobileModelNavigation.js';
 import { setAbility } from '../llm/abilities.js';
+import { isOpenRouterLine, routeSortOf } from '../llm/config.js';
 
 export const node = (tag, props = {}, ...children) => {
   const element = Object.assign(document.createElement(tag), props);
@@ -142,6 +143,18 @@ export function initModelLibrary({ root, workspace, toast }) {
     const model = node('input', { placeholder: '手动添加完整模型 ID（可选）', maxLength: 200, ariaLabel: '手动模型 ID' });
     // 服务档位：有的服务商用 service_tier 选快速档（如 TeamoRouter 填 fast），不填就是普通档
     const tier = node('input', { value: cfg.serviceTiers?.[provider] || '', placeholder: '可选，如 fast（按服务商说明填）', maxLength: 40, ariaLabel: '服务档位' });
+    // OpenRouter 线路选择：同一模型有多家线路，按延迟（默认）/出字速度/价格挑；只对 OpenRouter 地址显示和生效
+    const routeShown = isOpenRouterLine(cfg, provider);
+    const route = node(
+      'select',
+      { ariaLabel: 'OpenRouter 线路选择' },
+      ...[
+        ['latency', '延迟优先（首字最快，默认）'],
+        ['throughput', '出字速度优先'],
+        ['price', '价格优先']
+      ].map(([value, textContent]) => node('option', { value, textContent }))
+    );
+    route.value = routeSortOf(cfg, provider) || 'latency';
     const saveScope = workspace.scope;
     const save = button('保存服务商', () =>
       run(async () => {
@@ -162,7 +175,8 @@ export function initModelLibrary({ root, workspace, toast }) {
             providerNames: { ...value.providerNames, [provider]: alias.value.trim().slice(0, 40) || meta.name },
             ...(meta.custom && { baseURLs: { ...value.baseURLs, [provider]: address.value.trim() } }),
             ...(secret.value.trim() && { keys: { ...value.keys, [provider]: secret.value.trim() } }),
-            serviceTiers: { ...value.serviceTiers, [provider]: tier.value.trim() }
+            serviceTiers: { ...value.serviceTiers, [provider]: tier.value.trim() },
+            ...(routeShown && { routeSorts: { ...value.routeSorts, [provider]: route.value } })
           };
           const id = model.value.trim();
           if (id) {
@@ -183,6 +197,7 @@ export function initModelLibrary({ root, workspace, toast }) {
       node('label', {}, '密钥', secret),
       node('label', {}, '手动型号', model),
       node('label', {}, '服务档位', tier),
+      routeShown ? node('label', {}, 'OpenRouter 线路选择', route) : null,
       save
     );
     // 紧跟在卡片标题下面打开，并滚到能看见的地方：以前加在卡片最底下，最后一张卡片点了“配置”像没反应

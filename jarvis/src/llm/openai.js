@@ -194,8 +194,8 @@ export const CONTINUE_PROMPT = '（网络中断了，你上一条回答只发出
 /**
  * serviceTier：服务档位（如中转站的 "fast" 快速档），每次请求带上 service_tier；服务商不认就自动去掉重试
  */
-export function createOpenAIAdapter({ baseURL, apiKey, headers = {}, retryDelays = RETRY_DELAYS, serviceTier = '' }) {
-  const once = createOnce({ baseURL, apiKey, headers, serviceTier });
+export function createOpenAIAdapter({ baseURL, apiKey, headers = {}, retryDelays = RETRY_DELAYS, serviceTier = '', routeSort = '' }) {
+  const once = createOnce({ baseURL, apiKey, headers, serviceTier, routeSort });
   return {
     kind: 'openai',
     async stream(opts) {
@@ -222,8 +222,9 @@ export function createOpenAIAdapter({ baseURL, apiKey, headers = {}, retryDelays
 }
 
 const noTierModels = new Set(); // 不认 service_tier 的型号：去掉后不再带
+const noRouteSort = new Set(); // 不认 provider.sort 的接口地址+型号：去掉后不再带
 const noUsageModels = new Set(); // 不认 stream_options 的中转站+型号：去掉后不再带
-function createOnce({ baseURL, apiKey, headers = {}, serviceTier = '' }) {
+function createOnce({ baseURL, apiKey, headers = {}, serviceTier = '', routeSort = '' }) {
   return {
     async stream({ signal: outer, ...req }) {
       const guard = stallGuard(outer, req.stallTimeouts);
@@ -242,21 +243,27 @@ function createOnce({ baseURL, apiKey, headers = {}, serviceTier = '' }) {
         // 思考强度：日常对话让推理模型少想一点，首字快很多（不支持的模型会报错，自动去掉重试）
         ...(withEffort && { reasoning_effort: effort }),
         ...(withTier && { service_tier: serviceTier }),
+        // OpenRouter 线路选择：按延迟/出字速度/价格挑同一模型的线路
+        ...(useRoute && { provider: { sort: routeSort } }),
         // 让服务商在最后一包带上 Token 用量（评测算每次调用花了多少）；不认这个参数的中转站自动去掉重试
         ...(withUsage && { stream_options: { include_usage: true } })
       }),
       signal
     });
     let useTier = Boolean(serviceTier) && !noTierModels.has(model);
+    let useRoute = Boolean(routeSort) && !noRouteSort.has(baseURL + '|' + model);
     let useUsage = !noUsageModels.has(baseURL + '|' + model);
     let useTools = !noToolModels.has(model);
     let useEffort = Boolean(effort) && !noEffortModels.has(model);
     let res = await guard.race(send(useTools, useEffort));
-    for (let retry = 0; retry < 2 && res.status === 400; retry++) {
+    for (let retry = 0; retry < 3 && res.status === 400; retry++) {
       const detail = await res.clone().text().catch(() => '');
       if (useUsage && /stream_options|include_usage/i.test(detail)) {
         noUsageModels.add(baseURL + '|' + model);
         useUsage = false;
+      } else if (useRoute && /provider\.sort|"provider"|\bprovider\b.{0,40}(?:invalid|unknown|unrecognized|not (?:allowed|supported))|(?:invalid|unknown|unrecognized|unsupported)[^.]{0,40}\bprovider\b/i.test(detail)) {
+        noRouteSort.add(baseURL + '|' + model);
+        useRoute = false;
       } else if (useTier && /service_tier|service tier/i.test(detail)) {
         noTierModels.add(model);
         useTier = false;

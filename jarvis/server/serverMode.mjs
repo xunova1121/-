@@ -101,7 +101,9 @@ export function mergeConfig(old, next) {
     if (value === 'use-gateway-key') throw Object.assign(new Error('请填写真实模型Key，不能保存网关占位符'), { status: 400 });
     keys[k] = keep(value, old.keys?.[k]);
   }
-  const maps = Object.fromEntries(['models', 'baseURLs', 'providerNames', 'modelLists', 'serviceTiers'].map((field) => [field, { ...old[field], ...next[field] }]));
+  // OpenRouter 线路选择只接受固定三档，不把任意文字写进配置
+  for (const v of Object.values(next.routeSorts ?? {})) if (!['latency', 'throughput', 'price'].includes(v)) throw Object.assign(new Error('OpenRouter 线路选择只能是延迟优先、出字速度优先或价格优先'), { status: 400 });
+  const maps = Object.fromEntries(['models', 'baseURLs', 'providerNames', 'modelLists', 'serviceTiers', 'routeSorts'].map((field) => [field, { ...old[field], ...next[field] }]));
   const merged = { ...old, ...next, ...maps, keys, tavilyKey: keep(next.tavilyKey, old.tavilyKey), bochaKey: keep(next.bochaKey, old.bochaKey), qianfanSearchKey: keep(next.qianfanSearchKey, old.qianfanSearchKey), deepseekSearchKey: keep(next.deepseekSearchKey, old.deepseekSearchKey), falKey: keep(next.falKey, old.falKey), qweatherKey: keep(next.qweatherKey, old.qweatherKey) };
   merged.stockVerified = { ...old.stockVerified };
   for (const key of STOCK_KEY_FIELDS) {

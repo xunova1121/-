@@ -89,7 +89,7 @@ export function modelNote(cfg, line) {
 }
 
 /** 每家服务商单独存的字段（删服务商时一起清掉） */
-const PROVIDER_MAPS = ['keys', 'models', 'baseURLs', 'providerNames', 'serviceTiers'];
+const PROVIDER_MAPS = ['keys', 'models', 'baseURLs', 'providerNames', 'serviceTiers', 'routeSorts'];
 
 /**
  * 删掉一家服务商：Key、地址、名字、型号列表，以及常用、备用、能力表、审查里用到它的。
@@ -147,5 +147,5 @@ export function saveCatalog(cfg, provider, ids) {
 export function copyModelSettings(cfg) {
   // 不复制本机声音、搜索密钥等无关设置，也不把服务端掩码当作可用密钥。
   const keys = Object.fromEntries(Object.entries(cfg.keys || {}).filter(([, value]) => value && !String(value).startsWith('••••')));
-  return { provider: cfg.provider, models: { ...cfg.models }, keys, baseURLs: { ...cfg.baseURLs }, providerNames: { ...cfg.providerNames }, imageModel: cfg.imageModel || '', videoModel: cfg.videoModel || '', documentReviewer: lineValid(cfg.documentReviewer) ? { ...cfg.documentReviewer } : null, favoriteModels: favoriteLines(cfg), fallbackModels: uniqueLines(cfg.fallbackModels || []).slice(0, MAX_BACKUPS), fallbackPolicy: cfg.fallbackPolicy || 'legacy', abilities: structuredClone(cfg.abilities || {}), pinModel: Boolean(cfg.pinModel), capabilityUpgrade: cfg.capabilityUpgrade !== false, serviceTiers: { ...cfg.serviceTiers }, routing: { ...cfg.routing, enabled: Boolean(cfg.routing?.enabled), routes: { ...cfg.routing?.routes } } };
+  return { provider: cfg.provider, models: { ...cfg.models }, keys, baseURLs: { ...cfg.baseURLs }, providerNames: { ...cfg.providerNames }, imageModel: cfg.imageModel || '', videoModel: cfg.videoModel || '', documentReviewer: lineValid(cfg.documentReviewer) ? { ...cfg.documentReviewer } : null, favoriteModels: favoriteLines(cfg), fallbackModels: uniqueLines(cfg.fallbackModels || []).slice(0, MAX_BACKUPS), fallbackPolicy: cfg.fallbackPolicy || 'legacy', abilities: structuredClone(cfg.abilities || {}), pinModel: Boolean(cfg.pinModel), capabilityUpgrade: cfg.capabilityUpgrade !== false, serviceTiers: { ...cfg.serviceTiers }, routeSorts: { ...cfg.routeSorts }, routing: { ...cfg.routing, enabled: Boolean(cfg.routing?.enabled), routes: { ...cfg.routing?.routes } } };
 }

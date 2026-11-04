@@ -103,11 +103,23 @@ function configuredAdapter(cfg, { gateway = null } = {}) {
   const baseURL = viaGw ? `${gateway.origin}/api/llm/${p.id}` : (p.custom ? cfg.baseURLs[p.id] : p.baseURL);
   const headers = p.id === 'openrouter' ? { 'HTTP-Referer': 'https://jarvis.local', 'X-Title': 'Jarvis' } : {};
   if (viaGw && p.custom) headers['x-jarvis-upstream'] = cfg.baseURLs[p.id].trim();
-  return { model, adapter: createOpenAIAdapter({ baseURL, apiKey: key || (viaGw ? 'use-gateway-key' : ''), headers, serviceTier: serviceTierOf(cfg, p.id) }) };
+  return { model, adapter: createOpenAIAdapter({ baseURL, apiKey: key || (viaGw ? 'use-gateway-key' : ''), headers, serviceTier: serviceTierOf(cfg, p.id), routeSort: routeSortOf(cfg, p.id) }) };
 }
 
 /** 服务档位（服务商“配置”里填的，如 fast）：每次请求带上 service_tier */
 export const serviceTierOf = (cfg, id) => String(cfg.serviceTiers?.[id] ?? '').trim().slice(0, 40);
+
+/**
+ * OpenRouter 线路选择（用户 2026-11-04）：同一个模型 OpenRouter 有十几家线路，首字 0.3～3 秒不等。
+ * 请求里带 provider.sort，让 OpenRouter 按延迟（默认）/出字速度/价格挑线路。只对 OpenRouter 地址生效。
+ */
+export const ROUTE_SORTS = ['latency', 'throughput', 'price'];
+export function isOpenRouterLine(cfg, id) {
+  if (id === 'openrouter') return true;
+  if (!providerById(id)?.custom) return false;
+  try { return new URL(String(cfg.baseURLs?.[id] || '').trim()).origin === 'https://openrouter.ai'; } catch { return false; }
+}
+export const routeSortOf = (cfg, id) => !isOpenRouterLine(cfg, id) ? '' : ROUTE_SORTS.includes(cfg.routeSorts?.[id]) ? cfg.routeSorts[id] : 'latency';
 
 /** 中转地址的根（去掉结尾的 / 和 /v1） */
 const rootOf = (url) => String(url || '').trim().replace(/\/+$/, '').replace(/\/v1$/, '');
@@ -130,7 +142,7 @@ function multiAdapter(p, cfg, model, key, gateway) {
   if (proto === 'anthropic') return createAnthropicAdapter({ apiKey: key, baseURL: base, headers: { ...up, ...(key && { Authorization: `Bearer ${key}` }) }, webSearch: search, compat: true });
   // 服务档位：Responses 和 Chat Completions 都带（TeamoRouter 说明里两种接口都支持 service_tier: "fast"）
   if (proto === 'responses') return createResponsesAdapter({ baseURL: `${base}/v1`, apiKey: key, headers: up, webSearch: search, serviceTier: tier });
-  return createOpenAIAdapter({ baseURL: `${base}/v1`, apiKey: key, headers: up, serviceTier: tier });
+  return createOpenAIAdapter({ baseURL: `${base}/v1`, apiKey: key, headers: up, serviceTier: tier, routeSort: routeSortOf(cfg, p.id) });
 }
 
 /** 实际使用的语音引擎（解析 auto） */
