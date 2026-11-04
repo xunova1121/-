@@ -4,6 +4,45 @@ import path from 'node:path';
 import os from 'node:os';
 import { createCodeSandbox } from '../server/codeSandbox.mjs';
 const id = 'sha256:' + 'a'.repeat(64);
+
+it('子项目build读取自己的package和锁、安装与运行都在同一目录，保留隔离要求且不冒充发布', async () => {
+  const root = await setup(), calls = [];
+  try {
+    await fs.mkdir(path.join(root, 'demo1'));
+    await fs.writeFile(path.join(root, 'demo1/package.json'), JSON.stringify({ name: 'subproject', version: '1.0.0', scripts: { build: 'node build.mjs' } }));
+    await fs.writeFile(path.join(root, 'demo1/build.mjs'), 'console.log("build-ok");');
+    const normal = fakeDocker(calls);
+    const box = createCodeSandbox({ image: 'local-test', runDocker: async (args, options) => {
+      if (args[0] === 'run') {
+        expect(args.slice(-2)).toEqual(['build', 'demo1']);
+        const mount = args.find(arg => arg.includes('dst=/packages'));
+        if (mount) expect(JSON.parse(await fs.readFile(path.join(mount.split('src=')[1].split(',dst=')[0], 'lock.json'), 'utf8')).name).toBe('subproject');
+      }
+      return normal(args, options);
+    } });
+    const result = await box.run({ root, files: ['package.json', 'demo1/package.json', 'demo1/build.mjs'], command: 'build', projectDir: './demo1/' });
+    expect(result).toMatchObject({ ok: true, projectDir: 'demo1', stage: 'build', hostWorktreeWritable: false });
+    expect(result.note).toContain('尚未做页面渲染或部署');
+    for (const projectDir of ['../outside', '/tmp', 'demo1/../../', 'demo1\\..', 'demo1//nested', '.git', 'node_modules/a']) {
+      await expect(box.run({ root, files: [], command: 'build', projectDir })).rejects.toMatchObject({ code: 'CODE_PROJECT_PATH' });
+    }
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+it('子项目缺少自己的锁不能借用根锁通过，失败构建也不返回成功', async () => {
+  const root = await setup();
+  try {
+    await fs.mkdir(path.join(root, 'demo'));
+    const files = ['package.json', 'demo/package.json'];
+    const pkg = { name: 'demo', version: '1.0.0', scripts: { build: 'node build.mjs' }, devDependencies: { vite: '5.4.21' } };
+    await fs.writeFile(path.join(root, 'demo/package.json'), JSON.stringify(pkg));
+    const calls = [], box = createCodeSandbox({ image: 'local-test', runDocker: fakeDocker(calls, { failTest: true }) });
+    await expect(box.run({ root, files, command: 'build', projectDir: 'demo' })).rejects.toMatchObject({ code: 'CODE_LOCK_REQUIRED' });
+    expect(calls.filter(call => call.args[0] === 'run')).toHaveLength(0);
+    delete pkg.devDependencies;
+    await fs.writeFile(path.join(root, 'demo/package.json'), JSON.stringify(pkg));
+    expect(await box.run({ root, files, command: 'build', projectDir: 'demo' })).toMatchObject({ ok: false, stage: 'build', exitCode: 1 });
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
 async function setup() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'code-box-'));
   await fs.writeFile(

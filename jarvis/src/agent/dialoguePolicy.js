@@ -1,3 +1,4 @@
+import { priceComparisonRequest, PRICE_COMPARISON_NOTE } from './priceComparison.js';
 /** 根据本轮实际工具建立能力边界，不让旧摘要或技能说明替工具回执作担保。 */
 export function needsActionTools(userText, messages = []) {
   const accepted = /^(可以|好|好的|行|嗯|确认|继续|就这样)[啊呀吧。！!\s]*$/.test(String(userText).trim());
@@ -24,6 +25,6 @@ const DOMAIN_RULES = [
 
 /** 仅按本轮目标选规则；继续任务的目标由主循环保留，不用旧持仓画像强行关联新问题。 */
 export function dialoguePolicy(text = '') {
-  return [DIALOGUE_POLICY, ...DOMAIN_RULES.filter(([pattern]) => pattern.test(String(text))).map(([, rule]) => rule)].join('\n');
+  return [DIALOGUE_POLICY, ...DOMAIN_RULES.filter(([pattern]) => pattern.test(String(text))).map(([, rule]) => rule), ...(priceComparisonRequest(text) ? [PRICE_COMPARISON_NOTE] : [])].join('\n');
 }
 

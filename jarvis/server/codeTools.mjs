@@ -72,10 +72,10 @@ export function createCodeTools({ repos, sessionId, taskId, editing = false, sav
       ),
       tool(
         'code_run',
-        '在断网Docker副本运行npm项目lint或test；锁定依赖由允许源下载后离线安装，安装脚本禁用。先读package.json，不在宿主机运行，不删改原测试。失败必须修代码后重跑。',
-        schema({ workspace_id: id, command: { type: 'string', enum: ['lint', 'test'] } }, ['workspace_id', 'command']),
+        '在断网Docker副本运行指定npm项目lint、test或build；子项目用project_dir。先读该目录package.json和锁文件；锁定依赖由允许源下载后离线安装，安装脚本禁用。失败按日志修原因重跑，不删改原测试。build只验证构建，隔离产物不导出，不等于已渲染或上线。',
+        schema({ workspace_id: id, command: { type: 'string', enum: ['lint', 'test', 'build'] }, project_dir: { type: 'string', maxLength: 200, description: '相对项目目录，默认.；如demo1，须含自己的package.json' } }, ['workspace_id', 'command']),
         async (a, e) => {
-          const value = await repos.run(a.workspace_id, sessionId, a.command, e);
+          const value = await repos.run(a.workspace_id, sessionId, a.command, e, a.project_dir || '.');
           if (!value.ok) {
             const lines = String(value.stderr || value.stdout || '进程没有输出日志').split('\n');
             const first = lines.findIndex((line) => /not ok|error|assertion|exception|failed/i.test(line));

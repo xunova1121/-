@@ -7,6 +7,7 @@ import { allowedCodePath, readCodeFile } from './codeRepoFiles.mjs';
 import { codeError, redactCode } from './codeGit.mjs';
 import { dependencyPlan, downloadDependencies } from './codeDependencies.mjs';
 import { codeContainer, localCodeDocker } from './codeDocker.mjs';
+import { codeProjectScope } from '../src/agent/codeProjectScope.js';
 const WORKER = fileURLToPath(new URL('./codeSandboxWorker.mjs', import.meta.url));
 
 export async function copyCodeSource(root, names, source, token, signal) {
@@ -75,10 +76,12 @@ export function createCodeSandbox({
   };
   return {
     configured: Boolean(image),
-    async run({ root, files, command, token = '' }, execution = {}) {
+    async run({ root, files, command, projectDir = '.', token = '' }, execution = {}) {
       execution.signal?.throwIfAborted();
       if (quarantined) throw codeError('CODE_SANDBOX_UNAVAILABLE', '上次容器清理未确认，已暂停代码执行，请管理员核查后重启服务');
-      if (!['lint', 'test'].includes(command)) throw codeError('CODE_COMMAND', '本期只运行package.json中的lint或test，不接受任意shell命令');
+      if (!['lint', 'test', 'build'].includes(command)) throw codeError('CODE_COMMAND', '只运行package.json中的lint、test或build，不接受任意shell命令');
+      projectDir = codeProjectScope(projectDir);
+      if (projectDir === null) throw codeError('CODE_PROJECT_PATH', 'project_dir必须是工作副本内的相对项目目录，例如demo1；不能是绝对路径或包含上级目录');
       if (!image || !/^[A-Za-z0-9][A-Za-z0-9_./:@-]{0,240}$/.test(image))
         throw codeError('CODE_SANDBOX_UNAVAILABLE', '管理员尚未配置JARVIS_CODE_SANDBOX_IMAGE；未在宿主机运行代码');
       const deadline = AbortSignal.timeout(Math.max(1, Math.min(130000, timeoutMs)));
@@ -97,19 +100,21 @@ export function createCodeSandbox({
         await fs.copyFile(WORKER, worker);
         await fs.chmod(worker, 0o644);
         const snapshot = await copyCodeSource(root, files, source, token, signal);
-        const pkg = await jsonFile(path.join(source, 'package.json'));
+        const project = path.join(source, projectDir);
+        const pkg = await jsonFile(path.join(project, 'package.json'));
         if (typeof pkg.scripts?.[command] !== 'string' || !pkg.scripts[command].trim() || pkg.scripts[command].length > 4000)
           throw codeError('CODE_SCRIPT', 'package.json没有有效的' + command + '脚本，未伪装成测试通过');
-        const lock = await jsonFile(path.join(source, 'package-lock.json'), false);
+        const lock = await jsonFile(path.join(project, 'package-lock.json'), false);
         const plan = dependencyPlan(pkg, lock, registry);
         execution.progress?.('正在核对锁文件和允许的npm依赖源…');
         const dependencies = await downloadDependencies(plan, packages, { signal, retrieval: execution.retrieval, fetchImpl });
         await fs.mkdir(output, { mode: 0o777 });
         await fs.chmod(output, 0o777);
-        const options = { image, source, worker, signal, runDocker, command, progress: execution.progress, cleanupTimeoutMs };
+        const options = { image, source, worker, signal, runDocker, command, projectDir, progress: execution.progress, cleanupTimeoutMs };
         const install = await codeContainer({ ...options, packages, output });
         const base = {
           command,
+          projectDir,
           ...snapshot,
           dependencies: { ...dependencies, syntheticLock: !lock },
           imageId: inspect.stdout.trim(),
@@ -123,7 +128,7 @@ export function createCodeSandbox({
         if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 128_000_000)
           throw codeError('CODE_DEP_LIMIT', '依赖归档超过128MB或不是普通文件，未执行项目');
         const result = await codeContainer({ ...options, archive });
-        return { ...base, install: { exitCode: 0 }, stage: command, ok: result.exitCode === 0, ...safe(result) };
+        return { ...base, install: { exitCode: 0 }, stage: command, ok: result.exitCode === 0, ...safe(result), ...(command === 'build' && { note: '仅证明此目录的构建命令执行结果；隔离产物未导出到工作副本，尚未做页面渲染或部署，不能给上线链接。' }) };
       } catch (error) {
         if (error.code === 'CODE_SANDBOX_CLEANUP') {
           preserve = true;

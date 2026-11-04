@@ -7,6 +7,7 @@ import { newsDate } from './newsSources.js';
 import { lookupIntent, newsSubject } from './lookup/intent.js';
 import { marketIndex } from './lookup/plan.js';
 import { weatherFallback, marketFallback } from './lookup/fallback.js';
+import { priceComparisonRequest } from './priceComparison.js';
 const MARKET_TOPIC = /指数|沪指|上证|深成|深证|创业板|科创|A股|大A|两市|股市|成交|涨停|跌停|券商|板块|收盘|开盘|行情|个股/;
 const MARKET_OFF = /金价|黄金|回收|楼盘|小区|学区|房价|二手房/;
 /** 一句话摘要：按句号截断，最多90字，去掉话题标签。 */
@@ -36,6 +37,9 @@ export function digestRows(items, request) {
 /** 本轮最多12条短证据，只存于执行期；不用模型旧回复填补失败，不把正文放入检查点。 */
 export function createLookupDelivery(request, now = Date.now) {
   const rows = new Map(), failures = [], direct = [], failedSources = [];
+  const kind = lookupIntent(request).kind;
+  const comparison = priceComparisonRequest(request);
+  const directKinds = { get_weather: 'weather', get_stock_kline: 'market', get_market_quote: 'market', get_sports_scores: 'sports_live' };
   let recovery = null, recoveredText = '';
   const safe = text => !answerConstraintIssues(request, text, now()).length;
   function add(row) {
@@ -43,6 +47,8 @@ export function createLookupDelivery(request, now = Date.now) {
   }
   return {
     record({ name: toolName, args = {}, ok, output = '', lookupRecovery }) {
+      // 回执仍交给模型和执行审查；这里只限制自动替代最终答复，避免辅助查询抢走用户目标。
+      if (directKinds[toolName] && (comparison || kind !== 'general' && directKinds[toolName] !== kind)) return;
       if (lookupRecovery && lookupRecovery.state !== 'fresh') {
         recovery = lookupRecovery;
         const raw = lookupRecovery.output || String(output).replace(/^错误：/, '');
@@ -85,6 +91,7 @@ export function createLookupDelivery(request, now = Date.now) {
           add({ ...item, summary, verification: 'search_only' });
         }
       } else if (toolName === 'fetch_json' && !todayNewsIntent(request) && !answerConstraints(request).todayNews) {
+        if (comparison) return; // 原始价格/汇率JSON不是已算完的价格比较。
         try {
           const value = JSON.parse(output);
           if (value.kind === 'public_json' && !value.truncated) add({ url: value.url, title: '公开接口返回数据', summary: JSON.stringify(value.data).slice(0, 350), verification: 'json_read' });
@@ -97,6 +104,7 @@ export function createLookupDelivery(request, now = Date.now) {
     get recovery() { return recovery; },
     get hasResults() { return rows.size > 0 || direct.length > 0; },
     delivery() {
+      if (comparison) return { text: this.text(), complete: false };
       if (recovery && recoveredText) return { text: recoveredText, complete: false, recovery };
       if (direct.length === 1 && direct[0].name === 'get_weather') {
         const result = weatherFallback(direct[0].output, request, now());
@@ -105,6 +113,7 @@ export function createLookupDelivery(request, now = Date.now) {
       return { text: this.text(), complete: false };
     },
     text() {
+      if (comparison && (rows.size || recovery)) return '价格比较尚未完成：已取得部分查询资料，但还需要核对双方同口径的价目、用量与缓存比例，不能仅凭汇率判断差价。';
       if (recovery && recoveredText) return recoveredText;
       if (direct.length) {
         const text = direct.map(row => row.name === 'get_weather' ? weatherFallback(row.output, request, now()).text : row.name === 'get_stock_kline' ? marketFallback(row.output) : row.name === 'get_market_quote' ? row.output : sportsAnswerTable(row.output, request)).filter(Boolean).join('\n\n');

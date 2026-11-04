@@ -10,6 +10,7 @@ import { creativeWithoutLookup } from '../core/imageFollowup.js';
 import { answerConstraints, answerConstraintIssues, concreteSourceRequirement, sourceCandidates, sourceAnswerIssue } from './answerRequirements.js';
 import { styleRequests, styleIssues, styleNote } from './styleCheck.js';
 import { completedDeliverySteps } from './deliveryCompletion.js';
+import { priceComparisonIssues } from './priceComparison.js';
 
 /** 核实文件内容的工具：同一文件验过可用后只再放行一次 */
 export const VERIFY_TOOLS = /^(?:read_file|computer_read_file|check_document)$/;
@@ -24,6 +25,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   let declinedTool = '';
   const toolBlock = (toolName) => blockedAfterDenial(request, declinedTool, toolName);
   const files = new Map();
+  const projectScopes = new Map(); // 每轮至多32个已实际读取/写入的package.json项目边界。
   const artifacts = new Map();
   const reads = new Map(); // 文件路径 → 验过可用之后又读了几次（最多 32 个文件）
   let version = 0;
@@ -60,6 +62,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     if (/^(?:取消|不用|别做|停止)/.test(String(text).trim()) || replaceLookup) {
       request = '用户最新修正：' + String(text).slice(0, 3900);
       files.clear();
+      projectScopes.clear();
       artifacts.clear();
     }
   };
@@ -91,6 +94,9 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     const path = typeof args.path === 'string' ? args.path.slice(0, 400) : '';
     sequence++;
     const repository = repositoryReceipt(toolName, args, ok, output);
+    if (ok && repository?.workspaceId && /(?:^|\/)package\.json$/.test(path) && projectScopes.size < 32) {
+      projectScopes.set(repository.workspaceId + ':' + path, { workspaceId: repository.workspaceId, dir: path === 'package.json' ? '.' : path.slice(0, -13) });
+    }
     if (ok && /^code_(?:edit|write)$/.test(toolName)) repositoryChanged = true;
     receipts.push({
       tool: toolName,
@@ -102,7 +108,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
       path,
       version,
       sequence,
-      key: toolName + ':' + path + ':' + String(args.query ?? args.url ?? '').slice(0, 200) + (repository ? ':' + repository.workspaceId + ':' + repository.command : '')
+      key: toolName + ':' + path + ':' + String(args.query ?? args.url ?? '').slice(0, 200) + (repository ? ':' + repository.workspaceId + ':' + repository.command + ':' + repository.projectDir : '')
     });
     if (receipts.length > 64) receipts.shift();
     // 文件被改了：之前的“已验过”作废；生成工具自己在这次调用里发来的验收结果（at 是这次调用的序号）保留
@@ -203,7 +209,8 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     );
     const ran = codeFiles.every(file => {
       if (!file.workspaceId) return legacyRan;
-      const latestTest = current.filter(item => item.tool === 'code_run' && item.workspaceId === file.workspaceId && item.command === 'test').at(-1);
+      const projectDir = [...projectScopes.values()].filter(scope => scope.workspaceId === file.workspaceId && (scope.dir === '.' || file.path.startsWith(scope.dir + '/'))).sort((a, b) => b.dir.length - a.dir.length)[0]?.dir || '.';
+      const latestTest = current.filter(item => item.tool === 'code_run' && item.workspaceId === file.workspaceId && item.command === 'test' && item.projectDir === projectDir).at(-1);
       return latestTest?.sequence > file.written && latestTest.ok && latestTest.testVerified;
     });
     const pending = [...files.values()].filter((file) => !file.verified && (file.workspaceId || codeFiles.includes(file))).map((file) => file.path);
@@ -280,7 +287,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   const lastDocument = () => [...artifacts.values()].filter((item) => /^(?:docx|pptx|xlsx)$/.test(item.format)).sort((a, b) => a.at - b.at).at(-1) ?? null;
   const checkAnswer = (text, now) => {
     selectedNews = new Set((String(text).match(/https?:\/\/[^\s)）\]，。]+/g) || []).filter(url => newsOriginals.has(url)));
-    answerIssues = [...answerConstraintIssues(request, text, now), ...presentationAnswerIssues(request, text, lastDocument())];
+    answerIssues = [...answerConstraintIssues(request, text, now), ...priceComparisonIssues(request, text), ...presentationAnswerIssues(request, text, lastDocument())];
     if (repositoryChanged) {
       const issue = repositoryDeliveryIssue(text, [...new Set([...files.values()].map(file => file.workspaceId).filter(Boolean))]);
       if (issue) answerIssues.push(issue);
@@ -294,7 +301,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   };
   const guardsAnswer = () => {
     const rules = answerConstraints(request);
-    return lastDocument()?.format === 'pptx' || visualEvidence.active() || (styleRequests(request).length > 0 && Boolean(lastDocument())) || rules.noTime || rules.literals.length > 0 || rules.todayNews || rules.care || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
+    return lastDocument()?.format === 'pptx' || visualEvidence.active() || (styleRequests(request).length > 0 && Boolean(lastDocument())) || rules.noTime || rules.literals.length > 0 || rules.todayNews || rules.care || rules.priceComparison || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
   };
   /** 改写一次后仍对不上：不吞掉回答（文件链接要留着），末尾补一句读回的实际情况 */
   const styleCorrection = () => (styleProblems.length ? '（读回文件核对：' + styleNote(request, lastDocument()).replace(/^用户要的调整，读回文件的实际结果：/, '').replace(/。回答照这个说$/, '') + '。）' : '');

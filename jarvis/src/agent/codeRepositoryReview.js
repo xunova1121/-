@@ -1,8 +1,10 @@
+import { codeProjectScope } from './codeProjectScope.js';
 /** 只取仓库ID、命令和验收标记，不把测试日志或代码放进回执摘要。 */
 export function repositoryReceipt(toolName, args, ok, output) {
   if (!/^code_(?:read|edit|write|run)$/.test(toolName)) return null;
   const workspaceId = /^[a-f0-9]{24}$/.test(args.workspace_id || '') ? args.workspace_id : '';
-  const command = toolName === 'code_run' && ['lint', 'test'].includes(args.command) ? args.command : '';
+  const command = toolName === 'code_run' && ['lint', 'test', 'build'].includes(args.command) ? args.command : '';
+  const projectDir = codeProjectScope(args.project_dir);
   let testVerified = false;
   let diagnosticTest = false;
   if (ok && command === 'test' && typeof output === 'string' && output.length <= 120000) {
@@ -11,6 +13,7 @@ export function repositoryReceipt(toolName, args, ok, output) {
       testVerified =
         value.ok === true &&
         value.command === 'test' &&
+        projectDir !== null && codeProjectScope(value.projectDir) === projectDir &&
         value.stage === 'test' &&
         value.exitCode === 0 &&
         value.install?.exitCode === 0 &&
@@ -28,6 +31,7 @@ export function repositoryReceipt(toolName, args, ok, output) {
       diagnosticTest =
         value.ok === false &&
         value.command === 'test' &&
+        projectDir !== null && codeProjectScope(value.projectDir) === projectDir &&
         value.stage === 'test' &&
         Number.isInteger(value.exitCode) &&
         value.exitCode !== 0 &&
@@ -39,7 +43,7 @@ export function repositoryReceipt(toolName, args, ok, output) {
       /* 普通报错、安装失败不能当作已复现测试失败。 */
     }
   }
-  return { workspaceId, command, testVerified, diagnosticTest };
+  return { workspaceId, command, projectDir, testVerified, diagnosticTest };
 }
 
 /** 只读诊断/明确拒绝删测时，红色基线是已得到的诊断；仍保留原失败回执。 */
@@ -62,7 +66,7 @@ export function explainedRepositoryFailure(report, answer = '') {
 }
 export function repositoryRepair(previous, later) {
   if (!previous.workspaceId || previous.workspaceId !== later.workspaceId) return false;
-  if (previous.tool === 'code_run') return later.tool === 'code_run' && previous.command === later.command && (later.command !== 'test' || later.testVerified);
+  if (previous.tool === 'code_run') return later.tool === 'code_run' && previous.command === later.command && previous.projectDir === later.projectDir && (later.command !== 'test' || later.testVerified);
   return /^code_(?:edit|write)$/.test(previous.tool) && /^code_(?:edit|write)$/.test(later.tool) && previous.path === later.path;
 }
 

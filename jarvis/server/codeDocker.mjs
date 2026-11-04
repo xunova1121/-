@@ -47,6 +47,7 @@ export async function codeContainer({
   output,
   archive,
   command,
+  projectDir = '.',
   signal,
   runDocker = localCodeDocker,
   progress,
@@ -78,6 +79,7 @@ export async function codeContainer({
   if (packages) args.push(...mount(packages, '/packages'), ...mount(output, '/output', false));
   else args.push(...mount(archive, '/deps.tar'));
   args.push('--entrypoint=timeout', image, '--signal=KILL', '60s', 'node', '/runner.mjs', packages ? 'install' : 'run', command);
+  if (projectDir !== '.') args.push(projectDir);
   let result, failure;
   try {
     progress?.(packages ? '正在离线安装锁定依赖（不执行安装脚本）…' : `正在断网运行${command}…`);

@@ -211,6 +211,18 @@ function inferSportsWindow(text2) {
   return {};
 }
 
+// src/agent/weatherPlace.js
+function weatherQueryPlace(text2) {
+  if (!/天气|气温|空气质量/.test(String(text2 || ""))) return null;
+  const value = String(text2 || "").trim().replace(/^(?:(?:请问|请|麻烦|帮我|给我|替我|再试一次|再试试|(?:重新|再)查(?:一?下|查)?|重新|再|查询|查一?下|查查|看看|看一?下)\s*)+/, "").replace(/[，,。！？?!\s]+$/, "");
+  const place = value.split(/天气|气温|空气质量/)[0].replace(/^(?:今天|今日|明天|后天|现在)\s*/, "").replace(/(?:今天|今日|明天|后天|现在|这周|本周|未来\d+天)?的?$/, "").trim();
+  return validWeatherPlace(place) ? place : null;
+}
+function validWeatherPlace(place) {
+  const value = String(place || "").trim();
+  return Boolean(value && value.length <= 100 && !/^(?:请|帮我|给我|查询|查一?下|查查|看看|看一?下|再查|今天|今日|明天|后天|现在|这里|这边|当地|附近|我这|我这边|我这里|我们这|我们这里|所在城市|这个|最近|未来|的|集团年|市|区|县)$/.test(value) && !/天气|带伞|下雨|下雪|怎么|什么|请问|这几天|未来|小时|昨天/.test(value));
+}
+
 // src/agent/lookup/intent.js
 var LOOKUP_KINDS = ["weather", "sports_live", "sports_news", "news", "market", "general", "meta"];
 var META = /^(?:(?:未央|你|你的|这个|这|查个|发个|发|查|今日|今天|新闻|体育资讯|体育新闻|体坛动态|天气|行情|汇率|比分|赛程|查询))*?(?:(?:怎么|为什么|咋)(?:这么|那么)?慢|(?:这么|那么|太)慢|还没好|还没查完|还没结束|在干嘛|在做什么|到底在干什么|谁让你这么做的|谁让你查的|谁让你搜的|好了吗|做完了吗|进展如何|什么进度)$/;
@@ -263,6 +275,12 @@ function lookupIntent(text2 = "", { history = [], preferences = [] } = {}) {
   const compact = value.replace(/[，,。！？!?\s]+/g, "");
   if (compact.length <= 80 && META.test(compact)) return { kind: "meta", params: { metaType: "status" }, sure: true, lookup: false, rule: "meta" };
   if (/^(?:你好|早上好|晚上好|谢谢|晚安|在吗|我(?:最近)?好累|陪我聊聊)[。！!\s]*$/.test(value)) return { kind: "meta", params: { metaType: "smalltalk" }, sure: true, lookup: false, rule: "meta" };
+  if (/^(?:(?:那)?(?:明天|后天)(?:呢|的天气)?|(?:请|帮我)?(?:再查查|再查一下|再查下|再查|再试试)?(?:天气)?)[？?。！!\s]*$/.test(value) && value) {
+    const previous = history.slice(-6).filter((message) => message.role === "user").at(-1);
+    const priorText = typeof previous?.content === "string" ? previous.content : "";
+    const city = /天气|气温|空气质量/.test(priorText) && weatherQueryPlace(priorText);
+    if (city) return { kind: "weather", params: { city, continuation: true, dateMode: dateMode(value) }, sure: true, lookup: true, rule: "weather_continuation" };
+  }
   if (/^(?:各[一二两三四五六七八九十\d]+条|继续|再查|再查一会儿)[。！!\s]*$/.test(value)) {
     const previous = [...history].reverse().find((m) => m.role === "user" && !/^(?:继续|再查|各.{0,3}条)/.test(String(m.content || "")));
     if (previous) {
@@ -2611,12 +2629,7 @@ function marketIndex(text2) {
   return /大盘|沪指|上证|A股|股市|两市|大A/i.test(value) ? "sh000001" : "";
 }
 function weatherPlace(text2, params = {}) {
-  if (params.city) return params.city;
-  const value = String(text2).replace(/^(?:再试试|再试一次|再查一下|再查下|重新查|再查)\s*/, "").replace(/[，,。！？?!]+$/, "").trim();
-  const place = value.match(/^(?:请|麻烦)?(?:帮我|给我)?(?:查一?下|查询|看看|看一?下)?\s*(.{1,32}?)(?:今天|今日|明天|后天|现在|这周|本周|未来\d+天)?(?:的)?(?:天气|气温|空气质量)/)?.[1]?.trim();
-  if (!place || /^(?:今天|今日|明天|后天|现在|这里|这边|当地|附近|我这|我们这|这个|最近|未来|的|集团年)$/.test(place)) return null;
-  if (/天气|带伞|下雨|下雪|怎么|什么|请问|这几天|未来|小时|昨天/.test(place)) return null;
-  return place;
+  return weatherQueryPlace(text2) || (params.city && validWeatherPlace(params.city) ? params.city : null);
 }
 function lookupPlan(intent, { text: text2, getTool, now = Date.now() }) {
   if (!intent.lookup || intent.kind === "meta") return null;
@@ -3205,9 +3218,9 @@ function formatWttr(placeName, j, days = 3, dataUrl = "") {
   return lines.join("\n");
 }
 async function getWeather(place, { get, days = 3, signal, retrieval, qweather = null, health, details = false }) {
-  if (!String(place || "").trim()) throw Object.assign(new Error("\u7F3A\u5C11\u5730\u70B9\uFF0C\u8BF7\u63D0\u4F9B\u57CE\u5E02\u6216\u5B9A\u4F4D\u7ED3\u679C\uFF0C\u4E0D\u80FD\u9ED8\u8BA4\u731C\u6D4B\u57CE\u5E02"), { code: "WEATHER_LOCATION_REQUIRED", name: "ValidationError" });
+  if (!validWeatherPlace(place)) throw Object.assign(new Error("\u7F3A\u5C11\u660E\u786E\u5730\u70B9\uFF0C\u8BF7\u6CBF\u7528\u7528\u6237\u786E\u8BA4\u7684\u57CE\u5E02\u6216\u6709\u6548\u5B9A\u4F4D\uFF1B\u6CA1\u6709\u5C31\u8BE2\u95EE\u57CE\u5E02\uFF0C\u4E0D\u80FD\u628A\u201C\u67E5\u67E5\u201D\u7B49\u8BE2\u95EE\u8BCD\u5F53\u5730\u70B9"), { code: "WEATHER_LOCATION_REQUIRED", name: "ValidationError" });
   const raw = String(place || "").trim(), capital = provinceCapital(raw);
-  const name = (capital || raw).replace(/(市|区|县)$/, "") || "\u5317\u4EAC";
+  const name = (capital || raw).replace(/(市|区|县)$/, "");
   const note = capital ? `\u201C${raw}\u201D\u662F\u7701\u7EA7\u5730\u533A\uFF0C\u5929\u6C14\u63A5\u53E3\u6309\u57CE\u5E02\u67E5\u8BE2\uFF0C\u4E0B\u9762\u662F\u7701\u4F1A${capital}\u7684\u5929\u6C14\uFF1B\u8981\u67E5\u5176\u4ED6\u57CE\u5E02\u8BF7\u8BF4\u57CE\u5E02\u540D\u3002
 ` : "";
   const ids = [qweather && "weather_qweather", "weather_openmeteo", "weather_wttr"].filter(Boolean);

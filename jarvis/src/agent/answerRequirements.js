@@ -1,3 +1,4 @@
+import { priceComparisonRequest } from './priceComparison.js';
 /** 只检查可确定的输出约束；不把关键词匹配冒充事实核验。 */
 export function answerConstraints(request = '') {
   const value = String(request).slice(-8000);
@@ -6,7 +7,7 @@ export function answerConstraints(request = '') {
   const literals = [...value.matchAll(/(?:不要|不得|禁止)(?:出现|使用|写|包含|提到)?\s*[“"「]([^”"」]{1,40})[”"」]/g)].map(match => match[1]).slice(0, 8);
   const todayNews = /今天|今日/.test(unquoted) && /新闻|资讯/.test(unquoted);
   const care = CARE_TOPIC.test(unquoted);
-  return { noTime, literals, todayNews, care };
+  return { noTime, literals, todayNews, care, priceComparison: priceComparisonRequest(value) };
 }
 
 const CARE_TOPIC = /产检|孕检|体检|化验|检查报告|检查单|报告单|超声|心超|胎儿|孕周|糖耐|血常规|(?:宠物|猫|狗).{0,8}(?:检查|报告|化验)/;

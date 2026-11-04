@@ -7,6 +7,7 @@ import { withWebDeadline } from './retrievalBudget.js';
 import { throwControl } from '../core/networkRequest.js';
 import { errorKind } from '../core/suggest.js';
 import { assertArchitectureToolCall } from './architectureStateProtection.js';
+import { toolFailureScope } from './toolFailureScope.js';
 
 /** 原顺序执行副作用，仅将连续的只读调用并行；检查点先于操作落盘。 */
 export async function executeToolCalls(
@@ -121,6 +122,8 @@ export async function executeToolCalls(
       lookupRecovery = e.lookupRecovery;
       if (e.code === 'RETRIEVAL_BUDGET') retrieval.close(e.message);
       output = `错误：${e.message || e}`;
+      const scope = toolFailureScope(c.name, e);
+      if (scope) output += '\n影响范围：' + scope;
       if (['verify_numbers', 'time_calc'].includes(c.name) && (e.name === 'ValidationError' || /^INVALID_/.test(e.code || ''))) output += '\n请按参数说明改写后重试一次。仍无法计算时必须给用户明确答复；能推算的注明“工具没能计算，以下按常识推算”，列基准和算式，不能称工具已核验，不能只说正在处理。';
     }
     if (failure?.code === 'LOOKUP_SOURCE_COOLING') loader.cool?.(c.name, failure.cooldownUntil);

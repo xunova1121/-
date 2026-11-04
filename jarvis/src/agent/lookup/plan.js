@@ -3,6 +3,7 @@ import { supportsSportsNews } from '../newsIntent.js';
 import { wantsPreSearch, preSearchQuery } from './prefetch.js';
 import { WEATHER_FETCH_MS } from './weatherLimits.js';
 import { quoteTarget } from '../marketQuote.js';
+import { weatherQueryPlace, validWeatherPlace } from '../weatherPlace.js';
 
 /** “大盘/沪指/深成指/创业板”对应的指数代码；问金价、汇率、港美股、楼盘等不算。 */
 export function marketIndex(text) {
@@ -15,12 +16,7 @@ export function marketIndex(text) {
 
 /** 只提取用户确实说过的地点。无定位、无城市时交模型追问，绝不默认北京/南京。 */
 export function weatherPlace(text, params = {}) {
-  if (params.city) return params.city;
-  const value = String(text).replace(/^(?:再试试|再试一次|再查一下|再查下|重新查|再查)\s*/, '').replace(/[，,。！？?!]+$/, '').trim();
-  const place = value.match(/^(?:请|麻烦)?(?:帮我|给我)?(?:查一?下|查询|看看|看一?下)?\s*(.{1,32}?)(?:今天|今日|明天|后天|现在|这周|本周|未来\d+天)?(?:的)?(?:天气|气温|空气质量)/)?.[1]?.trim();
-  if (!place || /^(?:今天|今日|明天|后天|现在|这里|这边|当地|附近|我这|我们这|这个|最近|未来|的|集团年)$/.test(place)) return null;
-  if (/天气|带伞|下雨|下雪|怎么|什么|请问|这几天|未来|小时|昨天/.test(place)) return null;
-  return place;
+  return weatherQueryPlace(text) || (params.city && validWeatherPlace(params.city) ? params.city : null);
 }
 
 /** 一条意图只生成一份预取计划；证券名称/汇率不猜代码，交原搜索工具查证。 */

@@ -2,6 +2,25 @@ import { it, expect } from 'vitest';
 import { createExecutionReview } from '../src/agent/executionReview.js';
 const a = 'a'.repeat(24),
   b = 'b'.repeat(24);
+
+it('根目录通过不能证明独立子项目通过，构建不能替代测试，其他目录成功不能清除本目录失败', () => {
+  const review = createExecutionReview('做好demo1项目并验证');
+  for (const file of ['demo1/package.json', 'demo1/src/main.ts']) {
+    review.record({ name: 'code_write', args: { workspace_id: a, path: file }, ok: true });
+    review.record({ name: 'code_read', args: { workspace_id: a, path: file }, ok: true });
+  }
+  run(review);
+  expect(review.report().codeExecution).toBe('not_run');
+  const check = (projectDir, command, ok = true, reportedDir = projectDir) => review.record({ name: 'code_run', args: { workspace_id: a, command, project_dir: projectDir }, ok, output: JSON.stringify({ ...JSON.parse(output(command)), ok, projectDir: reportedDir }) });
+  check('demo1', 'test', false);
+  check('demo2', 'test');
+  check('demo1', 'build');
+  expect(review.report()).toMatchObject({ codeExecution: 'not_run', failures: ['code_run'] });
+  check('demo1', 'test', true, '.');
+  expect(review.report().codeExecution).toBe('not_run');
+  check('demo1', 'test');
+  expect(review.report()).toMatchObject({ codeExecution: 'executed_scope_needs_review', failures: [] });
+});
 const output = (command = 'test') =>
   JSON.stringify({
     ok: true,

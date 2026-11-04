@@ -1,4 +1,5 @@
 import { inferSportsWindow } from './sportsWindow.js';
+import { weatherQueryPlace } from '../weatherPlace.js';
 /** 查询意图的单一规则表。对话入口、工具调用和评测共用，不再按工具另判类别。 */
 export const LOOKUP_KINDS = ['weather', 'sports_live', 'sports_news', 'news', 'market', 'general', 'meta'];
 const META = /^(?:(?:未央|你|你的|这个|这|查个|发个|发|查|今日|今天|新闻|体育资讯|体育新闻|体坛动态|天气|行情|汇率|比分|赛程|查询))*?(?:(?:怎么|为什么|咋)(?:这么|那么)?慢|(?:这么|那么|太)慢|还没好|还没查完|还没结束|在干嘛|在做什么|到底在干什么|谁让你这么做的|谁让你查的|谁让你搜的|好了吗|做完了吗|进展如何|什么进度)$/;
@@ -59,6 +60,13 @@ export function lookupIntent(text = '', { history = [], preferences = [] } = {})
   const compact = value.replace(/[，,。！？!?\s]+/g, '');
   if (compact.length <= 80 && META.test(compact)) return { kind: 'meta', params: { metaType: 'status' }, sure: true, lookup: false, rule: 'meta' };
   if (/^(?:你好|早上好|晚上好|谢谢|晚安|在吗|我(?:最近)?好累|陪我聊聊)[。！!\s]*$/.test(value)) return { kind: 'meta', params: { metaType: 'smalltalk' }, sure: true, lookup: false, rule: 'meta' };
+  // 仅紧邻的用户天气问题可以提供城市；不采用助手猜的城市，也不跨新话题翻旧定位。
+  if (/^(?:(?:那)?(?:明天|后天)(?:呢|的天气)?|(?:请|帮我)?(?:再查查|再查一下|再查下|再查|再试试)?(?:天气)?)[？?。！!\s]*$/.test(value) && value) {
+    const previous = history.slice(-6).filter(message => message.role === 'user').at(-1);
+    const priorText = typeof previous?.content === 'string' ? previous.content : '';
+    const city = /天气|气温|空气质量/.test(priorText) && weatherQueryPlace(priorText);
+    if (city) return { kind: 'weather', params: { city, continuation: true, dateMode: dateMode(value) }, sure: true, lookup: true, rule: 'weather_continuation' };
+  }
   if (/^(?:各[一二两三四五六七八九十\d]+条|继续|再查|再查一会儿)[。！!\s]*$/.test(value)) {
     const previous = [...history].reverse().find(m => m.role === 'user' && !/^(?:继续|再查|各.{0,3}条)/.test(String(m.content || '')));
     if (previous) {

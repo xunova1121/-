@@ -105,6 +105,26 @@ try {
   assert.notEqual(initial.sourceDigest, green.sourceDigest);
   assert.equal(lint.sourceDigest, green.sourceDigest);
   assert.equal(requests.length, 3);
+  // 根项目有测试、子项目有独立构建：必须在子目录实际安装并构建，不能借根测试报完成。
+  const subPkg = { ...pkg, name: 'fictional-subproject', scripts: { build: 'node build.mjs', prebuild: 'node -e "process.exit(91)"' } };
+  const subLock = { ...lock, name: subPkg.name, packages: { ...lock.packages, '': { ...lock.packages[''], name: subPkg.name } } };
+  const subFiles = {
+    'demo1/package.json': JSON.stringify(subPkg),
+    'demo1/package-lock.json': JSON.stringify(subLock),
+    'demo1/build.mjs': 'import fs from "node:fs";import assert from "node:assert/strict";import check from "fixture-check";assert(process.cwd().endsWith("/demo1"));assert(check(1));assert(!fs.existsSync("/work/node_modules"));assert(!fs.existsSync("bad"));fs.mkdirSync("dist");fs.writeFileSync("dist/index.html","<h1>built</h1>");console.log("SUBPROJECT_BUILT");'
+  };
+  for (const [file, content] of Object.entries(subFiles)) await tool('code_write').run({ workspace_id: a.workspace_id, path: file, content });
+  const subBuild = JSON.parse(await tool('code_run').run({ workspace_id: a.workspace_id, project_dir: 'demo1', command: 'build' }));
+  assert(subBuild.ok);
+  assert.equal(subBuild.projectDir, 'demo1');
+  assert.match(subBuild.stdout, /SUBPROJECT_BUILT/);
+  assert.match(subBuild.note, /未导出/);
+  assert.equal(subBuild.dependencies.packages, 1);
+  await assert.rejects(fs.stat(path.join(tree, 'demo1/dist')), { code: 'ENOENT' });
+  await tool('code_write').run({ workspace_id: a.workspace_id, path: 'demo1/bad', content: 'force actual build failure' });
+  await assert.rejects(tool('code_run').run({ workspace_id: a.workspace_id, project_dir: 'demo1', command: 'build' }), error => error.code === 'CODE_TEST_FAILED' && error.result.stage === 'build' && error.result.exitCode === 1);
+  for (const [file, content] of Object.entries(subFiles)) assert.equal(await fs.readFile(path.join(tree, file), 'utf8'), content);
+  console.log('✓ 子项目真实离线依赖安装与build成功；prebuild禁用；构建失败保留非零退出码，未冒充发布或污染工作副本');
   await fs.writeFile(
     path.join(out, 'report.json'),
     JSON.stringify(
@@ -120,6 +140,7 @@ try {
         dependencyScriptsDisabled: true,
         network: 'none',
         sourceDigest: green.sourceDigest,
+        subprojectBuild: { projectDir: subBuild.projectDir, exitCode: subBuild.exitCode, packages: subBuild.dependencies.packages, render: 'not_tested', deployment: 'not_performed' },
         elapsedMs: Date.now() - start
       },
       null,

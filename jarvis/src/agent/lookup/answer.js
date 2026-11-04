@@ -27,7 +27,7 @@ export function lookupAnswerNote(intent, text = '') {
   const notes = [WEB_LOOKUP_NOTE, '工具失败不是终点。程序已替你换过来源或方法时，直接用拿到的数据回答，并自然说明来源；需要你自己联网时，先换来源，再换方法，两种方法都失败才说明，并说清已经试过什么。旧缓存必须保留查到的时间，不冒充实时；全部失败只给一句原因和一个下一步，不复述工具名、错误码或叠加免责声明。未经用户同意不要建立重试提醒。不要说“额度用完”“明天再查”这类没有依据的话：这只是本轮时间或次数到了，用户回“再查”就能接着查。'];
   if (['news', 'sports_news'].includes(intent.kind)) notes.push(newsLookupNote(text, intent));
   if (intent.kind === 'sports_news') notes.push(SPORTS_NEWS_NOTE);
-  if (intent.kind === 'weather') notes.push('天气沿用真实回执的具体地点、数据提供者和更新时间，给出适合用户活动的建议；没有地点先简短问城市或区县，不猜定位。');
+  if (intent.kind === 'weather') notes.push('天气优先get_weather（已配置和风API→免费天气备用源）。fetch_json的可信域名限制只属于公开JSON工具，不控制get_weather、fetch_url，也不能据此断言和风或Open-Meteo本身不可用；超时与本地策略拒绝分别说明，加域名不保证修好超时。沿用真实回执的具体地点、数据提供者和更新时间，给出适合用户活动的建议；没有地点先简短问城市或区县，不猜定位，“查查”是询问词，不是城市。');
   if (intent.kind === 'sports_live') notes.push('按工具的北京时区、时间窗口、状态及来源逐场回答；界面卡片不替代文字。默认今天足球/足彩赛程保留当前进行中及未来两小时未开赛，已开场仍进行中的不能按过去的开球时间误删；来源陈旧状态的开球边界仍按回执，不列窗口外比赛，不编竞彩编号或赔率。明确全天、下午、前后或指定日期按该范围。');
   if (intent.kind === 'market') notes.push('收盘价、上一交易记录收盘价、价格日期和复权方式必须同源，日K不冒充实时价。股票代码不明先查证，持仓盈亏沿用holding_profit，不猜汇率或价格。');
   notes.push('结果足够就直接给答案，不先交检索计划。查到几条先给几条；没有结果时一句说清真实失败步骤和可行下一步。失败/覆盖不足的结尾说明最多一句，不叠免责声明；日期、来源、内容限制和关键计算校验仍必须满足。');

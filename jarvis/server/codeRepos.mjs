@@ -386,10 +386,10 @@ export function createCodeRepos({ baseDir, getConfig, git = createGitRunner(), h
         return browser.run({ root: current.cwd, files: await files(current, context), token: current.connection.token, ...input }, context);
       });
     },
-    run(id, sessionId, command, execution = {}) {
+    run(id, sessionId, command, execution = {}, projectDir = '.') {
       return operate(id, sessionId, execution, async (current, context) => {
         if (!sandbox) throw codeError('CODE_SANDBOX_UNAVAILABLE', '尚未配置代码隔离器，不在宿主机执行');
-        return sandbox.run({ root: current.cwd, files: await files(current, context), command, token: current.connection.token }, context);
+        return sandbox.run({ root: current.cwd, files: await files(current, context), command, projectDir, token: current.connection.token }, context);
       });
     }
   };

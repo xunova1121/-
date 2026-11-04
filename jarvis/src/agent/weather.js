@@ -4,6 +4,7 @@ import { fetchQWeather, parseQWeather, lookupQWeatherCity, formatQWeather } from
 import { allWeatherCooling, weatherProvider, shortSourceRetry } from './lookup/weatherProvider.js';
 import { failureKind } from './lookup/recoveryData.js';
 import { WEATHER_SOURCE_MS } from './lookup/weatherLimits.js';
+import { validWeatherPlace } from './weatherPlace.js';
 /**
  * 查天气：不走搜索引擎（天气在搜索结果页里是特殊卡片，抓网页抓不到），优先已配置的和风API，失败后才用无需密钥的免费接口。
  *   1. Open-Meteo：先用地名查经纬度（支持中文地名），再取实况和未来几天预报
@@ -62,10 +63,10 @@ export function formatWttr(placeName, j, days = 3, dataUrl = '') {
  * @param {{ get: (url: string) => Promise<Response>, days?: number }} o
  */
 export async function getWeather(place, { get, days = 3, signal, retrieval, qweather = null, health, details = false }) {
-  if (!String(place || '').trim()) throw Object.assign(new Error('缺少地点，请提供城市或定位结果，不能默认猜测城市'), { code: 'WEATHER_LOCATION_REQUIRED', name: 'ValidationError' });
+  if (!validWeatherPlace(place)) throw Object.assign(new Error('缺少明确地点，请沿用用户确认的城市或有效定位；没有就询问城市，不能把“查查”等询问词当地点'), { code: 'WEATHER_LOCATION_REQUIRED', name: 'ValidationError' });
   // 问的是省份：天气接口只认城市，按省会查并写明（用户 2026-11-01：“河南的天气”直接说查不到）
   const raw = String(place || '').trim(), capital = provinceCapital(raw);
-  const name = (capital || raw).replace(/(市|区|县)$/, '') || '北京';
+  const name = (capital || raw).replace(/(市|区|县)$/, '');
   const note = capital ? `“${raw}”是省级地区，天气接口按城市查询，下面是省会${capital}的天气；要查其他城市请说城市名。\n` : '';
   const ids = [qweather && 'weather_qweather', 'weather_openmeteo', 'weather_wttr'].filter(Boolean);
   const ignoreCooling = await allWeatherCooling(ids, health);

@@ -1,12 +1,16 @@
 /** 仅容器内运行。主机不执行npm、项目脚本或归档中的程序。 */
 import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import path from 'node:path';
 const phase = process.argv[2];
 const command = process.argv[3];
+const projectDir = process.argv[4] || '.';
+const project = path.posix.resolve('/work', projectDir);
+if (project !== '/work' && !project.startsWith('/work/')) throw new Error('项目目录越界');
 const run = (binary, args) =>
   new Promise((resolve, reject) => {
     const child = spawn(binary, args, {
-      cwd: '/work',
+      cwd: project,
       env: {
         ...process.env,
         HOME: '/tmp',
@@ -31,14 +35,14 @@ await fs.cp('/source', '/work', { recursive: true, dereference: false });
 await fs.writeFile('/tmp/npm-user.rc', '');
 await fs.writeFile('/tmp/npm-global.rc', '');
 if (phase === 'install') {
-  await fs.copyFile('/packages/lock.json', '/work/package-lock.json');
-  const code = await run('npm', ['ci', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', '--strict-ssl=true']);
+  await fs.copyFile('/packages/lock.json', path.join(project, 'package-lock.json'));
+  const code = await run('npm', ['--prefix', project, '--workspaces=false', 'ci', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', '--strict-ssl=true']);
   if (code !== 0) process.exit(code);
-  await fs.mkdir('/work/node_modules', { recursive: true });
-  process.exit(await run('tar', ['-cf', '/output/deps.tar', '-C', '/work', 'node_modules']));
+  await fs.mkdir(path.join(project, 'node_modules'), { recursive: true });
+  process.exit(await run('tar', ['-cf', '/output/deps.tar', '-C', project, 'node_modules']));
 }
-if (phase !== 'run' || !['lint', 'test'].includes(command)) throw new Error('隔离入口只支持install/lint/test');
-const unpacked = await run('tar', ['-xf', '/deps.tar', '--no-same-owner', '-C', '/work']);
+if (phase !== 'run' || !['lint', 'test', 'build'].includes(command)) throw new Error('隔离入口只支持install/lint/test/build');
+const unpacked = await run('tar', ['-xf', '/deps.tar', '--no-same-owner', '-C', project]);
 if (unpacked !== 0) process.exit(unpacked);
 // 不运行pretest/posttest等隐含生命周期；明确要求的lint/test脚本照常执行。
-process.exit(await run('npm', ['--ignore-scripts', 'run', command]));
+process.exit(await run('npm', ['--prefix', project, '--workspaces=false', '--ignore-scripts', 'run', command]));
