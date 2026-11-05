@@ -135,3 +135,7 @@
 .drawer-agent-pick span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .drawer-item.with-agent { display: flex; align-items: center; gap: 8px; }
 .drawer-item.with-agent .drawer-item-copy { flex: 1; min-width: 0; }
+
+/* ---------- 电脑工作台顶栏入口（紧挨“对话 / 工作室”） ---------- */
+.wb-agents-entry { order: -1; margin-left: 8px; min-height: 36px; padding: 0 16px; border: 0; border-radius: 20px; background: var(--accent-soft); color: var(--accent); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.wb-agents-entry:focus-visible { outline: 2px solid var(--wy-ag-focus); outline-offset: 2px; }

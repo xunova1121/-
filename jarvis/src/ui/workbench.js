@@ -15,8 +15,6 @@ export function initWorkbench({showPanel,newSession,openSession,getSession,getRu
  const closePanel=()=>{document.body.classList.add('side-closed');document.body.classList.remove('side-open');};
  function button(label,icon,fn,parent=nav){const b=node('button');b.type='button';b.title=label;b.setAttribute('aria-label',label);b.append(node('span',icon,'wb-nav-icon'),node('span',label));b.onclick=fn;parent.append(b);return b;}
  const fresh=button('新建对话','＋',()=>{newSession();setView(false);closePanel();});fresh.className='wb-new';
- // 智能体广场入口（第2步）：打开广场浮层，由 app/agents.js 处理
- button('发现智能体','✦',()=>{closePanel();window.dispatchEvent(new Event('jarvis:open-agents'));},nav).dataset.destination='agents';
  const primaryLinks=[['文件空间','▱','workspace'],['专家与技能','◇','skills'],['定时任务','◷','system']];
  const secondaryLinks=[['连接应用','⌘','skills'],['记忆空间','♧','mind'],['知识库','▤','knowledge'],['实验室','⚗','settings']];
  function link([label,icon,panel],parent){const b=button(label,icon,()=>{showPanel(panel);document.body.classList.toggle('wb-connections',label==='连接应用');},parent);b.dataset.destination=label==='连接应用'?'connections':panel;}
@@ -26,7 +24,9 @@ export function initWorkbench({showPanel,newSession,openSession,getSession,getRu
  const secondary=node('div',null,'wb-nav-secondary');secondary.setAttribute('aria-label','资料与工具');nav.append(secondary);secondaryLinks.forEach(item=>link(item,secondary));
  const recent=node('section',null,'wb-recent'),recentHead=node('div',null,'wb-recent-head'),search=node('button','⌕');search.title='搜索全部对话';search.onclick=()=>showPanel('sessions');recentHead.append(node('span','最近对话'),search);const history=node('div',null,'wb-history-list');history.tabIndex=0;history.setAttribute('aria-label','最近对话列表');const more=node('button','查看更多','wb-recent-more');more.type='button';more.hidden=true;more.onclick=()=>showPanel('sessions');recent.append(recentHead,history,more);rail.append(recent);
  const bottom=node('button','⚙  设置与模型','wb-bottom');bottom.onclick=()=>showPanel('models');rail.append(bottom);
- const tabs=node('nav',null,'wb-tabs'),chat=node('button','对话'),studio=node('button','工作室');tabs.setAttribute('aria-label','工作视图');tabs.append(chat,studio);top.append(tabs);chat.onclick=()=>setView(false);studio.onclick=()=>setView(true);
+ const tabs=node('nav',null,'wb-tabs'),chat=node('button','对话'),studio=node('button','工作室');tabs.setAttribute('aria-label','工作视图');tabs.append(chat,studio);top.append(tabs);
+ // 智能体广场入口（第2步）：放在顶栏，不占侧栏高度（600px 高的窗口里最近对话不能被挤掉）；打开广场浮层由 app/agents.js 处理
+ const agents=node('button','✦ 智能体','wb-agents-entry');agents.type='button';agents.title='发现智能体';agents.dataset.destination='agents';agents.onclick=()=>{closePanel();window.dispatchEvent(new Event('jarvis:open-agents'));};tabs.after(agents);chat.onclick=()=>setView(false);studio.onclick=()=>setView(true);
  function setView(on){closePanel();document.body.classList.toggle('wb-studio',on);if(on)document.body.classList.remove('stage-mini');chat.classList.toggle('selected',!on);studio.classList.toggle('selected',on);chat.setAttribute('aria-pressed',String(!on));studio.setAttribute('aria-pressed',String(on));window.dispatchEvent(new Event('resize'));}setView(false);
  const landing=node('section',null,'wb-landing'),intro=node('div',null,'wb-intro');const hero=node('span',null,'wb-hero-mark');hero.append(createMascot('wave'));intro.append(hero,node('h1','你好，我是未央'),node('p','从一个想法开始，把事情交给我。'));const cards=node('div',null,'wb-cards');
  const suggestions=[['整理工作，轻松开始','拆解目标，安排今天的计划','plan','请帮我梳理今天的工作计划，先问我当前的目标和时间安排。','✓'],['你的专属专家','办公、编程、研究，按需协作','expert','请列出已经安装的技能，并说明哪些适合我现在的工作。','✦'],['文件处理','读文档、写方案、制作演示稿','document','我需要整理一份文档，请先让我提供文件和具体要求。','▤'],['数据分析','读懂表格，发现数据里的线索','data','我想分析一份表格，请先确认文件、分析目标和数据口径。','▥']];
