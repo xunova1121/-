@@ -164,6 +164,9 @@ app.initShortcuts();
 // 调试 / 自动化测试入口
 window.__jarvis = {
   machine: app.machine,
+  get agents() {
+    return app.agents;
+  },
   speaker: app.speaker,
   get voice() {
     return app.voice;

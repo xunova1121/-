@@ -6,6 +6,7 @@
  */
 import { getAgent } from './agentProfiles.js';
 import { profileId } from './agentProfileValidation.js';
+import { templateNote } from './pptTemplates.js';
 
 /** 只管流程、不授予能力的工具：收窄后也保留，否则模型连“看要求 / 列计划 / 要更多时间”都做不了 */
 export const AGENT_FLOW_TOOLS = new Set(['read_task_requirements', 'read_tool_result', 'need_more_time', 'update_plan', 'review_task', 'execution_capabilities', 'tool_search']);
@@ -22,7 +23,8 @@ export function agentFormNote(profile, values = {}) {
     if (!value) continue;
     if (field.type === 'select' && !field.options.includes(value)) continue;
     if ([...value].length > (field.type === 'textarea' ? 2000 : 200)) continue;
-    parts.push(`${field.label} ${value}`);
+    // 模板编号对模型没意义：换成“用哪个风格配色、推荐结构、可用配图”的说明
+    parts.push(field.key === 'template' ? templateNote(value) || `${field.label} ${value}` : `${field.label} ${value}`);
   }
   return parts.length ? `用户选择：${parts.join('；')}` : '';
 }

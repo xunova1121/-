@@ -5,6 +5,7 @@ import './agentSquare.css';
  *   - 起始页：图标、名字、开场白、表单下拉、3 条推荐问题（点了只填输入框）、上传资料入口
  */
 import { agentIcon, AGENT_TONES } from './agentIcons.js';
+import { templatePicker } from './pptTemplateLibrary.js';
 
 export const CATEGORY_LABELS = { '': '全部', office: '办公创作', gongwen: '公文写作', image: '图片处理', research: '查询研究', life: '生活服务', mine: '我的' };
 const SOURCE_LABELS = { builtin: '内置', user: '我创建的', github: '来自 GitHub' };
@@ -117,9 +118,12 @@ export function createAgentSquare({ listAgents, onPick, onClose = () => {} }) {
  * @param {object} profile
  * @param {{ values?: Record<string,string>, onFill: (text: string) => void, onForm: (values: Record<string,string>) => void, onUpload?: () => void, onBack?: () => void }} o
  */
-export function agentStartView(profile, { values = {}, onFill, onForm, onUpload, onBack }) {
+export function agentStartView(profile, { values = {}, onFill, onForm, onUpload, onBack, onTemplates }) {
   const form = { ...values };
-  const fields = (profile.form || []).filter((f) => f.type === 'select').map((f) => {
+  // 模板字段画成卡片（P4“先选一个喜欢的样子”），其余选项画成下拉框
+  const hasTemplate = (profile.form || []).some((f) => f.key === 'template');
+  const picker = hasTemplate && templatePicker({ value: form.template || '', onMore: onTemplates, onChange: (id) => { if (id) form.template = id; else delete form.template; onForm({ ...form }); } });
+  const fields = (profile.form || []).filter((f) => f.type === 'select' && f.key !== 'template').map((f) => {
     const select = el('select', { className: 'wy-agent-select' }, el('option', { value: '', textContent: '不限' }), ...f.options.map((o) => el('option', { value: o, textContent: o })));
     select.value = f.options.includes(form[f.key]) ? form[f.key] : '';
     select.setAttribute('aria-label', f.label);
@@ -146,6 +150,7 @@ export function agentStartView(profile, { values = {}, onFill, onForm, onUpload,
       el('span', {}, el('b', { textContent: profile.name }), el('small', { textContent: '未央 · 你的专属帮手' }))),
     el('p', { className: 'wy-agent-start-intro', textContent: profile.intro }),
     fields.length ? el('div', { className: 'wy-agent-form' }, ...fields) : null,
+    picker ? picker.root : null,
     el('div', { className: 'wy-agent-start-label' }, el('b', { textContent: '从这里开始' }), el('small', { textContent: '点选后可修改' })),
     el('div', { className: 'wy-agent-starters' }, ...starters),
     upload,

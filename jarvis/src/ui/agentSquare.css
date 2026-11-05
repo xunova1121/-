@@ -139,3 +139,25 @@
 /* ---------- 电脑工作台顶栏入口（紧挨“对话 / 工作室”） ---------- */
 .wb-agents-entry { order: -1; margin-left: 8px; min-height: 36px; padding: 0 16px; border: 0; border-radius: 20px; background: var(--accent-soft); color: var(--accent); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
 .wb-agents-entry:focus-visible { outline: 2px solid var(--wy-ag-focus); outline-offset: 2px; }
+
+/* ---------- PPT 模板（P4 选择区、P5 模板库与样张） ---------- */
+.wy-tpl-pick { display: flex; flex-direction: column; gap: 10px; }
+.wy-tpl-more { min-height: 44px; padding: 0 4px; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 13px; cursor: pointer; }
+.wy-tpl-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (min-width: 880px) { .wy-tpl-grid.wide { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.wy-tpl-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; padding: 0 0 6px; border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.wy-tpl-card b { font-size: 14px; }
+.wy-tpl-card small { color: var(--muted); font-size: 12px; }
+.wy-tpl-frame { position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; max-width: 100%; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: var(--wy-ag-subtle); }
+.wy-tpl-card.on .wy-tpl-frame { outline: 2.5px solid var(--accent); outline-offset: 2px; }
+.wy-tpl-card.on b::after { content: ' ✓'; color: var(--accent); }
+.wy-tpl-thumb { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
+.wy-tpl-thumb.missing { display: none; }
+.wy-tpl-fallback { position: absolute; inset: 0; display: grid; place-items: center; padding: 8px; color: var(--muted); font-size: 12px; text-align: center; }
+.wy-tpl-chosen { color: var(--muted); font-size: 12px; }
+.wy-tpl-pages { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; margin: 0 -20px; padding: 0 20px 4px; }
+.wy-tpl-frame.big { flex: 0 0 86%; scroll-snap-align: center; }
+@media (min-width: 880px) { .wy-tpl-pages { margin: 0; padding: 0; } .wy-tpl-frame.big { flex: 1 1 0; } }
+.wy-tpl-outline { display: flex; flex-direction: column; gap: 4px; font-size: 14px; line-height: 1.6; }
+.wy-tpl-outline span { color: var(--muted); }
+.wy-tpl-use { min-height: 48px; border: 0; border-radius: 14px; background: var(--accent); color: var(--wy-ag-on-accent); font: inherit; font-size: 16px; font-weight: 600; cursor: pointer; }

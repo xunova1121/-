@@ -82,6 +82,25 @@ async function phone(browser, base, { width, theme, zoom }) {
   check(`[${tag}] 推荐问题只填进输入框`, prompt === '做一份 6–10 页的项目进展汇报', prompt);
   await page.waitForTimeout(300);
   check(`[${tag}] 没有自动发送（对话里没有消息）`, (await page.locator('#transcript .msg').count()) === 0);
+  // P4 / P5 模板：起始页 4 张真实样张缩略图 → 全部模板 → 筛选 → 预览 3 页 → 用这个模板
+  await page.waitForFunction(() => [...document.querySelectorAll('.wy-tpl-pick .wy-tpl-thumb')].filter((i) => i.complete && i.naturalWidth > 0).length === 4);
+  check(`[${tag}] 起始页 4 个模板，缩略图都加载出来`, (await page.locator('.wy-tpl-pick .wy-tpl-card').count()) === 4);
+  await page.click('.wy-tpl-more');
+  await page.waitForSelector('.wy-tpl-library:not([hidden]) .wy-tpl-card');
+  check(`[${tag}] 模板库 10 个模板`, (await page.locator('.wy-tpl-library .wy-tpl-card').count()) === 10);
+  check(`[${tag}] 模板库不横向溢出`, (await overflow(page)) <= 0);
+  await page.click('.wy-tpl-library .wy-agents-chip[data-scene="gov"]');
+  check(`[${tag}] 筛“政企汇报”剩 3 个`, (await page.locator('.wy-tpl-library .wy-tpl-card').count()) === 3);
+  await page.screenshot({ path: `${output}/templates-${tag}.png` });
+  await page.click('.wy-tpl-library .wy-tpl-card[data-template="gov-annual"]');
+  await page.waitForFunction(() => [...document.querySelectorAll('.wy-tpl-pages .wy-tpl-thumb')].filter((i) => i.complete && i.naturalWidth > 0).length === 3);
+  check(`[${tag}] 预览 3 页样张`, true);
+  await page.screenshot({ path: `${output}/template-preview-${tag}.png` });
+  await page.click('.wy-tpl-use');
+  await page.waitForSelector('.wy-tpl-card.on[data-template="gov-annual"]');
+  check(`[${tag}] 用这个模板后回到起始页并选中，页数选择还在`, (await page.inputValue('.wy-agent-select[aria-label="页数"]')) === '6-10');
+  const art = await page.evaluate(() => window.__jarvis.agents.prepareTurn());
+  check(`[${tag}] 模板配图在设备上画好放进工作区`, art.length === 2 && art.every((x) => x.ok && x.size > 20000), JSON.stringify(art));
   // 返回广场：保留分类
   await page.click('.wy-agent-back-link');
   await page.waitForSelector('.wy-agents:not([hidden])');

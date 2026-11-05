@@ -1,4 +1,5 @@
 /** 首批智能体只声明角色和能力；选择配置不授予额外权限，也不触发模型。 */
+import { PPT_TEMPLATE_IDS } from './pptTemplates.js';
 const researchTools = ['web_search', 'fetch_url', 'read_evidence', 'read_file', 'kb_search', 'verify_numbers', 'reconcile_numbers', 'time_calc'];
 const documentTools = ['create_document', 'write_long_document', 'read_document_structure', 'edit_office_document', 'check_document', 'get_document_template', 'list_files', 'read_file', 'preview'];
 const select = (key, label, options) => ({ key, label, type: 'select', options });
@@ -10,7 +11,8 @@ const profiles = [
     starters: ['把这份资料整理成一份汇报 PPT', '做一份 6–10 页的项目进展汇报', '帮我修改这份 PPT 的版式，保留原文'],
     prompt: '你帮助用户制作和修改可编辑的PPT。遵守用户页数和材料要求，先定内容结构与图片版式，再配图和生成。数字注明来源，不编造资料。生成后检查文件及排版，只突出最终文件；重做沿用同一目标路径，明确未完成或未核验的部分。',
     tools: [...new Set([...documentTools, ...researchTools, 'generate_image', 'inspect_image', 'update_plan', 'review_task'])],
-    form: [select('pages', '页数', ['3-5', '6-10', '10-20', '20-30']), select('scene', '场景', ['通用', '政企汇报', '工作总结', '路演', '教学', '节日活动']), select('language', '语言', ['简体中文', '繁体中文', '英文'])],
+    // template：模板库（pptTemplates.js）里的编号，起始页上画成模板卡片，不是下拉框
+    form: [select('template', '模板', [...PPT_TEMPLATE_IDS]), select('pages', '页数', ['3-5', '6-10', '10-20', '20-30']), select('scene', '场景', ['通用', '政企汇报', '工作总结', '路演', '教学', '节日活动']), select('language', '语言', ['简体中文', '繁体中文', '英文'])],
     output: 'pptx', source: 'builtin'
   },
   {

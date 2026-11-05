@@ -350,6 +350,7 @@ export function createTurn(app) {
           }
         });
       };
+      await app.agents?.prepareTurn?.(); // 选了 PPT 模板：先把模板配图放进工作区
       const sight = app.imageDescriber?.(); // 当前模型看不了图时替它看图
       // 放在 try 里：智能体被删了等错误照常显示在这条回答里，不卡住本轮
       const agent = agentId && !(app.server && !here) ? await resolveAgentTurn({ agentId, form: app.session.agentForm || null }) : null;

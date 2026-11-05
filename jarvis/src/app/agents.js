@@ -5,6 +5,11 @@
 import * as registry from '../agent/agentProfiles.js';
 import * as sessionsApi from '../agent/sessions.js';
 import { createAgentSquare, agentStartView, iconBadge } from '../ui/agentSquare.js';
+import { createTemplateLibrary } from '../ui/pptTemplateLibrary.js';
+import { pptTemplate, templateArtPath } from '../agent/pptTemplates.js';
+import { artSvg } from '../agent/pptTemplateArt.js';
+import { THEMES, REPORT_THEMES } from '../agent/themes.js';
+import * as ws from '../agent/workspace.js';
 import { $, toast } from './env.js';
 
 /** 抽屉“发现智能体”卡片上的三个常用入口 */
@@ -26,6 +31,54 @@ export function createAgents(app) {
   };
 
   const square = createAgentSquare({ listAgents, onPick: (p) => start(p) });
+  // 模板库：选了模板记在当前智能体对话上，重画起始页（保留其他选项）
+  const library = createTemplateLibrary({
+    onPick: (id) => {
+      if (!app.session?.agentId || app.history.length) return;
+      app.session.agentForm = { ...(app.session.agentForm || {}), template: id };
+      renderStart();
+    }
+  });
+
+  /**
+   * 发消息前：选了模板就把模板配图放进工作区（服务器模式同时传到服务器），模型才能在 PPT 里引用。
+   * 失败不挡发送：配图缺了，生成时会在缺图清单里如实列出。
+   */
+  /** 模板配图：原创 SVG 插画在设备上画成 1200×675 的 PNG */
+  async function drawArt(tpl, motif) {
+    const theme = THEMES[tpl.theme] || REPORT_THEMES[tpl.theme];
+    const url = URL.createObjectURL(new Blob([artSvg(motif, theme.colors)], { type: 'image/svg+xml' }));
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      const canvas = Object.assign(document.createElement('canvas'), { width: 1200, height: 675 });
+      canvas.getContext('2d').drawImage(img, 0, 0, 1200, 675);
+      return await new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('画配图失败'))), 'image/png'));
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  async function prepareTurn() {
+    const tpl = pptTemplate(app.session?.agentForm?.template);
+    if (!app.session?.agentId || !tpl) return [];
+    const done = [];
+    for (const [name, motif] of tpl.art) {
+      const path = templateArtPath(tpl.id, name);
+      try {
+        const have = await ws.exists(path);
+        const blob = have ? await ws.readBlob(path) : await drawArt(tpl, motif);
+        if (!have) await ws.write(path, blob);
+        if (app.server) await app.server.upload(path, blob);
+        done.push({ path, ok: true, size: blob.size });
+      } catch (e) {
+        console.warn('[模板配图]', path, e?.message || e);
+        done.push({ path, ok: false });
+      }
+    }
+    return done;
+  }
 
   /** 选了智能体：开一段新对话记住它（空对话不落盘，发第一句时才存） */
   async function start(profile) {
@@ -67,7 +120,8 @@ export function createAgents(app) {
             session.agentForm = Object.keys(values).length ? values : undefined;
           },
           onUpload: () => $('#btn-attach')?.click(),
-          onBack: () => square.open()
+          onBack: () => square.open(),
+          onTemplates: () => library.open()
         })
       );
       root.scrollTop = 0;
@@ -120,6 +174,8 @@ export function createAgents(app) {
   return {
     agents: {
       square,
+      library,
+      prepareTurn,
       openSquare,
       start,
       renderStart,
