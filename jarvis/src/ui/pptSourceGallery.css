@@ -1,0 +1,20 @@
+.wy-ppt-sources{padding:0 0 20px;border-bottom:1px solid #9babb92e;margin-bottom:24px;color:inherit}
+.wy-ppt-sources h3{margin:0 0 8px;font-size:1.12rem}
+.wy-ppt-sources>p,.wy-ppt-source-detail p{font-size:.86rem;line-height:1.65;opacity:.8}
+.wy-ppt-source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 12px;align-items:start}
+.wy-ppt-source-detail{min-width:0}
+.wy-ppt-source-detail summary{list-style:none;cursor:pointer;min-height:44px}
+.wy-ppt-source-detail summary::-webkit-details-marker{display:none}
+.wy-ppt-source-detail img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:10px;background:#e9edf2}
+.wy-ppt-source-detail b,.wy-ppt-source-detail small{display:block;margin:8px 0 0;overflow-wrap:anywhere}
+.wy-ppt-source-detail b{font-size:.95rem}.wy-ppt-source-detail small{font-size:.76rem;opacity:.7}
+.wy-ppt-source-detail[open]{grid-column:1/-1}
+.wy-ppt-source-slides{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}
+.wy-ppt-source-detail a{display:inline-flex;align-items:center;min-height:44px;color:inherit;font-size:.82rem}
+.wy-ppt-source-use{display:block;width:100%;min-height:46px;background:#315be8;color:white;border:0;border-radius:12px;margin-top:12px;padding:10px;font:inherit;cursor:pointer}
+.wy-ppt-source-use:disabled{opacity:.5;cursor:wait}
+.wy-ppt-source-status{overflow-wrap:anywhere}
+.wy-ppt-source-license summary{min-height:44px;display:flex;align-items:center;font-size:.78rem;cursor:pointer}
+.wy-ppt-source-license pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.7rem;line-height:1.6}
+.wy-ppt-source-detail summary:focus-visible,.wy-ppt-source-use:focus-visible{outline:2px solid #4e79ff;outline-offset:3px}
+@media(min-width:1000px){.wy-ppt-source-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}

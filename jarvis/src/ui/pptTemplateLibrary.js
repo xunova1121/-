@@ -4,6 +4,7 @@
  */
 import { PPT_TEMPLATES, TEMPLATE_SCENES, pptTemplate } from '../agent/pptTemplates.js';
 import { themeById } from '../agent/themes.js';
+import { pptSourceGallery } from './pptSourceGallery.js';
 
 // 样张缩略图随构建打包（手机版、单文件版也有）；文件名 <模板>-<页>.jpg
 const THUMBS = import.meta.glob('../assets/ppt-templates/*.jpg', { eager: true, query: '?url', import: 'default' });
@@ -52,7 +53,7 @@ export function templatePicker({ value = '', onChange, onMore }) {
 }
 
 /** 模板库浮层：场景筛选 → 点模板看 3 页样张 → “用这个模板” */
-export function createTemplateLibrary({ onPick }) {
+export function createTemplateLibrary({ onPick, onImport }) {
   let scene = '';
   const back = el('button', { type: 'button', className: 'wy-agents-back', ariaLabel: '返回' });
   back.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
@@ -79,6 +80,7 @@ export function createTemplateLibrary({ onPick }) {
     const shown = PPT_TEMPLATES.filter((x) => !scene || x.scene === scene);
     body.replaceChildren(chips, el('div', { className: 'wy-tpl-grid wide' }, ...shown.map((x) => templateCard(x, { onClick: () => preview(x) }))),
       el('p', { className: 'wy-agent-start-note', textContent: '样张由未央的排版引擎生成，配图是原创插画；实际内容按你的资料来写。' }));
+    if (onImport) body.prepend(pptSourceGallery({ onImport }));
   }
   function preview(tpl) {
     previewing = tpl;

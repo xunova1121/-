@@ -11,6 +11,8 @@ import { artSvg } from '../agent/pptTemplateArt.js';
 import { themeById } from '../agent/themes.js';
 import * as ws from '../agent/workspace.js';
 import { $, toast } from './env.js';
+import { importPptSource } from './pptSourceImport.js';
+import { userStorageSuffix } from '../core/userStorage.js';
 
 /** 抽屉“发现智能体”卡片上的三个常用入口 */
 export const DRAWER_PICKS = ['ppt-maker', 'gongwen-writer', 'health-advisor'];
@@ -33,6 +35,12 @@ export function createAgents(app) {
   const square = createAgentSquare({ listAgents, onPick: (p) => start(p) });
   // 模板库：选了模板记在当前智能体对话上，重画起始页（保留其他选项）
   const library = createTemplateLibrary({
+    onImport: async (template, url) => {
+      await importPptSource({ app, workspace: ws, template, url, scope: userStorageSuffix, fill, readDraft: () => $('#prompt')?.value || '' });
+      renderStart();
+      library.close();
+      toast('样板已导入。补充修改要求后发送。');
+    },
     onPick: (id) => {
       if (!app.session?.agentId || app.history.length) return;
       app.session.agentForm = { ...(app.session.agentForm || {}), template: id };
