@@ -45,9 +45,11 @@ it('带编号：对话记住智能体与选择；模型看到角色说明和选�
 it('同一段对话不能中途换成别的智能体', async () => {
   const { adapter } = recording();
   const runner = make(adapter);
-  const first = await runner.start({ text: '查一下今天金价', agentId: 'market-quotes' });
-  await until(() => ['done', 'error'].includes(runner.get(first.id).status));
+  // 发起任务时就绑定智能体，不必等它做完（CI 上等行情类任务会碰到联网超时）
+  const first = await runner.start({ text: '你好', agentId: 'market-quotes' });
+  expect((await sessions.get(first.sessionId)).agentId).toBe('market-quotes');
   await expect(runner.start({ sessionId: first.sessionId, text: '再做个PPT', agentId: 'ppt-maker' })).rejects.toMatchObject({ status: 409 });
+  await until(() => ['done', 'error'].includes(runner.get(first.id).status));
 });
 
 it('智能体不存在：任务报错说明原因，不悄悄当普通对话；编号格式不对直接拒绝', async () => {
