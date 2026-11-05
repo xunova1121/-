@@ -13,26 +13,51 @@ import * as ws from '../agent/workspace.js';
 import { $, toast } from './env.js';
 import { importPptSource } from './pptSourceImport.js';
 import { userStorageSuffix } from '../core/userStorage.js';
+import { createAgentProfileEditor } from '../ui/agentProfileEditor.js';
+import { createAgentProfileActions } from './agentProfileActions.js';
 
 /** 抽屉“发现智能体”卡片上的三个常用入口 */
 export const DRAWER_PICKS = ['ppt-maker', 'gongwen-writer', 'health-advisor'];
 
 export function createAgents(app) {
   const cache = new Map(registry.BUILTIN_AGENTS.map((p) => [p.id, p]));
+  let cacheVersion = 0;
   const listAgents = async () => {
+    const version = cacheVersion;
+    const token = userStorageSuffix();
+    const server = app.server;
     const list = await registry.listAgents();
+    if (version !== cacheVersion || token !== userStorageSuffix() || server !== app.server) throw new Error('账号已切换，请重新打开广场。');
+    for (const [id, p] of cache) if (p.source !== 'builtin') cache.delete(id);
     for (const p of list) cache.set(p.id, p);
     return list;
   };
   const profileOf = async (id) => {
     if (!id) return null;
     if (cache.has(id)) return cache.get(id);
+    const version = cacheVersion;
     const p = await registry.getAgent(id).catch(() => null);
+    if (version !== cacheVersion) return null;
     if (p) cache.set(id, p);
     return p;
   };
 
-  const square = createAgentSquare({ listAgents, onPick: (p) => start(p) });
+  const actions = createAgentProfileActions(app);
+  const square = createAgentSquare({
+    listAgents,
+    onPick: (p) => start(p),
+    onEdit: (profile, after) => editor.open(profile, actions.capture(), after)
+  });
+  const editor = createAgentProfileEditor({
+    onSave: async (profile, fields, token) => {
+      const saved = await actions.save(profile, fields, token);
+      cache.set(saved.id, saved);
+    },
+    onRemove: async (profile, token) => {
+      await actions.remove(profile, token);
+      cache.delete(profile.id);
+    }
+  });
   // 模板库：选了模板记在当前智能体对话上，重画起始页（保留其他选项）
   const library = createTemplateLibrary({
     onImport: async (template, url) => {
@@ -127,7 +152,7 @@ export function createAgents(app) {
           onForm: (values) => {
             session.agentForm = Object.keys(values).length ? values : undefined;
           },
-          onUpload: () => $('#btn-attach')?.click(),
+          onUpload: () => $('#file-input')?.click(),
           onBack: () => square.open(),
           onTemplates: () => library.open()
         })
@@ -176,7 +201,11 @@ export function createAgents(app) {
 
   // 服务器模式切换后，个人智能体从服务器读：清掉本机缓存里的非内置项
   function resetCache() {
+    cacheVersion++;
     for (const [id, p] of cache) if (p.source !== 'builtin') cache.delete(id);
+    editor.close();
+    square.reset();
+    library.close();
   }
 
   return {

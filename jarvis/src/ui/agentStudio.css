@@ -1,0 +1,147 @@
+/* 第二版创作界面：白色主底、轻渐变介绍区；所有变量仅作用于广场和智能体起始页。 */
+.wy-agents, .wy-studio-start {
+  --studio-paper: #151c29;
+  --studio-wash: #1d2737;
+  --studio-ink: #edf1f9;
+  --studio-muted: #a2aec2;
+  --studio-line: #303c50;
+  --studio-blue: #9bb9ff;
+  --studio-soft: #253652;
+  --studio-hero: linear-gradient(115deg, #203552, #29263c);
+  color: var(--studio-ink);
+}
+:root[data-theme='light'] .wy-agents, :root[data-theme='light'] .wy-studio-start {
+  --studio-paper: #ffffff;
+  --studio-wash: #f6f8fb;
+  --studio-ink: #202633;
+  --studio-muted: #69778b;
+  --studio-line: #e9edf3;
+  --studio-blue: #3762e8;
+  --studio-soft: #edf3ff;
+  --studio-hero: linear-gradient(115deg, #edf5ff, #f5f1ff);
+}
+.wy-agents { background: var(--studio-paper); }
+.wy-agents .wy-agents-bar { min-height: 66px; border-bottom: 1px solid var(--studio-line); }
+.wy-agents .wy-agents-bar h2 { font-weight: 650; font-size: 17px; }
+.wy-agents .wy-agents-body { gap: 20px; padding-top: 20px; }
+.wy-studio-square .wy-agents-search { background: var(--studio-wash); border: 0; border-radius: 12px; }
+.wy-studio-square .wy-agents-banner { background: var(--studio-hero); border: 0; border-radius: 18px; min-height: 166px; padding: 26px 20px; position: relative; overflow: hidden; }
+.wy-studio-square .wy-agents-banner-copy { position: relative; z-index: 1; gap: 10px; max-width: 75%; }
+.wy-studio-square .wy-agents-banner-copy small { font-size: 9px; letter-spacing: .12em; color: var(--studio-muted); }
+.wy-studio-square .wy-agents-banner-copy b { font-size: 24px; line-height: 1.4; letter-spacing: -.04em; max-width: 210px; white-space: pre-line; }
+.wy-studio-square .wy-agents-banner-copy span { font-size: 12px; color: var(--studio-muted); max-width: 190px; }
+.wy-studio-hero-art { position: absolute; right: -12px; bottom: -20px; width: 140px; opacity: .65; pointer-events: none; }
+.wy-studio-features { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.wy-studio-features[hidden] { display: none; }
+.wy-studio-feature { border: 0; background: none; color: inherit; font: inherit; padding: 0; text-align: left; min-width: 0; }
+.wy-studio-feature img { width: 100%; aspect-ratio: 16/9; object-fit: contain; display: block; border-radius: 10px; background: var(--studio-wash); }
+.wy-studio-feature b { display: block; font-size: 13px; line-height: 1.5; }
+.wy-studio-feature small { display: block; color: var(--studio-muted); font-size: 11px; margin: 9px 0 4px; }
+.wy-studio-square .wy-agents-chips { border-bottom: 1px solid var(--studio-line); gap: 16px; }
+.wy-studio-square .wy-agents-chip { border-radius: 0; padding: 0 1px 8px; min-height: 46px; }
+.wy-studio-square .wy-agents-chip.on { background: none; color: var(--studio-blue); border-bottom: 2px solid var(--studio-blue); }
+.wy-studio-square .wy-agents-grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
+.wy-studio-square .wy-agent-card { display: grid; grid-template-columns: 48px minmax(0, 1fr); column-gap: 13px; row-gap: 4px; border: 0; border-bottom: 1px solid var(--studio-line); border-radius: 0; padding: 16px 0; box-shadow: none; background: transparent; }
+.wy-studio-square .wy-agent-card-top { grid-row: 1/3; width: 48px; }
+.wy-studio-square .wy-agent-tag { display: none; }
+.wy-studio-square .wy-agent-card b { font-size: 15px; align-self: end; }
+.wy-studio-square .wy-agent-card-intro { font-size: 12px; color: var(--studio-muted); }
+.wy-studio-square .wy-agent-card.skeleton { min-height: 90px; background: var(--studio-wash); margin-bottom: 8px; border-radius: 10px; }
+.wy-studio-new, .wy-studio-retry, .wy-studio-edit { border: 0; border-radius: 10px; background: var(--studio-soft); color: var(--studio-blue); font: inherit; min-height: 44px; padding: 10px 16px; cursor: pointer; }
+.wy-studio-new { align-self: stretch; }
+.wy-studio-personal-card { display: flex; align-items: center; gap: 8px; }
+.wy-studio-personal-card .wy-agent-card { flex: 1; }
+.wy-studio-edit { font-size: 12px; padding: 8px 12px; }
+
+/* 空对话内部升级；不更改输入栏、模型菜单、任务状态或已产生的消息。 */
+#main:has(.wy-studio-start), #transcript:has(.wy-studio-start) { background: #151c29; }
+#transcript:has(.wy-studio-start) { padding: 0; }
+:root[data-theme='light'] #main:has(.wy-studio-start) { background: #fff; }
+:root[data-theme='light'] #transcript:has(.wy-studio-start) { background: #fff; }
+.wy-studio-start { width: 100%; box-sizing: border-box; max-width: 860px; padding: 0 20px 30px; gap: 22px; background: var(--studio-paper); }
+.wy-studio-start .wy-agent-back-link { color: var(--studio-muted); margin-bottom: -12px; }
+.wy-studio-subhero { position: relative; padding: 26px 22px; border-radius: 16px; background: var(--studio-hero); overflow: hidden; }
+.wy-studio-eyebrow { color: var(--studio-muted); font-size: 9px; letter-spacing: .15em; display: block; margin-bottom: 13px; }
+.wy-studio-subhero .wy-agent-start-head { gap: 8px; margin-bottom: 10px; position: relative; z-index: 1; }
+.wy-studio-subhero .wy-agent-start-head .wy-agent-icon { width: 28px; height: 28px; border-radius: 8px; }
+.wy-studio-subhero .wy-agent-start-head b { font-size: 13px; font-weight: 500; }
+.wy-studio-subhero .wy-agent-start-head small { display: none; }
+.wy-studio-subhero h2 { position: relative; z-index: 1; margin: 0 0 10px; font-size: 24px; line-height: 1.45; letter-spacing: -.04em; max-width: 100%; white-space: pre-line; text-wrap: balance; }
+.wy-studio-subhero .wy-agent-start-intro { position: relative; z-index: 1; font-size: 13px; color: var(--studio-muted); max-width: 88%; }
+.wy-studio-subhero .wy-studio-hero-art { opacity: .3; }
+.wy-studio-start .wy-agent-form { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 12px; }
+.wy-studio-start[data-agent='ppt-maker'] .wy-agent-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.wy-studio-start .wy-agent-field[data-type='textarea'], .wy-studio-start .wy-agent-field[data-type='text'], .wy-studio-choice-field { grid-column: 1/-1; }
+.wy-studio-start .wy-agent-field { color: var(--studio-muted); gap: 10px; }
+.wy-studio-start .wy-agent-select { background: var(--studio-wash); border-color: var(--studio-line); border-radius: 9px; font-size: 13px; padding: 0 6px; color: var(--studio-ink); }
+.wy-studio-text { width: 100%; box-sizing: border-box; min-height: 46px; border: 1px solid var(--studio-line); border-radius: 10px; padding: 12px; color: var(--studio-ink); background: var(--studio-paper); font: inherit; font-size: 14px; line-height: 1.6; }
+textarea.wy-studio-text { min-height: 130px; resize: vertical; }
+.wy-studio-choice-field > select { position: absolute; opacity: 0; width: 1px; height: 1px; min-height: 0; padding: 0; pointer-events: none; }
+.wy-studio-document-types, .wy-studio-styles, .wy-studio-ratios { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 8px; }
+.wy-studio-document-types button, .wy-studio-styles button, .wy-studio-ratios button, .wy-studio-tools button { min-height: 44px; padding: 8px 5px; border: 1px solid transparent; border-radius: 10px; color: var(--studio-ink); background: var(--studio-wash); font: inherit; font-size: 12px; cursor: pointer; }
+.wy-studio-swatch { display: grid; place-items: center; margin-bottom: 8px; height: 42px; border-radius: 8px; font-size: 24px; background: var(--studio-soft); color: var(--studio-blue); }
+.wy-studio-document-types .wy-studio-swatch { width: 44px; margin: 0 auto 9px; }
+.wy-studio-styles button:nth-child(4n+2) .wy-studio-swatch { background: #d6e7df; color: #466f5d; }
+.wy-studio-styles button:nth-child(4n+3) .wy-studio-swatch { background: #e1def2; color: #73609c; }
+.wy-studio-styles button:nth-child(4n) .wy-studio-swatch { background: #f0e5ce; color: #8c7038; }
+.wy-studio-start button.on { border-color: var(--studio-blue); color: var(--studio-blue); background: var(--studio-soft); }
+.wy-studio-tools { display: flex; gap: 9px; flex-wrap: wrap; }
+.wy-studio-tools button { padding: 10px 14px; }
+.wy-studio-start [hidden] { display: none !important; }
+.wy-studio-tabs { display: flex; gap: 16px; border-bottom: 1px solid var(--studio-line); }
+.wy-studio-tabs button { min-height: 46px; padding: 8px 2px; border: 0; background: transparent; color: var(--studio-muted); font: inherit; font-size: 14px; }
+.wy-studio-start .wy-studio-tabs button.on { color: var(--studio-blue); background: transparent; border-bottom: 2px solid var(--studio-blue); }
+.wy-studio-start .wy-agent-starters { gap: 0; }
+.wy-studio-start .wy-agent-starter { min-height: 60px; padding: 16px 2px; border: 0; border-bottom: 1px solid var(--studio-line); border-radius: 0; background: transparent; color: var(--studio-ink); font-size: 14px; }
+.wy-studio-start .wy-agent-start-label { gap: 10px; }
+.wy-studio-start .wy-agent-start-label b { font-size: 15px; }
+.wy-studio-start .wy-agent-start-note { line-height: 1.7; color: var(--studio-muted); }
+.wy-studio-start .wy-agent-upload { border: 0; background: var(--studio-wash); border-radius: 12px; min-height: 58px; color: var(--studio-ink); }
+.wy-studio-start .wy-agent-upload-copy b { font-size: 13px; }
+.wy-studio-start .wy-agent-upload-copy span { font-size: 11px; color: var(--studio-muted); }
+.wy-studio-start .wy-tpl-thumb { object-fit: contain; }
+.wy-studio-start[data-layout='conversation'] .wy-studio-subhero { background: transparent; padding: 28px 0 8px; text-align: center; }
+.wy-studio-start[data-layout='conversation'] .wy-agent-start-head { flex-direction: column; gap: 14px; }
+.wy-studio-start[data-layout='conversation'] .wy-agent-start-head .wy-agent-icon { width: 78px; height: 78px; border-radius: 24px; }
+.wy-studio-start[data-layout='conversation'] .wy-studio-subhero h2 { max-width: none; font-size: 23px; }
+.wy-studio-start[data-layout='conversation'] .wy-agent-start-intro { margin: auto; max-width: 500px; }
+.wy-studio-start .wy-studio-dropzone { min-height: 150px; border: 1px dashed var(--studio-line); justify-content: center; flex-direction: column-reverse; text-align: center; }
+.wy-studio-start .wy-studio-dropzone .wy-agent-upload-plus { font-size: 36px; }
+.wy-studio-inspiration summary { cursor: pointer; min-height: 44px; line-height: 44px; font-size: 15px; font-weight: 600; }
+.wy-studio-posters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 12px; }
+.wy-studio-posters button { border: 0; background: none; color: inherit; text-align: left; font: inherit; padding: 0; min-width: 0; }
+.wy-studio-posters img { width: 100%; aspect-ratio: 3/4; object-fit: contain; border-radius: 10px; display: block; }
+.wy-studio-posters b { display: block; font-size: 13px; margin: 8px 0 3px; }
+.wy-studio-posters small { font-size: 11px; color: var(--studio-muted); }
+.wy-studio-inspiration > p { margin-top: 12px; }
+
+.wy-studio-editor { z-index: 65; }
+.wy-studio-editor-body { overflow-y: auto; padding: 22px 20px 30px; display: flex; flex-direction: column; gap: 18px; }
+.wy-studio-editor-body h3 { margin: 0; font-size: 23px; }
+.wy-studio-editor-field { display: flex; flex-direction: column; gap: 9px; font-size: 13px; }
+.wy-studio-editor-status { color: var(--studio-muted); margin: 0; font-size: 13px; }
+.wy-studio-save { border: 0; min-height: 48px; padding: 12px; background: #3762e8; color: white; font: inherit; border-radius: 12px; }
+.wy-studio-remove { border: 0; min-height: 44px; background: none; color: var(--studio-muted); font: inherit; font-size: 13px; }
+.wy-studio-editor button:disabled { opacity: .5; }
+.wy-studio-editor :focus-visible { outline: 2px solid var(--studio-blue); outline-offset: 2px; }
+@media (min-width: 880px) {
+  .wy-studio-square { inset: 3vh 6vw; border-radius: 20px; }
+  .wy-studio-square .wy-agents-body { max-width: 1120px; width: 100%; margin: auto; box-sizing: border-box; }
+  .wy-studio-square .wy-agents-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
+  .wy-studio-square .wy-agent-card { display: flex; flex-direction: column; gap: 9px; padding: 18px 0; }
+  .wy-studio-square .wy-agent-card b { align-self: flex-start; }
+  .wy-studio-square .wy-agents-banner { min-height: 210px; padding: 30px; }
+  .wy-studio-square .wy-agents-banner-copy b { max-width: none; font-size: 32px; }
+  .wy-studio-square .wy-agents-banner-copy span { max-width: none; font-size: 14px; }
+  .wy-studio-square .wy-studio-hero-art { width: 230px; right: 40px; bottom: -30px; }
+  .wy-studio-features { gap: 22px; }
+  .wy-studio-feature img { max-height: 185px; }
+  .wy-studio-start { padding: 12px 30px 30px; }
+  .wy-studio-subhero { padding: 30px; }
+  .wy-studio-subhero h2 { font-size: 30px; }
+  .wy-studio-subhero .wy-studio-hero-art { right: 22px; width: 180px; }
+  .wy-studio-posters { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .wy-studio-document-types { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .wy-studio-editor { inset: 5vh calc(50vw - 340px); }
+  .wy-studio-editor-body { padding: 24px 32px 32px; }
+}

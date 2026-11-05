@@ -6,6 +6,7 @@ import './agentSquare.css';
  */
 import { agentIcon, AGENT_TONES } from './agentIcons.js';
 import { templatePicker } from './pptTemplateLibrary.js';
+import { enhanceAgentStart, studioFeatures, studioHeroArt } from './agentStudio.js';
 
 export const CATEGORY_LABELS = { '': '全部', office: '办公创作', gongwen: '公文写作', image: '图片处理', research: '查询研究', life: '生活服务', mine: '我的' };
 const SOURCE_LABELS = { builtin: '内置', user: '我创建的', github: '来自 GitHub' };
@@ -26,7 +27,7 @@ export function iconBadge(profile, size = 'md') {
 /**
  * @param {{ listAgents: (o?: object) => Promise<object[]>, onPick: (profile: object) => void, onClose?: () => void }} o
  */
-export function createAgentSquare({ listAgents, onPick, onClose = () => {} }) {
+export function createAgentSquare({ listAgents, onPick, onEdit, onClose = () => {} }) {
   const state = { query: '', category: '' };
   const back = el('button', { type: 'button', className: 'wy-agents-back', ariaLabel: '返回' });
   back.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
@@ -40,16 +41,19 @@ export function createAgentSquare({ listAgents, onPick, onClose = () => {} }) {
   }));
   const banner = el('button', { type: 'button', className: 'wy-agents-banner' },
     el('span', { className: 'wy-agents-banner-copy' },
-      el('small', { textContent: '从资料到表达' }),
-      el('b', { textContent: '下一份汇报，一起做好' }),
-      el('span', { textContent: '选模板，放资料，让每一页更清楚。' })),
-    el('span', { className: 'wy-agents-banner-art', ariaHidden: 'true' }, el('i'), el('i'), el('i')));
+      el('small', { textContent: 'WEIYANG CREATIVE STUDIO' }),
+      el('b', { textContent: '把想法，\n变成作品。' }),
+      el('span', { textContent: '写一份报告，做一场出色的演示。' })), studioHeroArt());
+  const features = studioFeatures(id => { const p = all.find(x => x.id === id); if (p) pick(p); });
+  const manage = onEdit && el('button', { type: 'button', className: 'wy-studio-new', textContent: '＋ 创建智能体' });
+  manage?.addEventListener('click', () => onEdit(null, load));
   const grid = el('div', { className: 'wy-agents-grid', ariaLive: 'polite' });
   const root = el('section', { className: 'wy-agents', hidden: true, ariaLabel: '发现智能体' },
     el('header', { className: 'wy-agents-bar' }, back, el('h2', { textContent: '发现智能体' })),
     el('div', { className: 'wy-agents-body' },
       el('label', { className: 'wy-agents-search' }, el('span', { className: 'wy-agents-search-icon', ariaHidden: 'true' }), search),
-      banner, chips, grid));
+      banner, features, chips, grid, manage));
+  root.classList.add('wy-studio-square');
   root.setAttribute('role', 'dialog');
   document.body.append(root);
 
@@ -58,7 +62,7 @@ export function createAgentSquare({ listAgents, onPick, onClose = () => {} }) {
   let timer = 0;
   search.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { state.query = search.value.trim(); render(); }, 150); });
   back.addEventListener('click', close);
-  root.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  root.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   banner.addEventListener('click', () => { const p = all.find((x) => x.id === 'ppt-maker'); if (p) pick(p); });
 
   function card(p) {
@@ -78,8 +82,18 @@ export function createAgentSquare({ listAgents, onPick, onClose = () => {} }) {
   function render() {
     for (const c of chips.children) { const on = c.dataset.category === state.category; c.classList.toggle('on', on); c.setAttribute('aria-selected', String(on)); }
     banner.hidden = Boolean(state.query || state.category);
+    features.hidden = Boolean(state.query || state.category);
     const shown = all.filter(matches);
-    if (shown.length) { grid.replaceChildren(...shown.map(card)); return; }
+    if (shown.length) {
+      grid.replaceChildren(...shown.map(p => {
+        const button = card(p);
+        if (!onEdit || p.source === 'builtin') return button;
+        const edit = el('button', { type: 'button', className: 'wy-studio-edit', textContent: '编辑', ariaLabel: `编辑${p.name}` });
+        edit.addEventListener('click', () => onEdit(p, load));
+        return el('div', { className: 'wy-studio-personal-card' }, button, edit);
+      }));
+      return;
+    }
     const hint = state.category === 'mine' && !state.query ? '还没有自己创建的智能体' : `没有找到“${state.query || CATEGORY_LABELS[state.category]}”相关的智能体`;
     grid.replaceChildren(el('div', { className: 'wy-agents-empty' }, el('b', { textContent: hint }), el('span', { textContent: '换个说法试试，或者回到普通对话直接说你要做的事。' })));
   }
@@ -93,7 +107,12 @@ export function createAgentSquare({ listAgents, onPick, onClose = () => {} }) {
       render();
     } catch (e) {
       if (mine !== seq) return;
-      grid.replaceChildren(el('div', { className: 'wy-agents-empty' }, el('b', { textContent: '读不到智能体列表' }), el('span', { textContent: String(e?.message || '网络不好？稍后再打开试试') })));
+      all = [];
+      features.hidden = true;
+      banner.hidden = true;
+      const retry = el('button', { type: 'button', className: 'wy-studio-retry', textContent: '重新加载' });
+      retry.addEventListener('click', load);
+      grid.replaceChildren(el('div', { className: 'wy-agents-empty' }, el('b', { textContent: '读不到智能体列表' }), el('span', { textContent: String(e?.message || '网络不好？稍后再打开试试') }), retry));
     }
   }
   function pick(p) { close(); onPick(p); }
@@ -110,7 +129,8 @@ export function createAgentSquare({ listAgents, onPick, onClose = () => {} }) {
     document.body.classList.remove('wy-agents-open');
     onClose();
   }
-  return { root, open, close, get isOpen() { return !root.hidden; }, state };
+  function reset() { ++seq; all = []; grid.replaceChildren(); close(); }
+  return { root, open, close, reset, get isOpen() { return !root.hidden; }, state };
 }
 
 /**
@@ -123,15 +143,20 @@ export function agentStartView(profile, { values = {}, onFill, onForm, onUpload,
   // 模板字段画成卡片（P4“先选一个喜欢的样子”），其余选项画成下拉框
   const hasTemplate = (profile.form || []).some((f) => f.key === 'template');
   const picker = hasTemplate && templatePicker({ value: form.template || '', onMore: onTemplates, onChange: (id) => { if (id) form.template = id; else delete form.template; onForm({ ...form }); } });
-  const fields = (profile.form || []).filter((f) => f.type === 'select' && f.key !== 'template').map((f) => {
-    const select = el('select', { className: 'wy-agent-select' }, el('option', { value: '', textContent: '不限' }), ...f.options.map((o) => el('option', { value: o, textContent: o })));
-    select.value = f.options.includes(form[f.key]) ? form[f.key] : '';
+  const fields = (profile.form || []).filter((f) => f.key !== 'template').map((f) => {
+    const select = f.type === 'select'
+      ? el('select', { className: 'wy-agent-select' }, el('option', { value: '', textContent: '不限' }), ...f.options.map((o) => el('option', { value: o, textContent: o })))
+      : el(f.type === 'textarea' ? 'textarea' : 'input', { className: 'wy-studio-text', maxLength: f.type === 'textarea' ? 2000 : 200, placeholder: `填写${f.label}` });
+    select.value = f.type !== 'select' || f.options.includes(form[f.key]) ? form[f.key] || '' : '';
     select.setAttribute('aria-label', f.label);
-    select.addEventListener('change', () => {
+    select.addEventListener(f.type === 'select' ? 'change' : 'input', () => {
       if (select.value) form[f.key] = select.value; else delete form[f.key];
       onForm({ ...form });
     });
-    return el('label', { className: 'wy-agent-field' }, el('span', { textContent: f.label }), select);
+    const field = el('div', { className: 'wy-agent-field' }, el('span', { textContent: f.label }), select);
+    field.dataset.field = f.key;
+    field.dataset.type = f.type;
+    return field;
   });
   const starters = profile.starters.map((s) => {
     const b = el('button', { type: 'button', className: 'wy-agent-starter' }, el('span', { textContent: s }));
@@ -156,5 +181,6 @@ export function agentStartView(profile, { values = {}, onFill, onForm, onUpload,
     upload,
     el('p', { className: 'wy-agent-start-note', textContent: '问题会先填入输入框，由你确认发送。' }));
   root.dataset.agent = profile.id;
+  enhanceAgentStart(root, profile, { onFill });
   return root;
 }

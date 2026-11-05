@@ -21,7 +21,10 @@ const profiles = [
     starters: ['根据这些要点拟一份通知', '阅读来文，帮我起草批复', '把工作记录整理成述职报告'],
     prompt: '你帮助用户起草和修改公文。先确认文种和已有材料，沿用用户事实、称谓及数字，不虚构单位、文号、批示或依据。缺项明确留待补充。结构、层级和格式按选定文种处理，生成Word后读回核对；未实现的格式不能声称已符合标准。',
     tools: [...new Set([...documentTools, ...researchTools, 'read_image_text', 'review_task'])],
-    form: [select('tone', '语气', ['正式', '简洁'])], output: 'docx', source: 'builtin'
+    form: [select('kind', '文种', ['工作总结', '述职报告', '通知', '工作方案', '请示', '会议纪要', '讲话稿', '调研报告', '周报', '批复']),
+      { key: 'subject', label: '主题', type: 'text' }, { key: 'notes', label: '内容要点', type: 'textarea' },
+      { key: 'audience', label: '写给谁看', type: 'text' }, select('length', '篇幅', ['约800字', '约1500字', '约3000字']),
+      select('tone', '语气', ['正式', '简洁'])], output: 'docx', source: 'builtin'
   },
   {
     id: 'deep-researcher', name: '深度研究', icon: 'research', category: 'research',
@@ -37,7 +40,11 @@ const profiles = [
     starters: ['做一张活动宣传海报，突出时间和地点', '给这个产品设计一张方形海报', '按这些文案做一张简洁的竖版海报'],
     prompt: '你帮助用户设计海报。先确定用途、尺寸、标题与要点，保护用户提供的品牌与原文要求。调用已配置的图像能力，检查文字可读性和布局；没有可用接口时明确说明，不虚构生成成功或下载链接。',
     tools: ['generate_image', 'inspect_image', 'read_image_text', 'read_file', 'list_files', 'preview', 'review_task'],
-    form: [select('size', '尺寸', ['竖版', '横版', '方形', '朋友圈封面'])], output: 'image', source: 'builtin'
+    form: [select('size', '尺寸', ['竖版', '横版', '方形', '朋友圈封面']),
+      select('style', '画面风格', ['简约设计', '质感摄影', '立体视觉', '国风美学', '手绘插画', '复古拼贴', '水彩肌理', '未来科技']),
+      select('ratio', '画面比例', ['9:16', '16:9', '3:4', '1:1']),
+      { key: 'caption', label: '需要出现的文字', type: 'textarea' },
+      select('operation', '图片处理', ['创作新海报', '抠图（透明背景）', '画面扩展', '照片修复', '人像优化'])], output: 'image', source: 'builtin'
   },
   {
     id: 'image-reader', name: '图片转文字', icon: 'ocr', category: 'image',
@@ -45,7 +52,7 @@ const profiles = [
     starters: ['提取这张图片中的文字，保留段落', '把图片里的表格整理成可编辑表格', '核对这张截图里的数字和单位'],
     prompt: '你帮助用户提取和核对图片文字。读取本次提供的图片，保持原文顺序与表格对应关系，不确定的字和数字单独标注，不自行补齐。需要修订原结果时根据同一张原图复核；识别成功不等于事实已被核实。',
     tools: ['read_image_text', 'inspect_image', 'read_file', 'list_files', 'create_document', 'check_document', 'verify_numbers', 'review_task'],
-    form: [], output: 'text', source: 'builtin'
+    form: [select('format', '整理方式', ['提取文字', '保留表格', '翻译内容', '整理为Word'])], output: 'text', source: 'builtin'
   },
   {
     id: 'health-advisor', name: '健康顾问', icon: 'health', category: 'life',

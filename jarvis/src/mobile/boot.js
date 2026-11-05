@@ -57,6 +57,7 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
       dispatchEvent(new CustomEvent('jarvis:foreground', { detail: { active: isActive } }));
       if (!isActive) globalThis.__jarvisTTS?.stop().catch(() => {});
     });
+    const { closeAgentOverlay } = await import('../ui/agentNavigation.js');
     App.addListener('backButton', () => {
       const picker = document.querySelector('.mp-sheet:not([hidden]) .x-btn');
       if (picker) {
@@ -78,6 +79,7 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
         companion.close();
         return;
       }
+      if (closeAgentOverlay()) return;
       const b = document.body;
       if (
         b.classList.contains('workbench') &&
