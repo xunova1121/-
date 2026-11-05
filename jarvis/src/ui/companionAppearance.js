@@ -41,7 +41,8 @@ export function initCompanionAppearance(navigation = {}) {
   const jump = Object.assign(document.createElement('button'), { type: 'button', className: 'wy-jump-latest', textContent: '↓ 回到最新回复', hidden: true });
   root.after(jump);
   const update = () => {
-    jump.hidden = !body.classList.contains('wy-reading-history') || root.scrollHeight - root.scrollTop - root.clientHeight < 160;
+    // 还没有任何消息（如智能体起始页）就没有“最新回复”可回
+    jump.hidden = !root.querySelector('.msg') || !body.classList.contains('wy-reading-history') || root.scrollHeight - root.scrollTop - root.clientHeight < 160;
   };
   root.addEventListener('scroll', update, { passive: true });
   new MutationObserver(update).observe(root, { childList: true, subtree: true, characterData: true });

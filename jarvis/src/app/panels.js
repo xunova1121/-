@@ -55,7 +55,7 @@ export function createPanels(app) {
     if (name === 'settings') app.renderHabits();
     dispatchEvent(new CustomEvent('jarvis:panel', { detail: name })); // 面板打开时各自刷新（如服务器模式的网络耗时）
   }
-  for (const b of document.querySelectorAll('.rail-btn')) b.addEventListener('click', () => showPanel(b.dataset.panel, { toggle: true }));
+  for (const b of document.querySelectorAll('.rail-btn[data-panel]')) b.addEventListener('click', () => showPanel(b.dataset.panel, { toggle: true }));
   for (const b of document.querySelectorAll('[data-open]')) b.addEventListener('click', () => showPanel(b.dataset.open));
 
   /** 模型分工面板（下面创建；配置变化时刷新） */

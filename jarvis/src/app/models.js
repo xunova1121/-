@@ -145,6 +145,7 @@ export function createModels(app) {
   const serverCfg = loadServerSettings(storage);
   const server = serverCfg.enabled && serverCfg.url && serverCfg.token ? createServerClient({ base: serverCfg.url, token: serverCfg.token }) : null;
   agentProfiles.useRemote(server?.agentProfiles ?? null);
+  app.agents?.resetCache(); // 换了数据来源：个人智能体重新从对应的地方读
   if (server) {
     // 手机 App：连自己的服务器直接走系统原生网络（不先试 WebView、没有跨域预检，国内移动网络下快得多）
     try {

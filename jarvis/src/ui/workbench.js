@@ -15,6 +15,8 @@ export function initWorkbench({showPanel,newSession,openSession,getSession,getRu
  const closePanel=()=>{document.body.classList.add('side-closed');document.body.classList.remove('side-open');};
  function button(label,icon,fn,parent=nav){const b=node('button');b.type='button';b.title=label;b.setAttribute('aria-label',label);b.append(node('span',icon,'wb-nav-icon'),node('span',label));b.onclick=fn;parent.append(b);return b;}
  const fresh=button('新建对话','＋',()=>{newSession();setView(false);closePanel();});fresh.className='wb-new';
+ // 智能体广场入口（第2步）：打开广场浮层，由 app/agents.js 处理
+ button('发现智能体','✦',()=>{closePanel();window.dispatchEvent(new Event('jarvis:open-agents'));},nav).dataset.destination='agents';
  const primaryLinks=[['文件空间','▱','workspace'],['专家与技能','◇','skills'],['定时任务','◷','system']];
  const secondaryLinks=[['连接应用','⌘','skills'],['记忆空间','♧','mind'],['知识库','▤','knowledge'],['实验室','⚗','settings']];
  function link([label,icon,panel],parent){const b=button(label,icon,()=>{showPanel(panel);document.body.classList.toggle('wb-connections',label==='连接应用');},parent);b.dataset.destination=label==='连接应用'?'connections':panel;}
@@ -29,7 +31,7 @@ export function initWorkbench({showPanel,newSession,openSession,getSession,getRu
  const landing=node('section',null,'wb-landing'),intro=node('div',null,'wb-intro');const hero=node('span',null,'wb-hero-mark');hero.append(createMascot('wave'));intro.append(hero,node('h1','你好，我是未央'),node('p','从一个想法开始，把事情交给我。'));const cards=node('div',null,'wb-cards');
  const suggestions=[['整理工作，轻松开始','拆解目标，安排今天的计划','plan','请帮我梳理今天的工作计划，先问我当前的目标和时间安排。','✓'],['你的专属专家','办公、编程、研究，按需协作','expert','请列出已经安装的技能，并说明哪些适合我现在的工作。','✦'],['文件处理','读文档、写方案、制作演示稿','document','我需要整理一份文档，请先让我提供文件和具体要求。','▤'],['数据分析','读懂表格，发现数据里的线索','data','我想分析一份表格，请先确认文件、分析目标和数据口径。','▥']];
  for(const [title,sub,cls,prompt,art]of suggestions){const b=node('button',null,'wb-card '+cls),copy=node('span');copy.append(node('b',title),node('small',sub));b.append(copy,node('i',art,'wb-card-art'));b.onclick=()=>{const input=document.querySelector('#prompt');input.value=prompt;input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();};cards.append(b);}landing.append(intro,cards);main.prepend(landing);
- const transcript=document.querySelector('#transcript');function update(){landing.hidden=!!transcript.querySelector('.msg');}
+ const transcript=document.querySelector('#transcript');function update(){landing.hidden=!!transcript.querySelector('.msg, .wy-agent-start');}
  new MutationObserver(update).observe(transcript,{childList:true,subtree:true});update();
  document.querySelector('#prompt').placeholder='可以描述任务，或提出任何问题';
  const info=node('aside',null,'wb-info');info.id='wb-conversation-info';info.setAttribute('aria-label','当前对话信息');

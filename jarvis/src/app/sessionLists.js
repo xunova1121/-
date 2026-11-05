@@ -55,6 +55,16 @@ export function createSessionLists(app) {
         });
       },
       onRendered: () => activity.flush(),
+      agents: app.agents && {
+        picks: () => app.agents.drawerPicks(),
+        icon: (p) => app.agents.icon(p),
+        rowIcon: (row) => app.agents.rowIcon(row),
+        onOpen: () => app.agents.openSquare(),
+        onPick: (p) => {
+          app.agents.start(p);
+          app.closeSide();
+        }
+      },
       onRename: async (id, title) => {
         await sessionsApi.rename(id, title);
         if (id === app.session.id) {

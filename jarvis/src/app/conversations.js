@@ -54,6 +54,7 @@ export function createConversations(app) {
     const title = app.session.title || (first ? sessionsApi.autoTitle(first) : '');
     el.textContent = title;
     el.hidden = !title;
+    app.agents?.decorateTitle();
   }
   $('#chat-title').addEventListener('click', async () => {
     const now = $('#chat-title').textContent;
@@ -181,6 +182,8 @@ export function createConversations(app) {
           desktop: Boolean(DESKTOP)
         })
       );
+    // 智能体对话有自己的推荐问题，不再显示通用开场建议
+    else if (app.session.agentId) app.callouts?.set([]);
     else openingCallouts();
     app.sessionsPanel?.refresh();
     app.setTask('idle');

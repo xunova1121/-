@@ -41,7 +41,7 @@ export function groupSessions(list, now = Date.now()) {
 /**
  * @param {{ onNew: () => void, onOpenSession: (id: string) => void, onPanel: (name: string) => void, listSessions: () => Promise<object[]>, cachedSessions?: () => object[] | null, currentId: () => string, icons: Record<string, string>, onRename?: (id: string, title: string) => Promise<void>, onPin?: (id: string, pinned: boolean) => Promise<void>, onDelete?: (id: string) => Promise<void> }} o
  */
-export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, cachedSessions = () => null, currentId, icons = {}, onRename, onPin, onDelete, onExport, searchContent, rowState = () => ({}), onRendered = () => {}, source = () => 'local' }) {
+export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, cachedSessions = () => null, currentId, icons = {}, onRename, onPin, onDelete, onExport, searchContent, rowState = () => ({}), onRendered = () => {}, source = () => 'local', agents = null }) {
   const scrim = el('div', { className: 'drawer-scrim', hidden: true });
   const history = el('div', { className: 'drawer-history' });
   // 按标题搜对话：有关键词时列出所有匹配的（不受“只显示 8 条”限制）
@@ -89,11 +89,26 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, cached
   memBtn.addEventListener('click', () => { close(); onPanel('mind'); });
   const closeBtn = el('button', { type: 'button', className: 'drawer-close', textContent: '×', ariaLabel: '关闭菜单' });
   closeBtn.addEventListener('click', close);
+  // 发现智能体（设计稿 P1）：点标题进广场，点图标直接开该智能体的对话
+  const agentRow = el('div', { className: 'drawer-agent-picks' });
+  const agentHead = el('button', { type: 'button', className: 'drawer-agents-head' }, el('b', { textContent: '发现智能体' }), el('span', { ariaHidden: 'true', textContent: '›' }));
+  agentHead.addEventListener('click', () => { close(); agents?.onOpen(); });
+  const agentCard = agents && el('section', { className: 'drawer-card drawer-agents' }, agentHead, agentRow);
+  function renderAgentPicks() {
+    if (!agents) return;
+    agentRow.replaceChildren(...agents.picks().map((p) => {
+      const b = el('button', { type: 'button', className: 'drawer-agent-pick' }, agents.icon(p), el('span', { textContent: p.name }));
+      b.dataset.agent = p.id;
+      b.addEventListener('click', () => { close(); agents.onPick(p); });
+      return b;
+    }));
+  }
   const drawer = el('aside', { className: 'drawer', id: 'drawer', ariaLabel: '菜单' },
     el('div', { className: 'drawer-head' },
       el('span', { className: 'drawer-logo', ariaHidden: 'true' }),
       el('div', { className: 'drawer-title' }, el('strong', { textContent: '未央' }), el('small', { textContent: '个人智能助手' })), closeBtn),
     newBtn,
+    agentCard,
     el('section', { className: 'drawer-card' }, el('h3', { textContent: '功能' }), grid),
     el('section', { className: 'drawer-hist' }, el('h3', { textContent: '历史对话' }), search, history),
     el('footer', { className: 'drawer-foot' }, memBtn, settingsBtn)
@@ -164,9 +179,11 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, cached
   function row(x, cur) {
     const state = rowState(x);
     const caption = el('span', { className: 'drawer-item-copy' }, el('span', { className: 'drawer-item-t', textContent: x.title || '新对话' }));
+    const agentIcon = agents?.rowIcon(x);
     if (state.label) caption.append(el('small', { className: 'drawer-activity', textContent: state.label }));
     if (state.unread) caption.append(el('span', { className: 'drawer-unread', ariaLabel: '有未读回复', title: '有未读回复' }));
-    const b = el('button', { type: 'button', className: `drawer-item${x.id === cur ? ' current' : ''}` },
+    const b = el('button', { type: 'button', className: `drawer-item${x.id === cur ? ' current' : ''}${agentIcon ? ' with-agent' : ''}` },
+      agentIcon,
       caption,
       el('time', { textContent: shortTime(x.updatedAt ?? x.createdAt ?? Date.now()) }));
     if (x.id === cur) b.setAttribute('aria-current', 'true');
@@ -210,6 +227,7 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, cached
   function open() {
     expanded = false;
     search.value = '';
+    renderAgentPicks();
     refresh();
     document.body.classList.add('drawer-open');
     drawer.setAttribute('aria-hidden', 'false');

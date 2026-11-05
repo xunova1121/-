@@ -16,6 +16,7 @@ import { createCodeProjectsUI } from './app/codeProjects.js';
  *   app/panels.js         右侧面板
  *   app/view.js           欢迎页、命令面板、主题、更新提示、设置开关、开机动画
  *   app/sessionLists.js   “对话”面板、手机左侧抽屉
+ *   app/agents.js         智能体广场、智能体起始页、顶栏智能体名字
  *   app/sync.js           服务器模式设置面板
  *   app/recovery.js       启动时接回上次的对话 / 没做完的任务
  *   app/shortcuts.js      键盘快捷键
@@ -59,6 +60,7 @@ import { createPanels, PANES } from './app/panels.js';
 import { createModelWorkspace } from './app/modelWorkspace.js';
 import { createView } from './app/view.js';
 import { createSessionLists } from './app/sessionLists.js';
+import { createAgents } from './app/agents.js';
 import { createSync } from './app/sync.js';
 import { createRecovery } from './app/recovery.js';
 import { createShortcuts } from './app/shortcuts.js';
@@ -99,6 +101,7 @@ mount(app, createComposer(app));
 mount(app, createPanels(app));
 mount(app, createModelWorkspace(app));
 mount(app, createView(app));
+mount(app, createAgents(app));
 mount(app, createSessionLists(app));
 mount(app, createSync(app));
 mount(app, createRecovery(app));

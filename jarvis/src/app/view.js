@@ -35,6 +35,8 @@ export function createView(app) {
   addEventListener('jarvis:weather-config-changed', () => homeWeather.refresh({ force: true }));
   function renderWelcome() {
     if (document.querySelector('#transcript .msg')) return;
+    // 从智能体广场开的空对话：显示该智能体的起始页，不显示普通首页
+    if (app.agents?.renderStart()) return;
     if (COMPACT) {
       homeView?.destroy();
       document.querySelector('#transcript .wy-home')?.remove();
