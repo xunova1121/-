@@ -3,9 +3,11 @@
  * 样张和配图都由未央自己的排版引擎和 scripts/make-ppt-templates.mjs 生成（配图是脚本里手写的原创几何插画），
  * 不使用网上的模板文件或图片。缩略图在 src/assets/ppt-templates/<id>-<页>.jpg；配图不存文件，由 pptTemplateArt.js 现画。
  */
-export const TEMPLATE_SCENES = Object.freeze({ gov: '政企汇报', summary: '工作总结', pitch: '项目路演', teach: '培训教学', data: '数据分析', product: '产品发布', event: '节日活动', simple: '简约通用' });
+export const TEMPLATE_SCENES = Object.freeze({ gov: '政企汇报', summary: '工作总结', decision: '决策建议', pitch: '项目路演', research: '学术科研', teach: '培训教学', data: '数据分析', tech: '技术方案', product: '产品发布', event: '节日活动', simple: '简约通用' });
 
-const t = (id, name, scene, style, theme, desc, art, outline, sample) => ({ id, name, scene, style, theme, desc, art, outline, sample: sample.replace('{{TITLE}}', name) });
+/** method：写这类 PPT 的方法（交给模型）；credit：借鉴了哪个开源项目的思路（只借鉴，不复制其文件和图片） */
+const t = (id, name, scene, style, theme, desc, art, outline, sample, { method = '', credit = '' } = {}) => ({ id, name, scene, style, theme, desc, art, outline, method, credit, sample: sample.replace('{{TITLE}}', name) });
+const PPT_MASTER = '方法参考 hugohe3/ppt-master（MIT）';
 
 /** art：本模板自带的配图，[名字, 图案, 用途]；图案见 scripts/pptTemplateArt.mjs */
 const LIST = [
@@ -45,6 +47,36 @@ const LIST = [
     [['cover', 'lanterns', '封面'], ['scene', 'lanterns', '活动页配图']],
     ['活动主题', '活动流程', '分工安排', '预算与保障'],
     `# {{TITLE}}\n\n![封面](art/cover)\n\n## 活动主题\n\n团圆迎新春，携手向未来\n\n## 活动流程\n\n![活动现场](art/scene)\n\n1. 14:00 签到入场\n2. 14:30 领导致辞\n3. 15:00 游戏互动\n4. 16:30 抽奖与合影\n\n## 分工安排\n\n- 策划组：方案与流程\n- 物料组：场地布置与礼品\n- 宣传组：海报与拍照\n- 保障组：安全与后勤\n\n## 谢谢\n\n期待与你一起欢度佳节`),
+  t('violet-glass', '紫韵工作汇报', 'summary', 'minimal', 'violet-glass', '紫色玻璃质感的工作汇报：通透、年轻，适合产品、品牌、创意团队',
+    [['cover', 'glass', '封面'], ['scene', 'glass', '内容页配图']],
+    ['工作概览', '重点成果', '问题与改进', '下一步计划'],
+    `# {{TITLE}}\n\n![封面](art/cover)\n\n## 工作概览\n\n- 36个：上线需求\n- 4.8分：用户满意度\n- 2倍：活跃用户增长\n\n## 重点成果\n\n![成果](art/scene)\n\n- 品牌焕新：完成视觉系统升级｜全渠道统一\n- 体验优化：关键流程步骤减少一半\n- 增长实验：完成12组A/B测试\n\n## 问题与改进\n\n- 需求排期偏紧：建立双周规划会\n- 设计规范不统一：沉淀组件库\n- 数据看板滞后：接入实时数据\n\n## 下一步计划\n\n- 一季度：会员体系上线\n- 二季度：国际化版本\n- 全年：活跃用户再翻一番`,
+    { credit: '视觉风格参考 metaimagine/ai-pptx（MIT）的紫色玻璃质感模板；配图为未央原创' }),
+  t('academic-report', '课题研究汇报', 'research', 'report', 'academic-blue', '课题汇报、开题答辩、学术交流：深蓝标题栏、关键词标红，严谨清楚',
+    [['cover', 'campus', '封面 / 章节'], ['scene', 'books', '研究内容配图']],
+    ['一、研究背景与意义', '二、研究内容与方法', '三、阶段性成果', '四、下一步计划'],
+    `# {{TITLE}}\n\n![封面](art/cover)\n\n## 一、研究背景与意义\n\n结论：现有方法在**小样本场景**下准确率明显不足\n\n- 3类：主流方法对比\n- 62%：小样本下平均准确率\n- 2项：本课题要解决的关键问题\n\n## 二、研究内容与方法\n\n![研究方法](art/scene)\n\n- 数据构建：整理公开数据集并补充标注｜样本量扩大3倍\n- 模型改进：引入迁移学习与数据增强\n- 实验设计：设置三组对照实验\n\n## 三、阶段性成果\n\n- 论文：投稿2篇，录用1篇\n- 原型：完成实验平台搭建\n- 指标：准确率提升到78%\n\n## 谢谢\n\n恳请各位专家批评指正`,
+    { credit: '版式思路参考 deathcats4/scholar-ppt-cn（MIT）的中文学术汇报模板；配图为未央原创', method: '学术汇报：先讲清研究问题和意义，再讲方法、实验和结果；结论要有数据支撑，引用标注来源；“已完成 / 进行中 / 计划”分开写，不夸大成果。' }),
+  t('consulting-decision', '决策建议汇报', 'decision', 'business', 'ink-jade', '给领导或客户的决策建议：结论先行、论据分组、每个建议配风险和行动',
+    [['cover', 'compass', '封面'], ['scene', 'compass', '建议页配图']],
+    ['核心结论与建议', '现状与问题', '方案对比', '实施路径与风险'],
+    `# {{TITLE}}\n\n![封面](art/cover)\n\n## 核心建议：优先上线方案B\n\n结论：方案B**投入最少、见效最快**，建议本季度启动\n\n- 3个月：预计见效时间\n- 40%：比方案A节省投入\n- 2项：需要决策的事项\n\n## 现状与问题\n\n- 成本高：单位成本比同行高18%\n- 周期长：交付平均延迟2周\n- 协同难：三个部门流程不统一\n\n## 方案对比\n\n| 方案 | 投入（万元） | 见效（月） |\n|---|---|---|\n| 方案A | 500 | 6 |\n| 方案B | 300 | 3 |\n| 方案C | 420 | 5 |\n\n## 实施路径与风险\n\n![路径](art/scene)\n\n- 第一阶段：试点两个部门｜风险：人员抵触，提前培训\n- 第二阶段：全面推广｜风险：系统对接，预留缓冲\n- 第三阶段：复盘优化`,
+    { credit: PPT_MASTER, method: '决策汇报（金字塔原理）：第一页就给结论和要决策的事；每页标题是一句判断，下面放支撑证据；事实、假设、建议分开写；每个建议配预期效果、代价和风险，不编造对标数据。' }),
+  t('operating-review', '月度经营复盘', 'data', 'data', 'forest-canopy', '月报、季度经营复盘：实际对计划、差异原因、整改责任人，一页一个指标',
+    [['cover', 'dashboard', '封面'], ['scene', 'growth', '趋势页配图']],
+    ['本期总览', '实际与计划对比', '差异原因', '整改与下期预测'],
+    `# {{TITLE}}\n\n![封面](art/cover)\n\n## 本期总览：营收完成计划的96%\n\n- 960万：本月营收（计划1000万）\n- -4%：与计划差异\n- 3项：上月承诺已完成\n\n## 实际与计划对比\n\n| 指标 | 实际 | 计划 |\n|---|---|---|\n| 营收（万元） | 960 | 1000 |\n| 新客户（家） | 42 | 40 |\n| 毛利率（%） | 38 | 40 |\n\n## 差异原因\n\n![趋势](art/scene)\n\n- 华南区域：两个大单延期到下月｜影响约30万\n- 原材料涨价：毛利率下降2个点\n- 新客户超额：新渠道带来增量\n\n## 整改与下期预测\n\n- 大单跟进：销售总监负责，11月20日前签约\n- 成本控制：采购部负责，锁定季度价格\n- 下月预测：营收1050万`,
+    { credit: PPT_MASTER, method: '经营复盘：先给本期结果和与计划的差距；实际、计划、上期数值明确标注、口径不变；每个差异讲原因（有证据才下结论），每个原因配整改措施、责任人和日期；坏消息不弱化。' }),
+  t('tech-review', '技术方案评审', 'tech', 'minimal', 'tech-innovation', '架构评审、技术方案、系统介绍：问题与约束 → 机制 → 取舍 → 落地',
+    [['cover', 'circuit', '封面'], ['scene', 'circuit', '架构页配图']],
+    ['问题与约束', '整体架构', '关键机制', '方案取舍与落地计划'],
+    `# {{TITLE}}\n\n![封面](art/cover)\n\n## 问题与约束\n\n- 高峰并发：每秒2万次请求\n- 响应时间：99%请求在200毫秒内\n- 成本：服务器预算不增加\n\n## 整体架构\n\n![架构](art/scene)\n\n- 接入层：统一网关，限流与鉴权\n- 服务层：拆分为订单、库存、支付三个服务\n- 数据层：读写分离，热点数据进缓存\n\n## 方案取舍\n\n| 方案 | 性能 | 复杂度 |\n|---|---|---|\n| 单体扩容 | 中 | 低 |\n| 服务拆分 | 高 | 中 |\n| 全面重写 | 高 | 高 |\n\n## 落地计划\n\n- 第1个月：网关上线，灰度10%流量\n- 第2个月：订单服务拆分\n- 第3个月：全量切换，保留回滚方案`,
+    { credit: PPT_MASTER, method: '技术方案：先讲要解决的问题和硬约束（并发、延迟、成本），再讲整体架构和关键机制，然后对比备选方案说明取舍；性能数字写清测试条件；最后给落地步骤和回滚办法。' }),
+  t('incident-review', '故障复盘报告', 'tech', 'business', 'desert-rose', '故障、事故、质量问题复盘：时间线、影响、原因、改进措施，不追责只改进',
+    [['cover', 'timeline', '封面'], ['scene', 'timeline', '时间线配图']],
+    ['事件概要与影响', '时间线', '原因分析', '改进措施'],
+    `# {{TITLE}}\n\n![封面](art/cover)\n\n## 事件概要：支付服务中断42分钟\n\n- 42分钟：服务中断时长\n- 1.2万笔：受影响订单\n- 0笔：资金损失\n\n## 时间线（北京时间）\n\n![时间线](art/scene)\n\n1. 10:05 监控告警，支付成功率下降\n2. 10:12 值班工程师确认故障\n3. 10:30 定位到数据库连接耗尽\n4. 10:47 扩容恢复，服务正常\n\n## 原因分析\n\n- 直接原因：新版本连接池配置错误\n- 发现慢：告警阈值过高，晚了7分钟\n- 流程缺口：变更未经压测\n\n## 改进措施\n\n- 配置检查：发布前自动校验｜负责人：运维组，11月15日\n- 告警优化：阈值下调到5%｜负责人：监控组，11月10日\n- 变更流程：上线前必须压测｜负责人：研发经理，即日起`,
+    { credit: PPT_MASTER, method: '故障复盘（不追责）：先写影响（时长、范围、损失）；时间线每条带时间和来源；原因分技术、流程、管理多方面，不归咎个人；做得好的也写；改进措施写负责人、日期和怎么验证；没查清的写成待确认。' }),
   t('simple-general', '简约通用', 'simple', 'minimal', 'arctic-frost', '什么场合都能用的简洁模板：留白多，信息干净',
     [['cover', 'mountains', '封面'], ['scene', 'mountains', '内容页配图']],
     ['背景', '核心观点', '具体做法', '总结'],
@@ -66,5 +98,5 @@ export function templateNote(id) {
   const x = pptTemplate(id);
   if (!x) return '';
   const art = x.art.map(([name, , use]) => `${templateArtPath(x.id, name)}（${use}）`).join('、');
-  return `模板「${x.name}」：生成 PPT 时 create_document 传 style=${x.style}、theme=${x.theme}；推荐结构：${x.outline.join(' → ')}；可用配图：${art}，在正文里用 ![说明](路径) 引用，配图只是氛围图，不能代替真实照片或数据`;
+  return `模板「${x.name}」：生成 PPT 时 create_document 传 style=${x.style}、theme=${x.theme}；推荐结构：${x.outline.join(' → ')}；${x.method ? `写法：${x.method}；` : ''}可用配图：${art}，在正文里用 ![说明](路径) 引用，配图只是氛围图，不能代替真实照片或数据`;
 }

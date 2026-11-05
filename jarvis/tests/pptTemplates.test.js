@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PPT_TEMPLATES, PPT_TEMPLATE_IDS, TEMPLATE_SCENES, templateNote, templateArtPath, pptTemplate } from '../src/agent/pptTemplates.js';
 import { artSvg, ART_MOTIFS } from '../src/agent/pptTemplateArt.js';
-import { THEMES, REPORT_THEMES } from '../src/agent/themes.js';
+import { THEMES, themeById } from '../src/agent/themes.js';
 import { ALL_STYLE_IDS } from '../src/agent/pptStyles.js';
 import { makePptx } from '../src/agent/pptxWriter.js';
 import { BUILTIN_AGENTS } from '../src/agent/agentProfiles.js';
@@ -15,15 +15,29 @@ const texts = (page) => page.items.filter(it => it.kind === 'text').map(it => (A
 
 describe('PPT 模板库', () => {
   it('10 个模板：编号唯一，风格、配色、场景、配图图案都存在，3 张样张缩略图都在', () => {
-    expect(PPT_TEMPLATES).toHaveLength(10);
-    expect(new Set(PPT_TEMPLATE_IDS).size).toBe(10);
+    // 第一批 10 个一个都不能少（第二批另有守护）
+    for (const id of ['gov-progress', 'gov-annual', 'eco-park', 'work-summary', 'startup-pitch', 'training', 'data-report', 'product-launch', 'festival-event', 'simple-general']) expect(PPT_TEMPLATE_IDS).toContain(id);
+    expect(new Set(PPT_TEMPLATE_IDS).size).toBe(PPT_TEMPLATE_IDS.length);
     for (const t of PPT_TEMPLATES) {
       expect(ALL_STYLE_IDS, t.id).toContain(t.style);
-      expect(THEMES[t.theme] || REPORT_THEMES[t.theme], t.id).toBeTruthy();
+      expect(themeById(t.theme), t.id).toBeTruthy();
       expect(TEMPLATE_SCENES[t.scene], t.id).toBeTruthy();
       for (const [, motif] of t.art) expect(ART_MOTIFS, t.id).toContain(motif);
       for (const n of [1, 2, 3]) expect(fs.existsSync(path.join('src/assets/ppt-templates', `${t.id}-${n}.jpg`)), `${t.id}-${n}`).toBe(true);
     }
+  });
+  it('第二批 6 个：借鉴 GitHub 上 MIT 开源项目的思路，注明出处；咨询、复盘、技术、学术类带写法说明', () => {
+    const second = ['violet-glass', 'academic-report', 'consulting-decision', 'operating-review', 'tech-review', 'incident-review'];
+    expect(PPT_TEMPLATES).toHaveLength(16);
+    for (const id of second) {
+      const t = pptTemplate(id);
+      expect(t, id).toBeTruthy();
+      expect(t.credit, id).toMatch(/MIT/);
+    }
+    for (const id of second.slice(1)) expect(pptTemplate(id).method, id).toBeTruthy();
+    expect(templateNote('incident-review')).toContain('写法：');
+    expect(themeById('violet-glass').name).toBe('紫韵');
+    expect(themeById('academic-blue').name).toBe('学术蓝');
   });
   it('原创配图：只用简单图形，不引用外部图片、字体或脚本', () => {
     for (const motif of ART_MOTIFS) {
@@ -35,7 +49,7 @@ describe('PPT 模板库', () => {
   });
   it('样例内容用排版引擎生成：有封面配图、无排版错误、不缺图', async () => {
     for (const t of PPT_TEMPLATES) {
-      const { info } = await makePptx({ title: t.name, content: t.sample, theme: THEMES[t.theme] || REPORT_THEMES[t.theme], style: t.style, loadImage: async () => PNG });
+      const { info } = await makePptx({ title: t.name, content: t.sample, theme: themeById(t.theme), style: t.style, loadImage: async () => PNG });
       expect(info.layoutIssues.filter(x => x.level === 'error'), t.id).toEqual([]);
       expect(info.missingImages, t.id).toEqual([]);
       expect(info.slides, t.id).toBeGreaterThanOrEqual(4);
@@ -67,5 +81,18 @@ describe('排版引擎：模板样张发现的两个问题', () => {
     const page = texts(info.preview.at(-1));
     expect(page).toContain('14:00');
     expect(page).not.toMatch(/(^|\|)00 签到入场/);
+  });
+});
+
+describe('排版引擎：第二批模板样张发现的问题', () => {
+  it('每行单位不同的指标表不画成同一根纵轴的柱状图', async () => {
+    const md = '## 实际与计划\n\n| 指标 | 实际 | 计划 |\n|---|---|---|\n| 营收（万元） | 960 | 1000 |\n| 新客户（家） | 42 | 40 |\n| 毛利率（%） | 38 | 40 |';
+    const { info } = await makePptx({ title: 'x', content: md, theme: THEMES.business, style: 'business' });
+    expect(info.layouts.at(-1)).toBe('table');
+  });
+  it('“4.8分：满意度”当成大数字', async () => {
+    const { info } = await makePptx({ title: 'x', content: '## 概览\n\n- 36个：上线需求\n- 4.8分：用户满意度\n- 2倍：活跃增长', theme: THEMES.business, style: 'business' });
+    expect(info.layouts.at(-1)).toBe('stats');
+    expect(texts(info.preview.at(-1))).toContain('4.8');
   });
 });

@@ -87,7 +87,7 @@ async function phone(browser, base, { width, theme, zoom }) {
   check(`[${tag}] 起始页 4 个模板，缩略图都加载出来`, (await page.locator('.wy-tpl-pick .wy-tpl-card').count()) === 4);
   await page.click('.wy-tpl-more');
   await page.waitForSelector('.wy-tpl-library:not([hidden]) .wy-tpl-card');
-  check(`[${tag}] 模板库 10 个模板`, (await page.locator('.wy-tpl-library .wy-tpl-card').count()) === 10);
+  check(`[${tag}] 模板库 16 个模板`, (await page.locator('.wy-tpl-library .wy-tpl-card').count()) === 16);
   check(`[${tag}] 模板库不横向溢出`, (await overflow(page)) <= 0);
   await page.click('.wy-tpl-library .wy-agents-chip[data-scene="gov"]');
   check(`[${tag}] 筛“政企汇报”剩 3 个`, (await page.locator('.wy-tpl-library .wy-tpl-card').count()) === 3);

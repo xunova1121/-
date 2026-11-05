@@ -3,13 +3,13 @@
  * 缩略图是排版引擎真实生成、LibreOffice 转出来的样张（scripts/make-ppt-templates.mjs），取不到图时只显示名字。
  */
 import { PPT_TEMPLATES, TEMPLATE_SCENES, pptTemplate } from '../agent/pptTemplates.js';
-import { THEMES, REPORT_THEMES } from '../agent/themes.js';
+import { themeById } from '../agent/themes.js';
 
 // 样张缩略图随构建打包（手机版、单文件版也有）；文件名 <模板>-<页>.jpg
 const THUMBS = import.meta.glob('../assets/ppt-templates/*.jpg', { eager: true, query: '?url', import: 'default' });
 const templateThumb = (id, page = 1) => THUMBS[`../assets/ppt-templates/${id}-${page}.jpg`] || '';
 
-const themeName = (id) => (THEMES[id] || REPORT_THEMES[id])?.name || id;
+const themeName = (id) => themeById(id)?.name || id;
 const el = (tag, props = {}, ...kids) => {
   const e = Object.assign(document.createElement(tag), props);
   e.append(...kids.filter((k) => k !== null && k !== undefined && k !== false));
@@ -90,6 +90,7 @@ export function createTemplateLibrary({ onPick }) {
       el('p', { className: 'wy-agent-start-intro', textContent: tpl.desc }),
       el('div', { className: 'wy-tpl-outline' }, el('b', { textContent: '推荐结构' }), el('span', { textContent: tpl.outline.join(' → ') })),
       el('div', { className: 'wy-tpl-outline' }, el('b', { textContent: '自带配图' }), el('span', { textContent: tpl.art.map(([, , usage]) => usage).join('、') })),
+      tpl.credit ? el('div', { className: 'wy-tpl-outline' }, el('b', { textContent: '出处' }), el('span', { textContent: tpl.credit })) : null,
       use);
     body.scrollTop = 0;
   }

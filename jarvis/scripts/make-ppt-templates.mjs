@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PPT_TEMPLATES } from '../src/agent/pptTemplates.js';
-import { THEMES, REPORT_THEMES } from '../src/agent/themes.js';
+import { themeById } from '../src/agent/themes.js';
 import { makePptx } from '../src/agent/pptxWriter.js';
 import { artSvg } from '../src/agent/pptTemplateArt.js';
 
@@ -27,7 +27,7 @@ const page = await browser.newPage({ viewport: { width: 1200, height: 675 } });
 let problems = 0;
 try {
   for (const tpl of PPT_TEMPLATES) {
-    const theme = THEMES[tpl.theme] || REPORT_THEMES[tpl.theme];
+    const theme = themeById(tpl.theme);
     if (!theme) throw new Error(`${tpl.id}：没有配色 ${tpl.theme}`);
     const images = {};
     for (const [name, motif] of tpl.art) {

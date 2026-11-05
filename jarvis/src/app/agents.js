@@ -8,7 +8,7 @@ import { createAgentSquare, agentStartView, iconBadge } from '../ui/agentSquare.
 import { createTemplateLibrary } from '../ui/pptTemplateLibrary.js';
 import { pptTemplate, templateArtPath } from '../agent/pptTemplates.js';
 import { artSvg } from '../agent/pptTemplateArt.js';
-import { THEMES, REPORT_THEMES } from '../agent/themes.js';
+import { themeById } from '../agent/themes.js';
 import * as ws from '../agent/workspace.js';
 import { $, toast } from './env.js';
 
@@ -46,7 +46,7 @@ export function createAgents(app) {
    */
   /** 模板配图：原创 SVG 插画在设备上画成 1200×675 的 PNG */
   async function drawArt(tpl, motif) {
-    const theme = THEMES[tpl.theme] || REPORT_THEMES[tpl.theme];
+    const theme = themeById(tpl.theme);
     const url = URL.createObjectURL(new Blob([artSvg(motif, theme.colors)], { type: 'image/svg+xml' }));
     try {
       const img = new Image();

@@ -44,6 +44,7 @@ import { withoutCodeCredentials } from './gitHosting.mjs';
  */
 import dns from 'node:dns/promises';
 import { resolveAgentTurn, sanitizeAgentForm } from '../src/agent/agentTurn.js';
+import { BUILTIN_AGENTS } from '../src/agent/agentProfileBuiltins.js';
 import { profileId } from '../src/agent/agentProfileValidation.js';
 import { runAgent } from '../src/agent/agent.js';
 import { createTools } from '../src/agent/tools.js';
@@ -287,7 +288,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const session = await sessions.get(task.sessionId);
     const cfg = serverModelConfig(withoutCodeCredentials(await getConfig()));
     // 智能体对话：按本人注册表解析（找不到就报错，不悄悄当普通对话）
-    const agent = task.evaluationId ? null : await resolveAgentTurn({ agentId: session.agentId || null, form: session.agentForm || null });
+    // 评测任务只允许内置智能体（固定配置、不涉及个人数据），不读个人智能体
+    const agent = await resolveAgentTurn({ agentId: session.agentId || null, form: session.agentForm || null }, task.evaluationId ? { lookup: async (id) => BUILTIN_AGENTS.find((p) => p.id === id) || null } : undefined);
     const taskIntent = resolveTaskIntent(task.text, { history: session.messages.slice(0, -1), state: session.taskContext, images: task.images.length });
     // 记忆按意思找：用能力表“记忆向量”那一项（服务器没有跨域限制）；没有就只按关键字
     memory.configureMemory({ llm: helper(cfg, 'write', task, 'memory'), embedder: createEmbedder(cfg, { direct: true }) });

@@ -7,7 +7,7 @@ import { officeTypography } from './officeTypography.js';
 import { requestedSlides, presentationCover } from './documentPageBudget.js';
 import * as ws from './workspace.js';
 import { generate } from './docs.js';
-import { THEME_IDS, REPORT_THEME_IDS, themeList } from './themes.js';
+import { THEME_IDS, REPORT_THEME_IDS, TEMPLATE_THEME_IDS, themeList } from './themes.js';
 import { planDocument, documentError } from './documentPlan.js';
 import { chooseDesign, DOC_KINDS, SHEET_KINDS } from './documentDesign.js';
 import { styleRequests, relativeTypography, lastStyle } from './styleCheck.js';
@@ -82,7 +82,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         content: str('Markdown 内容'),
         source_requirement_id: str('只排版、内容不变时，绑定read_task_requirements中用户原文编号；不从助手旧稿重写正文'),
         source_path: str('Word重排绑定原DOCX；PPT从Word制作时绑定原DOCX核对完整表格，补图绑定本工具制作的原PPT并另存；普通MD原文转Word也可绑定。其他跨格式材料用read_file读取后填content，不把原件重排参数用于PDF'),
-        theme: { type: 'string', enum: [...THEME_IDS, ...REPORT_THEME_IDS], description: '配色主题（政企汇报另有 tech-blue 科技蓝 / gov-red 政务红 / eco-green 生态绿），不填自动选' },
+        theme: { type: 'string', enum: [...THEME_IDS, ...REPORT_THEME_IDS, ...TEMPLATE_THEME_IDS], description: '配色主题（政企汇报另有 tech-blue 科技蓝 / gov-red 政务红 / eco-green 生态绿；模板库另有 violet-glass 紫韵 / academic-blue 学术蓝），不填自动选' },
         style: { type: 'string', enum: ALL_STYLE_IDS, description: 'PPT 设计风格（构图不同，不只是颜色）：business 稳重商务（汇报、方案）/ minimal 简洁留白（产品、设计、品牌）/ story 叙事氛围（剧情、人物、历史、文化、旅行）/ data 数据报告（经营、财务、统计）/ report 政企汇报（项目路演、解决方案、政企/国企汇报：双色章节标题、标题下结论句、指标条、痛点四宫格、竖标签面板、左图右文、渐变封面结尾）。不填按用户要求和内容自动选' },
         print_friendly: { type: 'boolean', description: 'PPT 打印友好：政企汇报的封面、章节页、结尾页不用深色渐变，改白底（用户说要打印、黑白、省墨时用）' },
         sheet_style: { type: 'string', enum: SHEET_STYLE_IDS, description: 'Excel视觉风格：business商务表格/minimal简洁留白/ledger紧凑台账/analysis分析报表；不填按用户原话、Excel偏好和kind选。样式不移动行列，不改公式数据' },

@@ -75,11 +75,23 @@ export const REPORT_THEMES = {
 };
 export const REPORT_THEME_IDS = Object.keys(REPORT_THEMES);
 
+/**
+ * 模板库专用配色（PPT 模板第二批）：单独登记，不参与按内容自动选色，也不改上面两组的数量。
+ * 紫韵参考 metaimagine/ai-pptx（MIT）的紫色玻璃质感，学术蓝参考 deathcats4/scholar-ppt-cn（MIT）的学术汇报配色；颜色值为未央自定
+ */
+export const TEMPLATE_THEMES = {
+  'violet-glass': T('violet-glass', '紫韵', { primary: '4B2BB8', accent: '7B5CF0', soft: 'F0ECFF', bg: 'FAF8FF', extra: 'E26AD0' }, 'sans', [], '产品、品牌、创意工作汇报'),
+  'academic-blue': T('academic-blue', '学术蓝', { primary: '123E7C', accent: '1F5FB4', soft: 'E8EFF9', bg: 'F7F9FC', extra: 'C62828' }, 'sans', [], '课题汇报、开题答辩、学术交流')
+};
+export const TEMPLATE_THEME_IDS = Object.keys(TEMPLATE_THEMES);
+/** 按 id 精确找任意一组配色（模板库、脚本用） */
+export const themeById = (id) => THEMES[id] ?? REPORT_THEMES[id] ?? TEMPLATE_THEMES[id] ?? null;
+
 /** 按 id 或中文名找主题；找不到返回 null */
 export function findTheme(name) {
   const s = String(name ?? '').trim();
   if (!s) return null;
-  return THEMES[s] ?? REPORT_THEMES[s] ?? [...Object.values(THEMES), ...Object.values(REPORT_THEMES)].find((t) => t.name === s || s.includes(t.name)) ?? null;
+  return THEMES[s] ?? REPORT_THEMES[s] ?? TEMPLATE_THEMES[s] ?? [...Object.values(THEMES), ...Object.values(REPORT_THEMES), ...Object.values(TEMPLATE_THEMES)].find((t) => t.name === s || s.includes(t.name)) ?? null;
 }
 
 /**

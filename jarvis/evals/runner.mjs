@@ -52,7 +52,7 @@ export async function runCase(api, item, { runId = randomUUID(), now = Date.now,
     status: 'not_started', quality: 'not_reviewed', cost: null, costReason: '接口尚未提供完整计费数据' };
   try {
     if (signal?.aborted) { result.status='client_cancelled'; result.quality='execution_failed'; return result; }
-    accepted = await api('/api/tasks', { text: prompt, requestId, ...(sessionId && { sessionId }), ...(evaluationId && { evaluationId }) }, { signal });
+    accepted = await api('/api/tasks', { text: prompt, requestId, ...(sessionId && { sessionId }), ...(evaluationId && { evaluationId }), ...(item.agentId && { agentId: item.agentId, ...(item.agentForm && { agentForm: item.agentForm }) }) }, { signal });
     if (!/^[\w-]{1,80}$/.test(accepted?.id || '') || !/^[\w-]{1,80}$/.test(accepted?.sessionId || '') || accepted.joined || (sessionId && accepted.sessionId !== sessionId)) throw evalError('服务器未创建独立评测任务', 'EVAL_PROTOCOL');
     owned = true;
     result.taskId = accepted.id; result.sessionId = accepted.sessionId;

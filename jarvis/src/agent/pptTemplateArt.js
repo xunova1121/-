@@ -77,6 +77,37 @@ ${trees}<path d="M0 700 C 400 620 900 760 1600 660 L1600 900 L0 900Z" fill="url(
     const lantern = (x, y, s) => `<path d="M${x} 0 V${y - s}" stroke="${hex(c.primary)}" stroke-width="4"/><rect x="${x - s * 0.35}" y="${y - s * 1.05}" width="${s * 0.7}" height="${s * 0.16}" rx="4" fill="${hex(c.extra)}"/><ellipse cx="${x}" cy="${y}" rx="${s * 0.75}" ry="${s * 0.9}" fill="${hex(c.accent)}"/><path d="M${x} ${y - s * 0.9} V${y + s * 0.9} M${x - s * 0.4} ${y - s * 0.78} C ${x - s * 0.6} ${y} ${x - s * 0.6} ${y} ${x - s * 0.4} ${y + s * 0.78} M${x + s * 0.4} ${y - s * 0.78} C ${x + s * 0.6} ${y} ${x + s * 0.6} ${y} ${x + s * 0.4} ${y + s * 0.78}" stroke="${tint(c.accent, 0.35)}" stroke-width="4" fill="none"/><rect x="${x - s * 0.35}" y="${y + s * 0.88}" width="${s * 0.7}" height="${s * 0.16}" rx="4" fill="${hex(c.extra)}"/><path d="M${x} ${y + s * 1.04} v${s * 0.5}" stroke="${hex(c.extra)}" stroke-width="8" stroke-linecap="round"/>`;
     return `${confetti}${lantern(330, 330, 150)}${lantern(620, 230, 110)}${lantern(1000, 300, 130)}${lantern(1300, 220, 100)}<path d="M0 760 C 400 700 1200 820 1600 740 L1600 900 L0 900Z" fill="url(#main)"/>`;
   },
+  glass(c) {
+    // 玻璃质感的流体团：几层半透明渐变圆叠加（配色自定，构图原创）
+    const blob = (cx, cy, r, from, to, o) => `<defs><radialGradient id="g${cx}${cy}" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="#ffffff" stop-opacity=".9"/><stop offset=".45" stop-color="${from}"/><stop offset="1" stop-color="${to}"/></radialGradient></defs><circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#g${cx}${cy})" opacity="${o}"/>`;
+    return `${blob(1120, 360, 300, tint(c.accent, 0.35), hex(c.primary), 0.92)}${blob(1380, 640, 150, tint(c.extra, 0.3), hex(c.extra), 0.85)}${blob(820, 650, 110, tint(c.accent, 0.6), hex(c.accent), 0.8)}${blob(1460, 180, 70, '#ffffff', tint(c.accent, 0.4), 0.9)}
+<path d="M760 420 C 900 200 1300 160 1480 360 S 1300 760 980 700" fill="none" stroke="#ffffff" stroke-width="10" opacity=".55" stroke-linecap="round"/><rect x="120" y="680" width="420" height="16" rx="8" fill="${hex(c.accent)}" opacity=".5"/><rect x="120" y="720" width="280" height="16" rx="8" fill="${hex(c.extra)}" opacity=".5"/>`;
+  },
+  campus(c) {
+    const cols = Array.from({ length: 7 }, (_, i) => `<rect x="${560 + i * 80}" y="360" width="40" height="300" rx="6" fill="${tint(c.soft, 0.3)}"/>`).join('');
+    return `<circle cx="1320" cy="200" r="80" fill="${hex(c.extra)}" opacity=".18"/><rect x="500" y="320" width="600" height="360" fill="url(#main)"/><path d="M460 330 L800 160 L1140 330 Z" fill="${hex(c.primary)}"/><circle cx="800" cy="260" r="38" fill="${tint(c.soft, 0.4)}"/>${cols}
+<rect x="440" y="660" width="720" height="40" fill="${hex(c.primary)}"/><rect x="400" y="700" width="800" height="30" fill="${tint(c.primary, 0.3)}"/><path d="M0 760 C 400 720 1200 800 1600 740 L1600 900 L0 900Z" fill="${tint(c.accent, 0.5)}"/>
+<path d="M1260 700 V560 M1260 560 l-50 40 M1260 590 l50 -40" stroke="${hex(c.primary)}" stroke-width="10" stroke-linecap="round"/><circle cx="1260" cy="520" r="70" fill="${tint(c.accent, 0.2)}"/><circle cx="300" cy="560" r="90" fill="${tint(c.accent, 0.3)}"/><rect x="292" y="600" width="16" height="110" fill="${hex(c.primary)}"/>`;
+  },
+  timeline(c) {
+    const pts = [[260, 520], [520, 470], [780, 600], [1040, 380], [1300, 430]];
+    const nodes = pts.map(([x, y], i) => `<circle cx="${x}" cy="${y}" r="${i === 2 ? 46 : 30}" fill="${i === 2 ? hex(c.extra) : 'url(#main)'}"/><rect x="${x - 70}" y="${y + 70}" width="140" height="18" rx="9" fill="${tint(c.primary, 0.55)}"/><rect x="${x - 50}" y="${y + 100}" width="100" height="14" rx="7" fill="${tint(c.primary, 0.7)}"/>`).join('');
+    return `<path d="M200 ${pts[0][1]} ${pts.map(([x, y]) => `L${x} ${y}`).join(' ')} L1420 430" fill="none" stroke="${hex(c.primary)}" stroke-width="12" stroke-linejoin="round"/>${nodes}
+<path d="M780 600 m-14 -18 h28 l-14 -26z" fill="#ffffff"/><rect x="772" y="590" width="16" height="16" rx="3" fill="#ffffff"/><rect x="200" y="760" width="1220" height="8" rx="4" fill="${tint(c.primary, 0.5)}"/>
+${[0, 1, 2, 3, 4, 5].map((i) => `<rect x="${200 + i * 244}" y="748" width="4" height="32" fill="${hex(c.primary)}"/>`).join('')}`;
+  },
+  circuit(c) {
+    const r = rng(9); let lines = '';
+    for (let i = 0; i < 14; i++) { const y = 140 + i * 48, x1 = 120 + r() * 300, x2 = x1 + 200 + r() * 500, bend = y + (r() > 0.5 ? 40 : -40); lines += `<path d="M${x1} ${y} H${x2} L${x2 + 40} ${bend} H${x2 + 160}" fill="none" stroke="${i % 3 ? tint(c.accent, 0.4) : hex(c.extra)}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="${x2 + 166}" cy="${bend}" r="10" fill="${hex(c.accent)}"/>`; }
+    return `<rect width="${W}" height="${H}" fill="${hex(c.primary)}"/>${lines}<rect x="1060" y="270" width="360" height="360" rx="40" fill="url(#main)" stroke="${hex(c.extra)}" stroke-width="10"/><rect x="1140" y="350" width="200" height="200" rx="24" fill="${hex(c.primary)}"/>
+${[0, 1, 2, 3].map((i) => `<rect x="${1090 + i * 90}" y="230" width="14" height="40" rx="5" fill="${hex(c.extra)}"/><rect x="${1090 + i * 90}" y="630" width="14" height="40" rx="5" fill="${hex(c.extra)}"/>`).join('')}<path d="M1200 450 l30 30 l60 -70" stroke="${hex(c.extra)}" stroke-width="16" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`;
+  },
+  compass(c) {
+    return `<circle cx="1040" cy="450" r="300" fill="${tint(c.soft, 0.4)}" stroke="${hex(c.primary)}" stroke-width="14"/><circle cx="1040" cy="450" r="240" fill="none" stroke="${tint(c.primary, 0.6)}" stroke-width="4" stroke-dasharray="8 22"/>
+<path d="M1040 230 L1090 450 L1040 670 L990 450 Z" fill="${tint(c.primary, 0.55)}"/><path d="M1040 230 L1090 450 L990 450 Z" fill="${hex(c.extra)}"/><circle cx="1040" cy="450" r="26" fill="${hex(c.primary)}"/>
+${['N', 'E', 'S', 'W'].map((_, i) => { const a = (i * Math.PI) / 2, x = 1040 + Math.sin(a) * 270, y = 450 - Math.cos(a) * 270; return `<circle cx="${x}" cy="${y}" r="14" fill="${hex(c.primary)}"/>`; }).join('')}
+<rect x="180" y="300" width="480" height="70" rx="16" fill="url(#main)"/><rect x="180" y="410" width="380" height="50" rx="12" fill="${tint(c.primary, 0.55)}"/><rect x="180" y="490" width="420" height="50" rx="12" fill="${tint(c.primary, 0.65)}"/><rect x="180" y="570" width="300" height="50" rx="12" fill="${tint(c.primary, 0.75)}"/>`;
+  },
   mountains(c) {
     return `<circle cx="1180" cy="230" r="90" fill="#ffffff" opacity=".9"/><path d="M0 700 L320 330 L560 560 L820 260 L1180 640 L1400 420 L1600 600 L1600 900 L0 900Z" fill="${tint(c.primary, 0.55)}"/>
 <path d="M820 260 L900 345 L860 360 L820 330 L780 360 L760 330Z" fill="#ffffff" opacity=".85"/><path d="M0 780 L420 520 L700 720 L1000 480 L1600 760 L1600 900 L0 900Z" fill="url(#main)"/><path d="M0 860 C 500 800 1100 900 1600 840 L1600 900 L0 900Z" fill="${hex(c.primary)}"/>`;

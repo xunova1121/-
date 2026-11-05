@@ -72,3 +72,17 @@ it('主循环：不带智能体时和原来一样，没有角色说明，工具�
   const offered = new Set(seen.tools.map(t => t.name));
   expect(offered.has('create_document')).toBe(true);
 });
+
+it('专业技能说明：8 个内置智能体都有，进系统提示；自建智能体不能借用', async () => {
+  const { AGENT_SKILLS, agentSkill } = await import('../src/agent/agentSkills.js');
+  const { agentPromptNote } = await import('../src/agent/agentTurn.js');
+  for (const p of BUILTIN_AGENTS) {
+    expect(AGENT_SKILLS[p.id], p.id).toBeTruthy();
+    expect([...AGENT_SKILLS[p.id]].length, p.id).toBeLessThanOrEqual(1200);
+    expect(agentPromptNote(p)).toContain(AGENT_SKILLS[p.id].slice(0, 20));
+  }
+  expect(agentSkill({ ...ppt, source: 'user' })).toBe('');
+  expect(agentPromptNote({ ...ppt, source: 'user' })).not.toContain('PPT 制作专业方法');
+  expect(AGENT_SKILLS['gongwen-writer']).toMatch(/一文一事/);
+  expect(AGENT_SKILLS['health-advisor']).toMatch(/120/);
+});

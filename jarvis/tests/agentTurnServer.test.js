@@ -70,3 +70,15 @@ it('不带编号：和原来一样，对话上没有智能体字段', async () =
   expect((await sessions.get(task.sessionId)).agentId).toBeUndefined();
   expect(JSON.stringify(calls[0].system)).not.toContain('当前智能体');
 });
+
+it('评测任务：可以用内置智能体（固定配置），不读个人智能体', async () => {
+  const { adapter, calls } = recording();
+  const runner = make(adapter);
+  const ok = await runner.start({ text: '做一份汇报PPT', agentId: 'ppt-maker', evaluationId: 'eval-agents-1' });
+  await until(() => ['done', 'error'].includes(runner.get(ok.id).status));
+  expect(runner.get(ok.id).status).toBe('done');
+  expect(JSON.stringify(calls[0].system)).toContain('当前智能体：PPT 制作');
+  const bad = await runner.start({ text: '你好', agentId: 'my-own-agent', evaluationId: 'eval-agents-2' });
+  await until(() => ['done', 'error'].includes(runner.get(bad.id).status));
+  expect(runner.get(bad.id).status).toBe('error');
+});

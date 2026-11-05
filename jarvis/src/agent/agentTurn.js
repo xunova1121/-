@@ -7,6 +7,7 @@
 import { getAgent } from './agentProfiles.js';
 import { profileId } from './agentProfileValidation.js';
 import { templateNote } from './pptTemplates.js';
+import { agentSkill } from './agentSkills.js';
 
 /** 只管流程、不授予能力的工具：收窄后也保留，否则模型连“看要求 / 列计划 / 要更多时间”都做不了 */
 export const AGENT_FLOW_TOOLS = new Set(['read_task_requirements', 'read_tool_result', 'need_more_time', 'update_plan', 'review_task', 'execution_capabilities', 'tool_search']);
@@ -39,7 +40,8 @@ export function narrowAgentTools(tools = [], profile = null) {
 /** 附加到系统提示的角色说明 */
 export function agentPromptNote(profile) {
   if (!profile) return '';
-  const lines = [`## 当前智能体：${profile.name}`, profile.prompt].filter(Boolean);
+  // 内置智能体再附专业技能说明（工作方法和交付前检查清单，见 agentSkills.js）
+  const lines = [`## 当前智能体：${profile.name}`, profile.prompt, agentSkill(profile)].filter(Boolean);
   if (profile.tools?.length) lines.push('本对话只开放这个智能体的工具；用户要做范围外的事时说明可以回到普通对话处理，不要假装做了。');
   return lines.join('\n');
 }
