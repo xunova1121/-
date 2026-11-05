@@ -43,6 +43,8 @@ import { withoutCodeCredentials } from './gitHosting.mjs';
  * 这里只负责排队、存对话、记进度。手机上才有的能力（控制电脑、运行代码、语音）在服务器上不提供。
  */
 import dns from 'node:dns/promises';
+import { resolveAgentTurn, sanitizeAgentForm } from '../src/agent/agentTurn.js';
+import { profileId } from '../src/agent/agentProfileValidation.js';
 import { runAgent } from '../src/agent/agent.js';
 import { createTools } from '../src/agent/tools.js';
 import * as sessions from '../src/agent/sessions.js';
@@ -284,6 +286,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     for (const controller of summaryControllers) controller.abort();
     const session = await sessions.get(task.sessionId);
     const cfg = serverModelConfig(withoutCodeCredentials(await getConfig()));
+    // 智能体对话：按本人注册表解析（找不到就报错，不悄悄当普通对话）
+    const agent = task.evaluationId ? null : await resolveAgentTurn({ agentId: session.agentId || null, form: session.agentForm || null });
     const taskIntent = resolveTaskIntent(task.text, { history: session.messages.slice(0, -1), state: session.taskContext, images: task.images.length });
     // 记忆按意思找：用能力表“记忆向量”那一项（服务器没有跨域限制）；没有就只按关键字
     memory.configureMemory({ llm: helper(cfg, 'write', task, 'memory'), embedder: createEmbedder(cfg, { direct: true }) });
@@ -377,7 +381,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       const r = await runAgent({
         adapter, model, fallbacks, lookupPreferences: () => taskLookup.preferences(), lookupModel: createLookupModel(cfg, value => { const picked = makeAdapter(value); return { ...picked, adapter: evaluationAdapter(picked.adapter) }; }), maxSteps: policy.maxSteps, maxTotalSteps: policy.maxTotalSteps, codeWork, ...sight(cfg, task), hedgeMs: cfg.hedgeBackup === false ? 0 : HEDGE_MS, modelNote: modelNote(cfg, { provider: route.cfg.provider, model }),
         history: unsummarized(history, session.summary).map(({ role, content }) => ({ role, content })),
-        userText: task.resumeFrom ? task.text+'\n\n'+checkpointRecoveryText(task.resumeFrom) : task.text, requirementText: taskIntent.requirementText, taskIntent, capabilityRoutes, images: task.images,
+        userText: task.resumeFrom ? task.text+'\n\n'+checkpointRecoveryText(task.resumeFrom) : task.text, requirementText: taskIntent.requirementText, taskIntent, capabilityRoutes, images: task.images, agent,
         // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
         effort: effortFor(kind, task.text, cfg),
         // 语音对话：口语短答；“你好 / 谢谢”这类寒暄不带工具，回得快
@@ -508,20 +512,27 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
 
   return {
     /** @returns {Promise<{ id: string, sessionId: string }>} */
-    async start({ sessionId = null, text, images = [], voice = false, requestId = null, targetTaskId = null, evaluationId = null, evaluationAuthorization = null }) {
+    async start({ sessionId = null, text, images = [], voice = false, requestId = null, targetTaskId = null, evaluationId = null, evaluationAuthorization = null, agentId = null, agentForm = null }) {
       text = String(text ?? '').trim();
       if (!text) throw Object.assign(new Error('任务内容是空的'),{status:400});
       if (text.length>20000) throw Object.assign(new Error('任务内容太长'),{status:400});
       if (sessionId!==null&&!/^[\w-]{1,40}$/.test(String(sessionId))) throw Object.assign(new Error('对话编号不对'),{status:400});
       if (requestId!==null&&!/^[\w-]{1,80}$/.test(String(requestId))) throw Object.assign(new Error('请求编号不对'),{status:400});
+      // 智能体：这里只认编号格式；是否真有这个智能体、能用哪些工具，执行时按本人注册表再查（不信客户端传来的配置）
+      if (agentId!==null&&agentId!==''){profileId(agentId);}else agentId=null;
+      agentForm=agentId?sanitizeAgentForm(agentForm):null;
       images=(Array.isArray(images)?images:[]).filter(i=>/^image\/(png|jpe?g|webp|gif)$/.test(i?.mime)&&typeof i.data==='string'&&i.data.length<=MAX_IMAGE_CHARS).slice(0,MAX_IMAGES).map(({mime,data})=>({mime,data}));
       await recover();
       if (userAccess && !userAccess.active(userAccess.current())) throw Object.assign(new Error('该用户已停用'), { status: 403 });
-      const hash=createHash('sha256').update(JSON.stringify([text,images,Boolean(voice),targetTaskId,evaluationId])).digest('hex');
+      const hash=createHash('sha256').update(JSON.stringify([text,images,Boolean(voice),targetTaskId,evaluationId,...(agentId?[agentId,agentForm]:[])])).digest('hex');
       const id=sessionId||(requestId?'c_'+createHash('sha256').update(requestId).digest('hex').slice(0,30):sessions.create().id);
       const result=await editSession(id,async session=>{
         session??={...sessions.create(),id};
         const evaluationScope = bindEvaluation(session, evaluationId);
+        // 一段对话只属于一个智能体：新对话记下；已绑定的不许换成别的（防止中途换配置扩大工具范围）
+        if(agentId&&session.agentId&&session.agentId!==agentId)throw Object.assign(new Error('这段对话属于另一个智能体，请新开对话'),{status:409});
+        if(agentId&&!session.agentId&&!session.messages.length)session.agentId=agentId;
+        if(agentId&&session.agentId===agentId&&agentForm)session.agentForm=agentForm;
         const receipts=(session.taskReceipts||[]).filter(x=>now()-x.at<KEEP_DONE_MS);
         const prior=requestId&&receipts.find(x=>x.requestId===requestId);
         if(prior){

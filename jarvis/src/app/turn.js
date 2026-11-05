@@ -13,6 +13,7 @@ import { createAdapter, providerById } from '../llm/config.js';
 import { TASKS, fallbackRoutes, isSmallTalk } from '../llm/router.js';
 import { runTeam, shouldTeam } from '../agent/team.js';
 import { runAgent } from '../agent/agent.js';
+import { resolveAgentTurn } from '../agent/agentTurn.js';
 import { capabilityUpgradeRoutes } from '../llm/capabilityUpgrade.js';
 import { collectRequirements } from '../agent/taskRequirements.js';
 import { preApproved } from '../agent/commandSafety.js';
@@ -315,7 +316,10 @@ export function createTurn(app) {
     const madeFiles = turn.files;
     app.callouts?.retract();
     // 内置演示模式下“自动”不触发（规则拆步效果有限），只认明确的“/团队 …”或“总是”
-    const team = !app.server && !computerKind && shouldTeam(text, app.settings.teamMode === 'auto' && !app.helperLlm() ? 'off' : app.settings.teamMode);
+    // 智能体对话：本机做时按自己的注册表解析配置；服务器做时只传编号，由服务器按本人注册表再查
+    const agentId = app.session.agentId || null;
+    const team =
+      !agentId && !app.server && !computerKind && shouldTeam(text, app.settings.teamMode === 'auto' && !app.helperLlm() ? 'off' : app.settings.teamMode);
     const releaseTask = taskKeeper.begin();
     try {
       // 服务器模式：服务器做，进度事件和本机一样显示（runRemote 的用法和 runAgent 一样）
@@ -327,6 +331,8 @@ export function createTurn(app) {
           userText: o.userText,
           images: remoteTurnImages(o.images, llmHistory),
           voice: o.voice,
+          agentId,
+          agentForm: app.session.agentForm || null,
           emit: o.emit,
           signal: o.signal,
           onFile: (p) => app.pullServerFile(p, turn),
@@ -345,6 +351,8 @@ export function createTurn(app) {
         });
       };
       const sight = app.imageDescriber?.(); // 当前模型看不了图时替它看图
+      // 放在 try 里：智能体被删了等错误照常显示在这条回答里，不卡住本轮
+      const agent = agentId && !(app.server && !here) ? await resolveAgentTurn({ agentId, form: app.session.agentForm || null }) : null;
       const result = await (app.server && !here ? serverRun : team ? runTeam : runAgent)({
         llm: team ? app.helperLlm('reason') : undefined,
         pickModel: team ? app.modelForRole : undefined,
@@ -362,6 +370,7 @@ export function createTurn(app) {
         requirements: collectRequirements(app.history, app.session.requirements),
         requirementText: taskIntent?.inherited ? taskIntent.requirementText : userText,
         taskIntent,
+        agent,
         capabilityRoutes: remotePC
           ? []
           : capabilityUpgradeRoutes(app.llmConfig, (cfg) => createAdapter(cfg, { gateway: app.gateway }), { provider: route.cfg.provider, model }),

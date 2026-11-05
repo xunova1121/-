@@ -22,9 +22,10 @@ export function autoTitle(text) {
   return t.length > TITLE_MAX ? `${t.slice(0, TITLE_MAX)}…` : t;
 }
 
-export function create({ title = '新对话', messages = [] } = {}) {
+export function create({ title = '新对话', messages = [], agentId = null, agentForm = null } = {}) {
   const t = Date.now();
-  return { id: uid('c'), title, titleSet: false, createdAt: t, updatedAt: t, pinned: false, messages };
+  // 从智能体广场开的对话记住是哪个智能体（旧对话没有这两个字段，照普通对话处理）
+  return { id: uid('c'), title, titleSet: false, createdAt: t, updatedAt: t, pinned: false, messages, ...(agentId && { agentId }), ...(agentForm && { agentForm }) };
 }
 
 export async function save(session) {

@@ -379,9 +379,9 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
    * @param {{ sessionId: string, userText: string, images?: Array<{ mime: string, data: string }>, emit: (e: object) => void, signal?: AbortSignal, onFile?: (path: string) => void, onStarted?: (task: { id: string }) => void, taskId?: string }} o
    * @returns {Promise<{ text: string, toolCalls: number, steps: number }>}
    */
-  export async function runRemote(client, { sessionId, userText, images = [], voice = false, emit, signal, onFile, onStarted, taskId = null }) {
+  export async function runRemote(client, { sessionId, userText, images = [], voice = false, emit, signal, onFile, onStarted, taskId = null, agentId = null, agentForm = null }) {
     if(signal?.aborted)throw Object.assign(new Error('aborted'),{name:'AbortError'});
-    const task = taskId ? { id: taskId } : await client.startTask({ sessionId, text: userText, ...(images.length && { images }), ...(voice && { voice: true }) });
+    const task = taskId ? { id: taskId } : await client.startTask({ sessionId, text: userText, ...(images.length && { images }), ...(voice && { voice: true }), ...(agentId && { agentId }), ...(agentId && agentForm && { agentForm }) });
     const stop = () => client.stopTask(task.id).catch(() => {});
     if(signal?.aborted){await stop();throw Object.assign(new Error('aborted'),{name:'AbortError'});}
     signal?.addEventListener('abort', stop, { once: true });

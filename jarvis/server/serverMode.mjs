@@ -433,7 +433,7 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
       json(res, 200, await scheduler.upsert({ title: body.title, prompt: body.prompt, unattended: false, ...timing })); return true;
     }
     if (pathname === '/api/tasks' && req.method === 'POST') {
-      const { sessionId = null, text, images, voice, requestId, evaluationId } = await readJson(req, IMPORT_LIMIT); // 可能带图片，放宽大小
+      const { sessionId = null, text, images, voice, requestId, evaluationId, agentId = null, agentForm = null } = await readJson(req, IMPORT_LIMIT); // 可能带图片，放宽大小
       let forcedEvaluationId = evaluationId ?? null;
       if (principal.role === 'evaluation') {
         const existing = sessionId ? await sessions.get(sessionId) : null;
@@ -441,7 +441,7 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
         forcedEvaluationId = existing && !evaluationId ? existing.evaluationId : security.evaluationScope(principal, evaluationId);
       }
       if (principal.role === 'evaluation' && security.remaining(principal.id) < 1) { json(res, 429, { error: '评测令牌今日模型与搜索调用次数已达上限', code: 'EVAL_QUOTA' }); return true; }
-      json(res, 200, await runner.start({ sessionId, text, images, voice: voice === true, requestId:requestId??null, evaluationId: forcedEvaluationId, ...(principal.role === 'evaluation' && { evaluationAuthorization: { id: principal.id } }) })); return true;
+      json(res, 200, await runner.start({ sessionId, text, images, voice: voice === true, requestId:requestId??null, evaluationId: forcedEvaluationId, ...(principal.role !== 'evaluation' && { agentId, agentForm }), ...(principal.role === 'evaluation' && { evaluationAuthorization: { id: principal.id } }) })); return true;
     }
     if (pathname === '/api/tasks' && req.method === 'GET') { json(res, 200, runner.list().filter(row => principal.role !== 'evaluation' || accessRoutes.owned(principal, row))); return true; }
     const t = pathname.match(/^\/api\/tasks\/([\w-]+)(\/events|\/stop|\/notes)?$/);
