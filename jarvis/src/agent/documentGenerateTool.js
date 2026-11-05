@@ -20,6 +20,7 @@ import { S, str, fmtSize, findTemplate } from './documentSchema.js';
 import { formattingSource, verifyFormattingContent } from './documentPreservation.js';
 import { formatDocumentFile } from './documentFileFormat.js';
 import { documentTypography, typographyFromText } from './documentTypography.js';
+import { checkGongwen, detectGongwenKind, gongwenIssueNote } from './gongwenCheck.js';
 import { presentationDesign } from './presentationDesign.js';
 import { spreadsheetDesign, SHEET_STYLE_IDS, SHEET_STYLE_NAMES } from './spreadsheetDesign.js';
 
@@ -364,6 +365,11 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         );
       const left = [...lint(format, finalContent, { kind: design.kind }), ...built(out)];
       if (left.length) notes.push(`还需要注意：${left.map((x) => x.text).join('；')}`);
+      // 公文体检（gongwenCheck.js）：公文主题或标题是公文文种时，按文种规则确定性检查，问题交回模型改正
+      if (format === 'docx' && (out.theme?.official || detectGongwenKind(finalContent, title))) {
+        const gw = checkGongwen(`${docNo ? docNo + '\n' : ''}${finalContent}`, { title, sourceText: `${rawRequestText || ''}\n${requirements || ''}` });
+        notes.push(gw.issues.length ? gongwenIssueNote(gw) : `公文体检（${gw.kind || '公文'}）：文种、结语、编号、日期没发现问题`);
+      }
       // 用户指定了 PPT 字号又排不下：不能偷偷缩字，也别只报“可能溢出”就交差——精简那几页的字再生成一次（第二轮 30 题：24 磅第 3 页溢出）
       const overflow = format === 'pptx' && typography.body?.size && (r.validation.issues || []).some((i) => /放不下/.test(i.text) && !/放不下时按可读容量自动分页/.test(i.text));
       if (overflow) notes.push(`用户指定了正文 ${typography.body.size} 磅，不能靠缩小字号解决溢出：把检查提示放不下的那几页文字精简（每条一句短话，必要时少写一两条，页数不变），用同一路径再生成一次；精简后还放不下再照实告诉用户`);

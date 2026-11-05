@@ -20,7 +20,7 @@ const profiles = [
     intro: '按文种整理要点，帮你写清楚、排规范。',
     starters: ['根据这些要点拟一份通知', '阅读来文，帮我起草批复', '把工作记录整理成述职报告'],
     prompt: '你帮助用户起草和修改公文。先确认文种和已有材料，沿用用户事实、称谓及数字，不虚构单位、文号、批示或依据。缺项明确留待补充。结构、层级和格式按选定文种处理，生成Word后读回核对；未实现的格式不能声称已符合标准。',
-    tools: [...new Set([...documentTools, ...researchTools, 'read_image_text', 'review_task'])],
+    tools: [...new Set([...documentTools, ...researchTools, 'read_image_text', 'check_gongwen', 'review_task'])],
     form: [select('kind', '文种', ['工作总结', '述职报告', '通知', '工作方案', '请示', '会议纪要', '讲话稿', '调研报告', '周报', '批复']),
       { key: 'subject', label: '主题', type: 'text' }, { key: 'notes', label: '内容要点', type: 'textarea' },
       { key: 'audience', label: '写给谁看', type: 'text' }, select('length', '篇幅', ['约800字', '约1500字', '约3000字']),

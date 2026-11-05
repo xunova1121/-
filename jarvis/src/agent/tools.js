@@ -29,6 +29,7 @@ import { searchAggregateHints, safeFallbackQuery } from './searchFallback.js';
 import { throwControl } from '../core/networkRequest.js';
 import { createVerificationTool, currentTime } from './verifyNumbers.js';
 import { createNumberReconcileTool } from './numberReconcile.js';
+import { createGongwenCheckTool } from './gongwenCheck.js';
 import { checkpointView } from '../../shared/taskCheckpoint.js';
 import { skillCompatibility } from './skillCompatibility.js';
 import { MOBILE } from '../config.js';
@@ -130,6 +131,7 @@ export function createTools(ctx) {
     ...(ctx.convertLegacyDoc ? [legacyDocumentTool(ctx)] : []),
     createVerificationTool(ctx),
     createNumberReconcileTool(),
+    createGongwenCheckTool(),
     createTimeCalcTool(ctx),
     createWorkRecordsTool(),
     createSongTool(ctx),
