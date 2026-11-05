@@ -126,6 +126,8 @@ export async function upsert(input) {
     everyMinutes: input.everyMinutes,
     enabled: input.enabled !== false,
     unattended: Boolean(input.unattended),
+    // 交给哪个智能体（可选）：有步骤的智能体到点按工作流执行；只存编号，执行时再按本人注册表解析
+    ...(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(String(input.agentId ?? old?.agentId ?? '')) && String(input.agentId ?? old?.agentId).length <= 64 && { agentId: String(input.agentId ?? old?.agentId) }),
     createdAt: old?.createdAt ?? Date.now(),
     lastRun: old?.lastRun ?? null,
     lastStatus: old?.lastStatus ?? null,

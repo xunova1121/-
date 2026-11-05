@@ -430,7 +430,7 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
       const body = await readJson(req);
       // 口语时间（“每天 9 点”）或面板表单的分项（kind / time / weekday / at / everyMinutes）都收；服务器上没人确认，不开无人值守操作
       const timing = typeof body.when === 'string' ? scheduler.parseWhen(body.when) : { kind: body.kind, time: body.time, weekday: body.weekday, at: body.at, everyMinutes: body.everyMinutes };
-      json(res, 200, await scheduler.upsert({ title: body.title, prompt: body.prompt, unattended: false, ...timing })); return true;
+      json(res, 200, await scheduler.upsert({ title: body.title, prompt: body.prompt, unattended: false, ...(typeof body.agentId === 'string' && { agentId: body.agentId }), ...timing })); return true;
     }
     if (pathname === '/api/tasks' && req.method === 'POST') {
       const { sessionId = null, text, images, voice, requestId, evaluationId, agentId = null, agentForm = null } = await readJson(req, IMPORT_LIMIT); // 可能带图片，放宽大小

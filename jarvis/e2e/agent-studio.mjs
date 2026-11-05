@@ -99,6 +99,18 @@ try {
     await page.fill('.wy-studio-editor [aria-label="一句话介绍"]', '核对来源，再整理简报');
     await page.fill('.wy-studio-editor textarea', '1.检索资料\n2.核对日期\n3.形成摘要');
     for (let i = 1; i <= 3; i++) await page.fill(`.wy-studio-editor [aria-label="推荐问题 ${i}"]`, `帮我整理第${i}类资讯`);
+    // 工作流步骤：加两步，第二步交给公文写作并做公文体检
+    await page.click('.wy-flow-add');
+    await page.click('.wy-flow-add');
+    const steps = page.locator('.wy-flow-step');
+    await steps.nth(0).locator('[aria-label="步骤名称"]').fill('检索资料');
+    await steps.nth(0).locator('[aria-label="这一步要做什么"]').fill('按主题检索最近一周的资料');
+    await steps.nth(1).locator('[aria-label="步骤名称"]').fill('写成简报');
+    await steps.nth(1).locator('[aria-label="这一步要做什么"]').fill('整理成一页简报');
+    await steps.nth(1).locator('[aria-label="交给哪个智能体"]').selectOption('gongwen-writer');
+    await steps.nth(1).locator('[aria-label="做完怎么检查"]').selectOption('gongwen');
+    check(`${tag} 工作流步骤第一步不能上移、最后一步不能下移`, await page.evaluate(() => { const b = [...document.querySelectorAll('.wy-flow-step .wy-flow-move')]; return b[0].disabled && b[4].disabled; }));
+    check(`${tag} 工作流编辑区不横向溢出`, await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
     await page.screenshot({ path: `${out}/personal-${tag}.png` });
     await page.click('.wy-studio-save');
     await page.waitForSelector('.wy-studio-editor[hidden]', { state: 'attached' });
@@ -113,6 +125,7 @@ try {
     check(`${tag} 刷新后仍能读取个人配置`, await page.locator('.wy-studio-personal-card').count() === 1);
     await page.click('.wy-studio-edit');
     check(`${tag} 工作要求回填未丢`, (await page.inputValue('.wy-studio-editor textarea')).includes('核对日期'));
+    check(`${tag} 工作流步骤保存后回填`, (await page.locator('.wy-flow-step').count()) === 2 && (await page.locator('.wy-flow-step').nth(1).locator('[aria-label="交给哪个智能体"]').inputValue()) === 'gongwen-writer' && (await page.locator('.wy-flow-step').nth(1).locator('[aria-label="做完怎么检查"]').inputValue()) === 'gongwen');
     await page.fill('.wy-studio-editor [aria-label="名称"]', '修改后的简报助手');
     await page.click('.wy-studio-save');
     await page.waitForSelector('.wy-studio-editor[hidden]', { state: 'attached' });

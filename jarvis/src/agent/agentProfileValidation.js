@@ -6,7 +6,10 @@ export const PROFILE_TOOL_NAMES = Object.freeze([...CORE, 'get_document_template
 const knownTools = new Set(PROFILE_TOOL_NAMES);
 const outputs = new Set(['text', 'docx', 'pptx', 'xlsx', 'image']);
 const sources = new Set(['builtin', 'user', 'github']);
-const fields = ['id', 'name', 'icon', 'category', 'intro', 'starters', 'prompt', 'tools', 'form', 'output', 'source'];
+const fields = ['id', 'name', 'icon', 'category', 'intro', 'starters', 'prompt', 'tools', 'form', 'output', 'source', 'steps'];
+/** 工作流每一步完成后的确定性检查（见 workflowRun.js）；none 表示不检查 */
+export const WORKFLOW_CHECKS = Object.freeze(['none', 'gongwen', 'numbers']);
+export const MAX_WORKFLOW_STEPS = 8;
 export const MAX_PROFILE_BYTES = 32 * 1024;
 export const profileError = (field, detail, status = 400) => Object.assign(new Error(`${field}：${detail}`), {
   name: 'ValidationError', code: 'INVALID_AGENT_PROFILE', kind: 'input', status, field
@@ -88,6 +91,23 @@ export function validateProfile(value, { existingIds = [], toolNames = knownTool
   if (!sources.has(value.source)) throw profileError('source', '来源类型无效');
   result.output = value.output;
   result.source = value.source;
+  // 工作流步骤（可选，旧配置没有这个字段照常可读）：每步写做什么、交给哪个智能体、做完怎么检查
+  if (value.steps !== undefined) {
+    result.steps = array(value.steps, 'steps', MAX_WORKFLOW_STEPS).map((step, i) => {
+      const field = `steps[${i}]`;
+      object(step, field, ['title', 'task', 'agentId', 'check']);
+      const out = { title: text(step.title, `${field}.title`, 40), task: text(step.task, `${field}.task`, 600) };
+      if (step.agentId !== undefined && step.agentId !== '') {
+        out.agentId = profileId(step.agentId);
+        if (out.agentId === id) throw profileError(`${field}.agentId`, '不能把步骤交给工作流自己');
+      }
+      const check = step.check ?? 'none';
+      if (!WORKFLOW_CHECKS.includes(check)) throw profileError(`${field}.check`, '检查方式无效');
+      if (check !== 'none') out.check = check;
+      return out;
+    });
+    if (!result.steps.length) delete result.steps;
+  }
   if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_PROFILE_BYTES) throw profileError('profile', '单份配置不能超过32KiB');
   return result;
 }

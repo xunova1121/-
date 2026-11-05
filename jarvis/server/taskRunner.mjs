@@ -44,6 +44,7 @@ import { withoutCodeCredentials } from './gitHosting.mjs';
  */
 import dns from 'node:dns/promises';
 import { resolveAgentTurn, sanitizeAgentForm } from '../src/agent/agentTurn.js';
+import { runWorkflow } from '../src/agent/workflowRun.js';
 import { BUILTIN_AGENTS } from '../src/agent/agentProfileBuiltins.js';
 import { profileId } from '../src/agent/agentProfileValidation.js';
 import { runAgent } from '../src/agent/agent.js';
@@ -380,7 +381,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const arm = () => { clearTimeout(idle); idle = setTimeout(() => { task.idle = true; task.ctrl.abort(); }, idleMs); };
     arm();
     try {
-      const r = await runAgent({
+      // 智能体配置里写了步骤：按工作流逐步执行（每步仍走 runAgent，见 workflowRun.js）
+      const r = await (agent?.profile?.steps?.length ? runWorkflow : runAgent)({
         adapter, model, fallbacks, lookupPreferences: () => taskLookup.preferences(), lookupModel: createLookupModel(cfg, value => { const picked = makeAdapter(value); return { ...picked, adapter: evaluationAdapter(picked.adapter) }; }), maxSteps: policy.maxSteps, maxTotalSteps: policy.maxTotalSteps, codeWork, ...sight(cfg, task), hedgeMs: cfg.hedgeBackup === false ? 0 : HEDGE_MS, modelNote: modelNote(cfg, { provider: route.cfg.provider, model }),
         history: unsummarized(history, session.summary).map(({ role, content }) => ({ role, content })),
         userText: task.resumeFrom ? task.text+'\n\n'+checkpointRecoveryText(task.resumeFrom) : task.text, requirementText: taskIntent.requirementText, taskIntent, capabilityRoutes, images: task.images, agent,

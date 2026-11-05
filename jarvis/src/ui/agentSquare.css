@@ -161,3 +161,16 @@
 .wy-tpl-outline { display: flex; flex-direction: column; gap: 4px; font-size: 14px; line-height: 1.6; }
 .wy-tpl-outline span { color: var(--muted); }
 .wy-tpl-use { min-height: 48px; border: 0; border-radius: 14px; background: var(--accent); color: var(--wy-ag-on-accent); font: inherit; font-size: 16px; font-weight: 600; cursor: pointer; }
+
+/* ---------- 个人智能体：工作流步骤 ---------- */
+.wy-flow { display: flex; flex-direction: column; gap: 10px; }
+.wy-flow h3, .wy-studio-editor .wy-flow h3 { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.4; }
+.wy-flow-steps { display: flex; flex-direction: column; gap: 10px; margin: 0; padding-left: 22px; }
+.wy-flow-step { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.wy-flow-row { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.wy-flow-row > input, .wy-flow-row > select { flex: 1; min-width: 0; }
+.wy-flow-step textarea { min-height: 64px; resize: vertical; }
+.wy-flow-move { flex: none; width: 44px; height: 44px; border: 1px solid var(--line); border-radius: 12px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+.wy-flow-move:disabled { opacity: 0.35; cursor: default; }
+.wy-flow-add { min-height: 44px; border: 1px dashed var(--line); border-radius: 12px; background: transparent; color: var(--accent); font: inherit; cursor: pointer; }
+.wy-flow-add:disabled { opacity: 0.4; }

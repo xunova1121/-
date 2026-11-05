@@ -1,5 +1,6 @@
 /** 个人智能体编辑器：复用已有注册表，保存失败留住表单；关闭不保存。 */
 import { studioEl as el } from './agentStudio.js';
+import { createStepsEditor } from './workflowStepsEditor.js';
 
 export function createAgentProfileEditor({ onSave, onRemove }) {
   const back = el('button', { type: 'button', className: 'wy-agents-back', textContent: '‹', ariaLabel: '返回' });
@@ -17,6 +18,7 @@ export function createAgentProfileEditor({ onSave, onRemove }) {
   let revision = 0;
   let busy = false;
   const fields = new Map();
+  let steps = null;
 
   function field(key, label, value, max, area = false) {
     const input = el(area ? 'textarea' : 'input', { value, maxLength: max, required: true, className: 'wy-studio-text' });
@@ -37,13 +39,13 @@ export function createAgentProfileEditor({ onSave, onRemove }) {
   });
   function pending(value) {
     busy = value;
-    for (const node of body.querySelectorAll('button, input, textarea')) node.disabled = value;
+    for (const node of body.querySelectorAll('button, input, textarea, select')) node.disabled = value;
   }
   body.addEventListener('submit', async e => {
     e.preventDefault();
     if (busy || !body.reportValidity()) return;
     const mine = revision;
-    const value = Object.fromEntries([...fields].map(([key, node]) => [key, node.value.trim()]));
+    const value = { ...Object.fromEntries([...fields].map(([key, node]) => [key, node.value.trim()])), steps: steps ? steps.value() : [] };
     pending(true);
     notice.textContent = '正在保存…';
     try {
@@ -69,10 +71,13 @@ export function createAgentProfileEditor({ onSave, onRemove }) {
       field('name', '名称', value?.name || '', 40),
       field('intro', '一句话介绍', value?.intro || '', 200),
       field('prompt', '工作要求与步骤（最多600字）', value?.prompt || '', 600, true),
+      (steps = createStepsEditor(value?.steps || [])).root,
+      field('when', '定时运行（可选，如：每周五17点、每天8点）', '', 40),
       ...Array.from({ length: 3 }, (_, i) => field(`starter${i}`, `推荐问题 ${i + 1}`, value?.starters[i] || '', 200)),
       notice, el('button', { type: 'submit', className: 'wy-studio-save', textContent: '保存智能体' }));
     // 原配置可以有空角色提示，其余必填项仍由统一校验检查。
     fields.get('prompt').required = false;
+    fields.get('when').required = false;
     if (value && onRemove) {
       const remove = el('button', { type: 'button', className: 'wy-studio-remove', textContent: '删除智能体' });
       let confirm = false;

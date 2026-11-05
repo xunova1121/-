@@ -5,6 +5,8 @@ import { createLookupModel } from '../agent/lookupModels.js';
 import { MOBILE } from '../config.js';
 import { createAdapter } from '../llm/config.js';
 import { runAgent } from '../agent/agent.js';
+import { resolveAgentTurn } from '../agent/agentTurn.js';
+import { runWorkflow } from '../agent/workflowRun.js';
 import * as agentMemory from '../agent/memory.js';
 import * as compress from '../agent/compress.js';
 import * as habits from '../agent/habits.js';
@@ -239,30 +241,36 @@ export function createBackground(app) {
       sess.messages.push({ role: 'user', content: s.prompt, ts: Date.now() });
       const usedTools = [];
       const { adapter, model, problem } = createAdapter(app.llmConfig, { gateway: app.gateway });
+      // 定时任务指定了智能体：按本人注册表解析（工作流按步骤执行）；找不到就报失败，不悄悄当普通任务
+      const agentTurn = s.agentId ? await resolveAgentTurn({ agentId: s.agentId }).catch(() => null) : null;
+      const agentProblem = s.agentId && !agentTurn ? `定时任务要用的智能体不存在或已删除：${s.agentId}` : '';
+      if (agentTurn) sess.agentId = s.agentId;
       // 卡住保护、空回复、【无需通知】见 scheduledRun.js
-      const res = problem
-        ? { ok: false, quiet: false, text: '', note: problem }
-        : await executeScheduled(
-            async ({ signal, emit }) =>
-              runAgent({
-                adapter,
-                model,
-                lookupModel: createLookupModel(app.llmConfig, (cfg) => createAdapter(cfg, { gateway: app.gateway })),
-                history: [],
-                sessionId: sess.id,
-                signal,
-                emit,
-                userText: scheduledPrompt(s, scheduler.describe(s)),
-                tools: await app.buildTools({ background: true }),
-                // 无人值守：需要确认的操作默认拒绝，除非这个任务设为“允许无人值守操作”或本次会话已允许；危险命令一律拒绝
-                approve: async (req) => preApproved(req, { sessionKeys: app.sessionApprovals, unattended: s.unattended })
-              }),
-            {
-              onEvent: (e) => {
-                if (e.type === 'tool_start') usedTools.push(e.name);
+      const res =
+        problem || agentProblem
+          ? { ok: false, quiet: false, text: '', note: problem || agentProblem }
+          : await executeScheduled(
+              async ({ signal, emit }) =>
+                (agentTurn?.profile?.steps?.length ? runWorkflow : runAgent)({
+                  agent: agentTurn,
+                  adapter,
+                  model,
+                  lookupModel: createLookupModel(app.llmConfig, (cfg) => createAdapter(cfg, { gateway: app.gateway })),
+                  history: [],
+                  sessionId: sess.id,
+                  signal,
+                  emit,
+                  userText: scheduledPrompt(s, scheduler.describe(s)),
+                  tools: await app.buildTools({ background: true }),
+                  // 无人值守：需要确认的操作默认拒绝，除非这个任务设为“允许无人值守操作”或本次会话已允许；危险命令一律拒绝
+                  approve: async (req) => preApproved(req, { sessionKeys: app.sessionApprovals, unattended: s.unattended })
+                }),
+              {
+                onEvent: (e) => {
+                  if (e.type === 'tool_start') usedTools.push(e.name);
+                }
               }
-            }
-          );
+            );
       const content = res.ok ? res.text || '（已检查，无需通知）' : `执行失败：${res.note}`;
       sess.messages.push({ role: 'assistant', content, ts: Date.now(), ...(usedTools.length && { tools: [...new Set(usedTools)] }) });
       sess.updatedAt = Date.now();

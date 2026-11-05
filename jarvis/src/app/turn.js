@@ -14,6 +14,7 @@ import { TASKS, fallbackRoutes, isSmallTalk } from '../llm/router.js';
 import { runTeam, shouldTeam } from '../agent/team.js';
 import { runAgent } from '../agent/agent.js';
 import { resolveAgentTurn } from '../agent/agentTurn.js';
+import { runWorkflow } from '../agent/workflowRun.js';
 import { capabilityUpgradeRoutes } from '../llm/capabilityUpgrade.js';
 import { collectRequirements } from '../agent/taskRequirements.js';
 import { preApproved } from '../agent/commandSafety.js';
@@ -354,7 +355,7 @@ export function createTurn(app) {
       const sight = app.imageDescriber?.(); // 当前模型看不了图时替它看图
       // 放在 try 里：智能体被删了等错误照常显示在这条回答里，不卡住本轮
       const agent = agentId && !(app.server && !here) ? await resolveAgentTurn({ agentId, form: app.session.agentForm || null }) : null;
-      const result = await (app.server && !here ? serverRun : team ? runTeam : runAgent)({
+      const result = await (app.server && !here ? serverRun : team ? runTeam : agent?.profile?.steps?.length ? runWorkflow : runAgent)({
         llm: team ? app.helperLlm('reason') : undefined,
         pickModel: team ? app.modelForRole : undefined,
         effort,

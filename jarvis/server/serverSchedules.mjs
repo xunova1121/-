@@ -56,7 +56,7 @@ export function createServerSchedules({ runner, tickMs = 30_000, now = Date.now,
     const sess = sessions.create();
     let res;
     try {
-      const started = await runner.start({ sessionId: sess.id, text: scheduledPrompt(s, scheduler.describe(s)) });
+      const started = await runner.start({ sessionId: sess.id, text: scheduledPrompt(s, scheduler.describe(s)), ...(s.agentId && { agentId: s.agentId }) });
       // 空对话不落盘，对话由任务执行器建好后再改标题（不然标题会是那句长长的任务说明）
       await runner.edit(sess.id, async (one) => {
         if (!one) return;
