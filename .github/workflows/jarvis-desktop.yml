@@ -449,6 +449,7 @@ jobs:
           trap - EXIT
           npm run build:standalone
           node e2e/standalone.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/ppt-sources.mjs "$RUNNER_TEMP/jarvis-e2e/ppt-sources"
       - name: 保存验证截图和日志
         if: always()
         continue-on-error: true
