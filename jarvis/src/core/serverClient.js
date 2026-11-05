@@ -1,4 +1,5 @@
 import { userStorageSuffix } from './userStorage.js';
+import { createAgentProfileClient } from './agentProfileClient.js';
 /**
  * 服务器模式的客户端：手机 / 电脑把任务交给自己的云服务器做（服务器端见 server/serverMode.mjs）。
  *
@@ -197,6 +198,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     },
     base: root,
     account: loadServerSettings(),
+    agentProfiles: createAgentProfileClient(req),
     timings,
     /** 唤醒连接：点输入框、回到 App 时先轻轻问一下服务器，断掉的旧连接在发消息前就换掉（30 秒内只问一次） */
     warm() {
