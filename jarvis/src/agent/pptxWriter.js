@@ -1,4 +1,5 @@
 import { presentationMarkdown } from './presentationMarkdown.js';
+import { chartFriendlyTable, rankColumn, deckTitle } from './pptInputTidy.js';
 import { PPT_ICON_CATALOG } from './pptIconCatalog.js';
 import { planTablePages, combineExplanationPages, tidyPresentationPunctuation } from './presentationLayoutPlan.js';
 import { summarizeTable, decorationData } from './presentationLocalVisuals.js';
@@ -165,6 +166,7 @@ export function parseSlides(title, md) {
     for (const row of block.type === 'table' ? [block.header, ...block.rows] : []) for (let i = 0; i < row.length; i++) row[i] = row[i].map(run => ({ ...run, text: tidyPresentationPunctuation(run.text) }));
   };
   blocks.forEach(clean);
+  for (let i = 0; i < blocks.length; i++) blocks[i] = chartFriendlyTable(blocks[i]);
   const explicitPages = blocks.some(block => block.type === 'hr');
   const slides = [];
   let cur = null;
@@ -355,7 +357,7 @@ const num = (s) => {
   return /^[-+]?\d+(\.\d+)?$/.test(t) ? Number(t) : null;
 };
 function numericColumns(table) {
-  return table.header.map((_, i) => i).filter((i) => i > 0 && table.rows.length && table.rows.every((r) => num(plain(r[i] ?? [])) !== null));
+  return table.header.map((_, i) => i).filter((i) => i > 0 && !rankColumn(table.header[i]) && table.rows.length && table.rows.every((r) => num(plain(r[i] ?? [])) !== null));
 }
 /** 能画进同一张柱状图的数字列：单位不同（如“人天”和“万元”）时只取第一种单位的列 */
 function chartColumns(table) {
@@ -373,6 +375,7 @@ function chartColumns(table) {
 export async function makePptx({ title, content, theme, subtitle = '', author = '', date = '', loadImage = null, style = 'business', expectedSlides = null, maxSlides = null, requireCover = false, forbidCover = false, typography = {}, renderSvg = null, signal, pictureLayout = 'legacy', printFriendly = false }) {
   // 政企汇报没指定配色（默认商务蓝）时用科技蓝
   if (style === 'report' && (!theme || theme.id === 'business')) theme = REPORT_THEMES['tech-blue'];
+  title = deckTitle(title);
   const report = style === 'report';
   const PptxGenJS = (await import('pptxgenjs')).default;
   const pptx = new PptxGenJS();

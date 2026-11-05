@@ -54,7 +54,8 @@ export function chooseDesign({ format, title = '', content = '', requirements = 
   const head = `${title}\n${String(content).slice(0, 3000)}`;
   if (format === 'pptx') {
     if (ALL_STYLE_IDS.includes(style)) return { style, label: STYLE_NAMES[style], reason: '按指定的风格' };
-    const asked = firstHit(STYLE_ASK, ask);
+    // 标题里写了风格（如“…_政企汇报”）也算用户说的，不能被“表格多”盖过去（用户 2026-11-05）
+    const asked = firstHit(STYLE_ASK, ask) || firstHit(STYLE_ASK, title);
     if (asked) return { style: asked, label: STYLE_NAMES[asked], reason: '按你说的要求' };
     // 表格多、数字密：数据报告
     if (tableCount(content) >= 2) return { style: 'data', label: STYLE_NAMES.data, reason: '内容里表格和数字多' };

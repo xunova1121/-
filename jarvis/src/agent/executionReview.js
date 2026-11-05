@@ -11,6 +11,9 @@ import { answerConstraints, answerConstraintIssues, concreteSourceRequirement, s
 import { styleRequests, styleIssues, styleNote } from './styleCheck.js';
 import { completedDeliverySteps } from './deliveryCompletion.js';
 import { priceComparisonIssues } from './priceComparison.js';
+import { reconcileAnswerIssues, conflictingNumbers } from './numberReconcile.js';
+/** 问的是数字类事实（几条、多少、排第几、里程、人口……）：交付前查同一回答里有没有前后不一致的数 */
+const NUMERIC_FACT = /多少|几条|几个|几座|第几|排名|排第|里程|人口|面积|总量|规模|金额|营收|产量|占比/;
 
 /** 核实文件内容的工具：同一文件验过可用后只再放行一次 */
 export const VERIFY_TOOLS = /^(?:read_file|computer_read_file|check_document)$/;
@@ -32,6 +35,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   let repositoryChanged = false;
   let sequence = 0;
   let answerIssues = [];
+  let numberDecisions = [];
   let sourceIssue = '';
   let calculationIssue = '';
   let styleProblems = [];
@@ -67,6 +71,8 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     }
   };
   const record = ({ name: toolName, args = {}, ok, validation, output = '', code = '' }) => {
+    // 数字定案结果：交付前核对回答只用主数字（最多保留 12 组）
+    if (ok && toolName === 'reconcile_numbers') { try { numberDecisions = [...numberDecisions, ...(JSON.parse(output).decisions || [])].slice(-12); } catch { /* 回执不是 JSON 时不记 */ } }
     let dataRetrieved;
     if (ok && toolName === 'get_today_news') {
       try {
@@ -288,6 +294,8 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   const checkAnswer = (text, now) => {
     selectedNews = new Set((String(text).match(/https?:\/\/[^\s)）\]，。]+/g) || []).filter(url => newsOriginals.has(url)));
     answerIssues = [...answerConstraintIssues(request, text, now), ...priceComparisonIssues(request, text), ...presentationAnswerIssues(request, text, lastDocument())];
+    // 数字定案（用户 2026-11-05：南京地铁 611 / 757 / 556.8 公里同时出现）：用了定案就只用主数字；没定案时查明显的前后不一致
+    answerIssues.push(...(numberDecisions.length ? reconcileAnswerIssues(text, numberDecisions) : numericLookup() ? conflictingNumbers(text) : []));
     if (repositoryChanged) {
       const issue = repositoryDeliveryIssue(text, [...new Set([...files.values()].map(file => file.workspaceId).filter(Boolean))]);
       if (issue) answerIssues.push(issue);
@@ -299,9 +307,11 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     calculationIssue = result.calculation === 'failed' ? '关键verify_numbers校验失败，修正输入重算；不能核验时必须明确校验失败、请人工复核' : result.contract.calculation && result.calculation === 'not_checked' ? '关键计算尚无工具校验，请先调用verify_numbers核对，不能用心算冒充工具结果' : '';
     return [...answerIssues, ...styleProblems, ...(visualIssue ? [visualIssue] : []), ...(sourceIssue ? [sourceIssue] : []), ...(calculationIssue ? [calculationIssue] : [])];
   };
+  /** 数字类事实问题，且本轮至少有两次联网取得资料 */
+  const numericLookup = () => NUMERIC_FACT.test(String(request)) && receipts.filter(r => r.ok && /^(?:web_search|fetch_url|fetch_json|deep_research|fact_check)$/.test(r.tool)).length >= 2;
   const guardsAnswer = () => {
     const rules = answerConstraints(request);
-    return lastDocument()?.format === 'pptx' || visualEvidence.active() || (styleRequests(request).length > 0 && Boolean(lastDocument())) || rules.noTime || rules.literals.length > 0 || rules.todayNews || rules.care || rules.priceComparison || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
+    return numberDecisions.length > 0 || numericLookup() || lastDocument()?.format === 'pptx' || visualEvidence.active() || (styleRequests(request).length > 0 && Boolean(lastDocument())) || rules.noTime || rules.literals.length > 0 || rules.todayNews || rules.care || rules.priceComparison || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
   };
   /** 改写一次后仍对不上：不吞掉回答（文件链接要留着），末尾补一句读回的实际情况 */
   const styleCorrection = () => (styleProblems.length ? '（读回文件核对：' + styleNote(request, lastDocument()).replace(/^用户要的调整，读回文件的实际结果：/, '').replace(/。回答照这个说$/, '') + '。）' : '');

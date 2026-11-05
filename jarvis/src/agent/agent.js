@@ -785,7 +785,7 @@ function repeats(before, after) {
 /** 只回了一句“收到 / 好的” */
 const ACK_ONLY = /^(?:收到|好的|好|明白|了解|OK|ok|嗯)[。！!.]?$/;
 
-export const PARALLEL_SAFE = new Set(['get_today_news', 'fetch_json', 'get_stock_kline', 'get_market_quote', 'get_sports_scores', 'review_task', 'check_search_terms', 'web_search', 'fetch_url', 'read_evidence', 'read_file', 'list_files', 'find_files', 'search_in_files', 'kb_search', 'recall', 'search_conversations', 'list_my_messages', 'read_conversation', 'get_weather', 'get_current_time', 'verify_numbers', 'time_calc', 'read_skill_file', 'computer_read_file', 'computer_list_dir']);
+export const PARALLEL_SAFE = new Set(['get_today_news', 'fetch_json', 'get_stock_kline', 'get_market_quote', 'get_sports_scores', 'review_task', 'check_search_terms', 'web_search', 'fetch_url', 'read_evidence', 'read_file', 'list_files', 'find_files', 'search_in_files', 'kb_search', 'recall', 'search_conversations', 'list_my_messages', 'read_conversation', 'get_weather', 'get_current_time', 'verify_numbers', 'reconcile_numbers', 'time_calc', 'read_skill_file', 'computer_read_file', 'computer_list_dir']);
 const CODE_FILE = /\.(m?js|ts|py|html?)$/i;
 /** 回答结尾是“我现在开始 / 接下来生成 / 马上做 / 稍等”这类预告（说了要做但还没做） */
 /** “需要的话我可以接着做 PPT”这类询问不算（那是在问用户） */
@@ -804,7 +804,7 @@ export function callPurpose(convo = [], closing = false) {
   return 'answer';
 }
 /** 写法类核对（改不好也照常展示回答） */
-const SOFT_ANSWER_RULES = new Set(['care_deferral']);
+const SOFT_ANSWER_RULES = new Set(['care_deferral', 'number_consistency']);
 /** 回答核对问题 → 规则名 */
 export function rewriteRule(issue = '') {
   const t = String(issue);
@@ -813,6 +813,7 @@ export function rewriteRule(issue = '') {
   if (/时间或日期/.test(t)) return 'no_time';
   if (/禁止输出/.test(t)) return 'forbidden_text';
   if (/今日新闻|非今日/.test(t)) return 'today_news';
+  if (/数字定案|数字前后不一致/.test(t)) return 'number_consistency';
   if (/verify_numbers|计算|数值/.test(t)) return 'calculation';
   if (/截图|识别|原图/.test(t)) return 'visual';
   if (/渠道|入口|候选证据/.test(t)) return 'source';
