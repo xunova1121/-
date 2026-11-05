@@ -43,3 +43,4 @@ describe('PPT 输入整理', () => {
     expect(chooseDesign({ format: 'pptx', title: '季度数据', content: two }).style).toBe('data');
   });
 });
+

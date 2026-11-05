@@ -9,6 +9,9 @@ import { errorKind } from '../core/suggest.js';
 import { assertArchitectureToolCall } from './architectureStateProtection.js';
 import { toolFailureScope } from './toolFailureScope.js';
 
+/** 产出文件、核对数字的本地工具：联网到点后照常可用 */
+export const OUTPUT_TOOLS = /^(?:create_document|write_long_document|edit_office_document|check_document|write_file|edit_file|preview|create_diagram|export_diagram|reconcile_numbers|verify_numbers|time_calc)$/;
+
 /** 原顺序执行副作用，仅将连续的只读调用并行；检查点先于操作落盘。 */
 export async function executeToolCalls(
   calls,
@@ -51,6 +54,8 @@ export async function executeToolCalls(
     seen.set(sig, times);
     if (seen.size > 128) seen.delete(seen.keys().next().value);
     try {
+      // 联网到点只停联网；要出文件（PPT、Word、图）就是文档任务，按深度任务继续，不能连生成也挡掉（用户 2026-11-05：三页 PPT 连试三次都被“联网预算”挡住）
+      if (closing && !retrieval.extensive && !webTools.has(c.name) && OUTPUT_TOOLS.test(c.name)) retrieval.upgrade?.('文档');
       if (closing && (!retrieval.extensive || webTools.has(c.name))) throw new Error('联网检索已经结束，请直接整理已有资料回答，不要继续调用工具');
       if (!tool) throw new Error(`没有名为 ${c.name} 的工具`);
       const cooldownUntil = loader.cooldownUntil?.(c.name);

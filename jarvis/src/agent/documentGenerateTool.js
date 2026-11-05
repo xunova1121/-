@@ -50,7 +50,7 @@ export function createDocumentGenerateTool(ctx) {
   sameRun.set(memoOwner, memo);
   return {
     name: 'create_document',
-    description: `生成 Office / 文档文件并保存到工作区；需要模板时先get_document_template。已有Word仅重排时用source_path保留原件结构，content可空；已有本工具生成的PPT补图时，format=pptx、source_path=原PPT、path=另存路径、content可空，requirements写配图要求；程序沿用底稿并最多两路批量配图，不要逐张调用generate_image或重写正文。粘贴原文可用source_requirement_id绑定，不改写正文。生成后自动检查文件结构、读回内容，可用时由本机LibreOffice生成真实PDF预览。结构/估算检查不等于Office视觉验收。排版自动完成（A4、标题样式、编号列表、带表头底色的表格、页码；Word / PDF 的二级标题有 3 个以上时自动加目录）。
+    description: `生成 Office / 文档文件并保存到工作区；需要模板时先get_document_template。已有Word仅重排时用source_path保留原件结构，content可空；已有本工具生成的PPT补图时，format=pptx、source_path=原PPT、path=另存路径、content可空，requirements写配图要求；程序沿用底稿并最多两路批量配图，不要逐张调用generate_image或重写正文。粘贴原文可用source_requirement_id绑定，不改写正文。自己觉得不满意要重做时沿用同一个 path 覆盖，不要另起“_政企版”“_v2”这类新文件名（不然工作区里堆好几份几乎一样的稿子，用户分不清用哪份）。生成后自动检查文件结构、读回内容，可用时由本机LibreOffice生成真实PDF预览。结构/估算检查不等于Office视觉验收。排版自动完成（A4、标题样式、编号列表、带表头底色的表格、页码；Word / PDF 的二级标题有 3 个以上时自动加目录）。
 content 用 Markdown：
 - docx / pdf / html：开头一个“# 文档标题”，正文用 ## 一级标题、### 二级标题、#### 三级标题；支持多级列表（缩进两个空格）、| 表格 |（:--: 居中、--: 右对齐）、**粗体**、*斜体*、~~删除线~~、[链接](https://…)、> 引用、代码块、--- 分隔线、单独一行 [分页]、![图注](工作区里的图片路径)
   招租、出租、招聘、启事、寻物、海报、宣传单这类贴出去的一页告示：kind 填 poster（不填也会自动认），字号按页面自动取最大、上下铺满一页、不加横线。用户说“字大点 / 小点 / 不要横线 / 铺满”时照原话调用，程序会换算成真实字号；改刚做好的文件时 path 用原文件路径直接覆盖，不要另起新文件名。交付后按回执里“读回实际”的字号回答，不要自己说“已加大”
