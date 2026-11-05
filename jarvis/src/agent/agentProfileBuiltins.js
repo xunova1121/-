@@ -20,7 +20,7 @@ const profiles = [
     intro: '按文种整理要点，帮你写清楚、排规范。',
     starters: ['根据这些要点拟一份通知', '阅读来文，帮我起草批复', '把工作记录整理成述职报告'],
     prompt: '你帮助用户起草和修改公文。先确认文种和已有材料，沿用用户事实、称谓及数字，不虚构单位、文号、批示或依据。缺项明确留待补充。结构、层级和格式按选定文种处理，生成Word后读回核对；未实现的格式不能声称已符合标准。',
-    tools: [...new Set([...documentTools, ...researchTools, 'read_image_text', 'check_gongwen', 'review_task'])],
+    tools: [...new Set([...documentTools, ...researchTools, 'read_image_text', 'check_gongwen', 'check_writing', 'review_task'])],
     form: [select('kind', '文种', ['工作总结', '述职报告', '通知', '工作方案', '请示', '会议纪要', '讲话稿', '调研报告', '周报', '批复']),
       { key: 'subject', label: '主题', type: 'text' }, { key: 'notes', label: '内容要点', type: 'textarea' },
       { key: 'audience', label: '写给谁看', type: 'text' }, select('length', '篇幅', ['约800字', '约1500字', '约3000字']),
@@ -31,7 +31,7 @@ const profiles = [
     intro: '围绕一个问题查证资料，给出有来源的结论。',
     starters: ['对比这两个方案的优缺点和适用条件', '帮我研究这个行业最近的变化', '核实这篇文章的关键说法和数字'],
     prompt: '你帮助用户研究具体问题。先界定范围，再查证相关资料，区分原文、搜索摘要、推断及待核实内容。数字冲突先核对口径和时间，结论附来源，保留不确定性。遵守本轮工具权限、检索预算和停止信号，资料不足时明确说明。',
-    tools: [...researchTools, 'deep_research', 'fact_check', 'get_today_news', 'create_document', 'check_document', 'update_plan', 'review_task'],
+    tools: [...researchTools, 'deep_research', 'fact_check', 'get_today_news', 'create_document', 'check_document', 'check_writing', 'update_plan', 'review_task'],
     form: [], output: 'text', source: 'builtin'
   },
   {
@@ -39,7 +39,7 @@ const profiles = [
     intro: '告诉我主题、文字和用途，一起把海报做好。',
     starters: ['做一张活动宣传海报，突出时间和地点', '给这个产品设计一张方形海报', '按这些文案做一张简洁的竖版海报'],
     prompt: '你帮助用户设计海报。先确定用途、尺寸、标题与要点，保护用户提供的品牌与原文要求。调用已配置的图像能力，检查文字可读性和布局；没有可用接口时明确说明，不虚构生成成功或下载链接。',
-    tools: ['generate_image', 'inspect_image', 'read_image_text', 'read_file', 'list_files', 'preview', 'review_task'],
+    tools: ['generate_image', 'make_poster', 'process_image', 'inspect_image', 'read_image_text', 'read_file', 'list_files', 'preview', 'review_task'],
     form: [select('size', '尺寸', ['竖版', '横版', '方形', '朋友圈封面']),
       select('style', '画面风格', ['简约设计', '质感摄影', '立体视觉', '国风美学', '手绘插画', '复古拼贴', '水彩肌理', '未来科技']),
       select('ratio', '画面比例', ['9:16', '16:9', '3:4', '1:1']),

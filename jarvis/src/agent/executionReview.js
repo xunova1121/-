@@ -11,7 +11,7 @@ import { answerConstraints, answerConstraintIssues, concreteSourceRequirement, s
 import { styleRequests, styleIssues, styleNote } from './styleCheck.js';
 import { completedDeliverySteps } from './deliveryCompletion.js';
 import { priceComparisonIssues } from './priceComparison.js';
-import { reconcileAnswerIssues, conflictingNumbers } from './numberReconcile.js';
+import { reconcileAnswerIssues, conflictingNumbers, weatherConflicts } from './numberReconcile.js';
 /** 问的是数字类事实（几条、多少、排第几、里程、人口……）：交付前查同一回答里有没有前后不一致的数 */
 const NUMERIC_FACT = /多少|几条|几个|几座|第几|排名|排第|里程|人口|面积|总量|规模|金额|营收|产量|占比/;
 
@@ -296,6 +296,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     answerIssues = [...answerConstraintIssues(request, text, now), ...priceComparisonIssues(request, text), ...presentationAnswerIssues(request, text, lastDocument())];
     // 数字定案（用户 2026-11-05：南京地铁 611 / 757 / 556.8 公里同时出现）：用了定案就只用主数字；没定案时查明显的前后不一致
     answerIssues.push(...(numberDecisions.length ? reconcileAnswerIssues(text, numberDecisions) : numericLookup() ? conflictingNumbers(text) : []));
+    if (weatherAsked()) answerIssues.push(...weatherConflicts(text));
     if (repositoryChanged) {
       const issue = repositoryDeliveryIssue(text, [...new Set([...files.values()].map(file => file.workspaceId).filter(Boolean))]);
       if (issue) answerIssues.push(issue);
@@ -308,10 +309,12 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     return [...answerIssues, ...styleProblems, ...(visualIssue ? [visualIssue] : []), ...(sourceIssue ? [sourceIssue] : []), ...(calculationIssue ? [calculationIssue] : [])];
   };
   /** 数字类事实问题，且本轮至少有两次联网取得资料 */
+  // 查过天气或问的是天气：回答里同一天的最高 / 最低温不能前后两个数
+  const weatherAsked = () => /天气|气温|温度|穿衣|下雨/.test(String(request)) || receipts.some(r => r.ok && r.tool === 'get_weather');
   const numericLookup = () => NUMERIC_FACT.test(String(request)) && receipts.filter(r => r.ok && /^(?:web_search|fetch_url|fetch_json|deep_research|fact_check)$/.test(r.tool)).length >= 2;
   const guardsAnswer = () => {
     const rules = answerConstraints(request);
-    return numberDecisions.length > 0 || numericLookup() || lastDocument()?.format === 'pptx' || visualEvidence.active() || (styleRequests(request).length > 0 && Boolean(lastDocument())) || rules.noTime || rules.literals.length > 0 || rules.todayNews || rules.care || rules.priceComparison || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
+    return numberDecisions.length > 0 || numericLookup() || weatherAsked() || lastDocument()?.format === 'pptx' || visualEvidence.active() || (styleRequests(request).length > 0 && Boolean(lastDocument())) || rules.noTime || rules.literals.length > 0 || rules.todayNews || rules.care || rules.priceComparison || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
   };
   /** 改写一次后仍对不上：不吞掉回答（文件链接要留着），末尾补一句读回的实际情况 */
   const styleCorrection = () => (styleProblems.length ? '（读回文件核对：' + styleNote(request, lastDocument()).replace(/^用户要的调整，读回文件的实际结果：/, '').replace(/。回答照这个说$/, '') + '。）' : '');

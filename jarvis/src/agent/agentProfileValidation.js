@@ -95,7 +95,7 @@ export function validateProfile(value, { existingIds = [], toolNames = knownTool
   if (value.steps !== undefined) {
     result.steps = array(value.steps, 'steps', MAX_WORKFLOW_STEPS).map((step, i) => {
       const field = `steps[${i}]`;
-      object(step, field, ['title', 'task', 'agentId', 'check']);
+      object(step, field, ['title', 'task', 'agentId', 'check', 'onlyIf']);
       const out = { title: text(step.title, `${field}.title`, 40), task: text(step.task, `${field}.task`, 600) };
       if (step.agentId !== undefined && step.agentId !== '') {
         out.agentId = profileId(step.agentId);
@@ -104,6 +104,8 @@ export function validateProfile(value, { existingIds = [], toolNames = knownTool
       const check = step.check ?? 'none';
       if (!WORKFLOW_CHECKS.includes(check)) throw profileError(`${field}.check`, '检查方式无效');
       if (check !== 'none') out.check = check;
+      // 条件：上一步结果里出现这句话才做这一步（如“不合格”“需要审批”）
+      if (step.onlyIf !== undefined && String(step.onlyIf).trim()) out.onlyIf = text(step.onlyIf, `${field}.onlyIf`, 40);
       return out;
     });
     if (!result.steps.length) delete result.steps;

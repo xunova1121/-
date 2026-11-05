@@ -156,3 +156,22 @@ export function createNumberReconcileTool() {
     }
   };
 }
+
+/**
+ * 天气回答前后矛盾（用户转录：同一条回答里写“最高22℃”又写“18～29℃”）：同一个回答里“最高 X℃”和温度区间
+ * “a～b℃”同时出现、且 X 不等于区间里的高值时报出来。只看同一段（同一天）里的，宁可漏报不误报。
+ */
+export function weatherConflicts(text) {
+  const issues = [];
+  for (const para of String(text || '').split(/\n\s*\n|\n(?=[#*\-|]|\d+[.、])/)) {
+    const highs = [...para.matchAll(/最高(?:气温|温度)?\s*(?:约|为|是|达)?\s*(-?\d+(?:\.\d+)?)\s*(?:℃|°C|度)/g)].map((m) => Number(m[1]));
+    const lows = [...para.matchAll(/最低(?:气温|温度)?\s*(?:约|为|是|达)?\s*(-?\d+(?:\.\d+)?)\s*(?:℃|°C|度)/g)].map((m) => Number(m[1]));
+    const ranges = [...para.matchAll(/(-?\d+(?:\.\d+)?)\s*(?:℃|°C|度)?\s*[~～至到—–-]\s*(-?\d+(?:\.\d+)?)\s*(?:℃|°C|度)/g)].map((m) => [Number(m[1]), Number(m[2])].sort((a, b) => a - b));
+    if (!ranges.length) continue;
+    const [lo, hi] = ranges[0];
+    if (highs.some((h) => Math.abs(h - hi) > 0.5) || lows.some((l) => Math.abs(l - lo) > 0.5)) {
+      issues.push(`天气数字前后不一致：同一段里写了${highs.length ? `“最高${highs[0]}℃”` : ''}${lows.length ? `“最低${lows[0]}℃”` : ''}，又写了“${lo}～${hi}℃”；按天气工具的结果统一成一组数字（同一天的最高、最低只能有一个值）`);
+    }
+  }
+  return issues.slice(0, 2);
+}

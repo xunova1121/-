@@ -30,6 +30,9 @@ import { throwControl } from '../core/networkRequest.js';
 import { createVerificationTool, currentTime } from './verifyNumbers.js';
 import { createNumberReconcileTool } from './numberReconcile.js';
 import { createGongwenCheckTool } from './gongwenCheck.js';
+import { createWritingCheckTool } from './writingChecks.js';
+import { createPosterTool, toBase64 } from './posterTool.js';
+import { createImageTaskTool } from './imageTasks.js';
 import { checkpointView } from '../../shared/taskCheckpoint.js';
 import { skillCompatibility } from './skillCompatibility.js';
 import { MOBILE } from '../config.js';
@@ -132,6 +135,10 @@ export function createTools(ctx) {
     createVerificationTool(ctx),
     createNumberReconcileTool(),
     createGongwenCheckTool(),
+    createWritingCheckTool(),
+    createImageTaskTool(ctx),
+    // 服务器上没有浏览器画布：插画底图用服务器的 SVG 渲染器转 PNG
+    createPosterTool({ ...ctx, rasterizeSvg: ctx.renderSvg ? async (svg) => ({ mime: 'image/png', data: toBase64(new Uint8Array(await (await ctx.renderSvg(svg)).arrayBuffer())) }) : null }),
     createTimeCalcTool(ctx),
     createWorkRecordsTool(),
     createSongTool(ctx),

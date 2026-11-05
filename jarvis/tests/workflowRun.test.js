@@ -91,3 +91,47 @@ it('服务器端：个人工作流按步骤真实执行，每步调用一次模�
     await runner.settled();
   }
 });
+
+it('条件步骤：上一步结果里没有指定的话就跳过，有就执行', async () => {
+  const p = validateProfile({ ...base, steps: [{ title: '判断', task: '看要不要请示' }, { title: '起草', task: '起草请示', onlyIf: '需要请示' }, { title: '总结', task: '总结' }] });
+  const run = vi.fn(async (o) => ({ text: o.userText.includes('第 1/3 步') ? '不用请示，直接办' : '好了', toolCalls: 0 }));
+  const events = [];
+  const out = await runWorkflow({ userText: 'x', agent: { profile: p, note: '' }, emit: (e) => events.push(e) }, { run });
+  expect(run).toHaveBeenCalledTimes(2);
+  expect(out.text).toContain('已跳过');
+  expect(events.some((e) => e.type === 'tool_end' && /跳过/.test(e.output))).toBe(true);
+  const run2 = vi.fn(async () => ({ text: '需要请示', toolCalls: 0 }));
+  await runWorkflow({ userText: 'x', agent: { profile: p, note: '' } }, { run: run2 });
+  expect(run2).toHaveBeenCalledTimes(3);
+  expect(validateProfile(p).steps[1].onlyIf).toBe('需要请示');
+});
+
+it('每步一张进度卡；中途失败后回“继续”从失败那一步接着做，不重做前面的', async () => {
+  const p = validateProfile({ ...base, steps: [{ title: '一', task: 'a' }, { title: '二', task: 'b' }, { title: '三', task: 'c' }] });
+  let fail = true;
+  const seen = [];
+  const run = vi.fn(async (o) => { const n = /第 (\d)\/3 步/.exec(o.userText)[1]; seen.push(n); if (n === '2' && fail) throw new Error('网络断了'); return { text: `结果${n}`, toolCalls: 0 }; });
+  const events = [];
+  const opts = { sessionId: 's-resume', agent: { profile: p, note: '' }, emit: (e) => events.push(e) };
+  await expect(runWorkflow({ ...opts, userText: '原始要求' }, { run })).rejects.toThrow('网络断了');
+  expect(events.filter((e) => e.type === 'tool_start' && e.name === 'workflow_step')).toHaveLength(2);
+  expect(events.some((e) => e.type === 'tool_end' && e.ok === false)).toBe(true);
+  expect(events.map((e) => e.delta || '').join('')).toContain('回复“继续”');
+  fail = false;
+  seen.length = 0;
+  const out = await runWorkflow({ ...opts, userText: '继续' }, { run });
+  expect(seen).toEqual(['2', '3']);
+  expect(run.mock.calls.at(-1)[0].userText).toContain('原始要求');
+  expect(out.text).toContain('结果1');
+  expect(out.steps).toBe(3);
+  // 做完就清掉进度：再说“继续”是重新开始
+  seen.length = 0;
+  await runWorkflow({ ...opts, userText: '继续' }, { run });
+  expect(seen).toEqual(['1', '2', '3']);
+});
+
+it('现成的工作流都能通过配置校验', async () => {
+  const { WORKFLOW_PRESETS } = await import('../src/agent/workflowPresets.js');
+  expect(WORKFLOW_PRESETS.length).toBeGreaterThanOrEqual(3);
+  for (const preset of WORKFLOW_PRESETS) expect(validateProfile({ ...base, steps: preset.steps }).steps).toHaveLength(preset.steps.length);
+});

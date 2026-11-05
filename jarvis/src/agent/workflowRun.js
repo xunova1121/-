@@ -8,6 +8,12 @@ import { runAgent } from './agent.js';
 import { getAgent, BUILTIN_AGENTS } from './agentProfiles.js';
 import { checkGongwen, gongwenIssueNote } from './gongwenCheck.js';
 import { conflictingNumbers } from './numberReconcile.js';
+import { collection } from './store.js';
+
+/** 每段对话的工作流进度（做完的步骤和结果）：中途失败后回“继续”从失败那一步接着做 */
+const progressStore = collection('kv');
+const progressKey = (sessionId) => `workflow-progress:${sessionId}`;
+export const RESUME_RE = /^\s*(继续|接着做|接着|重试|从失败的地方继续)\s*[。.!！]?\s*$/;
 
 /** 每种检查：返回问题说明，没有问题返回空 */
 export const STEP_CHECKS = {
@@ -40,10 +46,26 @@ export async function runWorkflow(options, { run = runAgent, lookup = getAgent }
   const steps = profile?.steps || [];
   if (!steps.length) return run(options);
   const base = { ...profile, steps: undefined };
-  const previous = [];
+  const sessionId = options.sessionId || null;
+  // 回“继续”：同一个工作流上次没做完，就带上做完的步骤，从失败那一步接着做
+  const saved = sessionId && RESUME_RE.test(String(userText || '')) ? await progressStore.get(progressKey(sessionId)).catch(() => null) : null;
+  const resume = saved?.agentId === profile.id && saved.steps?.length < steps.length ? saved : null;
+  const previous = resume ? resume.steps : [];
+  const originalText = resume?.userText || userText;
+  const remember = () => sessionId && progressStore.put({ id: progressKey(sessionId), agentId: profile.id, userText: originalText, steps: previous }).catch(() => {});
   let toolCalls = 0;
+  if (resume) emit({ type: 'text', delta: `> 接着上次的进度：前 ${previous.length} 步已完成，从第 ${previous.length + 1} 步继续。\n\n` });
   for (const [index, step] of steps.entries()) {
+    if (index < previous.length) continue;
     if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+    // 条件步骤：上一步结果里没出现指定的话就跳过
+    if (step.onlyIf && !String(previous.at(-1)?.text || '').includes(step.onlyIf)) {
+      emit({ type: 'tool_start', id: `workflow-${index}`, name: 'workflow_step', args: { step: index + 1, title: step.title } });
+      emit({ type: 'tool_end', id: `workflow-${index}`, name: 'workflow_step', ok: true, output: `跳过：上一步结果里没有“${step.onlyIf}”`, ms: 0 });
+      previous.push({ index, title: step.title, text: `（已跳过：上一步结果里没有“${step.onlyIf}”）`, skipped: true });
+      await remember();
+      continue;
+    }
     // 交给哪个智能体：没写就用工作流自己的角色；写了就按编号查（找不到报错，不悄悄换成别的）
     let stepProfile = base;
     if (step.agentId) {
@@ -51,10 +73,19 @@ export async function runWorkflow(options, { run = runAgent, lookup = getAgent }
       if (!stepProfile) throw Object.assign(new Error(`工作流第 ${index + 1} 步要用的智能体不存在：${step.agentId}`), { name: 'ValidationError', code: 'AGENT_NOT_FOUND', kind: 'input' });
     }
     emit({ type: 'text', delta: `${index ? '\n\n' : ''}### 第 ${index + 1} 步 · ${step.title}\n\n` });
-    emit({ type: 'tool_progress', id: 'workflow', text: `工作流第 ${index + 1}/${steps.length} 步：${step.title}` });
-    const prompt = stepPrompt({ workflow: profile.name, step, index, total: steps.length, userText, previous });
+    // 每一步一张进度卡：开始、完成或失败、用时
+    const startedAt = Date.now();
+    emit({ type: 'tool_start', id: `workflow-${index}`, name: 'workflow_step', args: { step: index + 1, total: steps.length, title: step.title } });
+    const prompt = stepPrompt({ workflow: profile.name, step, index, total: steps.length, userText: originalText, previous: previous.filter((p) => !p.skipped) });
     const once = (text) => run({ ...options, userText: text, requirementText: text, agent: { profile: { ...stepProfile, steps: undefined }, note: agent.note } });
-    let result = await once(prompt);
+    let result;
+    try {
+      result = await once(prompt);
+    } catch (error) {
+      emit({ type: 'tool_end', id: `workflow-${index}`, name: 'workflow_step', ok: false, output: `第 ${index + 1} 步失败：${error?.message || error}`, ms: Date.now() - startedAt });
+      if (error?.name !== 'AbortError') emit({ type: 'text', delta: `\n\n> 第 ${index + 1} 步没做成：${error?.message || error}。前面做完的步骤已保存，回复“继续”从这一步接着做。\n` });
+      throw error;
+    }
     toolCalls += result?.toolCalls || 0;
     const issue = STEP_CHECKS[step.check || 'none']?.(result?.text || '') || '';
     if (issue) {
@@ -65,7 +96,10 @@ export async function runWorkflow(options, { run = runAgent, lookup = getAgent }
       if (still) emit({ type: 'text', delta: `\n\n> 改了一次仍有问题，请人工核对：\n${still}\n` });
     }
     previous.push({ index, title: step.title, text: result?.text || '' });
+    emit({ type: 'tool_end', id: `workflow-${index}`, name: 'workflow_step', ok: true, output: `第 ${index + 1}/${steps.length} 步「${step.title}」完成${step.check && step.check !== 'none' ? `，已做${CHECK_NAMES[step.check]}` : ''}`, ms: Date.now() - startedAt });
+    await remember();
   }
+  if (sessionId) await progressStore.delete(progressKey(sessionId)).catch(() => {});
   const text = previous.map((p) => `### 第 ${p.index + 1} 步 · ${p.title}\n\n${p.text}`).join('\n\n');
   return { text, toolCalls, steps: previous.length, workflow: true };
 }

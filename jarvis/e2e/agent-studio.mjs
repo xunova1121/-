@@ -99,6 +99,10 @@ try {
     await page.fill('.wy-studio-editor [aria-label="一句话介绍"]', '核对来源，再整理简报');
     await page.fill('.wy-studio-editor textarea', '1.检索资料\n2.核对日期\n3.形成摘要');
     for (let i = 1; i <= 3; i++) await page.fill(`.wy-studio-editor [aria-label="推荐问题 ${i}"]`, `帮我整理第${i}类资讯`);
+    // 现成的工作流：套用后有 3 步，删掉再自己加
+    await page.selectOption('[aria-label="套用现成的工作流"]', 'qingshi');
+    check(`${tag} 套用现成工作流得到 3 步`, (await page.locator('.wy-flow-step').count()) === 3 && (await page.locator('.wy-flow-step').nth(1).locator('[aria-label="做完怎么检查"]').inputValue()) === 'gongwen');
+    while (await page.locator('.wy-flow-step').count()) await page.locator('.wy-flow-step').first().locator('[aria-label="删除这一步"]').click();
     // 工作流步骤：加两步，第二步交给公文写作并做公文体检
     await page.click('.wy-flow-add');
     await page.click('.wy-flow-add');
@@ -109,6 +113,7 @@ try {
     await steps.nth(1).locator('[aria-label="这一步要做什么"]').fill('整理成一页简报');
     await steps.nth(1).locator('[aria-label="交给哪个智能体"]').selectOption('gongwen-writer');
     await steps.nth(1).locator('[aria-label="做完怎么检查"]').selectOption('gongwen');
+    await steps.nth(1).locator('[aria-label="执行条件"]').fill('有新资料');
     check(`${tag} 工作流步骤第一步不能上移、最后一步不能下移`, await page.evaluate(() => { const b = [...document.querySelectorAll('.wy-flow-step .wy-flow-move')]; return b[0].disabled && b[4].disabled; }));
     check(`${tag} 工作流编辑区不横向溢出`, await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
     await page.screenshot({ path: `${out}/personal-${tag}.png` });
@@ -126,6 +131,7 @@ try {
     await page.click('.wy-studio-edit');
     check(`${tag} 工作要求回填未丢`, (await page.inputValue('.wy-studio-editor textarea')).includes('核对日期'));
     check(`${tag} 工作流步骤保存后回填`, (await page.locator('.wy-flow-step').count()) === 2 && (await page.locator('.wy-flow-step').nth(1).locator('[aria-label="交给哪个智能体"]').inputValue()) === 'gongwen-writer' && (await page.locator('.wy-flow-step').nth(1).locator('[aria-label="做完怎么检查"]').inputValue()) === 'gongwen');
+    check(`${tag} 执行条件保存后回填`, (await page.locator('.wy-flow-step').nth(1).locator('[aria-label="执行条件"]').inputValue()) === '有新资料');
     await page.fill('.wy-studio-editor [aria-label="名称"]', '修改后的简报助手');
     await page.click('.wy-studio-save');
     await page.waitForSelector('.wy-studio-editor[hidden]', { state: 'attached' });
