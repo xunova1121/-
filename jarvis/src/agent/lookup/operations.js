@@ -5,11 +5,12 @@ import { withWebDeadline } from './request.js';
 import { WEATHER_FETCH_MS } from './weatherLimits.js';
 import { localLookupFailure } from './healthPolicy.js';
 import { SEARCH_WINDOW_MS } from '../searchPolicy.js';
+import { SPORTS_OPERATION_MS, sportsDiagnostics } from '../sportsRequest.js';
 
 /** 沿用原工具的提供者、凭据和回执；记录的是整项查询健康，不冒充单个上游可用性。 */
 export const LOOKUP_OPERATIONS = [
   { id: 'query_weather', label: '天气查询（和风及原有备用）', kinds: ['weather'], tools: ['get_weather'], region: 'cn', priority: 1, timeoutMs: WEATHER_FETCH_MS, needsKey: false, optionalKey: true, validation: 'existing' },
-  { id: 'query_sports', label: '赛程查询（直播吧接口及赛程页）', kinds: ['sports_live'], tools: ['get_sports_scores'], region: 'cn', priority: 1, timeoutMs: 12000, needsKey: false, validation: 'existing' },
+  { id: 'query_sports', label: '赛程查询（直播吧接口及赛程页）', kinds: ['sports_live'], tools: ['get_sports_scores'], region: 'cn', priority: 1, timeoutMs: SPORTS_OPERATION_MS, needsKey: false, validation: 'existing' },
   { id: 'query_market', label: '股票日K查询（原有同源口径）', kinds: ['market'], tools: ['get_stock_kline'], region: 'cn', priority: 1, timeoutMs: 10000, needsKey: false, validation: 'existing' },
   { id: 'query_quote', label: '实时报价（腾讯/东方财富公开行情）', kinds: ['market'], tools: ['get_market_quote'], region: 'cn', priority: 1, timeoutMs: 10000, needsKey: false, validation: 'existing' },
   { id: 'query_search', label: '通用搜索（已配置引擎）', kinds: ['general', 'market'], tools: ['web_search'], region: 'cn', priority: 2, timeoutMs: 8000, needsKey: false, optionalKey: true, validation: 'existing' },
@@ -75,7 +76,7 @@ export function connectLookupTools(tools, lookup) {
       const intent = execution.retrieval?.intent || lookupIntent(request);
       if (!request || !intent.lookup || execution.retrieval?.extensive) return guarded(args, execution);
       const kind = { get_weather: 'weather', get_stock_kline: 'market', get_market_quote: 'market', get_sports_scores: 'sports_live' }[tool.name] || intent.kind;
-      const timeoutMs = tool.name === 'get_weather' ? WEATHER_FETCH_MS : tool.name === 'get_sports_scores' ? 12000 : ['get_stock_kline', 'get_market_quote', 'get_today_news', 'get_sports_scores'].includes(tool.name) ? 10000 : 5000;
+      const timeoutMs = tool.name === 'get_weather' ? WEATHER_FETCH_MS : tool.name === 'get_sports_scores' ? SPORTS_OPERATION_MS : ['get_stock_kline', 'get_market_quote', 'get_today_news'].includes(tool.name) ? 10000 : 5000;
       const found = await recoverLookup({ ...intent, kind }, { name: tool.name, args, timeoutMs }, {
         text: request, signal: execution.signal, retrieval: execution.retrieval, lastGood: lookup.lastGood, nowFn: lookup.now,
         getTool: raw,
@@ -85,7 +86,8 @@ export function connectLookupTools(tools, lookup) {
             return { ok: true, output: typeof value === 'object' && 'text' in value ? value.text : String(value) };
           } catch (error) {
             if (execution.signal?.aborted) throw error;
-            return { ok: false, failure: { name: error.name, code: error.code, kind: error.kind, status: error.status, cooldownUntil: error.cooldownUntil, tool: error.tool } };
+            return { ok: false, failure: { name: error.name, code: error.code, kind: error.kind, status: error.status, cooldownUntil: error.cooldownUntil, tool: error.tool,
+              ...(call.name === 'get_sports_scores' && { sourceFailures: sportsDiagnostics(error.sourceFailures) }) } };
           }
         }))
       });

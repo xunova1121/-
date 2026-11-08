@@ -1,5 +1,6 @@
 import { collection } from '../store.js';
 import { consecutiveLookupFailures, localLookupFailure, providerLookupFailure } from './healthPolicy.js';
+import { sportsDiagnostics } from '../sportsRequest.js';
 
 export const LOOKUP_COOLDOWN_MS = 30 * 60 * 1000;
 const KEY = 'lookup.health.';
@@ -50,8 +51,11 @@ export function createLookupHealth({ storage = collection('kv'), now = Date.now 
           providerFailure: result.providerFailure ?? (result.state === 'failed' && (!result.code && !result.status && !result.kind || providerLookupFailure(result))),
           ...(Number.isInteger(result.status) && { status: result.status }),
           code: String([401, 402, 403, 429].includes(result.status) ? 'LOOKUP_AUTH' : result.code || '').slice(0, 60),
-          // 只接受行情模块的固定来源标签和状态码，不写URL、请求参数、错误正文或配置。
-          ...(Array.isArray(result.sourceFailures) && { sourceFailures: result.sourceFailures.filter(row => /^(?:上海金|伦敦金|东方财富外汇|参考汇率|名字查代码|腾讯行情|(?:恒生.*指数|道琼斯工业指数|纳斯达克综合指数|标普500指数|日经225指数)（(?:腾讯行情|东方财富行情)）)$/.test(row.source) && /^[A-Za-z0-9_]{1,60}$/.test(row.code)).slice(0, 8).map(row => ({ source: row.source, code: row.code })) })
+          // 行情/赛程仅接受固定标签与状态字段，不写URL、请求参数、错误正文或配置。
+          ...(Array.isArray(result.sourceFailures) && { sourceFailures: [
+            ...result.sourceFailures.filter(row => /^(?:上海金|伦敦金|东方财富外汇|参考汇率|名字查代码|腾讯行情|(?:恒生.*指数|道琼斯工业指数|纳斯达克综合指数|标普500指数|日经225指数)（(?:腾讯行情|东方财富行情)）)$/.test(row?.source) && /^[A-Za-z0-9_]{1,60}$/.test(row?.code)).slice(0, 8).map(row => ({ source: row.source, code: row.code })),
+            ...sportsDiagnostics(result.sourceFailures)
+          ].slice(0, 8) })
         }].slice(-10);
         const cooling = consecutiveLookupFailures(samples);
         const record = { id: sourceKey(id), samples, cooldownUntil: cooling ? at + LOOKUP_COOLDOWN_MS : 0 };

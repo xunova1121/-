@@ -1,4 +1,5 @@
 import { marketFallback } from './fallback.js';
+import { sportsFailureText } from '../sportsRequest.js';
 /** 失败分类只使用结构化状态；原始报错只留在工具日志。 */
 export function failureKind(error = {}) {
   if (error.name === 'ValidationError' || ['WEATHER_LOCATION_REQUIRED', 'INVALID_STOCK_INPUT', 'INVALID_QUOTE_INPUT'].includes(error.code)) return 'input';
@@ -13,7 +14,8 @@ export function failureSentence(kind, attempts) {
   const reasons = [...new Set(attempts.map(a => a.failure === 'auth' ? '授权或额度不足' : a.failure === 'transient' ? '连接超时或不稳定' : a.failure === 'cooling' ? '暂时不可用' : '未取得有效内容'))].join('、');
   const cooling = attempts.filter(a => a.failure === 'cooling' && Number.isFinite(a.cooldownUntil));
   const note = cooling.map(a => `${a.label}冷却至北京时间${new Date(a.cooldownUntil).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}`).join('；');
-  return `${routes}都没取得可用结果（${reasons || '暂时无法连接'}），可以稍后再试。${note ? `${note}；冷却期间不要重复调用这些工具，换参数也不能恢复。` : ''}`;
+  const detail = kind === 'sports_live' ? sportsFailureText(attempts.flatMap(a => a.sourceFailures || [])) : '';
+  return `${routes}都没取得可用结果（${reasons || '暂时无法连接'}），可以稍后再试。${note ? `${note}；冷却期间不要重复调用这些工具，换参数也不能恢复。` : ''}${detail ? `\n来源诊断：${detail}` : ''}`;
 }
 export function usefulReceipt(found) {
   if (!found?.output?.trim()) return false;

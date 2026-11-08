@@ -1,6 +1,6 @@
 import { inSportsWindow, beijingTimestamp } from './sportsWindow.js';
-import { httpError } from '../core/networkRequest.js';
-import { withWebDeadline } from './retrievalBudget.js';
+import { createSportsRequests, sportsHttpError, SPORTS_SOURCES } from './sportsRequest.js';
+import { throwControl } from '../core/networkRequest.js';
 /**
  * 赛程比分的国内来源：直播吧的比分列表（bifen4pc.qiumibao.com，不用密钥）。
  * 已有国内服务器实测；中文队名、北京时间、比分、半场、第几分钟都有。
@@ -14,7 +14,6 @@ const STATE = { 1: '未开赛', 2: '进行中', 3: '完场', 4: '延期', 6: '�
 const SPORT = { football: '足球', basketball: '篮球', tennis: '网球', snooker: '斯诺克', game: '电竞', other: '其他' };
 /** 特殊状态只用于分类统计，不能再拿它隐藏比赛或猜联赛级别。 */
 const SPECIAL = new Set(['4', '6', '7']);
-const TIMEOUT_MS = 6000;
 /** 列表随比赛进行变化：缓存 30 秒（只一条） */
 const CACHE_MS = 30_000;
 let cached = null;
@@ -23,17 +22,22 @@ export const clearZhibo8Cache = () => {
 };
 
 /** 取直播吧的比分列表 */
-export async function fetchZhibo8({ get, signal, refresh = false }) {
+export async function fetchZhibo8({ get, signal, refresh = false, requests = createSportsRequests({ signal }) }) {
+  throwControl(null, signal);
   if (!refresh && cached && Date.now() - cached.at < CACHE_MS) return cached.list;
-  const data = await withWebDeadline(
-    async (s) => {
+  const data = await requests.read('scores',
+    async (s, stage) => {
       const response = await get(ZHIBO8_URL, { signal: s });
-      if (!response.ok) throw httpError(response.status, '', '直播吧');
-      return response.json();
-    },
-    { signal, timeoutMs: TIMEOUT_MS }
+      stage('body', response.status);
+      if (!response.ok) throw sportsHttpError(response, SPORTS_SOURCES.scores);
+      let data;
+      try { data = await response.json(); }
+      catch (error) { if (error instanceof SyntaxError) stage('parse'); throw error; }
+      stage('parse');
+      if (!Array.isArray(data?.list) || data.list.some(row => !row || typeof row !== 'object' || Array.isArray(row))) throw Object.assign(new Error('直播吧返回的格式不认识'), { kind: 'api', code: 'BAD_FORMAT' });
+      return data;
+    }
   );
-  if (!Array.isArray(data?.list)) throw Object.assign(new Error('直播吧返回的格式不认识'), { kind: 'api', code: 'BAD_FORMAT' });
   cached = { at: Date.now(), list: data.list };
   return data.list;
 }

@@ -2,6 +2,7 @@
 import { getSportsScores } from '../src/agent/sportsScores.js';
 import { sportsQuery } from '../src/agent/sportsSnapshot.js';
 import { withWebDeadline } from '../src/agent/retrievalBudget.js';
+import { SPORTS_OPERATION_MS } from '../src/agent/sportsRequest.js';
 export async function refreshSports(query, { get, signal } = {}) {
   if (query.size > 10 || [...query.keys()].some(k => !['period', 'window_minutes', 'date', 'end_date', 'sport', 'team', 'teams', 'leagues'].includes(k))) throw Object.assign(new Error('不支持的赛程查询参数'), { status: 400 });
   const args = Object.fromEntries(query);
@@ -11,7 +12,7 @@ export async function refreshSports(query, { get, signal } = {}) {
   if (args.sport && !['all', 'football', 'basketball', 'tennis'].includes(args.sport)) throw Object.assign(new Error('不支持的运动项目'), { status: 400 });
   let snapshot;
   try {
-    await withWebDeadline(s => getSportsScores(sportsQuery(args), { get, signal: s, refresh: true, onScores: value => { snapshot = value; } }), { signal, timeoutMs: 15000 });
+    await withWebDeadline(s => getSportsScores(sportsQuery(args), { get, signal: s, refresh: true, onScores: value => { snapshot = value; } }), { signal, timeoutMs: SPORTS_OPERATION_MS });
   } catch (error) {
     if (error.code === 'INVALID_SPORTS_INPUT') error.status = 400;
     throw error;

@@ -4,6 +4,7 @@ import { withWebDeadline } from './request.js';
 import { lastGoodKey } from './lastGood.js';
 import { failureKind, failureSentence, usefulReceipt, receiptLinks, recoveryText, QUERY_LABELS } from './recoveryData.js';
 import { SEARCH_WINDOW_MS } from '../searchPolicy.js';
+import { sportsDiagnostics } from '../sportsRequest.js';
 
 /** 后备搜索单次上限：不再是5秒/3秒，仍受本轮剩余时间约束 */
 export const RECOVERY_SEARCH_MS = SEARCH_WINDOW_MS;
@@ -36,7 +37,8 @@ export async function recoverLookup(intent, plan, options) {
       if (error.code === 'RETRIEVAL_BUDGET') { attempts.push({ label, failure: 'budget' }); return null; }
       const failure = failureKind(error);
       if (failure === 'cooling') cooled.add(call.name);
-      attempts.push({ label, failure, ...(failure === 'cooling' && { tool: call.name, cooldownUntil: error.cooldownUntil }) });
+      attempts.push({ label, failure, ...(failure === 'cooling' && { tool: call.name, cooldownUntil: error.cooldownUntil }),
+        ...(call.name === 'get_sports_scores' && { sourceFailures: sportsDiagnostics(error.sourceFailures) }) });
       if (failure === 'input') return { tool: plan.name, args: plan.args, output: intent.kind === 'weather' ? '你想查哪个城市或区县的天气？' : '请告诉我证券代码和要查询的价格口径。', recovery: { state: 'input', attempts } };
       return null;
     }
@@ -53,8 +55,8 @@ export async function recoverLookup(intent, plan, options) {
   const label = plan.name === 'web_search' ? '公开搜索' : QUERY_LABELS[intent.kind] || '查询来源';
   let found = await attempt({ name: plan.name, args: plan.args }, label, plan.timeoutMs);
   if (found) return found.recovery?.state === 'input' ? found : finish(found);
-  // 原天气/行情/搜索已含逐源重试与后备，不重新跑整条链；其他偶发只短重试一次。
-  if (!['get_weather', 'get_stock_kline', 'get_market_quote', 'web_search'].includes(plan.name) && attempts.at(-1)?.failure === 'transient') {
+  // 天气/赛程/行情/搜索已含逐源重试与后备，不重新跑整条链；其他偶发只短重试一次。
+  if (!['get_weather', 'get_sports_scores', 'get_stock_kline', 'get_market_quote', 'web_search'].includes(plan.name) && attempts.at(-1)?.failure === 'transient') {
     found = await attempt({ name: plan.name, args: plan.args }, label + '短重试', 2000);
     if (found) return finish(found);
   }

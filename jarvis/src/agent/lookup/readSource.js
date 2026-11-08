@@ -3,30 +3,37 @@ import { withWebDeadline } from '../retrievalBudget.js';
 import { webBody } from '../webBody.js';
 import { decodeLookupBody } from './content.js';
 import { providerLookupFailure } from './healthPolicy.js';
+import { retryAfterMs, retryWait, sleep } from '../../llm/openai.js';
 
-/** 统一单来源读取：列表和正文共用一个5秒期限，迟到/取消不回写结果，不执行网页脚本。 */
+/** 列表和正文共用来源声明的期限（最多8秒），迟到/取消不回写结果，不执行网页脚本。 */
 export async function readLookupSource(source, { get = (...args) => fetch(...args), now = Date.now(), params = {}, signal, retrieval, detailLimit = 3, requestLimit = Infinity } = {}) {
   const started = performance.now(); let requests = 0;
+  const timeoutMs = Math.max(1, Math.min(8000, source.timeoutMs || 5000, retrieval?.remaining ?? Infinity));
+  let retried = false;
   try {
     const value = await withWebDeadline(async activeSignal => {
       const read = async url => {
         if (activeSignal.aborted) throw activeSignal.reason;
-        if (requests >= requestLimit) throw Object.assign(new Error('已为其他来源保留读取额度'), { code: 'LOOKUP_READ_RESERVED' });
-        retrieval?.consume('read'); requests++;
-        let response;
         for (let attempt = 0; attempt < 2; attempt++) {
+          if (activeSignal.aborted) throw activeSignal.reason;
+          if (requests >= requestLimit) throw Object.assign(new Error('已为其他来源保留读取额度'), { code: 'LOOKUP_READ_RESERVED' });
+          retrieval?.consume('read'); requests++;
           try {
-            response = await withWebDeadline(s => get(url, { signal: s, credentials: 'omit' }), { signal: activeSignal, timeoutMs: attempt ? 1500 : 3000 });
-            if (!response.ok) throw Object.assign(new Error('HTTP ' + response.status), { code: 'LOOKUP_HTTP', status: response.status, kind: 'api' });
-            break;
+            return await withWebDeadline(async s => {
+              const response = await get(url, { signal: s, credentials: 'omit' });
+              if (s.aborted) throw s.reason;
+              if (!response.ok) throw Object.assign(new Error('HTTP ' + response.status), { code: 'LOOKUP_HTTP', status: response.status, kind: 'api', retryAfterMs: retryAfterMs(response.headers?.get?.('retry-after')) });
+              const bytes = await webBody(response, 1024 * 1024, s);
+              if (s.aborted) throw s.reason;
+              return decodeLookupBody(bytes, response.headers.get('content-type') || '');
+            }, { signal: activeSignal, timeoutMs: Math.min(attempt ? 2500 : 5000, timeoutMs - (performance.now() - started)) });
           } catch (error) {
-            if (activeSignal.aborted || attempt || requests >= requestLimit || failureKind(error) !== 'transient') throw error;
-            retrieval?.consume('read'); requests++;
+            const delayMs = Math.max(Number(error.retryAfterMs) || 0, retryWait(300, error));
+            if (activeSignal.aborted || error.code === 'RETRIEVAL_BUDGET' || error.name === 'AbortError' || attempt || retried || requests >= requestLimit || failureKind(error) !== 'transient' || timeoutMs - (performance.now() - started) - delayMs < 500) throw error;
+            retried = true;
+            await sleep(delayMs, activeSignal);
           }
         }
-        const bytes = await webBody(response, 1024 * 1024, activeSignal);
-        if (activeSignal.aborted) throw activeSignal.reason;
-        return decodeLookupBody(bytes, response.headers.get('content-type') || '');
       };
       const body = await read(source.url);
       let parsed;
@@ -45,12 +52,12 @@ export async function readLookupSource(source, { get = (...args) => fetch(...arg
       }
       if (activeSignal.aborted) throw activeSignal.reason;
       return { items: items.slice(0, 36).map(row => ({ ...row, kind: source.kind, sourceId: source.id, verified: row.verified || 'index', source: row.source || source.label })), failures };
-    }, { signal, timeoutMs: Math.min(5000, source.timeoutMs || 5000) });
+    }, { signal, timeoutMs });
     return { source: source.id, label: source.label, url: source.url, state: value.items.length ? 'ok' : 'empty', items: value.items,
       warnings: value.failures.slice(0, 5),
       reason: value.items.length ? '' : value.failures.length ? value.failures.slice(0, 2).join('；') : '当前时间范围无可验证内容，或列表没有明确发布时间', elapsedMs: Math.round(performance.now() - started), requests };
   } catch (error) {
     if (signal?.aborted || error.code === 'RETRIEVAL_BUDGET' || error.name === 'AbortError') throw error;
-    return { source: source.id, label: source.label, url: source.url, state: 'failed', providerFailure: providerLookupFailure(error), items: [], reason: error.name === 'TimeoutError' ? '超时（来源总期限5秒）' : error.code === 'LOOKUP_PARSE' ? error.message : error.status ? '来源返回HTTP ' + error.status : '读取未完成：' + String(error.message).slice(0, 100), status: error.status, code: error.code || (error.name === 'TimeoutError' ? 'LOOKUP_TIMEOUT' : 'LOOKUP_NETWORK'), elapsedMs: Math.round(performance.now() - started), requests };
+    return { source: source.id, label: source.label, url: source.url, state: 'failed', providerFailure: providerLookupFailure(error), items: [], reason: error.name === 'TimeoutError' ? `超时（本来源共用${timeoutMs / 1000}秒预算）` : error.code === 'LOOKUP_PARSE' ? error.message : error.status ? '来源返回HTTP ' + error.status : '读取未完成：' + String(error.message).slice(0, 100), status: error.status, code: error.code || (error.name === 'TimeoutError' ? 'LOOKUP_TIMEOUT' : 'LOOKUP_NETWORK'), elapsedMs: Math.round(performance.now() - started), requests };
   }
 }

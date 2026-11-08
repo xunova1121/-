@@ -1,5 +1,5 @@
-import { withWebDeadline } from './retrievalBudget.js';
-import { httpError, throwControl } from '../core/networkRequest.js';
+import { createSportsRequests, sportsHttpError, SPORTS_SOURCES } from './sportsRequest.js';
+import { throwControl } from '../core/networkRequest.js';
 import { webBody } from './webBody.js';
 import { newsPlain } from './newsSources.js';
 import { beijingTimestamp, inSportsWindow } from './sportsWindow.js';
@@ -35,16 +35,19 @@ export function parseSchedulePage(html) {
   return events;
 }
 
-export async function fetchSchedulePage({ get, signal, refresh = false }) {
+export async function fetchSchedulePage({ get, signal, refresh = false, requests = createSportsRequests({ signal }) }) {
+  throwControl(null, signal);
   if (!refresh && cached && Date.now() - cached.at < 30000) return cached.events;
-  const events = await withWebDeadline(async activeSignal => {
+  const events = await requests.read('schedule', async (activeSignal, stage) => {
     const response = await get(SCHEDULE_URL, { signal: activeSignal, credentials: 'omit', redirect: 'error' });
-    if (!response.ok) throw httpError(response.status, '', '国内赛程页');
+    stage('body', response.status);
+    if (!response.ok) throw sportsHttpError(response, SPORTS_SOURCES.schedule);
     const bytes = await webBody(response, 1000000, activeSignal);
-    throwControl(null, activeSignal);
-    return parseSchedulePage(new TextDecoder().decode(bytes));
-  }, { signal, timeoutMs: 4000 });
-  if (!events.length) throw Object.assign(new Error('赛程页没有可核对的对阵和日期'), { code: 'SPORTS_PAGE_EMPTY' });
+    stage('parse');
+    const parsed = parseSchedulePage(new TextDecoder().decode(bytes));
+    if (!parsed.length) throw Object.assign(new Error('赛程页没有可核对的对阵和日期'), { code: 'SPORTS_PAGE_EMPTY' });
+    return parsed;
+  });
   cached = { at: Date.now(), events };
   return events;
 }
