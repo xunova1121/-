@@ -46,6 +46,11 @@ try {
     }, raw);
     await page.evaluate(() => window.__jarvis.agents.openSquare());
     await page.waitForSelector('.wy-agent-favorite');
+    const smallTargets = selector => page.evaluate(selector => [...document.querySelectorAll(selector)].filter(node => node.offsetParent && node.getBoundingClientRect().height < 43.5).map(node => node.textContent.trim()), selector);
+    check(`${tag} 广场含收藏及折叠入口的触控高度至少44px`, (await smallTargets('.wy-agents button, .wy-agents input, .wy-hub summary')).length === 0);
+    await page.locator('.wy-hub-workflows summary').click();
+    check(`${tag} 展开流程后操作的触控高度至少44px`, (await smallTargets('.wy-hub button, .wy-hub summary')).length === 0);
+    await page.locator('.wy-hub-workflows summary').click();
     await page.locator('.wy-agent-card-shell').filter({ has: page.locator('[data-agent="ppt-maker"]') }).locator('.wy-agent-favorite').click();
     await page.getByRole('tab', { name: '收藏', exact: true }).click();
     check(`${tag} 收藏筛选真实智能体`, await page.locator('.wy-agent-card[data-agent]').count() === 1);
@@ -60,6 +65,7 @@ try {
     check(`${tag} 真实文件而非演示卡片`, (await page.locator('.wy-library-row').textContent()).includes('季度复盘'));
     await page.getByRole('button', { name: '打开与修改', exact: true }).click();
     await page.getByText('直接调整文字与格式 · 不调用模型', { exact: true }).click();
+    check(`${tag} 作品编辑及版本入口的触控高度至少44px`, (await smallTargets('.wy-library button, .wy-library summary')).length === 0);
     await page.locator('[aria-label="原文字（须唯一匹配）"]').fill('本季度完成十二个项目');
     await page.locator('[aria-label="替换为"]').fill('本季度完成十五个项目');
     await page.getByRole('button', { name: '替换文字并另存', exact: true }).click();
