@@ -9,11 +9,15 @@ import { getAgent, BUILTIN_AGENTS } from './agentProfiles.js';
 import { checkGongwen, gongwenIssueNote } from './gongwenCheck.js';
 import { conflictingNumbers } from './numberReconcile.js';
 import { collection } from './store.js';
+import { AGENT_FLOW_TOOLS } from './agentTurn.js';
+
+// 待确认步骤只读资料与规划，不能靠提示语阻止模型提前生成或覆盖文件。
+const REVIEW_TOOLS = new Set([...AGENT_FLOW_TOOLS, 'web_search', 'fetch_url', 'read_evidence', 'read_file', 'kb_search', 'list_files', 'get_document_template', 'read_document_structure', 'verify_numbers', 'reconcile_numbers', 'time_calc']);
 
 /** 每段对话的工作流进度（做完的步骤和结果）：中途失败后回“继续”从失败那一步接着做 */
 const progressStore = collection('kv');
 const progressKey = (sessionId) => `workflow-progress:${sessionId}`;
-export const RESUME_RE = /^\s*(继续|接着做|接着|重试|从失败的地方继续)\s*[。.!！]?\s*$/;
+export const RESUME_RE = /^\s*(继续|确认继续|按此提纲继续|接着做|接着|重试|从失败的地方继续)\s*[。.!！]?\s*$/;
 
 /** 每种检查：返回问题说明，没有问题返回空 */
 export const STEP_CHECKS = {
@@ -48,11 +52,16 @@ export async function runWorkflow(options, { run = runAgent, lookup = getAgent }
   const base = { ...profile, steps: undefined };
   const sessionId = options.sessionId || null;
   // 回“继续”：同一个工作流上次没做完，就带上做完的步骤，从失败那一步接着做
-  const saved = sessionId && RESUME_RE.test(String(userText || '')) ? await progressStore.get(progressKey(sessionId)).catch(() => null) : null;
-  const resume = saved?.agentId === profile.id && saved.steps?.length < steps.length ? saved : null;
-  const previous = resume ? resume.steps : [];
-  const originalText = resume?.userText || userText;
-  const remember = () => sessionId && progressStore.put({ id: progressKey(sessionId), agentId: profile.id, userText: originalText, steps: previous }).catch(() => {});
+  const progress = progressStore.bind();
+  const signature = JSON.stringify(steps);
+  const saved = sessionId ? await progress.get(progressKey(sessionId)) : null;
+  const continueRequested = RESUME_RE.test(String(userText || ''));
+  const resume = saved?.agentId === profile.id && (!saved.signature || saved.signature === signature) && saved.steps?.length < steps.length && (continueRequested || saved.paused) ? saved : null;
+  const revising = resume?.paused && !continueRequested;
+  const previous = resume ? [...resume.steps] : [];
+  if (revising) previous.pop();
+  const originalText = revising ? `${resume.userText}\n本次修改意见：${clip(userText, 4000)}` : resume?.userText || userText;
+  const remember = (paused = false) => sessionId && progress.put({ id: progressKey(sessionId), agentId: profile.id, signature, paused, userText: clip(originalText, 12000), steps: previous.map(p => ({ ...p, text: clip(p.text, 6000) })) });
   let toolCalls = 0;
   if (resume) emit({ type: 'text', delta: `> 接着上次的进度：前 ${previous.length} 步已完成，从第 ${previous.length + 1} 步继续。\n\n` });
   for (const [index, step] of steps.entries()) {
@@ -77,7 +86,11 @@ export async function runWorkflow(options, { run = runAgent, lookup = getAgent }
     const startedAt = Date.now();
     emit({ type: 'tool_start', id: `workflow-${index}`, name: 'workflow_step', args: { step: index + 1, total: steps.length, title: step.title } });
     const prompt = stepPrompt({ workflow: profile.name, step, index, total: steps.length, userText: originalText, previous: previous.filter((p) => !p.skipped) });
-    const once = (text) => run({ ...options, userText: text, requirementText: text, agent: { profile: { ...stepProfile, steps: undefined }, note: agent.note } });
+    const once = (text) => run({ ...options,
+      ...(step.review && { tools: (options.tools || []).filter(tool => REVIEW_TOOLS.has(tool.name)) }),
+      userText: text, requirementText: text,
+      agent: { profile: { ...stepProfile, steps: undefined, ...(step.review && { tools: [...new Set(['read_task_requirements', ...(stepProfile.tools?.length ? stepProfile.tools : [...REVIEW_TOOLS]).filter(name => REVIEW_TOOLS.has(name))])] }) }, note: agent.note }
+    });
     let result;
     try {
       result = await once(prompt);
@@ -98,8 +111,15 @@ export async function runWorkflow(options, { run = runAgent, lookup = getAgent }
     previous.push({ index, title: step.title, text: result?.text || '' });
     emit({ type: 'tool_end', id: `workflow-${index}`, name: 'workflow_step', ok: true, output: `第 ${index + 1}/${steps.length} 步「${step.title}」完成${step.check && step.check !== 'none' ? `，已做${CHECK_NAMES[step.check]}` : ''}`, ms: Date.now() - startedAt });
     await remember();
+    if (step.review && index < steps.length - 1) {
+      if (!sessionId) throw Object.assign(new Error('提纲确认需要可保存的对话，请在对话中运行此工作流'), { code: 'WORKFLOW_SESSION_REQUIRED' });
+      await remember(true);
+      const note = '\n\n提纲已保存，请核对内容和版式。回复“确认继续”后制作；直接提出修改意见会先修改本步，不会提前生成后续作品。';
+      emit({ type: 'text', delta: note });
+      return { text: previous.map(p => `### 第 ${p.index + 1} 步 · ${p.title}\n\n${p.text}`).join('\n\n') + note, toolCalls, steps: previous.length, workflow: true, awaitingReview: true };
+    }
   }
-  if (sessionId) await progressStore.delete(progressKey(sessionId)).catch(() => {});
+  if (sessionId) await progress.delete(progressKey(sessionId));
   const text = previous.map((p) => `### 第 ${p.index + 1} 步 · ${p.title}\n\n${p.text}`).join('\n\n');
   return { text, toolCalls, steps: previous.length, workflow: true };
 }

@@ -79,6 +79,8 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
         companion.close();
         return;
       }
+      const studio = document.querySelector('.wy-library[open]');
+      if (studio) { studio.close(); return; }
       if (closeAgentOverlay()) return;
       const b = document.body;
       if (

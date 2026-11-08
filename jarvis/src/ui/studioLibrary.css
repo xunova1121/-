@@ -1,0 +1,336 @@
+.wy-hub {
+  display: grid;
+  gap: 14px;
+  margin: 14px 0 22px;
+  color: var(--text, #172139);
+}
+.wy-hub-shortcuts,
+.wy-hub-flows,
+.wy-hub-recent {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.wy-hub button,
+.wy-library button {
+  border: 1px solid #cdd8ed;
+  border-radius: 12px;
+  background: var(--panel, #fff);
+  color: inherit;
+  padding: 10px 14px;
+  cursor: pointer;
+  min-height: 42px;
+}
+.wy-hub button:hover,
+.wy-library button:hover {
+  border-color: #6384f5;
+  background: #edf2ff;
+}
+.wy-hub-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+.wy-hub-shortcuts button {
+  background: linear-gradient(135deg, #f2f5ff, #f6fbff);
+  font-weight: 600;
+  padding: 10px 5px;
+  font-size: 13px;
+  min-width: 0;
+}
+.wy-hub-resume {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(110deg, #eaf3ff, #f5efff);
+  border-radius: 16px;
+  padding: 12px 16px;
+}
+.wy-hub-resume:empty,
+.wy-hub-recent:empty {
+  display: none;
+}
+.wy-hub-resume span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wy-hub-flows strong {
+  font-size: 13px;
+  flex-basis: 100%;
+  font-weight: 500;
+  opacity: 0.7;
+}
+.wy-hub-check {
+  justify-self: start;
+  font-size: 12px;
+}
+.wy-hub-workflows {
+  font-size: 13px;
+  color: inherit;
+}
+.wy-hub-workflows summary {
+  cursor: pointer;
+  opacity: 0.75;
+  padding: 6px 0;
+}
+.wy-hub-workflows[open] .wy-hub-flows {
+  margin: 12px 0;
+}
+.wy-agent-favorite {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  z-index: 1;
+  border: 0;
+  background: transparent;
+  color: #5272da;
+  font-size: 20px;
+  padding: 9px;
+  cursor: pointer;
+}
+.wy-agent-card-shell {
+  position: relative;
+  min-width: 0;
+}
+.wy-agent-card-shell > .wy-agent-card {
+  height: 100%;
+  width: 100%;
+}
+.wy-agent-readiness {
+  font-size: 11px;
+  color: #607080;
+  display: block;
+  padding-top: 5px;
+}
+.wy-agent-readiness[data-state='missing'] {
+  color: #a96211;
+}
+.wy-library {
+  width: min(900px, calc(100vw - 28px));
+  max-height: calc(100dvh - 40px);
+  padding: 0;
+  border: 1px solid #dfe6f2;
+  border-radius: 22px;
+  background: var(--panel, #fff);
+  color: var(--text, #172139);
+  overflow: auto;
+}
+.wy-library::backdrop {
+  background: rgba(15, 25, 48, 0.35);
+}
+.wy-library > header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 22px;
+  background: var(--panel, #fff);
+  border-bottom: 1px solid #e5eaf2;
+}
+.wy-library h2 {
+  font-size: 19px;
+  overflow-wrap: anywhere;
+  margin: 0;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.wy-library > header button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.wy-library h3 {
+  font-size: 16px;
+  margin-top: 22px;
+}
+.wy-library-body {
+  padding: 20px;
+  display: grid;
+  gap: 12px;
+}
+.wy-library-tabs,
+.wy-library-tools {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.wy-library-rows {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.wy-library-row {
+  border: 1px solid #e3e9f3;
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+.wy-library-row strong,
+.wy-library-row small {
+  flex-basis: 100%;
+}
+.wy-library-row small {
+  opacity: 0.65;
+  font-size: 12px;
+}
+.wy-library input:not([type='checkbox']),
+.wy-library textarea,
+.wy-library select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #ccd6e6;
+  border-radius: 10px;
+  background: var(--panel, #fff);
+  color: inherit;
+  font: inherit;
+}
+.wy-library textarea {
+  min-height: 95px;
+  resize: vertical;
+}
+.wy-library-field {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+.wy-library-field:has([type='checkbox']) {
+  display: flex;
+  align-items: center;
+}
+.wy-library-note,
+.wy-library-empty {
+  font-size: 13px;
+  opacity: 0.75;
+  line-height: 1.7;
+}
+.wy-library-history,
+.wy-library-editor {
+  padding: 15px;
+  border: 1px solid #dce4f1;
+  border-radius: 12px;
+}
+.wy-library details[open] > summary {
+  margin-bottom: 16px;
+}
+.wy-library details > * + * {
+  margin-top: 10px;
+}
+.wy-library-history > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.wy-library-history span {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.wy-library-confirm {
+  border: 1px solid #94a9e5;
+  border-radius: 12px;
+  padding: 16px;
+  background: var(--panel, #f3f6ff);
+}
+.wy-library-confirm button + button {
+  margin-left: 10px;
+}
+.wy-library {
+  --panel: #151c29;
+  --text: #edf1f9;
+}
+.wy-hub {
+  color: inherit;
+}
+:root[data-theme='light'] .wy-library {
+  --panel: #fff;
+  --text: #172139;
+}
+:root:not([data-theme='light']) .wy-hub-shortcuts button,
+:root:not([data-theme='light']) .wy-hub-resume {
+  background: linear-gradient(110deg, #1e2b43, #292541);
+  color: #e8efff;
+}
+:root:not([data-theme='light']) .wy-library button:hover {
+  background: #253652;
+}
+.wy-agent-readiness {
+  grid-column: 2;
+}
+.wy-studio-square .wy-agent-card-shell > .wy-agent-card {
+  padding-right: 44px;
+}
+.wy-studio-personal-card .wy-agent-card-shell {
+  flex: 1;
+}
+.wy-studio-square .wy-agents-banner {
+  min-height: 110px;
+  padding: 18px 20px;
+}
+.wy-studio-square .wy-agents-banner-copy b {
+  font-size: 20px;
+  white-space: normal;
+}
+.wy-studio-square .wy-studio-hero-art {
+  width: 110px;
+}
+@media (max-width: 600px) {
+  .wy-hub-shortcuts {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .wy-library-rows {
+    grid-template-columns: 1fr;
+  }
+  .wy-library-body {
+    padding: 14px;
+  }
+  .wy-library > header {
+    padding: 14px;
+  }
+  .wy-library {
+    max-height: calc(100dvh - 22px);
+  }
+  .wy-hub-resume {
+    align-items: flex-start;
+  }
+  .wy-hub-resume button {
+    flex-shrink: 0;
+  }
+}
+.wy-hub[hidden] {
+  display: none;
+}
+.wy-studio-preview {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: auto;
+  max-height: 65vh;
+}
+.wy-studio-preview img,
+.wy-studio-preview canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 8px auto;
+}
+.wy-studio-preview pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.wy-studio-preview.is-zoomed canvas,
+.wy-studio-preview.is-zoomed img {
+  max-width: none;
+}

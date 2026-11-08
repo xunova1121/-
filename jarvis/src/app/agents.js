@@ -15,6 +15,9 @@ import { importPptSource } from './pptSourceImport.js';
 import { userStorageSuffix } from '../core/userStorage.js';
 import { createAgentProfileEditor } from '../ui/agentProfileEditor.js';
 import { createAgentProfileActions } from './agentProfileActions.js';
+import { createStudioActions } from './studioActions.js';
+import { createStudioPanel } from '../ui/studioLibrary.js';
+import { createStudioHub } from '../ui/studioHub.js';
 
 /** 抽屉“发现智能体”卡片上的三个常用入口 */
 export const DRAWER_PICKS = ['ppt-maker', 'gongwen-writer', 'health-advisor'];
@@ -43,8 +46,48 @@ export function createAgents(app) {
   };
 
   const actions = createAgentProfileActions(app);
+  const studioActions = createStudioActions(app, { fill, start });
+  const studioPanel = createStudioPanel({ actions: studioActions, toast });
+  const hub = createStudioHub({
+    toast,
+    open: (tab) => studioPanel.open(tab),
+    workflow: async (id) => {
+      await studioActions.workflow(id);
+      square.close();
+    },
+    pick: async (profile) => {
+      square.close();
+      await start(profile);
+    },
+    resume: async (id) => {
+      square.close();
+      await app.openSession(id);
+    },
+    check: async () => {
+      const token = studioActions.capture();
+      const report = await app.modelWorkspace.readiness(app.server ? 'server' : 'local');
+      token.check();
+      square.setReadiness(report);
+      toast('检查完成；未调用模型，配置就绪不代表实际效果已验收');
+    }
+  });
   const square = createAgentSquare({
     listAgents,
+    studio: {
+      hub,
+      error: toast,
+      load: async () => {
+        const token = studioActions.capture();
+        const [preferences, files, sessions, readiness] = await Promise.all([
+          token.call('preferences'),
+          token.call('list'),
+          sessionsApi.list(),
+          studioActions.configuration()
+        ]);
+        token.check();
+        return { preferences, files, sessions: sessions.slice(0, 30), readiness, change: (value) => token.call('change', value) };
+      }
+    },
     onPick: (p) => start(p),
     onEdit: (profile, after) => editor.open(profile, actions.capture(), after)
   });
@@ -115,6 +158,9 @@ export function createAgents(app) {
 
   /** 选了智能体：开一段新对话记住它（空对话不落盘，发第一句时才存） */
   async function start(profile) {
+    const token = studioActions.capture();
+    await token.call('change', { action: 'recent', id: profile.id }).catch((error) => toast('最近使用未保存：' + error.message));
+    token.check();
     const form = Object.fromEntries((profile.form || []).filter((f) => f.default).map((f) => [f.key, f.default]));
     await app.switchTo(sessionsApi.create({ agentId: profile.id, ...(Object.keys(form).length && { agentForm: form }) }));
     $('#prompt')?.focus();
@@ -206,12 +252,14 @@ export function createAgents(app) {
     editor.close();
     square.reset();
     library.close();
+    studioPanel.close();
   }
 
   return {
     agents: {
       square,
       library,
+      studioPanel,
       prepareTurn,
       openSquare,
       start,

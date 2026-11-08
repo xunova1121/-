@@ -20,7 +20,7 @@ export const WORKFLOW_PRESETS = Object.freeze([
     id: 'research-ppt', name: '调研到 PPT',
     steps: [
       { title: '查资料', task: '围绕用户的主题查证资料，列出关键事实、数字和来源', agentId: 'deep-researcher', check: 'numbers' },
-      { title: '列提纲', task: '按“结论 → 现状 → 问题 → 建议”列出 PPT 提纲，每页一句判断' },
+      { title: '列提纲', task: '按“结论 → 现状 → 问题 → 建议”列出 PPT 提纲，每页一句判断，逐页标出版式（上图下文、左右分栏或多图）及配图意图；先确定版式再配图。此步只提供方案，不生成PPT，等待用户确认', review: true },
       { title: '做 PPT', task: '按提纲和查到的资料做成可编辑 PPT，数字注明来源', agentId: 'ppt-maker' }
     ]
   }

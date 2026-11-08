@@ -33,11 +33,13 @@ export function createStepsEditor(initial = []) {
     check.setAttribute('aria-label', '做完怎么检查');
     const onlyIf = el('input', { className: 'wy-studio-text', value: step.onlyIf || '', maxLength: 40, placeholder: '仅当上一步结果包含这句话才做（可选）' });
     onlyIf.setAttribute('aria-label', '执行条件');
+    const review = el('input', { type: 'checkbox', checked: step.review === true, ariaLabel: '此步完成后等待确认' });
     const up = el('button', { type: 'button', className: 'wy-flow-move', textContent: '↑', ariaLabel: '上移' });
     const down = el('button', { type: 'button', className: 'wy-flow-move', textContent: '↓', ariaLabel: '下移' });
     const del = el('button', { type: 'button', className: 'wy-flow-move', textContent: '×', ariaLabel: '删除这一步' });
     const li = el('li', { className: 'wy-flow-step' }, el('div', { className: 'wy-flow-row' }, title, up, down, del), task, el('div', { className: 'wy-flow-row' }, agent, check), onlyIf);
-    li.read = () => ({ title: title.value.trim(), task: task.value.trim(), agentId: agent.value, check: check.value, onlyIf: onlyIf.value.trim() });
+    li.append(el('label', { className: 'wy-library-field' }, review, document.createTextNode('此步完成后等待我确认')));
+    li.read = () => ({ title: title.value.trim(), task: task.value.trim(), agentId: agent.value, check: check.value, onlyIf: onlyIf.value.trim(), review: review.checked });
     up.addEventListener('click', () => { if (li.previousElementSibling) list.insertBefore(li, li.previousElementSibling); refresh(); });
     down.addEventListener('click', () => { if (li.nextElementSibling) list.insertBefore(li.nextElementSibling, li); refresh(); });
     del.addEventListener('click', () => { li.remove(); refresh(); });
@@ -63,6 +65,6 @@ export function createStepsEditor(initial = []) {
   refresh();
 
   /** 读出步骤：标题和内容都空的一行忽略；只填了一半的交给统一校验报出具体是第几步 */
-  const value = () => [...list.children].map((li) => li.read()).filter((s) => s.title || s.task).map((s) => ({ title: s.title, task: s.task, ...(s.agentId && { agentId: s.agentId }), ...(s.check !== 'none' && { check: s.check }), ...(s.onlyIf && { onlyIf: s.onlyIf }) }));
+  const value = () => [...list.children].map((li) => li.read()).filter((s) => s.title || s.task).map((s) => ({ title: s.title, task: s.task, ...(s.agentId && { agentId: s.agentId }), ...(s.check !== 'none' && { check: s.check }), ...(s.onlyIf && { onlyIf: s.onlyIf }), ...(s.review && { review: true }) }));
   return { root, value };
 }

@@ -1,5 +1,12 @@
 /** 普通成员允许的接口；未知接口默认拒绝，避免新增管理接口绕过隔离。 */
 export function memberRoute(method, pathname) {
+  if (pathname === '/api/studio/preferences') return ['GET', 'PATCH'].includes(method);
+  if (['/api/studio/works', '/api/studio/versions'].includes(pathname)) return method === 'GET';
+  if (['/api/studio/copy', '/api/studio/edit', '/api/studio/inspect', '/api/studio/preview'].includes(pathname)) return method === 'POST';
+  if (pathname === '/api/studio/team') return ['GET', 'POST'].includes(method);
+  if (/^\/api\/studio\/team\/[a-f0-9-]{36}$/.test(pathname)) return method === 'DELETE';
+  if (/^\/api\/studio\/team\/[a-f0-9-]{36}\/copy$/.test(pathname)) return method === 'POST';
+  if (pathname === '/api/server/readiness') return ['GET', 'POST'].includes(method);
   if (pathname === '/api/agent-profiles') return ['GET', 'POST'].includes(method);
   if (/^\/api\/agent-profiles\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(pathname)) return ['GET', 'PUT', 'DELETE'].includes(method);
   if (pathname === '/api/server/config') return method === 'GET';

@@ -7,8 +7,9 @@ import './agentSquare.css';
 import { agentIcon, AGENT_TONES } from './agentIcons.js';
 import { templatePicker } from './pptTemplateLibrary.js';
 import { enhanceAgentStart, studioFeatures, studioHeroArt } from './agentStudio.js';
+import { matchesAgent, agentReadiness } from '../core/studioData.js';
 
-export const CATEGORY_LABELS = { '': '全部', office: '办公创作', gongwen: '公文写作', image: '图片处理', research: '查询研究', life: '生活服务', mine: '我的' };
+export const CATEGORY_LABELS = { '': '全部', favorites: '收藏', office: '办公创作', gongwen: '公文写作', image: '图片处理', research: '查询研究', life: '生活服务', mine: '我的' };
 const SOURCE_LABELS = { builtin: '内置', user: '我创建的', github: '来自 GitHub' };
 
 const el = (tag, props = {}, ...kids) => {
@@ -27,7 +28,7 @@ export function iconBadge(profile, size = 'md') {
 /**
  * @param {{ listAgents: (o?: object) => Promise<object[]>, onPick: (profile: object) => void, onClose?: () => void }} o
  */
-export function createAgentSquare({ listAgents, onPick, onEdit, onClose = () => {} }) {
+export function createAgentSquare({ listAgents, onPick, onEdit, studio, onClose = () => {} }) {
   const state = { query: '', category: '' };
   const back = el('button', { type: 'button', className: 'wy-agents-back', ariaLabel: '返回' });
   back.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
@@ -52,12 +53,13 @@ export function createAgentSquare({ listAgents, onPick, onEdit, onClose = () => 
     el('header', { className: 'wy-agents-bar' }, back, el('h2', { textContent: '发现智能体' })),
     el('div', { className: 'wy-agents-body' },
       el('label', { className: 'wy-agents-search' }, el('span', { className: 'wy-agents-search-icon', ariaHidden: 'true' }), search),
-      banner, features, chips, grid, manage));
+      banner, studio?.hub.root, chips, grid, features, manage));
   root.classList.add('wy-studio-square');
   root.setAttribute('role', 'dialog');
   document.body.append(root);
 
   let all = [];
+  let studioState = null;
   let seq = 0;
   let timer = 0;
   search.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { state.query = search.value.trim(); render(); }, 150); });
@@ -72,21 +74,40 @@ export function createAgentSquare({ listAgents, onPick, onEdit, onClose = () => 
       el('span', { className: 'wy-agent-card-intro', textContent: p.intro }));
     b.dataset.agent = p.id;
     b.addEventListener('click', () => pick(p));
+    if (studio) {
+      const health = agentReadiness(p, studioState?.readiness);
+      const note = el('small', { className: 'wy-agent-readiness', textContent: health.label });
+      note.dataset.state = health.state;
+      b.append(note);
+    }
     return b;
   }
   function matches(p) {
     const q = state.query.toLocaleLowerCase();
-    const inCat = !state.category || (state.category === 'mine' ? p.source !== 'builtin' : p.category === state.category);
-    return inCat && (!q || `${p.name}\n${p.intro}\n${p.starters.join('\n')}`.toLocaleLowerCase().includes(q));
+    const inCat = !state.category || (state.category === 'favorites' ? studioState?.preferences?.favorites.includes(p.id) : state.category === 'mine' ? p.source !== 'builtin' : p.category === state.category);
+    return inCat && matchesAgent(p, q);
   }
   function render() {
     for (const c of chips.children) { const on = c.dataset.category === state.category; c.classList.toggle('on', on); c.setAttribute('aria-selected', String(on)); }
     banner.hidden = Boolean(state.query || state.category);
     features.hidden = Boolean(state.query || state.category);
+    if (studio) { studio.hub.root.hidden = Boolean(state.query || state.category); studio.hub.render({ profiles: all, ...studioState }); }
     const shown = all.filter(matches);
     if (shown.length) {
       grid.replaceChildren(...shown.map(p => {
-        const button = card(p);
+        let button = card(p);
+        if (studioState) {
+          const captured = studioState;
+          const favorite = el('button', { type: 'button', className: 'wy-agent-favorite', textContent: captured.preferences.favorites.includes(p.id) ? '★' : '☆', ariaLabel: '收藏' + p.name });
+          favorite.setAttribute('aria-pressed', String(captured.preferences.favorites.includes(p.id)));
+          favorite.addEventListener('click', async () => {
+            favorite.disabled = true;
+            try { const preferences = await captured.change({ action: 'favorite', id: p.id }); if (studioState === captured) { studioState.preferences = preferences; render(); } }
+            catch (error) { studio.error(error.message); }
+            finally { favorite.disabled = false; }
+          });
+          button = el('div', { className: 'wy-agent-card-shell' }, button, favorite);
+        }
         if (!onEdit || p.source === 'builtin') return button;
         const edit = el('button', { type: 'button', className: 'wy-studio-edit', textContent: '编辑', ariaLabel: `编辑${p.name}` });
         edit.addEventListener('click', () => onEdit(p, load));
@@ -105,6 +126,10 @@ export function createAgentSquare({ listAgents, onPick, onEdit, onClose = () => 
       if (mine !== seq) return;
       all = list;
       render();
+      if (studio) {
+        try { const data = await studio.load(); if (mine !== seq) return; studioState = data; render(); }
+        catch (error) { if (mine === seq) studio.error(error.message); }
+      }
     } catch (e) {
       if (mine !== seq) return;
       all = [];
@@ -115,7 +140,7 @@ export function createAgentSquare({ listAgents, onPick, onEdit, onClose = () => 
       grid.replaceChildren(el('div', { className: 'wy-agents-empty' }, el('b', { textContent: '读不到智能体列表' }), el('span', { textContent: String(e?.message || '网络不好？稍后再打开试试') }), retry));
     }
   }
-  function pick(p) { close(); onPick(p); }
+  async function pick(p) { close(); try { await onPick(p); } catch (error) { if (studio?.error) studio.error(error.message); else console.error(error); } }
   function open() {
     search.value = state.query;
     root.hidden = false;
@@ -129,8 +154,8 @@ export function createAgentSquare({ listAgents, onPick, onEdit, onClose = () => 
     document.body.classList.remove('wy-agents-open');
     onClose();
   }
-  function reset() { ++seq; all = []; grid.replaceChildren(); close(); }
-  return { root, open, close, reset, get isOpen() { return !root.hidden; }, state };
+  function reset() { ++seq; all = []; studioState = null; studio?.hub.render(); grid.replaceChildren(); close(); }
+  return { root, open, close, reset, setReadiness(report) { if (studioState) { studioState.readiness = report; render(); } }, get isOpen() { return !root.hidden; }, state };
 }
 
 /**

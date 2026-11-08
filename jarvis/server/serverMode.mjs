@@ -1,6 +1,7 @@
 import { createUserStore, currentUser, PRIMARY_USER, runAsUser, userDataDir, userService } from './userScope.mjs';
 import { memberModelConfig } from './userRoutes.mjs';
 import { createAgentProfileRoutes } from './agentProfileRoutes.mjs';
+import { createStudioRoutes } from './studioRoutes.mjs';
 import { createEvaluationAccess } from './evaluationAccess.mjs';
 import { createAccessSecurity, legacyAccessToken } from './accessSecurity.mjs';
 import { createAccessRoutes } from './accessRoutes.mjs';
@@ -238,6 +239,7 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
   }
 
   const agentProfileRoutes = createAgentProfileRoutes({ readJson, json });
+  const studioRoutes = createStudioRoutes({ dataDir, readJson, json, activeUser: id => security.users.active(id) });
   /** 处理服务器模式的接口；不是这些接口返回 false */
   async function handle(req, res, pathname) {
     const principal = security.authenticate(req);
@@ -256,6 +258,7 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
     const principal = decision.principal;
     if (await accessRoutes.handle(req, res, pathname)) return true;
     if (await agentProfileRoutes(req, res, pathname, url)) return true;
+    if (await studioRoutes(req, res, pathname, url)) return true;
     if (pathname === '/api/server/readiness') {
       if (!authorized(req)) { json(res, 401, { error: '服务器登录已失效' }); return true; }
       return readinessRoutes(req, res);
