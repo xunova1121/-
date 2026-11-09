@@ -1,3 +1,4 @@
+import { createPhoneControl } from './app/phoneControl.js';
 import { createCodeProjectsUI } from './app/codeProjects.js';
 /**
  * 未央前端入口：只负责“组装”——按顺序创建各模块、恢复上次的设置、启动。具体功能都在 app/ 下：
@@ -107,6 +108,7 @@ mount(app, createSync(app));
 mount(app, createRecovery(app));
 mount(app, createShortcuts(app));
 mount(app, createScreenAwake(app));
+mount(app, createPhoneControl(app));
 globalThis.__jarvisToast = toast; // 手机原生保存文件时的进度提示
 
 // ---------------------------------------------------------------- 恢复上次的设置

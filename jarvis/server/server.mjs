@@ -44,7 +44,7 @@ import { createRuntimeReadiness } from './runtimeReadiness.mjs';
 
 const CORS_PATHS = /^\/api\/(health|readiness|local\/metrics|llm\/.+|tts\/edge|voice\/qwen\/voices)$/;
 /** 服务器模式里允许跨域调用的接口（手机 App、电脑版连自己的服务器） */
-const SERVER_CORS = /^\/api\/(health|server\/.+|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?|work-records(\/[^/]+)?|weather(\/cities)?|sports\/scores|voice\/qwen\/voices)$/;
+const SERVER_CORS = /^\/api\/(health|server\/.+|phone\/(?:devices(?:\/[a-f0-9-]{36})?|transport)|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?|work-records(\/[^/]+)?|weather(\/cities)?|sports\/scores|voice\/qwen\/voices)$/;
 export const EXTRA_UPSTREAMS = { qianfan: 'https://qianfan.baidubce.com', tavily: 'https://api.tavily.com', bocha: 'https://api.bochaai.com', elevenlabs: 'https://api.elevenlabs.io', fal: 'https://queue.fal.run' };
 // 读取网页时用常见浏览器的请求头：不少网站（包括搜索引擎）会拒绝或降级陌生的客户端
 const FETCH_HEADERS = {
@@ -338,7 +338,8 @@ export function createServer({
             return res.end();
           }
         }
-        if (pathname !== '/api/health' && pathname !== '/api/server/login') {
+        // 手机传输另用限时单设备凭据；只放行这一个POST到专属校验器。
+        if (pathname !== '/api/health' && pathname !== '/api/server/login' && !(pathname === '/api/phone/transport' && req.method === 'POST')) {
           const decision = serverMode.access ? await serverMode.access(req) : { status: serverMode.authorized(req) ? 200 : 401 };
           if (decision.status !== 200) return json(res, decision.status, { error: decision.status === 403 ? '此授权不能访问这项功能' : '请先登录', ...(decision.status === 401 && { login: true }) });
         }

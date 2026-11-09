@@ -1,3 +1,4 @@
+import { createPhoneTools } from '../src/agent/phoneTools.js';
 import { serverModelConfig } from './modelCredentials.mjs';
 import { chargeSearchRequest, chargeEvaluation, evaluationAdapter, evaluationModelFetch } from './evaluationAccess.mjs';
 import { presentationOverview } from './presentationOverview.mjs';
@@ -134,7 +135,7 @@ export function serverApproves(ask, text) {
   return false;
 }
 
-export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now, skillRunner = null, codeRepos = null, codeProjects = null, projectBaseDir, codeMaxSteps = 80, codeTaskMs = CODE_TASK_MS, lookupService = createLookupService({ get: publicFetch }), evaluationAccess = null, userAccess = null }) {
+export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now, skillRunner = null, codeRepos = null, codeProjects = null, projectBaseDir, codeMaxSteps = 80, codeTaskMs = CODE_TASK_MS, lookupService = createLookupService({ get: publicFetch }), evaluationAccess = null, userAccess = null, phoneBroker = null }) {
   const stockByUser = new Map(); // 最多50个已绑定用户；缓存不能跨用户复用。
   const stockForUser = () => {
     const id = userAccess?.current() || 'owner';
@@ -346,6 +347,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       currentSessionId: () => session.id,
       scheduleHost: 'server'
     }).filter((t) => !SERVER_BLOCKED.has(t.name)), task.evaluationId, Boolean(task.evaluationAuthorization));
+    if (phoneBroker && !task.evaluationId && !task.evaluationAuthorization) tools.push(...createPhoneTools(phoneBroker));
     const projectTool = projectExecutionTool({ image: process.env.JARVIS_CODE_SANDBOX_IMAGE, baseDir: typeof projectBaseDir === 'function' ? projectBaseDir() : projectBaseDir });
     if (projectTool && !task.evaluationAuthorization) tools.push(projectTool);
     if (taskRepos && !task.evaluationId) tools.push(...createCodeTools({ repos: scopedRepos, sessionId: session.id, taskId: task.checkpoint.codeTaskId || task.id, editing: taskRepos.writable === true, enableBrowser: true, saveBrowserArtifact: async (p, data, type) => { await ws.write(p, new Blob([data], { type })); task.files.add(p); record(task, { type: 'file', path: p }); } }));

@@ -15,7 +15,7 @@ export function compactToolResults(convo, { budget = TURN_BUDGET, keep = KEEP_RE
     for (const m of keep > 0 ? tools.slice(0, -keep) : tools) {
       const text = String(m.content ?? '');
       if (m.compacted || text.length <= short * 1.5) continue;
-      const id = m.name === 'read_tool_result' ? null : archive?.remember(m);
+      const id = ['read_tool_result', 'phone_action'].includes(m.name) ? null : archive?.remember(m);
       const receipt = preserveEvidence ? receiptSummary(text, short) : text.slice(0, short);
       m.content = `${receipt}\n…（这是较早的工具结果，为节省上下文已缩短，原文共 ${text.length} 字；${id ? `本轮原文编号 ${id}，用 read_tool_result 分段读取；若已过期需重读来源` : '还需要细节就再调用一次工具'}；省略部分不代表不存在，核对数字、来源和失败原因须回读）`;
       m.compacted = true;

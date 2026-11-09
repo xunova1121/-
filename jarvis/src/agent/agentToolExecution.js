@@ -37,13 +37,14 @@ export async function executeToolCalls(
   }
 ) {
   let newScreenThisStep = false;
+  let phoneActionThisStep = false;
   const exec = async (c) => {
     const tool = loader.get(c.name);
     // 执行器分配操作ID，不依赖中转站可能重复的工具ID；同一实际调用的回执可幂等保存。
     const workCallId = uid('op') + ':' + c.id;
     const t0 = Date.now();
     emit({ type: 'state', value: 'processing' });
-    emit({ type: 'tool_start', id: c.id, name: c.name, args: c.args });
+    emit({ type: 'tool_start', id: c.id, name: c.name, args: c.name === 'phone_action' ? { action: c.args?.action, deviceId: c.args?.deviceId } : c.args });
     let output;
     let outImages = [];
     let ok = true;
@@ -63,7 +64,7 @@ export async function executeToolCalls(
       if (!allowWebSearch && (webTools.has(c.name) || c.name === 'delegate_task'))
         throw Object.assign(new Error('当前描述/创作无需检索，请直接依据图片和材料回答；用户明确要求外部核实后再联网'), { code: 'SEARCH_NOT_REQUESTED', kind: 'api' });
       // 无状态相同参数最多2次；已声明的状态续接最多4次同参，仍执行自身额度/材料/阶段检查，不把新状态误作旧结果。
-      if (times >= 3 && !(times <= 4 && tool.isStatefulResume?.(c.args)) && !/^computer_(look|click|type|key|scroll|drag|screenshot)$/.test(c.name))
+      if (times >= 3 && !(times <= 4 && tool.isStatefulResume?.(c.args)) && !/^computer_(look|click|type|key|scroll|drag|screenshot)$/.test(c.name) && !(c.name === 'phone_action' && ['read_screen', 'screenshot'].includes(c.args?.action)))
         throw Object.assign(new Error(`这个操作（同样的参数）已经做过 ${times - 1} 次了，结果不会变。请换一种方法，或者直接根据已有结果继续。`), isDiagramTool(c.name) ? { code: 'DIAGRAM_DUPLICATE_CALL', kind: 'input' } : {});
       const scopeIssue = review.toolBlock?.(c.name);
       if (scopeIssue) throw Object.assign(new Error(scopeIssue), { code: 'TASK_SCOPE_AFTER_DENIAL', kind: 'input' });
@@ -80,6 +81,10 @@ export async function executeToolCalls(
       // 有风险的操作（操作电脑、MCP 工具）先征得用户同意
       if (newScreenThisStep && /^computer_(click|type|key|scroll|drag)$/.test(c.name))
         throw new Error('本步已有新的屏幕截图，请先查看返回的截图，再在下一步决定操作，不能连续盲点或盲输');
+      if (c.name === 'phone_action') {
+        if (phoneActionThisStep) throw new Error('先查看上一步手机回执，再决定下一步；本次未执行连续盲操作');
+        phoneActionThisStep = true;
+      }
       const ask = tool.approval?.(c.args);
       // 没确认：可能是用户点了拒绝，也可能是在服务器上运行、没法弹确认框。别让模型改做别的事来“补”
       if (ask && approve && !(await approve(ask, tool))) throw Object.assign(new Error('这个操作需要用户确认，这次没有得到确认（用户拒绝了，或在服务器上运行没法弹出确认框）。不要改做别的事来代替；在回答里说明没做成，并告诉用户可以自己在界面上操作（比如安装技能：在“技能”页粘贴地址安装）。'), { code: 'NOT_APPROVED' });
@@ -146,10 +151,11 @@ export async function executeToolCalls(
       output += '\n成果记录保存失败；已有文件不受影响，统计可能不完整，不要重新提交生成请求。';
     }
     await checkpoint?.({ type: 'tool_end', id: c.id, name: c.name, ok, output });
-    emit({ type: 'tool_end', id: c.id, name: c.name, ok, output, ...(failure && { errorKind: errorKind(failure), code: failure.code }), ms: Date.now() - t0 });
+    emit({ type: 'tool_end', id: c.id, name: c.name, ok, output: c.name === 'phone_action' && ok ? '手机已返回操作回执；页面文字和截图仅供本轮核对，不写入进度记录。' : output, ...(failure && { errorKind: errorKind(failure), code: failure.code }), ms: Date.now() - t0 });
     if (failure?.code !== 'RETRIEVAL_BUDGET') throwControl(failure, signal);
     review.record({ name: c.name, args: c.args, ok, output, code: failure?.code, lookupRecovery });
-    return { c, ok, output, outImages, ...(lookupRecovery && { lookupRecovery }), ...(failure && { failure: { code: failure.code, name: failure.name, kind: failure.kind, status: failure.status, cooldownUntil: failure.cooldownUntil, tool: failure.tool } }), ...(recovery?.stopped && { recoveryStop: recovery.message }) };
+    const phoneStopped = c.name === 'phone_action' && /^PHONE_(RESULT_UNKNOWN|STOPPED|CANCELLED|LOCKED|DISABLED|PAUSED|DISCONNECTED|OFFLINE|EXPIRED|SCOPE|AUTH)$/.test(failure?.code || '');
+    return { c, ok, output, outImages, ...(lookupRecovery && { lookupRecovery }), ...(failure && { failure: { code: failure.code, name: failure.name, kind: failure.kind, status: failure.status, cooldownUntil: failure.cooldownUntil, tool: failure.tool } }), ...(recovery?.stopped && { recoveryStop: recovery.message }), ...(phoneStopped && { recoveryStop: output + '\n手机操作已停止，请核对手机上的实际状态后再继续。' }) };
   };
   // 互不影响的只读调用（搜索、读文件、读网页……）同时做；其余按顺序一个个做
   const results = [];
@@ -164,7 +170,7 @@ export async function executeToolCalls(
       results.push(result);
       if (result.recoveryStop) {
         // 已停止本批执行，仍补齐工具响应，避免用户同时插话后续请求缺tool_call_id。
-        for (const pending of calls.slice(i + 1)) results.push({ c: pending, ok: false, output: '本轮图形恢复上限已触发，此操作未执行；' + result.recoveryStop, outImages: [] });
+        for (const pending of calls.slice(i + 1)) results.push({ c: pending, ok: false, output: (result.c.name === 'phone_action' ? '手机操作已停止，此操作未执行；' : '本轮图形恢复上限已触发，此操作未执行；') + result.recoveryStop, outImages: [] });
         break;
       }
       i++;

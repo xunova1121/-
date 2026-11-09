@@ -17,6 +17,7 @@ export const DOCUMENT_TOOLS = new Set(['write_long_document', 'create_document',
 
 /** 常驻工具：系统提示里点名的、几乎每天都用的 */
 export const CORE = new Set([
+  'phone_devices',
   'time_calc',
   'build_architecture', 'create_diagram', 'export_diagram', 'render_diagram', 'list_work_records',
   'write_professional_document', 'generate_task_brief',

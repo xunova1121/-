@@ -1,3 +1,4 @@
+import { PHONE_GUIDANCE } from '../../shared/phoneControl.js';
 import { DOCUMENT_TASK_CORE, documentRouteNote } from './documentToolProfile.js';
 import { taskToolCore } from './taskToolProfile.js';
 import { resolveTaskIntent } from '../core/taskIntent.js';
@@ -255,8 +256,10 @@ export const COMPUTER_NOTE = `## 本机文件与工作区的区别
 
 /** 仅缩减本轮GUI操作的旧截图，保留最近前后两张及文字；用户附件不动。 */
 export function trimComputerScreenshots(messages,keep=2) {
-  const shots=messages.filter(m=>m.role==='tool'&&/^computer_(look|click|type|key|scroll|drag|screenshot)$/.test(m.name||'')&&m.images?.length);
-  for(const m of shots.slice(0,Math.max(0,shots.length-keep))){delete m.images;m.content=`${m.content}\n（旧界面截图已从模型输入移除；请以最新截图为准。）`;}
+  const shots=messages.filter(m=>m.role==='tool'&&/^(computer_(look|click|type|key|scroll|drag|screenshot)|phone_action)$/.test(m.name||'')&&m.images?.length);
+  for(const m of shots.slice(0,Math.max(0,shots.length-keep))){delete m.images;if(m.name!=='phone_action')m.content=`${m.content}\n（旧界面截图已从模型输入移除；请以最新截图为准。）`;}
+  const screens=messages.filter(m=>m.role==='tool'&&m.name==='phone_action'&&/"screen"\s*:/.test(m.content||''));
+  for(const m of screens.slice(0,-2)) { try { const receipt=JSON.parse(m.content); delete receipt.screen; m.content=JSON.stringify({...receipt,note:'旧手机屏幕已移除，请用最新屏幕编号操作'}); } catch { /* 非结构化报错保持原文 */ } }
 }
 
 async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, maxTotalSteps = null, codeWork = null, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, isolated = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false, describeImages = null, visionLabel = '看图模型', readImageText = null, modelNote = '', hedgeMs = 0, lookupModel = null, retrievalText = null, lookupPreferences = null, lookupClassifier = null, taskIntent = null, capabilityRoutes = [], agent = null }) {
@@ -321,6 +324,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   // 任务清单（update_plan）和子任务分身（delegate_task，只有主线能派）由循环自己提供
   const plan = createPlanTool((steps) => emit({ type: 'plan', steps }));
   // 简单闲聊（light）：不带工具，回得快
+  if (tools.some(t => t.name === 'phone_action') && /手机|安卓|微信|闹钟|拨号|导航/.test(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n' + PHONE_GUIDANCE;
   let computerNote = tools.some(t => t.name === 'computer_search') && (computerTask || needsComputer(requirementText,{history})) ? COMPUTER_NOTE : '';
   if (light) tools = [];
   const executionTool = {

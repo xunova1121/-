@@ -87,6 +87,7 @@ const APP_ACTION = /(?:打开|启动|关闭|切换到|最小化|最大化|退出
 const lastComputerTools = history => [...history].reverse().find(m=>m.role==='assistant')?.tools?.filter(t=>typeof t==='string'&&t.startsWith('computer_')) || [];
 export function needsComputer(text, { history = [] } = {}) {
   const t = String(text || '').trim();
+  if (/(?:手机|安卓)(?:上|里|中|的|当前|屏幕|页面)|(?:操控|控制|操作).{0,8}(?:手机|安卓)|(?:在|用).{0,4}手机/.test(t) && /打开|启动|点击|输入|屏幕|页面|操控|控制|操作|滑动/.test(t) && !/电脑|桌面|[a-z]:[\\/]/i.test(t)) return false;
   if (LOCAL_PLACE.test(t)) return true;
   if (WORKSPACE_FILE.test(t) || /^(?:请问[，,\s]*)?(?:怎么|如何|怎样|为什么)/.test(t)) return false;
   return NEEDS_COMPUTER.test(t) || OPEN_DOCUMENT.test(t) || GUI_ACTION.test(t) || APP_ACTION.test(t) || /^(?:请|帮我|麻烦你|给我|替我)?打开\s*[^?？]{1,200}$/.test(t) ||

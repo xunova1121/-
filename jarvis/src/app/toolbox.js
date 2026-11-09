@@ -1,3 +1,4 @@
+import { createPhoneTools } from '../agent/phoneTools.js';
 import { editImage } from '../llm/imageEdit.js';
 import { localLookup } from './lookup.js';
 import { qweatherConfig } from '../core/qweather.js';
@@ -142,6 +143,7 @@ export function createToolbox(app) {
             }
           })
         : []),
+      ...(!background ? createPhoneTools(app.phoneControl?.transport()) : []),
       ...(await loadMcpTools())
     ];
   }

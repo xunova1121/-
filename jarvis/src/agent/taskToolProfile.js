@@ -1,6 +1,7 @@
 import { CODE_TASK_CORE } from './codeDevelopment.js';
 import { DOCUMENT_TASK_CORE } from './documentToolProfile.js';
 import { CORE } from './toolLoader.js';
+import { isPhoneRequest } from '../../shared/phoneControl.js';
 
 const BASIC = ['execution_capabilities', 'read_task_requirements', 'read_tool_result', 'review_task', 'need_more_time', 'request_capable_model'];
 const MEMORY = ['recall', 'remember', 'kb_search', 'search_conversations', 'read_conversation', 'list_my_messages', 'list_work_records'];
@@ -13,6 +14,7 @@ export function taskToolCore(intent, text, { images = [], computerTask = false, 
   const value = String(text || '');
   const names = new Set([...BASIC, ...MEMORY]);
   const add = list => list.forEach(name => names.add(name));
+  if (isPhoneRequest(value)) { add(['phone_devices', 'phone_action', 'get_current_time', 'time_calc']); return names; }
   if (intent?.category === 'code') { add(CODE_TASK_CORE); add(FILES); return names; }
   if (/Word|Excel|PPT|文档|表格|幻灯片|\.docx|\.xlsx|\.pptx/i.test(value)) return DOCUMENT_TASK_CORE;
   if (/架构图|流程图|关系图|拓扑图|生成图片|画图|图片|唱歌|歌曲|视频/.test(value)) return CORE;

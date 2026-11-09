@@ -54,6 +54,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createTaskRunner, publicFetch } from './taskRunner.mjs';
+import { createPhoneBroker } from './phoneBroker.mjs';
+import { createPhoneRoutes } from './phoneRoutes.mjs';
 import { createServerSchedules, notices as scheduleNotices } from './serverSchedules.mjs';
 import * as scheduler from '../src/agent/scheduler.js';
 import { useBackend } from '../src/agent/store.js';
@@ -174,7 +176,9 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
     }
   }));
   const lookupService = userService(() => injectedLookup ?? createLookupService({ storage: { get: id => store.get('kv', id), put: row => store.put('kv', row) }, get: publicFetch }));
-  runner = injected ?? createTaskRunner({ ...(makeTaskAdapter && { makeAdapter: makeTaskAdapter }), codeProjects: projects, getConfig: async () => withoutCodeCredentials(loadConfig()), maxRunning: () => loadConfig().taskConcurrency ?? maxRunning, skillRunner, codeRepos, projectBaseDir: () => path.join(userDataDir(dataDir), 'project-jobs'), lookupService, evaluationAccess, userAccess: { current: currentUser, run: runAsUser, active: security.users.active } });
+  const phoneBroker = createPhoneBroker({ active: security.users.active });
+  security.onRevoke(id => phoneBroker.revokeSession(id));
+  runner = injected ?? createTaskRunner({ phoneBroker, ...(makeTaskAdapter && { makeAdapter: makeTaskAdapter }), codeProjects: projects, getConfig: async () => withoutCodeCredentials(loadConfig()), maxRunning: () => loadConfig().taskConcurrency ?? maxRunning, skillRunner, codeRepos, projectBaseDir: () => path.join(userDataDir(dataDir), 'project-jobs'), lookupService, evaluationAccess, userAccess: { current: currentUser, run: runAsUser, active: security.users.active } });
   // 定时任务 / 提醒：服务器自己按时执行（手机关着也做），见 serverSchedules.mjs；测试里不自动开始计时
   const schedules = userService(() => createServerSchedules({ runner, active: () => security.users.active(currentUser()) }));
   // 启动时为每个有效身份恢复提醒；新建成员的定时器在首次请求时启动。
@@ -240,8 +244,10 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
 
   const agentProfileRoutes = createAgentProfileRoutes({ readJson, json });
   const studioRoutes = createStudioRoutes({ dataDir, readJson, json, activeUser: id => security.users.active(id) });
+  const phoneRoutes = createPhoneRoutes({ broker: phoneBroker, readJson, json, principal: security.authenticate });
   /** 处理服务器模式的接口；不是这些接口返回 false */
   async function handle(req, res, pathname) {
+    if (pathname === '/api/phone/transport' && req.method === 'POST') return phoneRoutes(req, res, pathname);
     const principal = security.authenticate(req);
     return runAsUser(principal?.userId || PRIMARY_USER, async () => {
       if (principal) { await initialize(); if (autoSchedules) schedules.start(); }
@@ -259,6 +265,7 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
     if (await accessRoutes.handle(req, res, pathname)) return true;
     if (await agentProfileRoutes(req, res, pathname, url)) return true;
     if (await studioRoutes(req, res, pathname, url)) return true;
+    if (await phoneRoutes(req, res, pathname)) return true;
     if (pathname === '/api/server/readiness') {
       if (!authorized(req)) { json(res, 401, { error: '服务器登录已失效' }); return true; }
       return readinessRoutes(req, res);

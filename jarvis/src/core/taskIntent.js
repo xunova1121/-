@@ -1,5 +1,6 @@
 /** 前后端共用任务判断。只读用户原话，不把助手的“已完成”或工具正文当新指令。 */
 import { isResponseRevision } from './responseRevision.js';
+import { isPhoneRequest } from '../../shared/phoneControl.js';
 const CODE = /代码|编程|函数|变量|bug\b|调试|脚本|编译|html|css|javascript|typescript|python|java\b|golang|rust\b|sql\b|正则|前端|后端|部署|docker|git\b|网页|网站|小程序|```/i;
 const SOURCE = /(?:^|\n)\s*(?:(?:async\s+)?function\s+\w+\s*\(|(?:const|let|var)\s+\w+\s*=|def\s+\w+\s*\(|(?:print|console\.log)\s*\(|(?:import|from)\s+[\w.]+\s+(?:import|as)|<(!doctype|html|svg)\b)/i;
 const BUILD = /(?:创建|做|制作|搭建|开发|实现|编写|写)[^。！？\n]{0,60}(?:电商(?:项目|平台|系统|商城)?|商城|网站|网页|HTML|CSS|小程序)/i;
@@ -33,7 +34,7 @@ export function classifyTaskText(text, { images = 0 } = {}) {
 
 function explicitTask(text, ts = 0) {
   const modelTask = classifyTaskText(text);
-  return { category: modelTask === 'code' ? 'code' : modelTask !== 'chat' || WORK.test(text) ? 'work' : 'chat', modelTask, goal: text.slice(0, 2400), goalTs: ts, truncated: text.length > 2400, cancelled: CANCEL.test(text) };
+  return { category: modelTask === 'code' ? 'code' : modelTask !== 'chat' || WORK.test(text) || isPhoneRequest(text) ? 'work' : 'chat', modelTask, goal: text.slice(0, 2400), goalTs: ts, truncated: text.length > 2400, cancelled: CANCEL.test(text) };
 }
 
 function domain(text) {

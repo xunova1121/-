@@ -22,7 +22,7 @@ export function checkpointEvent(previous = {}, event, at = Date.now()) {
     next.inFlight = next.inFlight.filter(x=>x.id!==event.id);
     // 图像候选数字只留本轮，不从工具摘要再次写入恢复检查点。
     const visual = event.name === 'read_image_text' || event.name === 'inspect_image';
-    const summary = visual ? (event.ok ? '图像识别调用成功，内容未核实；恢复时重新读取原图，不从摘要猜读数。' : '图像识别调用失败。') : String(event.output || '').slice(0, 500);
+    const summary = event.name === 'phone_action' ? '手机动作已结束；恢复前重新读取屏幕，不能重放旧点击或输入。' : visual ? (event.ok ? '图像识别调用成功，内容未核实；恢复时重新读取原图，不从摘要猜读数。' : '图像识别调用失败。') : String(event.output || '').slice(0, 500);
     next.steps.push({id:event.id,name:event.name,ok:Boolean(event.ok),at,summary});
   } else if (event.type === 'file' && !next.files.includes(event.path)) next.files.push(event.path);
   else if (event.type === 'plan') next.plan = event.steps;

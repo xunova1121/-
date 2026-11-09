@@ -27,6 +27,7 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
     globalThis.__jarvisEdgeSpeech = registerPlugin('EdgeSpeech');
     globalThis.__jarvisQwenSocket = registerPlugin('QwenRealtime');
     globalThis.__jarvisBackgroundTask = registerPlugin('BackgroundTask');
+    globalThis.__jarvisPhoneControl = registerPlugin('PhoneControl');
     globalThis.__jarvisKeepAwake = registerPlugin('KeepAwake'); // 屏幕常亮（app/screenAwake.js）
     globalThis.__jarvisSpeech.addListener('dialog', ({ active }) => {
       globalThis.__jarvisSystemSpeechDialog = active;
@@ -79,6 +80,8 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
         companion.close();
         return;
       }
+      const phone = document.querySelector('.wy-phone[open]');
+      if (phone) { phone.close(); return; }
       const studio = document.querySelector('.wy-library[open]');
       if (studio) { studio.close(); return; }
       if (closeAgentOverlay()) return;

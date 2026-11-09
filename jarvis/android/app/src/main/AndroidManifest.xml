@@ -34,6 +34,10 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+        <service android:name=".PhoneAccessibilityService" android:label="未央手机操控" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true">
+            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/phone_accessibility" />
+        </service>
         <service android:name=".TaskService" android:exported="false" android:foregroundServiceType="dataSync" />
         <!-- 后台待命（设置里的“常驻通知”，默认关）：只挂通知，不做别的事 -->
         <service android:name=".StandbyService" android:exported="false" android:foregroundServiceType="specialUse">
@@ -56,6 +60,7 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <!-- 直接对话（麦克风）、人脸跟随（摄像头）：用到时才会弹窗询问 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
@@ -71,6 +76,11 @@
 
     <!-- 朗读：Android 11+ 需要声明才能找到系统的 TTS 引擎 -->
     <queries>
+        <intent><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent>
+        <intent><action android:name="android.intent.action.SET_ALARM" /></intent>
+        <intent><action android:name="android.intent.action.DIAL" /><data android:scheme="tel" /></intent>
+        <intent><action android:name="android.intent.action.VIEW" /><data android:scheme="geo" /></intent>
+        <intent><action android:name="android.intent.action.SEND" /><data android:mimeType="text/plain" /></intent>
         <!-- Android 11+：拍照附件需要能找到系统相机。 -->
         <intent>
             <action android:name="android.media.action.IMAGE_CAPTURE" />

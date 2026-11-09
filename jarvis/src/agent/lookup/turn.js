@@ -8,6 +8,7 @@ import { needsComputer } from '../../llm/router.js';
 import { followsImage } from '../../core/imageFollowup.js';
 import { creativeWithoutLookup } from '../../core/imageFollowup.js';
 import { resolveTaskIntent } from '../../core/taskIntent.js';
+import { isPhoneRequest } from '../../../shared/phoneControl.js';
 /** 普通信息查询的总时限：包含上下文、模型等待/重试、检索和收尾；不是只计网页耗时。 */
 export const LOOKUP_TOTAL_MS = 60_000;
 export const COMPLEX = /深度|深入|全面|详细|长篇|长文|\d+\s*[千万元]?\s*字|调研|研究报告|生成|制作|创作|画|设计|样式|效果图|界面|网页|网站|PPT|Word|Excel|文档|报告|方案|论文|查原文|核实原文|核对原文|原文核实|逐条核[实验对]|逐项|逐一|交叉核[验对]|多来源核[验对]|(?:写|生成|制作|编制|导出|保存为|整理成).{0,16}(?:报告|文档|论文|PPT|Word|Excel|文件)|代码|编程|开发|安装|部署/i;
@@ -60,6 +61,7 @@ export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_
   const text = taskIntent.inherited ? taskIntent.goal : lookupRequirement(options.requirementText ?? options.userText, options.history);
   if(!taskIntent.inherited && text !== (options.requirementText ?? options.userText)) options = { ...options, requirementText: text };
   const hasComputer=options.tools?.some(t=>t.name==='computer_look'||t.name==='computer_search');
+  if (options.tools?.some(t => t.name === 'phone_action') && isPhoneRequest(text)) return run(options);
   if(options.computerTask||hasComputer&&needsComputer(text,{history:options.history||[]}))return run(options.computerTask?options:{...options,computerTask:true});
   if (followsImage(text, options.history || [], new Map((options.history || []).filter(message => message.images?.length || message.thumbs?.length).map(message => [message.ts, true])))) return run(options);
   if (!isQuickLookup(text, options.images)) return run(options);

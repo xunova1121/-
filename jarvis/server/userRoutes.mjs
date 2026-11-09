@@ -1,5 +1,7 @@
 /** 普通成员允许的接口；未知接口默认拒绝，避免新增管理接口绕过隔离。 */
 export function memberRoute(method, pathname) {
+  if (pathname === '/api/phone/devices') return ['GET', 'POST'].includes(method);
+  if (/^\/api\/phone\/devices\/[a-f0-9-]{36}$/.test(pathname)) return method === 'DELETE';
   if (pathname === '/api/studio/preferences') return ['GET', 'PATCH'].includes(method);
   if (['/api/studio/works', '/api/studio/versions'].includes(pathname)) return method === 'GET';
   if (['/api/studio/copy', '/api/studio/edit', '/api/studio/inspect', '/api/studio/preview'].includes(pathname)) return method === 'POST';

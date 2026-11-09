@@ -4,4 +4,5 @@
     <string name="title_activity_main">未央</string>
     <string name="package_name">com.xunova.jarvis</string>
     <string name="custom_url_scheme">com.xunova.jarvis</string>
+    <string name="phone_control_description">由本人开启后，在15分钟内读取选定应用的屏幕，执行点击、输入和滑动。屏幕文字或截图可交给当前模型处理；云端模式经本人服务器转发。密码及验证码请本人输入；敏感或无法判断的点击须在手机确认。可随时暂停或停止，锁屏后停止。不会自动启用或后台持续读取。</string>
 </resources>
