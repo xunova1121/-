@@ -2,15 +2,7 @@
 .holo-dialog{position:fixed;inset:0;width:100%;height:100%;max-width:none;max-height:none;padding:0;margin:0;border:0;background:#071426;color:#edf7ff;overflow:hidden;box-sizing:border-box}
 .holo-dialog::backdrop{background:#071426}
 .holo-dialog:not([open]){display:none}
-.wy-hologram .wy-mascot{background-image:url('./mascot-companion.webp');background-size:400% 300%}
-.wy-hologram .wy-mascot[data-state=wave]{background-position:0 50%}
-.wy-hologram .wy-mascot[data-state=love]{background-position:33.333333% 50%}
-.wy-hologram .wy-mascot[data-state=happy],.wy-hologram .wy-mascot[data-state=pet]{background-position:66.666667% 50%}
-.wy-hologram .wy-mascot[data-state=shy]{background-position:100% 50%}
-.wy-hologram .wy-mascot[data-state=sleep]{background-position:0 100%}
-.wy-hologram .wy-mascot[data-state=run]{background-position:33.333333% 100%}
-.wy-hologram .wy-mascot[data-state=spin]{background-position:66.666667% 100%}
-.wy-hologram .wy-mascot[data-state=dance]{background-position:100% 100%}
+/* 独立桌面陪伴窗口与主界面共用mascot.css的已确认素材及动作格。 */
 .wy-hologram .wy-mascot::after{display:none}
 .wy-hologram{--holo-cyan:#8be3ff;position:relative;isolation:isolate;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;height:100%;min-height:0;padding:18px 24px 20px;background:radial-gradient(ellipse at 65% 25%,#23547a40,transparent 54%),radial-gradient(ellipse at 22% 55%,#177e8a35,transparent 45%),linear-gradient(180deg,#051020,#0b2038 62%,#081528);color:#edf7ff;font:14px/1.5 'Segoe UI','Microsoft YaHei',sans-serif;overflow:auto;scrollbar-width:none}
 .wy-hologram *{box-sizing:border-box;scrollbar-width:none}.wy-hologram::-webkit-scrollbar,.wy-hologram *::-webkit-scrollbar{display:none;width:0;height:0}

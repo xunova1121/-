@@ -291,7 +291,17 @@ export function createView(app) {
   if (DESKTOP?.onUpdate || APP_UPDATER) {
     const pill = $('#update-pill');
     const note = $('#update-note');
+    const manualDownload = DESKTOP?.onUpdate && !APP_UPDATER ? document.createElement('button') : null;
+    if (manualDownload) {
+      manualDownload.type = 'button';
+      manualDownload.textContent = '打开官方下载页';
+      manualDownload.hidden = true;
+      manualDownload.id = 'btn-update-manual';
+      manualDownload.onclick = () => DESKTOP.invoke('openReleases').catch((e) => toast(e.message));
+      $('#row-version').append(manualDownload);
+    }
     const show = (u) => {
+      if (manualDownload) manualDownload.hidden = u.state !== 'error';
       $('#row-version').hidden = false;
       $('#app-version').textContent = `当前 ${u.current ?? DESKTOP?.version ?? ''}`;
       pill.hidden = !['downloading', 'ready', 'available'].includes(u.state);

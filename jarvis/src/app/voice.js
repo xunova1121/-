@@ -5,12 +5,12 @@
 import { MOBILE } from '../config.js';
 import { resolveVoice } from '../llm/config.js';
 import { Speaker } from '../perception/speaker.js';
-import { VoiceInput, speechRecognitionSupported } from '../perception/voiceInput.js';
-import { resolveStt, transcribe } from '../perception/stt.js';
+import { speechRecognitionSupported } from '../perception/voiceInput.js';
+import { resolveStt } from '../perception/stt.js';
+import { chooseVoiceInput, createVoiceInput } from '../perception/voiceInputFactory.js';
 import { QwenVoice } from '../perception/qwenVoice.js';
 import { playCue } from '../perception/voiceFx.js';
 import { NativeVoice } from '../mobile/nativeVoice.js';
-import { RecordedVoice } from '../mobile/recordedVoice.js';
 import { createVoiceLifecycle } from '../mobile/voiceLifecycle.js';
 import { recordVoiceEvent } from '../mobile/voiceDiagnostics.js';
 import { noteAction } from '../mobile/renderDiagnostics.js';
@@ -26,6 +26,7 @@ export function createVoice(app) {
   let callActive = false;
   let callStarting = false;
   let callGeneration = 0;
+  let inputGeneration = 0;
   let callRestore = null;
   let voiceSwitching = false,
     callCloudFallback = false;
@@ -98,16 +99,19 @@ export function createVoice(app) {
     $('#voice-call-status').textContent = text;
   };
   const sttEngine = () => resolveStt(app.llmConfig, { gateway: app.gateway, browserSupported: browserSR });
-  function recordedVoice() {
-    return new RecordedVoice({
-      getTranscriber: () => {
-        const id = sttEngine();
-        return id === 'none' || id === 'browser' ? null : (wav, signal) => transcribe(id, app.llmConfig, wav, { gateway: app.gateway, signal });
-      },
-      ...voiceHandlers
+  function makeInput(kind) {
+    return createVoiceInput(kind, {
+      getConfig: () => app.llmConfig,
+      getGateway: () => app.gateway,
+      getEngine: sttEngine,
+      browserSupported: browserSR,
+      plugin: globalThis.__jarvisSpeech,
+      allowBargeIn: () => callActive,
+      handlers: voiceHandlers
     });
   }
   const voiceHandlers = {
+    canFallback: () => MOBILE && (callActive || dictating) && !callCloudFallback && !['none', 'browser'].includes(sttEngine()),
     onStatus: (phase) => {
       if (callActive && phase === 'speech') callTiming = {};
       if (callActive && phase === 'processing') {
@@ -120,21 +124,23 @@ export function createVoice(app) {
     },
     onUnavailable: async (message) => {
       recordVoiceEvent('系统识别不可用', message);
-      if (!MOBILE || !callActive || callCloudFallback || /权限|permission/i.test(message) || sttEngine() === 'none') return;
+      if (!voiceHandlers.canFallback() || /权限|permission/i.test(message)) return;
       const gen = callGeneration;
+      const dictationGen = dictationGeneration;
       voiceSwitching = true;
       callCloudFallback = true;
       try {
-        voice.disable();
-        await globalThis.__jarvisSpeech?.stop();
-        if (!callActive || gen !== callGeneration) return;
-        voice = recordedVoice();
+        if ((!callActive || gen !== callGeneration) && (!dictating || dictationGen !== dictationGeneration)) return;
         callStatus('系统识别暂不可用，正在启用服务商转写…');
-        await voice.enable({ silenceMs: SILENCE_BY_SENSITIVITY[app.settings.vadSensitivity] });
-        if (gen !== callGeneration) voice.disable();
+        const ok = await setDirectVoice(true);
+        if (!ok) {
+          if (dictating && dictationGen === dictationGeneration) await stopDictation();
+          if (callActive && gen === callGeneration) await setVoiceCall(false);
+        }
       } catch (e) {
         toast(`语音转写无法启动：${e.message}`);
-        if (gen === callGeneration) await setVoiceCall(false);
+        if (dictating && dictationGen === dictationGeneration) await stopDictation();
+        if (callActive && gen === callGeneration) await setVoiceCall(false);
       } finally {
         voiceSwitching = false;
       }
@@ -226,21 +232,14 @@ export function createVoice(app) {
       toast(code === 'not-allowed' ? '麦克风权限被拒绝' : /^语音识别/.test(code) ? code : `语音识别出错：${code}`);
     }
   };
-  let voice = new (MOBILE ? RecordedVoice : VoiceInput)({
-    allowBrowserSR: browserSR,
-    getTranscriber: () => {
-      const id = sttEngine();
-      return id === 'browser' || id === 'none' ? null : (wav, signal) => transcribe(id, app.llmConfig, wav, { gateway: app.gateway, signal });
-    },
-    ...voiceHandlers
-  });
+  let inputKind = MOBILE ? 'recorded' : 'browser';
+  let voice = makeInput(inputKind);
   // 安卓 App：有系统语音识别就用它（免费、不用密钥、自己判断说完）；没有再走云端转写
   const nativeVoiceReady =
     MOBILE && globalThis.__jarvisSpeech
       ? NativeVoice.available(globalThis.__jarvisSpeech).then((ok) => {
           globalThis.__jarvisNativeSpeechAvailable = ok;
           recordVoiceEvent('系统服务检测', String(ok));
-          if (ok) voice = new NativeVoice({ plugin: globalThis.__jarvisSpeech, ...voiceHandlers });
           return ok;
         })
       : Promise.resolve(false);
@@ -258,46 +257,35 @@ export function createVoice(app) {
   }
 
   async function setDirectVoice(on) {
-    const nativeAvailable = await nativeVoiceReady; // 手机上先确定用不用系统识别
-    if (on && sttEngine() === 'qwen-realtime') {
-      if (!(voice instanceof QwenVoice)) {
-        voice.disable();
-        voice = new QwenVoice({ getConfig: () => app.llmConfig, getGateway: () => app.gateway, allowBargeIn: () => callActive, ...voiceHandlers });
-      }
-    } else if (on && voice instanceof QwenVoice) {
+    const generation = ++inputGeneration;
+    if (!on) voice.disable(); // 挂断不等待可用性检查或权限窗口返回。
+    const nativeAvailable = on ? await nativeVoiceReady : false;
+    if (generation !== inputGeneration) return false;
+    const kind = chooseVoiceInput({
+      mobile: MOBILE,
+      nativeAvailable,
+      requested: app.llmConfig.stt?.engine || 'auto',
+      resolved: sttEngine(),
+      nativeFailed: callCloudFallback
+    });
+    if (on && kind !== inputKind) {
       voice.disable();
-      voice = new (MOBILE ? RecordedVoice : VoiceInput)({
-        allowBrowserSR: browserSR,
-        getTranscriber: () => {
-          const id = sttEngine();
-          return id === 'none' || id === 'browser' ? null : (wav, signal) => transcribe(id, app.llmConfig, wav, { gateway: app.gateway, signal });
-        },
-        ...voiceHandlers
-      });
-    }
-    if (MOBILE && on) {
-      const useNative = nativeAvailable && (app.llmConfig.stt?.engine || 'auto') === 'auto';
-      if (useNative && !(voice instanceof NativeVoice)) {
-        voice.disable();
-        voice = new NativeVoice({ plugin: globalThis.__jarvisSpeech, ...voiceHandlers });
-      }
-      if (!useNative && voice instanceof NativeVoice) {
-        voice.disable();
-        voice = new RecordedVoice({
-          getTranscriber: () => {
-            const id = sttEngine();
-            return id === 'none' || id === 'browser' ? null : (wav, signal) => transcribe(id, app.llmConfig, wav, { gateway: app.gateway, signal });
-          },
-          ...voiceHandlers
-        });
-      }
+      inputKind = kind;
+      voice = makeInput(kind);
     }
     app.setSetting('directVoice', on);
     $('#set-voice').checked = on;
     if (on) {
       try {
-        await voice.enable({ silenceMs: SILENCE_BY_SENSITIVITY[app.settings.vadSensitivity] });
+        const input = voice;
+        await input.enable({ silenceMs: SILENCE_BY_SENSITIVITY[app.settings.vadSensitivity] });
+        if (generation !== inputGeneration) {
+          if (input !== voice || !app.settings.directVoice) input.disable();
+          return false;
+        }
+        input.setSuppressed(speaker.speaking);
       } catch (err) {
+        if (generation !== inputGeneration) return false;
         recordVoiceEvent('启动失败', err.message);
         toast(err.message);
         if (/云端语音识别/.test(err.message)) app.showPanel('models');
@@ -347,11 +335,10 @@ export function createVoice(app) {
     try {
       const ok = await setDirectVoice(true);
       if (gen !== callGeneration) {
-        await setDirectVoice(false);
         return;
       }
       if (!ok) await setVoiceCall(false);
-      else callStatus(voice.mode === 'ptt' ? '按住麦克风说话，松开后回复' : '直接说话，未央在听');
+      else callStatus(voice.mode === 'ptt' ? '按住麦克风说话，松开后回复' : voice instanceof NativeVoice ? '正在启动手机语音识别…' : '直接说话，未央在听');
     } catch (e) {
       toast(`语音无法启动：${e.message || e}`);
       if (gen === callGeneration) await setVoiceCall(false);
@@ -413,6 +400,7 @@ export function createVoice(app) {
     if (dictating) return stopDictation();
     if (callActive) await setVoiceCall(false);
     speaker.cancel();
+    callCloudFallback = false;
     dictating = true;
     const gen = ++dictationGeneration;
     body.classList.add('dictating');
@@ -425,7 +413,6 @@ export function createVoice(app) {
     try {
       const ok = await setDirectVoice(true);
       if (gen !== dictationGeneration) {
-        voice.disable();
         return;
       }
       if (!ok) await stopDictation();

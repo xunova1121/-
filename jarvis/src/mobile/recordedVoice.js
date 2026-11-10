@@ -22,16 +22,23 @@ export class RecordedVoice {
       this.processor.connect(this.context.destination); // 输出缓冲默认静音，不播放麦克风
       this.processor.onaudioprocess = e => this.process(e.inputBuffer.getChannelData(0));
       this.mode = 'vad'; this.onMode?.(this.mode);
+      this.onStatus?.('ready');
+      this.captureTimer = setTimeout(() => {
+        if (gen !== this.gen) return;
+        this.disable();
+        this.onError?.('麦克风没有返回音频，请检查手机麦克风权限及是否被其他应用占用');
+      }, 8000);
       return this.mode;
     } catch (e) { if (gen === this.gen) this.disable(); throw e; }
   }
   process(samples) {
+    clearTimeout(this.captureTimer);
     if (this.mode !== 'vad' || this.suppressed || this.busy) return;
     const now = performance.now();
     const rms = Math.sqrt(samples.reduce((sum, v) => sum + v * v, 0) / samples.length);
     this.onEnergy?.(Math.min(1, rms * 8));
     if (rms > .015) {
-      if (!this.started) { this.started = now || 1; this.onConfirm?.(); }
+      if (!this.started) { this.started = now || 1; this.onConfirm?.(); this.onStatus?.('speech'); }
       this.lastSound = now;
     }
     if (!this.started) return;
@@ -44,16 +51,28 @@ export class RecordedVoice {
     const rate = this.context.sampleRate;
     this.reset(); this.busy = true;
     this.ctrl = new AbortController();
+    this.onStatus?.('processing');
+    let timeout;
     try {
       const samples = new Float32Array(frames.reduce((n, f) => n + f.length, 0));
       let off = 0; for (const f of frames) { samples.set(f, off); off += f.length; }
-      const text = await this.getTranscriber()(encodeWav(samples, rate), this.ctrl.signal);
+      const ctrl = this.ctrl;
+      const text = await Promise.race([
+        this.getTranscriber()(encodeWav(samples, rate), ctrl.signal),
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => {
+            reject(Object.assign(new Error('语音转写超时，请检查网络后重说这一句'), { name: 'TimeoutError' }));
+            ctrl.abort();
+          }, 30000);
+        })
+      ]);
       if (gen === this.gen && text) this.onFinal?.(text);
     } catch (e) { if (gen === this.gen && e.name !== 'AbortError') this.onError?.(e.message); }
-    finally { if (gen === this.gen) { this.busy = false; this.ctrl = null; this.onCancel?.(); } }
+    finally { clearTimeout(timeout); if (gen === this.gen) { this.busy = false; this.ctrl = null; this.onCancel?.(); this.onStatus?.('ready'); } }
   }
   reset() { this.frames = []; this.started = 0; this.lastSound = 0; this.onEnergy?.(0); }
   disable() {
+    clearTimeout(this.captureTimer);
     this.gen++; this.ctrl?.abort(); this.ctrl = null; this.busy = false;
     if (this.processor) { this.processor.onaudioprocess = null; this.processor.disconnect(); }
     this.source?.disconnect(); this.stream?.getTracks().forEach(t => t.stop());

@@ -367,6 +367,8 @@ jobs:
           node e2e/multi-user.mjs "$RUNNER_TEMP/jarvis-e2e/multi-user"
           mkdir -p "$RUNNER_TEMP/jarvis-e2e"
           node e2e/mobile-ui.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node scripts/make-icons.mjs --check
+          node e2e/client-recovery.mjs "$RUNNER_TEMP/jarvis-e2e/client-recovery"
           node e2e/phone-control.mjs "$RUNNER_TEMP/jarvis-e2e/phone-control"
           node e2e/product-refresh.mjs "$RUNNER_TEMP/jarvis-e2e/product-refresh"
           node e2e/home-history.mjs "$RUNNER_TEMP/jarvis-e2e/home-history"

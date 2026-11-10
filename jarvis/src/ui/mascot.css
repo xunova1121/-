@@ -1,12 +1,15 @@
-.wy-mascot{position:relative;display:inline-block;flex:none;width:calc(var(--mascot-size,40px)*.75);height:var(--mascot-size,40px);vertical-align:middle;background:url('./mascot-states.webp') 0 0/400% 200% no-repeat;transform-origin:50% 75%;animation:wy-float 3.6s ease-in-out infinite}
-.wy-mascot[data-state=idle]{animation:wy-float 3.6s ease-in-out infinite,wy-blink 5.5s steps(1,end) infinite}
-.wy-mascot[data-state=wink]{background-position:33.333333% 0}
-.wy-mascot[data-state=rub]{background-position:66.666667% 0;animation:wy-rub .65s ease-in-out infinite}
-.wy-mascot[data-state=think],.wy-mascot[data-state=listen]{background-position:100% 0;animation:wy-think 2.5s ease-in-out infinite}
-.wy-mascot[data-state=sleep]{background-position:0 100%;animation:wy-breathe 3.6s ease-in-out infinite}
-.wy-mascot[data-state=run]{background-position:33.333333% 100%;animation:wy-run .32s ease-in-out infinite}
-.wy-mascot[data-state=happy]{background-position:66.666667% 100%;animation:wy-happy 1.5s ease-in-out infinite}
-.wy-mascot[data-state=spin]{background-position:100% 100%;animation:wy-spin 3s ease-in-out infinite}
+/* 三端共用已确认的4×3形象；图标生成器也从这张素材的首格导出。 */
+.wy-mascot{position:relative;display:inline-block;flex:none;width:var(--mascot-size,40px);height:var(--mascot-size,40px);vertical-align:middle;background:url('./mascot-approved.webp') 0 0/400% 300% no-repeat;transform-origin:50% 75%;animation:wy-float 3.6s ease-in-out infinite}
+.wy-mascot[data-state=idle]{animation:wy-float 3.6s ease-in-out infinite}
+.wy-mascot[data-state=wink]{background-position:100% 50%}
+.wy-mascot[data-state=rub]{background-position:33.333333% 50%;animation:wy-rub .65s ease-in-out infinite}
+.wy-mascot[data-state=think]{background-position:100% 0;animation:wy-think 2.5s ease-in-out infinite}
+.wy-mascot[data-state=listen]{background-position:0 50%;animation:wy-think 2.5s ease-in-out infinite}
+.wy-mascot[data-state=sleep]{background-position:33.333333% 100%;animation:wy-breathe 3.6s ease-in-out infinite}
+.wy-mascot[data-state=run]{background-position:100% 0;animation:wy-run .32s ease-in-out infinite}
+.wy-mascot[data-state=happy]{background-position:33.333333% 0;animation:wy-happy 1.5s ease-in-out infinite}
+.wy-mascot[data-state=spin]{background-position:0 100%;animation:wy-spin 3s ease-in-out infinite}
+.wy-mascot[data-state=pet]{background-position:100% 50%;animation:wy-pet 1.5s ease-in-out 3}
 .who-mood.wy-mascot{--mascot-size:36px;margin:-9px 0 -8px 6px;position:relative}
 .transcript .msg.agent:not(:last-child) .wy-mascot{animation:none}
 .wy-brand{display:inline-grid!important;place-items:center;position:relative;background:none!important;border:0!important;box-shadow:none!important;animation:none!important;overflow:visible}
@@ -36,15 +39,16 @@
 body.reduced-motion .wy-mascot,body.reduced-motion .wy-brand::after,body.reduced-motion .wb-mark,body.reduced-motion .wb-hero-mark{animation:none!important}
 body.wy-paused .wy-mascot,body.wy-paused .wy-brand::after{animation-play-state:paused}
 /* 二维轻量动作：不使用 rotateY 或持续的模糊滤镜。 */
-.wy-mascot[data-state=wave]{background-position:0 0;animation:wy-wave 1.4s ease-in-out infinite}
-.wy-mascot[data-state=shy]{background-position:33.333333% 0;animation:wy-shy 2s ease-in-out infinite}
-.wy-mascot[data-state=love]{background-position:66.666667% 100%;animation:wy-love 1.8s ease-in-out infinite}
-.wy-mascot[data-state=dance]{background-position:100% 100%;animation:wy-dance 1.2s ease-in-out infinite}
+.wy-mascot[data-state=wave]{background-position:66.666667% 50%;animation:wy-wave 1.4s ease-in-out infinite}
+.wy-mascot[data-state=shy]{background-position:66.666667% 0;animation:wy-shy 2s ease-in-out infinite}
+.wy-mascot[data-state=love]{background-position:100% 50%;animation:wy-love 1.8s ease-in-out infinite}
+.wy-mascot[data-state=dance]{background-position:0 100%;animation:wy-dance 1.2s ease-in-out infinite}
 .wy-mascot[data-state=love]::after{content:'♡';position:absolute;right:-6%;top:12%;color:#ee719c;font-size:calc(var(--mascot-size,40px)*.18)}
 .wy-mascot[data-state=sleep]::after{content:'zZ';position:absolute;right:0;top:10%;color:#8d84d0;font-size:calc(var(--mascot-size,40px)*.12)}
 @keyframes wy-wave{25%{transform:rotate(-8deg) translateY(-3px)}60%{transform:rotate(8deg)}}
 @keyframes wy-shy{50%{transform:rotate(-7deg) scale(.96) translateY(2px)}}
 @keyframes wy-love{50%{transform:scale(1.06)}}
+@keyframes wy-pet{50%{transform:translateY(3px) scale(1.035,.97)}}
 @keyframes wy-dance{25%{transform:translate(-5px,-3px) rotate(-8deg)}75%{transform:translate(5px,-3px) rotate(8deg)}}
 @keyframes wy-spin{0%,100%{transform:rotate(0)}75%{transform:rotate(360deg)}}
 .brand-mark.wy-brand{cursor:pointer;align-self:center;transform:translateY(-3px)}
