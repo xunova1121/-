@@ -22,6 +22,12 @@ on:
       - 'jarvis/package*.json'
       - '.github/workflows/jarvis-desktop.yml'
   workflow_dispatch:
+    inputs:
+      mirror_tag:
+        description: '仅同步源码仓库已正式发布的现有版本（如 desktop-v1.0.416）；留空照常构建发布'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -33,14 +39,34 @@ env:
   PUBLISH: ${{ github.ref == 'refs/heads/claude/jolly-darwin-tijh97' || startsWith(github.ref, 'refs/tags/desktop-v') }}
 
 concurrency:
-  group: jarvis-desktop-${{ github.ref }}
-  cancel-in-progress: true
+  group: jarvis-desktop-${{ inputs.mirror_tag || github.ref }}
+  cancel-in-progress: ${{ !inputs.mirror_tag }}
 
 jobs:
+  # 只恢复已发布版本的公开镜像，不创建新版本，也不跳过正常发版的验证链。
+  mirror_published:
+    name: 同步现有安装包到公开仓库
+    if: github.event_name == 'workflow_dispatch' && inputs.mirror_tag != '' && github.ref == 'refs/heads/claude/jolly-darwin-tijh97'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: 核对原包并同步公开发布
+        env:
+          SOURCE_TOKEN: ${{ github.token }}
+          RELEASE_REPO_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          MIRROR_TAG: ${{ inputs.mirror_tag }}
+        run: node .github/scripts/sync-published-release.mjs
+
   # 用户 2026-11-03：代码仓库改私密后，免费账户的构建产物存储有上限（约500MB），旧产物默认留90天把空间占满，
   # 1.0.385 所有测试通过却在“上传安装包”报 Artifact storage quota has been hit。发版前先删旧产物，新产物只留1天（正式安装包在 Releases）。
   cleanup:
     name: 清理旧的构建产物
+    if: ${{ !inputs.mirror_tag }}
     runs-on: ubuntu-latest
     permissions:
       actions: write
