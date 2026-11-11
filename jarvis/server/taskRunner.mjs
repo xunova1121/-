@@ -46,7 +46,7 @@ import { withoutCodeCredentials } from './gitHosting.mjs';
 import dns from 'node:dns/promises';
 import { resolveAgentTurn, sanitizeAgentForm } from '../src/agent/agentTurn.js';
 import { runWorkflow } from '../src/agent/workflowRun.js';
-import { BUILTIN_AGENTS } from '../src/agent/agentProfileBuiltins.js';
+import { ALL_BUILTIN_AGENTS as BUILTIN_AGENTS } from '../src/agent/agentProfileBuiltins.js';
 import { profileId } from '../src/agent/agentProfileValidation.js';
 import { runAgent } from '../src/agent/agent.js';
 import { createTools } from '../src/agent/tools.js';
@@ -319,6 +319,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const taskLookup = task.evaluationId ? createLookupService({ storage: memoryLookupStorage(), get: publicFetch }) : lookupService;
     const tools = evaluationTools(makeTools({
       ...deepseekSearchOptions(cfg), qianfanSearchKey: cfg.qianfanSearchKey, qianfanSearchTopK: cfg.qianfanSearchTopK,
+      qibookAccessKey: cfg.qibookAccessKey, qibookBaseUrl: cfg.qibookBaseUrl,
       // 评测不读用户保存的文档偏好（字号、风格），结果才能复现
       ...(task.evaluationId && { documentStylePreferences: async () => '' }),
       lookup: taskLookup.options(cfg.lookupRegion || 'auto'),

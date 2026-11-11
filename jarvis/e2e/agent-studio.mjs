@@ -38,7 +38,7 @@ try {
     if (zoom) await page.addStyleTag({ content: 'html {font-size:130% !important}' });
     await page.evaluate(() => window.__jarvis.agents.openSquare());
     await page.waitForSelector('.wy-studio-square:not([hidden]) .wy-agent-card');
-    check(`${tag} 真实广场8个智能体和两个作品入口`, await page.locator('.wy-agent-card[data-agent]').count() === 8 && await page.locator('.wy-studio-feature').count() === 2);
+    check(`${tag} 真实广场9个智能体（原8项加企业招投标）和两个作品入口`, await page.locator('.wy-agent-card[data-agent]').count() === 9 && await page.locator('.wy-studio-feature').count() === 2);
     await page.screenshot({ path: `${out}/square-${tag}.png` });
     await page.evaluate(() => window.__jarvis.agents.square.close());
     for (const id of ids) {

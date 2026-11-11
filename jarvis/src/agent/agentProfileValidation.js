@@ -2,7 +2,7 @@ import { CORE } from './toolLoader.js';
 
 export const AGENT_CATEGORIES = Object.freeze(['office', 'gongwen', 'image', 'research', 'life', 'mine']);
 // 复用常驻工具目录；文档模板工具虽按需加载，也是已实现的工具。
-export const PROFILE_TOOL_NAMES = Object.freeze([...CORE, 'get_document_template']);
+export const PROFILE_TOOL_NAMES = Object.freeze([...CORE, 'get_document_template', 'search_tenders', 'read_tender_notice', 'lookup_company', 'list_schedules', 'update_schedule', 'cancel_schedule']);
 const knownTools = new Set(PROFILE_TOOL_NAMES);
 const outputs = new Set(['text', 'docx', 'pptx', 'xlsx', 'image']);
 const sources = new Set(['builtin', 'user', 'github']);

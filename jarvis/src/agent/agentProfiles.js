@@ -1,15 +1,16 @@
 import { collection } from './store.js';
 import { userStorageSuffix } from '../core/userStorage.js';
-import { BUILTIN_AGENTS } from './agentProfileBuiltins.js';
+import { BUILTIN_AGENTS, ALL_BUILTIN_AGENTS } from './agentProfileBuiltins.js';
 import { profileError, profileFilter, profileId, validateProfile } from './agentProfileValidation.js';
-export { BUILTIN_AGENTS, validateProfile };
+export { BUILTIN_AGENTS, ALL_BUILTIN_AGENTS, validateProfile };
 
 // 使用现有kv集合，不升级数据库、不改旧对话。100份×32KiB限制配置的总规模。
 export const MAX_USER_AGENTS = 100;
 export const PROFILE_STORE_KEY = 'agent-profiles.v1';
 const kv = collection('kv');
 const pending = new WeakMap();
-const builtinIds = new Set(BUILTIN_AGENTS.map(p => p.id));
+const builtinIds = new Set(ALL_BUILTIN_AGENTS.map(p => p.id));
+const originalBuiltinIds = new Set(BUILTIN_AGENTS.map(p => p.id));
 const clone = value => structuredClone(value);
 
 function serial(store, work) {
@@ -29,7 +30,8 @@ async function readProfiles(store) {
   const record = await store.get(PROFILE_STORE_KEY);
   if (!record) return [];
   if (record.version !== 1 || !Array.isArray(record.items) || record.items.length > MAX_USER_AGENTS) throw profileError('storage', '智能体存储格式异常，原数据未覆盖');
-  const ids = [...builtinIds];
+  // 新增内置ID不能使升级前恰好同ID的个人配置整库无法读取；原8项仍保留。
+  const ids = [...originalBuiltinIds];
   return record.items.map(value => {
     const profile = validateProfile(value, { existingIds: ids });
     if (profile.source === 'builtin') throw profileError('source', '个人存储不能声明为内置智能体');
@@ -41,7 +43,7 @@ async function readProfiles(store) {
 /** 每次操作绑定当前存储身份，异步写入不会随另一个成员的请求切换。 */
 export function createAgentRegistry(storage = kv) {
   const bind = () => storage.bind?.() || storage;
-  const writable = id => { profileId(id); if (builtinIds.has(id)) throw profileError('id', '内置智能体不可覆盖或删除', 409); };
+  const writable = id => { profileId(id); if (originalBuiltinIds.has(id)) throw profileError('id', '内置智能体不可覆盖或删除', 409); };
   const write = work => {
     const store = bind();
     return serial(store, async () => {
@@ -54,14 +56,16 @@ export function createAgentRegistry(storage = kv) {
   return {
     async listAgents(options = {}) {
       const { category, query } = profileFilter(options);
-      const items = [...BUILTIN_AGENTS, ...await readProfiles(bind())];
+      const personal = await readProfiles(bind());
+      const items = [...ALL_BUILTIN_AGENTS.filter(p => !personal.some(row => row.id === p.id)), ...personal];
       return clone(items.filter(p => (!category || (category === 'mine' ? p.source !== 'builtin' : p.category === category))
         && (!query || `${p.name}\n${p.intro}\n${p.starters.join('\n')}`.toLocaleLowerCase().includes(query))));
     },
     async getAgent(id) {
       profileId(id);
-      const builtin = BUILTIN_AGENTS.find(p => p.id === id);
-      return clone(builtin || (await readProfiles(bind())).find(p => p.id === id) || null);
+      const builtin = ALL_BUILTIN_AGENTS.find(p => p.id === id);
+      if (originalBuiltinIds.has(id)) return clone(builtin);
+      return clone((await readProfiles(bind())).find(p => p.id === id) || builtin || null);
     },
     createAgent(value) {
       const profile = validateProfile(value, { existingIds: builtinIds });
@@ -80,6 +84,7 @@ export function createAgentRegistry(storage = kv) {
       if (profile.source === 'builtin') throw profileError('source', '不能更改为内置智能体');
       return write(items => {
         const index = items.findIndex(p => p.id === id);
+        if (index < 0 && builtinIds.has(id)) throw profileError('id', '内置智能体不可覆盖或删除', 409);
         if (index < 0) throw profileError('id', '没有找到此智能体', 404);
         if (items[index].source !== profile.source) throw profileError('source', '不能更改已有智能体的来源');
         items[index] = profile;
@@ -90,6 +95,7 @@ export function createAgentRegistry(storage = kv) {
       writable(id);
       return write(items => {
         const index = items.findIndex(p => p.id === id);
+        if (index < 0 && builtinIds.has(id)) throw profileError('id', '内置智能体不可覆盖或删除', 409);
         if (index < 0) throw profileError('id', '没有找到此智能体', 404);
         items.splice(index, 1);
         return { ok: true };

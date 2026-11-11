@@ -22,6 +22,7 @@ export function serverKeysPanel({ cfg, workspace, node }) {
     };
   };
   const fields = {
+    qibookAccessKey: field('企百科访问密钥（可选）', cfg.qibookAccessKey, '查工商、股东等企业资料；从 skill.qibook.com 获取，服务可能计费。未配置仍可用公开招标搜索。'),
     qianfanSearchKey: field('百度千帆搜索 Key', cfg.qianfanSearchKey, '国内搜索，按次计费；只填在服务器设置里。保存后可测试真实返回，不改变聊天模型。'),
     // 用户 2026-11-02：不用博查。保留这一栏只为已填过的人能清空；留空就不会用到（搜索已由百度千帆和 DeepSeek 负责）
     bochaKey: field('博查搜索 Key', cfg.bochaKey, '已不推荐：搜索由百度千帆和 DeepSeek 负责，这一栏留空即停用；以前填过的清空保存即可。'),
@@ -122,6 +123,9 @@ export function serverKeysPanel({ cfg, workspace, node }) {
     node('small', { className: 'ml-muted', textContent: '控制台“设置”页里的 API Host，每个账号不一样' })
   );
   const result = node('p', { className: 'ml-muted', role: 'status' });
+  const qibookHost = node('input', { type: 'url', autocomplete: 'off', ariaLabel: '企百科 API 地址', maxLength: 300, placeholder: '企百科控制台提供的 HTTPS 基础地址', value: cfg.qibookBaseUrl || '' });
+  const qibookRow = node('label', { className: 'ml-field' }, node('span', { textContent: '企百科 API 地址（可选）' }), qibookHost,
+    node('small', { className: 'ml-muted', textContent: '与访问密钥保存到同一运行位置。只在明确选择企百科查询时调用，不会自动查询全量资料。' }));
   const save = node('button', { type: 'button', className: 'ml-button', textContent: `保存到${where}` });
   save.addEventListener('click', async () => {
     const next = Object.fromEntries(
@@ -137,6 +141,8 @@ export function serverKeysPanel({ cfg, workspace, node }) {
       .replace(/^https?:\/\//i, '')
       .replace(/\/+$/, '');
     if (host !== (cfg.qweatherHost || '')) next.qweatherHost = host;
+    const qibookBase = qibookHost.value.trim().replace(/\/+$/, '');
+    if (qibookBase !== (cfg.qibookBaseUrl || '')) next.qibookBaseUrl = qibookBase;
     if (!Object.keys(next).length) {
       result.textContent = '没有填新的 Key，原来的保持不变';
       return;
@@ -145,6 +151,7 @@ export function serverKeysPanel({ cfg, workspace, node }) {
     try {
       await workspace.patch((value) => ({ ...value, ...next }));
       if (next.qianfanSearchKey) fields.qianfanSearchKey.input.value = '';
+      if (next.qibookAccessKey) { fields.qibookAccessKey.input.value = ''; fields.qibookAccessKey.input.placeholder = '已配置；留空保留'; }
       if (next.qweatherKey || 'qweatherHost' in next) globalThis.dispatchEvent(new Event('jarvis:weather-config-changed'));
       for (const provider of ['pexels', 'pixabay', 'unsplash'])
         if (next[provider + 'Key']) {
@@ -167,6 +174,7 @@ export function serverKeysPanel({ cfg, workspace, node }) {
     ...Object.values(fields).map((f) => f.row),
     topKRow,
     hostRow,
+    qibookRow,
     save,
     qianfanTest,
     ...stockControls,

@@ -10,7 +10,7 @@ export function createTaskPhases() {
   let lastAnswerMs = null;
   let overflow = false;
   const duration = (start, end) => Math.max(0, end - start);
-  const kindOf = (tool) => tool === 'web_search' ? 'search' : /^(?:fetch_url|fetch_json|get_today_news)$/.test(tool) ? 'read' : /^(fact_check|deep_research)$/.test(tool) ? 'research' : 'other';
+  const kindOf = (tool) => ['web_search', 'search_tenders', 'lookup_company'].includes(tool) ? 'search' : /^(?:fetch_url|fetch_json|get_today_news|read_tender_notice)$/.test(tool) ? 'read' : /^(fact_check|deep_research)$/.test(tool) ? 'research' : 'other';
   return {
     event(event, time) {
       if (event.type === 'diagnostic' && event.phase === 'model_start') {

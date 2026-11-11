@@ -484,6 +484,7 @@ jobs:
           node e2e/standalone.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/ppt-sources.mjs "$RUNNER_TEMP/jarvis-e2e/ppt-sources"
           node e2e/agent-studio.mjs "$RUNNER_TEMP/jarvis-e2e/agent-studio"
+          node e2e/business-intelligence.mjs "$RUNNER_TEMP/jarvis-e2e/business-intelligence"
           node e2e/studio-library.mjs "$RUNNER_TEMP/jarvis-e2e/studio-library"
           node e2e/studio-team.mjs "$RUNNER_TEMP/jarvis-e2e/studio-team"
       - name: 保存验证截图和日志

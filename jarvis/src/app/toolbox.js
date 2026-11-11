@@ -90,6 +90,8 @@ export function createToolbox(app) {
         qweather: qweatherConfig(app.llmConfig),
         falKey: app.llmConfig.falKey,
         bochaKey: app.llmConfig.bochaKey,
+        qibookAccessKey: app.llmConfig.qibookAccessKey,
+        qibookBaseUrl: app.llmConfig.qibookBaseUrl,
         searchRegion: app.llmConfig.searchRegion || 'auto',
         fetchViaGateway: app.fetchViaGateway(),
         llm: app.helperLlm('write'), // 深度调研：用写作模型

@@ -23,7 +23,7 @@ import { createStudioHub } from '../ui/studioHub.js';
 export const DRAWER_PICKS = ['ppt-maker', 'gongwen-writer', 'health-advisor'];
 
 export function createAgents(app) {
-  const cache = new Map(registry.BUILTIN_AGENTS.map((p) => [p.id, p]));
+  const cache = new Map(registry.ALL_BUILTIN_AGENTS.map((p) => [p.id, p]));
   let cacheVersion = 0;
   const listAgents = async () => {
     const version = cacheVersion;

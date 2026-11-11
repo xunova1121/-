@@ -1,5 +1,6 @@
 /** 首批智能体只声明角色和能力；选择配置不授予额外权限，也不触发模型。 */
 import { PPT_TEMPLATE_IDS } from './pptTemplates.js';
+import { BUSINESS_AGENT } from './businessAgent.js';
 const researchTools = ['web_search', 'fetch_url', 'read_evidence', 'read_file', 'kb_search', 'verify_numbers', 'reconcile_numbers', 'time_calc'];
 const documentTools = ['create_document', 'write_long_document', 'read_document_structure', 'edit_office_document', 'check_document', 'get_document_template', 'list_files', 'read_file', 'preview'];
 const select = (key, label, options) => ({ key, label, type: 'select', options });
@@ -85,3 +86,5 @@ function freeze(value) {
 }
 
 export const BUILTIN_AGENTS = freeze(profiles);
+/** 实际广场目录；BUILTIN_AGENTS保留首批评测集的固定范围。 */
+export const ALL_BUILTIN_AGENTS = freeze([...BUILTIN_AGENTS, BUSINESS_AGENT]);

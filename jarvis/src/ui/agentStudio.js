@@ -7,6 +7,7 @@ import poster1 from '../assets/agent-studio/poster-1.svg';
 import poster2 from '../assets/agent-studio/poster-2.svg';
 import poster3 from '../assets/agent-studio/poster-3.svg';
 import './agentStudio.css';
+import { enhanceBusinessStart } from './businessStart.js';
 
 export const studioEl = (tag, props = {}, ...kids) => {
   const node = Object.assign(document.createElement(tag), props);
@@ -15,6 +16,7 @@ export const studioEl = (tag, props = {}, ...kids) => {
 };
 const el = studioEl;
 const copy = {
+  'business-intelligence': ['BUSINESS INTELLIGENCE', '找到项目，\n看清企业。'],
   'ppt-maker': ['PRESENT YOUR IDEAS', '好内容，\n值得好的呈现。'],
   'gongwen-writer': ['WRITE WITH CLARITY', '落笔有据，\n表达有章法。'],
   'poster-designer': ['MAKE SOMETHING BEAUTIFUL', '让每个想法，\n都有画面。'],
@@ -163,4 +165,5 @@ export function enhanceAgentStart(root, profile, { onFill }) {
     heroNode.after(upload);
   }
   if (profile.id === 'ppt-maker' && upload) heroNode.after(upload);
+  if (profile.id === 'business-intelligence' && profile.source === 'builtin') enhanceBusinessStart(root, { onFill });
 }

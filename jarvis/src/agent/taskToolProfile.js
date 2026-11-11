@@ -18,6 +18,7 @@ export function taskToolCore(intent, text, { images = [], computerTask = false, 
   if (intent?.category === 'code') { add(CODE_TASK_CORE); add(FILES); return names; }
   if (/Word|Excel|PPT|文档|表格|幻灯片|\.docx|\.xlsx|\.pptx/i.test(value)) return DOCUMENT_TASK_CORE;
   if (/架构图|流程图|关系图|拓扑图|生成图片|画图|图片|唱歌|歌曲|视频/.test(value)) return CORE;
+  if (/招投标|招标|中标|采购公告|股东|股权|工商|查企业|查公司|对外投资/.test(value)) add(['search_tenders', 'read_tender_notice', 'lookup_company', 'time_calc', ...SEARCH]);
   if (/天气|温度|下雨|气温/.test(value)) add(['get_weather', 'get_current_time', ...SEARCH]);
   else if (/股价|行情|金价|汇率|大盘|美股|港股|油价|股票/.test(value)) add(['get_market_quote', 'get_stock_kline', 'verify_numbers', 'time_calc', 'list_holdings', 'holding_profit', ...SEARCH]);
   else if (/比分|赛程|比赛|足球|篮球|新闻|资讯/.test(value)) add(['get_today_news', 'get_sports_scores', ...SEARCH]);

@@ -32,6 +32,7 @@ export function cleanStudio(value = {}) {
   };
 }
 const ALIASES = {
+  'business-intelligence': '企业 公司 工商 股东 股权 对外投资 招投标 招标 中标 采购 项目 公告 企百科',
   'ppt-maker': '演示 幻灯片 汇报 述职 路演 方案',
   'gongwen-writer': '报告 材料 请示 周报 总结 公文 润色',
   'poster-designer': '海报 广告 宣传 抠图 修图 图片',

@@ -1,5 +1,6 @@
 /** 智能体图标：设计稿 docs/design/agent-square-20261105/icons/agents 里的原创线性 SVG（currentColor，跟随主题色） */
 export const AGENT_ICONS = {
+  business: '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V4h9v17M14 10h5v11M8 8h3M8 12h3M8 16h3M17 14v3"/></svg>',
   gongwen: "<svg aria-hidden=\"true\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M6 3h9l4 4v14H6z M14 3v5h5 M9 12h7 M9 16h5\"/></svg>",
   health: "<svg aria-hidden=\"true\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M20 5c-3-3-7 0-8 2-1-2-5-5-8-2-4 4 1 9 8 15 7-6 12-11 8-15 M7 12h3l2-4 2 7 2-3h3\"/></svg>",
   market: "<svg aria-hidden=\"true\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M4 3v17h17 M7 15l4-5 4 2 5-7 M16 5h4v4\"/></svg>",

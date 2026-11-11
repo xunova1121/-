@@ -71,6 +71,7 @@ import { serverModelCatalog } from './modelCatalog.mjs';
 import { listDocumentStyles, deleteDocumentStyle, setEmbedder, vectorStatus, backfillVectors } from '../src/agent/memory.js';
 import { createEmbedder } from '../src/llm/embeddings.js';
 import { qweatherConfig } from '../src/core/qweather.js';
+import { qibookConfig } from '../src/core/qibook.js';
 import { boundedCatalogs, applyRemovedProviders } from '../src/llm/modelLibrary.js';
 
 const UPLOAD_LIMIT = 50 * 1024 * 1024;
@@ -87,13 +88,19 @@ export const tokenFor = legacyAccessToken;
 export function maskConfig(cfg) {
   cfg = withoutCodeCredentials(cfg);
   const mask = (v) => (v ? `••••${String(v).slice(-4)}` : '');
-  return { ...cfg, ...Object.fromEntries(STOCK_KEY_FIELDS.map(key => [key, mask(cfg[key])])), keys: Object.fromEntries(Object.entries(cfg.keys ?? {}).map(([k, v]) => [k, mask(v)])), tavilyKey: mask(cfg.tavilyKey), bochaKey: mask(cfg.bochaKey), qianfanSearchKey: mask(cfg.qianfanSearchKey), deepseekSearchKey: mask(cfg.deepseekSearchKey), falKey: mask(cfg.falKey), qweatherKey: mask(cfg.qweatherKey) };
+  return { ...cfg, ...Object.fromEntries(STOCK_KEY_FIELDS.map(key => [key, mask(cfg[key])])), keys: Object.fromEntries(Object.entries(cfg.keys ?? {}).map(([k, v]) => [k, mask(v)])), tavilyKey: mask(cfg.tavilyKey), bochaKey: mask(cfg.bochaKey), qianfanSearchKey: mask(cfg.qianfanSearchKey), deepseekSearchKey: mask(cfg.deepseekSearchKey), falKey: mask(cfg.falKey), qweatherKey: mask(cfg.qweatherKey), qibookAccessKey: mask(cfg.qibookAccessKey) };
 }
 /** 保存时：密钥没改（还是 •••• 或留空）就沿用原来的 */
 export function mergeConfig(old, next) {
   // GitHub凭据只在专用仓库设置接口更新，模型面板的旧快照不能清空或覆盖。
   const { codeRepos: ignored, codeAccount: ignoredAccount, stockVerified: ignoredStockVerified, ...modelSettings } = next;
   next = modelSettings;
+  if (Object.hasOwn(next, 'qibookAccessKey') && (typeof next.qibookAccessKey !== 'string' || next.qibookAccessKey.length > 512)) throw Object.assign(new Error('企百科密钥格式无效'), { status: 400 });
+  if (Object.hasOwn(next, 'qibookBaseUrl')) {
+    if (typeof next.qibookBaseUrl !== 'string' || next.qibookBaseUrl.length > 300) throw Object.assign(new Error('企百科地址格式无效'), { status: 400 });
+    try { qibookConfig({ qibookAccessKey: 'validation-only', qibookBaseUrl: next.qibookBaseUrl }); }
+    catch { throw Object.assign(new Error('企百科地址须为公开HTTPS地址，不含账号或查询参数'), { status: 400 }); }
+  }
   if (Object.hasOwn(next, 'publicDataHosts')) next = { ...next, publicDataHosts: publicDataHosts(next.publicDataHosts) };
   if (Object.hasOwn(next, 'lookupRegion') && !LOOKUP_REGIONS.includes(next.lookupRegion)) throw Object.assign(new Error('查询地区只接受auto、cn或global'), { status: 400, code: 'LOOKUP_REGION' });
   if (Object.hasOwn(next, 'taskConcurrency') && (!Number.isInteger(next.taskConcurrency) || next.taskConcurrency < 1 || next.taskConcurrency > 4)) throw Object.assign(new Error('同时执行任务数须为1至4'), { status: 400 });
@@ -108,7 +115,7 @@ export function mergeConfig(old, next) {
   // OpenRouter 线路选择只接受固定三档，不把任意文字写进配置
   for (const v of Object.values(next.routeSorts ?? {})) if (!['latency', 'throughput', 'price'].includes(v)) throw Object.assign(new Error('OpenRouter 线路选择只能是延迟优先、出字速度优先或价格优先'), { status: 400 });
   const maps = Object.fromEntries(['models', 'baseURLs', 'providerNames', 'modelLists', 'serviceTiers', 'routeSorts'].map((field) => [field, { ...old[field], ...next[field] }]));
-  const merged = { ...old, ...next, ...maps, keys, tavilyKey: keep(next.tavilyKey, old.tavilyKey), bochaKey: keep(next.bochaKey, old.bochaKey), qianfanSearchKey: keep(next.qianfanSearchKey, old.qianfanSearchKey), deepseekSearchKey: keep(next.deepseekSearchKey, old.deepseekSearchKey), falKey: keep(next.falKey, old.falKey), qweatherKey: keep(next.qweatherKey, old.qweatherKey) };
+  const merged = { ...old, ...next, ...maps, keys, tavilyKey: keep(next.tavilyKey, old.tavilyKey), bochaKey: keep(next.bochaKey, old.bochaKey), qianfanSearchKey: keep(next.qianfanSearchKey, old.qianfanSearchKey), deepseekSearchKey: keep(next.deepseekSearchKey, old.deepseekSearchKey), falKey: keep(next.falKey, old.falKey), qweatherKey: keep(next.qweatherKey, old.qweatherKey), qibookAccessKey: keep(next.qibookAccessKey?.trim(), old.qibookAccessKey) };
   merged.stockVerified = { ...old.stockVerified };
   for (const key of STOCK_KEY_FIELDS) {
     merged[key] = keep(next[key], old[key]);

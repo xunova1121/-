@@ -51,7 +51,7 @@ async function phone(browser, base, { width, theme, zoom }) {
   await page.click('.drawer-agents-head');
   // P2 广场
   await page.waitForSelector('.wy-agents:not([hidden]) .wy-agent-card[data-agent]');
-  check(`[${tag}] 广场 8 个内置智能体`, (await page.locator('.wy-agent-card[data-agent]').count()) === 8);
+  check(`[${tag}] 广场 9 个内置智能体（保留原8项）`, (await page.locator('.wy-agent-card[data-agent]').count()) === 9);
   check(`[${tag}] 广场不横向溢出`, (await overflow(page)) <= 0);
   check(`[${tag}] 分类标签看得见`, await page.evaluate(() => document.querySelector('.wy-agents-chips').getBoundingClientRect().height >= 44));
   const tooSmall = await page.evaluate(() => [...document.querySelectorAll('.wy-agents button, .wy-agents input')].filter((b) => b.offsetParent && b.getBoundingClientRect().height < 43.5).map((b) => b.className));

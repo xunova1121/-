@@ -1,0 +1,328 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <title>老泵站河区域面源及溢流污染控制(调蓄池+配套管网)EPC总承包（第一标段）_交易公开_国家公共资源交易平台</title>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <meta name="others" content="页面生成时间 2024-04-26 07:22:49" />
+  <link type="text/css" href="/assets/css/main.css" rel="stylesheet">
+  <link type="text/css" href="/assets/css/deal.css" rel="stylesheet">
+  <script src="/assets/js/jquery-1.6.4.min.js"></script>
+  <script>
+    var mysid = '00536c16973a74fe4afb9f252198a66f778a';
+    var mypppSid = '00536c16973a74fe4afb9f252198a66f778a';
+    var myds = '513';
+    var myplatformCode = '12532500067137175R';
+    var myareaId = '530000';
+    var mybasepath = '/information';
+    var mycl = '01';
+    var myst = '0101';
+  </script>
+  <script src="/assets/js/dealDetailList.js"></script>
+</head>
+
+<body>
+<div class="header">
+  <div class="header_top">
+    <p class="p_fliat">
+      <a href="/SIC/web/govreport.po" target="_blank">政府网站工作年度报表</a>
+    </p>
+    <div id="addNewSearch">
+      <div class="p_last" style="margin-right:0px;"><a href="/serve/wechat/wechat.html" target="_blank"><img
+              src="/assets/images/weixin.png" id="weixin"></a></div>
+    </div>
+    <div id="ewm">
+      <div class="arrows"><img src="/assets/images/ewm.png"></div>
+      <div class="div">
+        <div class="div_on"><img src="/assets/images/wechatserve.jpg" width="100" height="100">
+          <p>服务号</p>
+        </div>
+        <!--     <div class="div_tw"><img src="/assets/images/wechatdy.jpg" width="100" height="100"><p>订阅号</p></div> -->
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+    // 等待 DOM 加载完成
+    document.addEventListener('DOMContentLoaded', function() {
+        var weixin = document.getElementById('weixin');
+        var ewm = document.getElementById('ewm');
+        var timeoutId = null;
+
+        if (weixin && ewm) {
+            // 鼠标移入微信图标
+            weixin.addEventListener('mouseenter', function() {
+                // 清除之前的定时器
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    timeoutId = null;
+                }
+                // 显示二维码（使用 slideDown 效果）
+                slideDown(ewm);
+            });
+
+            // 鼠标移出微信图标
+            weixin.addEventListener('mouseleave', function() {
+                // 延迟隐藏，给用户时间移动到二维码区域
+                timeoutId = setTimeout(function() {
+                    slideUp(ewm);
+                }, 100);
+            });
+
+            // 鼠标移入二维码区域
+            ewm.addEventListener('mouseenter', function() {
+                // 清除隐藏定时器，保持显示
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    timeoutId = null;
+                }
+            });
+
+            // 鼠标移出二维码区域
+            ewm.addEventListener('mouseleave', function() {
+                slideUp(ewm);
+            });
+        }
+    });
+
+    // 模拟 jQuery 的 slideDown 效果
+    function slideDown(element) {
+        element.style.overflow = 'hidden';
+        element.style.display = 'block';
+        element.style.height = '0';
+        element.style.opacity = '0';
+
+        var targetHeight = element.scrollHeight;
+        var duration = 200; // 动画持续时间（毫秒）
+        var startTime = null;
+
+        function animate(currentTime) {
+            if (!startTime) startTime = currentTime;
+            var progress = currentTime - startTime;
+            var percent = Math.min(progress / duration, 1);
+
+            // 缓动函数（ease-out）
+            var easePercent = 1 - Math.pow(1 - percent, 3);
+
+            element.style.height = (targetHeight * easePercent) + 'px';
+            element.style.opacity = easePercent;
+
+            if (percent < 1) {
+                requestAnimationFrame(animate);
+            } else {
+                element.style.height = 'auto';
+                element.style.opacity = '1';
+            }
+        }
+
+        requestAnimationFrame(animate);
+    }
+
+    // 模拟 jQuery 的 slideUp 效果
+    function slideUp(element) {
+        element.style.overflow = 'hidden';
+        var startHeight = element.offsetHeight;
+        element.style.height = startHeight + 'px';
+
+        var duration = 200; // 动画持续时间（毫秒）
+        var startTime = null;
+
+        function animate(currentTime) {
+            if (!startTime) startTime = currentTime;
+            var progress = currentTime - startTime;
+            var percent = Math.min(progress / duration, 1);
+
+            // 缓动函数（ease-in）
+            var easePercent = Math.pow(percent, 3);
+
+            element.style.height = (startHeight * (1 - easePercent)) + 'px';
+            element.style.opacity = 1 - easePercent;
+
+            if (percent < 1) {
+                requestAnimationFrame(animate);
+            } else {
+                element.style.display = 'none';
+                element.style.height = '';
+                element.style.opacity = '';
+                element.style.overflow = '';
+            }
+        }
+
+        requestAnimationFrame(animate);
+    }
+</script>
+<div class="banner">
+</div>
+<div class="nav_bj">
+  <div class="nav">
+    <ul class="nav_ul">
+      <li class="nav_stair nav_first"><a href="/">首页</a></li>
+      <li class="nav_stair"><a href="/SIC/web/govfunc.po">机构职能</a></li>
+      <li class="nav_stair"><a href="/deal/dealList.html">交易公开</a>
+        <ul class="nav_second nav_special">
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=01">工程建设</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=02">政府采购</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=03">土地使用权</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=04">矿业权</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=05">国有产权</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=21">碳排放权</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=22">排污权</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=23">药品采购</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=24">二类疫苗</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=25">林权</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=90">其他</a></li>
+        </ul>
+      </li>
+      <li class="nav_stair"><a href="/deal/creditList.html">交易诚信</a>
+        <ul class="nav_second">
+          <li><a href="/deal/creditList.html?SHOWTYPE=1">违法违规</a></li>
+          <li><a href="/deal/creditList.html?SHOWTYPE=2">奖励信息</a></li>
+        </ul>
+      </li>
+      <li class="nav_stair"><a href="https://data.ggzy.gov.cn/">数据服务</a></li>
+      <li class="nav_stair"><a href="/dealCollect/dealCollect.html">交易统计</a></li>
+      <li class="nav_stair"><a href="/SIC/web/platform.po">平台导航</a></li>
+      <li class="nav_stair"><a href="/SIC/web/policyFileList.po">政策法规</a>
+        <ul class="nav_second">
+          <li><a href="/SIC/web/policyFileList.po">政策法规文件</a></li>
+          <li><a href="/SIC/web/policyReadList.po">政策法规解读</a></li>
+        </ul>
+      </li>
+      <!-- <li class="nav_stair"><a href="http://data.ggzy.gov.cn/portal_legal/cxcg/index.html" target="_blank">培训交流</a></li>-->
+      <!--     <li class="nav_stair"><a href="https://59.252.80.14/reTurnUrl" target="_blank">统一认证</a></li>-->
+      <li class="nav_stair"><a href="/serve/service.html">服务中心</a>
+        <ul class="nav_second">
+          <li><a href="http://data.ggzy.gov.cn/portal_legal/cxcg/index.html" target="_blank">培训交流</a></li>
+          <li><a href="/serve/wechat/wechat.html">微信订阅</a></li>
+          <li><a href="/SIC/web/opinion.po">意见建议</a></li>
+          <li><a href="/SIC/web/collectList.po">调查征集</a></li>
+          <li><a href="/serve/regards/regards.html">关于我们</a></li>
+        </ul>
+      </li>
+    </ul>
+  </div>
+</div>
+
+<div class="location">
+  首页&nbsp;&nbsp;>&nbsp;&nbsp;交易公开&nbsp;&nbsp;>&nbsp;&nbsp;工程建设
+</div>
+<div class="fully">
+  <h4 class="h4_o">老泵站河区域面源及溢流污染控制(调蓄池+配套管网)EPC总承包（第一标段）</h4>
+  <p class="p_o"><span > 招标项目编号：42010020260916106003</span><span>信息来源：<label id="platformName">武汉市建设工程交易平台</label></span></p>
+  <div class="fully_toggle">
+    <ul class="ul_toggle">
+        <li id="t_0101" onclick="clickHead('0101')" class='li_toggle'>招标/资审公告</li>
+        <li id="t_0102" onclick="clickHead('0102')" >开标记录</li>
+        <li id="t_0104" onclick="clickHead('0104')" >交易结果公示</li>
+        <li id="t_0105" onclick="clickHead('0105')" >招标/资审文件澄清</li>
+    </ul>
+    <div class="fully_toggle_cont" id="div_0101" style='display:block;'>
+
+        <ul class="fully_list">
+            <li class=' li_hover'><a href="javascript:;" title="老泵站河区域面源及溢流污染控制(调蓄池+配套管网)EPC总承包（第一标段）"
+                                     onclick="showDetail(this,  '0101','/information/deal/html/b/420000/0101/20261111/004267fa09abe7d64bd29989c05e192ae8d7.html')">老泵站河区域面源及溢流污染控制(调蓄池+配套管网)EPC总承包（第一标段）</a><span>2026-11-11</span>
+            </li>
+        </ul>
+        <div class="detailShow" id="show0101"></div>
+
+    </div>
+
+    <div class="fully_toggle_cont" id="div_0102" >
+        <ul class="fully_list">
+          <li>暂无数据</li>
+        </ul>
+
+    </div>
+
+    <div class="fully_toggle_cont" id="div_0104" >
+        <ul class="fully_list">
+          <li>暂无数据</li>
+        </ul>
+
+    </div>
+
+    <div class="fully_toggle_cont" id="div_0105" >
+        <ul class="fully_list">
+          <li>暂无数据</li>
+        </ul>
+
+    </div>
+
+
+  </div>
+</div>
+<script type="text/javascript">
+  var firstLastUrl = '/information/deal/html/b/420000/0101/20261111/004267fa09abe7d64bd29989c05e192ae8d7.html';
+</script>
+<div class="foot">
+  <ul>
+    <li><a href="/home/webmap.html" target="_blank">网站地图</a><span>|</span></li>
+    <li><a href="/home/webStated.html" target="_blank">网站声明</a><span>|</span></li>
+    <li><a href="javascript:;" onclick="addFavorite();">添加收藏</a><span>|</span></li>
+    <li><a href="/home/contact.html" target="_blank">联系我们</a></li>
+  </ul>
+</div>
+<div class="footer">
+  <div class="footer_page" style="width:990px;">
+    <div style="float:left;margin-top:5px !important;">
+      <img onclick="linkto_jiucuo('bm04000008')" style="margin:0;border:0;cursor: pointer;"
+           src="/assets/images/jiucuo.png">
+    </div>
+    <div style="float:left;width:85px;height:85px;margin-top:-5px !important;">
+      <a href="https://bszs.conac.cn/sitename?method=show&id=59FE0779EB534910E053022E1AAC7D54" target="_blank">
+        <img id="imgConac" vspace="0" hspace="0" border="0" src="/assets/images/imgConac.png"
+             data-bd-imgshare-binded="1">
+      </a>
+    </div>
+    <div style="float:left;margin-left:20px;">
+      <p>主办：国家信息中心&nbsp;&nbsp;&nbsp;&nbsp;指导单位： 国家发展和改革委员会 </p>
+      <p style="display: flex; align-items: center;">网站标识码：bm04000008&nbsp;&nbsp;<a href="https://beian.miit.gov.cn/" target="_blank"
+                                             style="color:#000">京ICP备05052393号-9</a>&nbsp;&nbsp;
+        <img src="/assets/images/beianhao.png" width="14" height="14">
+        京公网安备11010202007733号 </p>
+      <p>地址：北京西城区三里河路58号&nbsp;&nbsp;&nbsp;&nbsp;邮政编码：100045</p>
+    </div>
+  </div>
+</div>
+<script type="text/javascript">
+    function linkto_jiucuo(site_code) {
+        //获取该站点需要纠错页面的url地址
+        var url = "";
+        if (parent !== window) {
+            try {
+                url = window.top.location.href;
+            } catch (e) {
+                url = window.top.document.referrer;
+            }
+        }
+        if (url.length == 0)
+            url = document.location.href;
+        //跳转至纠错系统填写页面
+        window.open("http://121.43.68.40/exposure/jiucuo.html?site_code=" + site_code + "&url=" + encodeURIComponent(url));
+    }
+
+    function addFavorite() {
+        var url = window.location;
+        var title = document.title;
+        var ua = navigator.userAgent.toLowerCase();
+        if (ua.indexOf("360se") > -1) {
+            alert("由于360浏览器功能限制，请按 Ctrl+D 手动收藏！");
+        } else if (ua.indexOf("msie 8") > -1) {
+            window.external.AddToFavoritesBar(url, title); //IE8
+        } else if (document.all) {
+            try {
+                window.external.addFavorite(url, title);
+            } catch (e) {
+                alert("您的浏览器不支持,请按 Ctrl+D 手动收藏!");
+            }
+        } else if (window.sidebar) {
+            window.sidebar.addPanel(title, url, "");
+        } else {
+            alert("您的浏览器不支持,请按 Ctrl+D 手动收藏!");
+        }
+    }
+</script>
+</body>
+
+</html>

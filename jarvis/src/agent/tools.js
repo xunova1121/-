@@ -21,6 +21,7 @@ import { searchRequest, screenSearchHits } from './retrievalQuality.js';
 import { createStockKlineTool } from './stockKline.js';
 import { createMarketQuoteTool } from './marketQuote.js';
 import { createTimeCalcTool } from './timeCalc.js';
+import { createBusinessTools } from './businessIntelligence.js';
 import { normalizeToolFormats } from './toolInputFormats.js';
 import { createSportsScoresTool } from './sportsScores.js';
 import { createHoldingTools } from './holdings.js';
@@ -691,6 +692,7 @@ export function createTools(ctx) {
   tools.push(...createConversationTrashTools());
 
   const engine = createSearch({ ...ctx, searchRegion: ctx.lookup?.region && ctx.lookup.region !== 'auto' ? ctx.lookup.region : ctx.searchRegion });
+  tools.push(...createBusinessTools(ctx, engine));
   if (engine) {
     tools.push({
       name: 'web_search',

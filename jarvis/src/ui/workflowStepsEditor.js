@@ -3,7 +3,7 @@
  * 可上移 / 下移 / 删除，最多 8 步。不做拖拽连线画布（手机上不好用）。只产出数据，保存由 agentProfileActions 统一校验。
  */
 import { studioEl as el } from './agentStudio.js';
-import { BUILTIN_AGENTS } from '../agent/agentProfiles.js';
+import { ALL_BUILTIN_AGENTS as BUILTIN_AGENTS } from '../agent/agentProfiles.js';
 import { MAX_WORKFLOW_STEPS } from '../agent/agentProfileValidation.js';
 import { WORKFLOW_PRESETS } from '../agent/workflowPresets.js';
 

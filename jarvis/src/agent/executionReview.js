@@ -74,6 +74,10 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     // 数字定案结果：交付前核对回答只用主数字（最多保留 12 组）
     if (ok && toolName === 'reconcile_numbers') { try { numberDecisions = [...numberDecisions, ...(JSON.parse(output).decisions || [])].slice(-12); } catch { /* 回执不是 JSON 时不记 */ } }
     let dataRetrieved;
+    if (ok && ['search_tenders', 'read_tender_notice', 'lookup_company'].includes(toolName)) {
+      try { const value = JSON.parse(output); dataRetrieved = Boolean(value.evidence === 'original_page' || value.items?.length || value.rows?.length); }
+      catch { dataRetrieved = false; }
+    }
     if (ok && toolName === 'get_today_news') {
       try {
         const value = JSON.parse(output);
@@ -227,7 +231,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
         (format) => ![...artifacts.values()].some((item) => item.format === format && item.readback === 'passed' && !item.errors)
       ),
       request,
-      retrievalReceipts: receipts.filter((receipt) => receipt.version === version && receipt.ok && receipt.dataRetrieved !== false && /^(?:get_today_news|fetch_json|web_search|fetch_url|fact_check|deep_research|get_weather|get_stock_kline|get_market_quote|get_sports_scores|read_evidence)$/.test(receipt.tool)).length,
+      retrievalReceipts: receipts.filter((receipt) => receipt.version === version && receipt.ok && receipt.dataRetrieved !== false && /^(?:search_tenders|read_tender_notice|lookup_company|get_today_news|fetch_json|web_search|fetch_url|fact_check|deep_research|get_weather|get_stock_kline|get_market_quote|get_sports_scores|read_evidence)$/.test(receipt.tool)).length,
       version,
       calls: sequence,
       answerIssues: [...answerIssues],
