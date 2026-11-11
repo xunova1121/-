@@ -93,6 +93,24 @@ if ! su -s /bin/sh jarvis -c "\"$NODE\" -v" >/dev/null 2>&1; then
   echo "== Node 在 jarvis 账号读不到的目录里，已复制一份到 $NODE"
 fi
 chown -R root:root "$APP"
+# 权限根治（1.0.419 事故：包里文件 0600，jarvis 账号读不了，服务起不来）：
+# 只规范程序目录——目录755、文件644（原本可执行的保留755），不给别人写权限；
+# 不碰 data、jarvis.env 和密钥；find 不跟随符号链接，不会越界改包外文件。
+chmod 755 "$APP"
+find "$APP" -type d -exec chmod 755 {} +
+find "$APP" -type f -perm -u+x -exec chmod 755 {} +
+find "$APP" -type f ! -perm -u+x -exec chmod 644 {} +
+# 切换前先用 jarvis 账号真实读一遍：读不了就中止，不把坏版本切成当前版本。
+# 注意进不去目录时 find 没有正常输出、只有报错，所以关键文件直接试读，find 的报错也算进证据。
+chmod 755 "$BASE"
+if ! su -s /bin/sh jarvis -c "test -x '$APP' && test -r '$APP/server/server.mjs' && test -r '$APP/package.json' && test -r '$APP/dist/index.html'"; then
+  echo "== 安装中止（没有切换版本）：jarvis 账号读不了新版本的程序目录或入口文件"; exit 1
+fi
+UNREADABLE="$(su -s /bin/sh jarvis -c "find '$APP' \( -type d ! -executable \) -o \( -type f ! -readable \) 2>&1" | head -3 || true)"
+if [[ -n "$UNREADABLE" ]]; then
+  echo "== 安装中止（没有切换版本）：jarvis 账号读不了新版本里的这些文件："; echo "$UNREADABLE"; exit 1
+fi
+PREV="$(readlink "$BASE/current" 2>/dev/null || true)"
 ln -sfn "$APP" "$BASE/current"
 
 cat > /etc/systemd/system/jarvis.service <<UNIT
@@ -165,7 +183,18 @@ for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8787/api/health 2>/dev/null 
 if curl -fsS http://127.0.0.1:8787/api/health | grep -q '"serverMode":true'; then
   echo "== 好了：未央 $VER 已在运行（本机 127.0.0.1:8787）"
 else
-  echo "== 启动好像没成功，看看日志：journalctl -u jarvis -n 50"; exit 1
+  echo "== 启动好像没成功，看看日志：journalctl -u jarvis -n 50"
+  # 新版本起不来就自动切回旧版本，别让更新失败把服务一直打挂
+  if [[ -n "${PREV:-}" && -d "$PREV" && "$PREV" != "$APP" ]]; then
+    echo "== 自动切回旧版本 $(basename "$PREV")"
+    ln -sfn "$PREV" "$BASE/current"
+    systemctl restart jarvis
+    for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8787/api/health 2>/dev/null | grep -q '"serverMode":true' && break; sleep 1; done
+    curl -fsS http://127.0.0.1:8787/api/health 2>/dev/null | grep -q '"serverMode":true' \
+      && echo "== 已回到旧版本，服务恢复；新版本 $VER 没有启用" \
+      || echo "== 旧版本也没起来，请看日志：journalctl -u jarvis -n 50"
+  fi
+  exit 1
 fi
 # 只留最近 2 个旧版本
 ls -dt "$BASE"/app-* 2>/dev/null | tail -n +4 | xargs -r rm -rf

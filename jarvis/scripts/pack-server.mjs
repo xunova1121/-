@@ -9,6 +9,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { SERVER_DEPS, serverImports } from './serverDeps.mjs';
+import { normalizePackPermissions } from './packPermissions.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const version = process.argv[2] || 'dev';
@@ -32,8 +33,11 @@ fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
   dependencies: Object.fromEntries(SERVER_DEPS.map((d) => [d, pkg.dependencies[d]]))
 }, null, 2));
 fs.writeFileSync(path.join(dir, 'VERSION'), `${version}\n`);
+// 1.0.419 事故根治：构建环境 umask 偏严时复制出来的文件是 0600，root 安装后 jarvis 服务账号读不了。
+// 打包前统一成 目录755 / 文件644（可执行保留755），并把归档里的属主记成 root，不带构建账号。
+normalizePackPermissions(dir);
 const file = path.join(out, `jarvis-server-${version}.tar.gz`);
-execFileSync('tar', ['-czf', file, '-C', stage, 'jarvis-server']);
+execFileSync('tar', ['--owner=0', '--group=0', '--numeric-owner', '-czf', file, '-C', stage, 'jarvis-server']);
 fs.rmSync(stage, { recursive: true, force: true });
 // 自动更新用（deploy/update.sh）：最新版本号和安装包的 sha256，随 Release 一起发布，文件名固定
 const sha256 = (await import('node:crypto')).createHash('sha256').update(fs.readFileSync(file)).digest('hex');
