@@ -63,6 +63,14 @@ SHA="$(sed -n 's/.*"sha256" *: *"\([0-9a-f]\{64\}\)".*/\1/p' "$WORK/latest.json"
 [[ -n "$VER" && -n "$SHA" ]] || { status error "版本信息读不出来" "$CUR"; exit 1; }
 if [[ "$VER" == "$CUR" ]]; then status latest "已经是最新版 $CUR" "$CUR"; exit 0; fi
 
+# 手动升级后公开源可能仍是旧版；只允许前向更新，不能把416降回415。
+if [[ "$CUR" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  if [[ "$(printf '%s\n%s\n' "$VER" "$CUR" | sort -V | head -n 1)" == "$VER" ]]; then
+    status latest "已安装 $CUR，公开源 $VER 较旧，保留当前版本" "$CUR"
+    exit 0
+  fi
+fi
+
 PKG="$WORK/jarvis-server-$VER.tar.gz"
 status downloading "正在下载 $VER" "$CUR"
 if ! fetch "https://github.com/$REPO/releases/download/desktop-v$VER/jarvis-server-$VER.tar.gz" "$PKG"; then
