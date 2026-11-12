@@ -486,6 +486,7 @@ jobs:
           node e2e/agent-studio.mjs "$RUNNER_TEMP/jarvis-e2e/agent-studio"
           node e2e/business-intelligence.mjs "$RUNNER_TEMP/jarvis-e2e/business-intelligence"
           node e2e/tender-center.mjs "$RUNNER_TEMP/jarvis-e2e/tender-center"
+          node e2e/pc-agent-navigation.mjs "$RUNNER_TEMP/jarvis-e2e/pc-agent-navigation"
           node e2e/studio-library.mjs "$RUNNER_TEMP/jarvis-e2e/studio-library"
           node e2e/studio-team.mjs "$RUNNER_TEMP/jarvis-e2e/studio-team"
       - name: 保存验证截图和日志
@@ -526,6 +527,7 @@ jobs:
           - 单个来源失败不清空公告，显示最近成功时间和覆盖范围。同一公告修订重复匹配不重复提醒；预算和截止变化有前后对照，重启后恢复。
           - 本批目录覆盖已接入的政府采购/公共资源公开列表，不代表全国全量数据；未知预算和无法读取的原文明确标记，企业股权完整变更不属于本次自动来源。
           - 手机、电脑、服务器同批发布，继续保留1.0.420安装权限修复及固定安卓签名。用户服务器网络、真实模型、安卓/Windows真机未验收。
+          - PC智能体移到左侧主导航，广场使用主内容区；统一线性图标、搜索分类与卡片，侧栏切换保留对话草稿，短窗口仍可查看最近对话。
 
           ## 更新与使用
           先在设置里“立即更新服务器”，再更新电脑和手机。仅安装APK不会替换远端服务器代码。

@@ -249,6 +249,7 @@ export function createAgents(app) {
     square.open();
   }
   addEventListener('jarvis:open-agents', openSquare);
+  addEventListener('jarvis:close-agents', () => square.close());
   document.getElementById('btn-agents')?.addEventListener('click', openSquare);
 
   // 服务器模式切换后，个人智能体从服务器读：清掉本机缓存里的非内置项
