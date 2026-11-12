@@ -754,10 +754,10 @@ function createQianfanSearch({ qianfanSearchKey, qianfanSearchTopK = 10, fetchVi
           let response;
           try {
             response = await get(QIANFAN_ENDPOINT, { method: "POST", redirect: "error", signal, headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" }, body: JSON.stringify(request) });
-          } catch (failure) {
-            throwControl(failure, signal);
-            if (localLookupFailure(failure)) throw failure;
-            if (["EVAL_QUOTA", "EVAL_EXPIRED"].includes(failure.code)) throw failure;
+          } catch (failure2) {
+            throwControl(failure2, signal);
+            if (localLookupFailure(failure2)) throw failure2;
+            if (["EVAL_QUOTA", "EVAL_EXPIRED"].includes(failure2.code)) throw failure2;
             throw Object.assign(new Error("\u767E\u5EA6\u641C\u7D22\u7F51\u7EDC\u8FDE\u63A5\u5931\u8D25"), { kind: "network", code: "QIANFAN_NETWORK" });
           }
           if (!response.ok) {
@@ -787,12 +787,12 @@ function createQianfanSearch({ qianfanSearchKey, qianfanSearchTopK = 10, fetchVi
           }
         });
         return datedSearchHits(mergeSearchHits(rows), query, { freshness: options.freshness, requestText: options.requestText, now: now() }).slice(0, Math.max(1, Math.min(20, count)));
-      } catch (failure) {
-        throwControl(failure, options.signal);
-        if (["EVAL_QUOTA", "EVAL_EXPIRED"].includes(failure.code)) throw failure;
-        const delay = searchBackoff(failure);
+      } catch (failure2) {
+        throwControl(failure2, options.signal);
+        if (["EVAL_QUOTA", "EVAL_EXPIRED"].includes(failure2.code)) throw failure2;
+        const delay = searchBackoff(failure2);
         if (delay) unavailableUntil = now() + delay;
-        throw failure;
+        throw failure2;
       }
     }
   };
@@ -822,6 +822,13 @@ function createQueryLedger() {
   };
 }
 
+// src/agent/researchBudget.js
+var RESEARCH_BUDGETS = Object.freeze({
+  quick: { durationMs: 9e4, search: 6, read: 8, model: 6 },
+  standard: { durationMs: 18e4, search: 16, read: 16, model: 11 },
+  deep: { durationMs: 3e5, search: 30, read: 28, model: 18 }
+});
+
 // src/agent/lookup/clock.js
 var QUICK_RETRIEVAL_MS = 45e3;
 var DEEP_RETRIEVAL_MS = 8 * 6e4;
@@ -839,6 +846,7 @@ function createRetrievalBudget(text2, { now = Date.now, timeBudgetMs, clock = nu
   const totalLimit = limits.search + limits.read;
   let strict = strictVerification(text2);
   let extensive = extensiveRetrieval(text2), started = null, calls = 0, failed = 0, reason = "", override = null;
+  let researchLimits = null;
   const duration = () => override ?? timeBudgetMs ?? (strict ? VERIFICATION_MS : extensive ? DEEP_RETRIEVAL_MS : QUICK_RETRIEVAL_MS);
   const check = () => {
     if (!reason && started !== null) {
@@ -861,9 +869,10 @@ function createRetrievalBudget(text2, { now = Date.now, timeBudgetMs, clock = nu
     },
     consume(kind) {
       if (reason || started !== null && (clock && clock.retrievalRemaining() <= 0 || duration() > 0 && now() - started >= duration())) throw Object.assign(new Error(`${reason || "\u672C\u8F6E\u8054\u7F51\u68C0\u7D22\u5DF2\u8FBE\u5230\u65F6\u95F4\u9884\u7B97"}\uFF0C\u8FD9\u6B21${KIND_LABEL[kind] || kind}\u6CA1\u6709\u6267\u884C`), { code: "RETRIEVAL_BUDGET" });
-      const limit = (strict ? { search: 20, read: 16 } : !extensive ? limits : {})[kind];
+      const baseLimit = (strict ? { search: 20, read: 16 } : !extensive ? limits : {})[kind];
+      const limit = researchLimits ? Math.min(researchLimits[kind] ?? Infinity, strict ? baseLimit ?? Infinity : Infinity) : baseLimit;
       if (limit && resources[kind] >= limit) {
-        reason ||= `${strict ? "\u9010\u9879\u6838\u9A8C" : "\u666E\u901A\u67E5\u8BE2"}\u7684${KIND_LABEL[kind] || kind}\uFF08${kind}\uFF09\u9884\u7B97\u5DF2\u7528\u5B8C\uFF08${limit}\u6B21\uFF09`;
+        reason ||= `${researchLimits ? "\u672C\u8F6E\u8C03\u7814" : strict ? "\u9010\u9879\u6838\u9A8C" : "\u666E\u901A\u67E5\u8BE2"}\u7684${KIND_LABEL[kind] || kind}\uFF08${kind}\uFF09\u9884\u7B97\u5DF2\u7528\u5B8C\uFF08${limit}\u6B21\uFF09`;
         throw Object.assign(new Error(reason), { code: "RETRIEVAL_BUDGET" });
       }
       if (kind in resources) resources[kind]++;
@@ -873,6 +882,18 @@ function createRetrievalBudget(text2, { now = Date.now, timeBudgetMs, clock = nu
     },
     get resources() {
       return { ...resources };
+    },
+    beginResearch(depth = "standard") {
+      if (researchLimits) return;
+      if (check()) throw Object.assign(new Error(reason), { code: "RETRIEVAL_BUDGET" });
+      const profile = RESEARCH_BUDGETS[depth] ?? RESEARCH_BUDGETS.standard;
+      const elapsed = started === null ? 0 : now() - started;
+      researchLimits = Object.fromEntries(["search", "read", "model"].map((kind) => [kind, resources[kind] + profile[kind]]));
+      override = Math.min(timeBudgetMs ?? Infinity, elapsed + profile.durationMs);
+      if (clock?.extend && Number.isFinite(clock.remaining?.())) {
+        clock.extend(Math.max(0, override - elapsed + SUMMARY_RESERVE_MS - clock.remaining()));
+      }
+      extensive = true;
     },
     end(ok) {
       failed = ok ? 0 : failed + 1;
@@ -1668,15 +1689,15 @@ async function recoverLookup(intent, plan, options) {
         attempts.push({ label: label2, failure: "budget" });
         return null;
       }
-      const failure = failureKind(error);
-      if (failure === "cooling") cooled.add(call.name);
+      const failure2 = failureKind(error);
+      if (failure2 === "cooling") cooled.add(call.name);
       attempts.push({
         label: label2,
-        failure,
-        ...failure === "cooling" && { tool: call.name, cooldownUntil: error.cooldownUntil },
+        failure: failure2,
+        ...failure2 === "cooling" && { tool: call.name, cooldownUntil: error.cooldownUntil },
         ...call.name === "get_sports_scores" && { sourceFailures: sportsDiagnostics(error.sourceFailures) }
       });
-      if (failure === "input") return { tool: plan.name, args: plan.args, output: intent.kind === "weather" ? "\u4F60\u60F3\u67E5\u54EA\u4E2A\u57CE\u5E02\u6216\u533A\u53BF\u7684\u5929\u6C14\uFF1F" : "\u8BF7\u544A\u8BC9\u6211\u8BC1\u5238\u4EE3\u7801\u548C\u8981\u67E5\u8BE2\u7684\u4EF7\u683C\u53E3\u5F84\u3002", recovery: { state: "input", attempts } };
+      if (failure2 === "input") return { tool: plan.name, args: plan.args, output: intent.kind === "weather" ? "\u4F60\u60F3\u67E5\u54EA\u4E2A\u57CE\u5E02\u6216\u533A\u53BF\u7684\u5929\u6C14\uFF1F" : "\u8BF7\u544A\u8BC9\u6211\u8BC1\u5238\u4EE3\u7801\u548C\u8981\u67E5\u8BE2\u7684\u4EF7\u683C\u53E3\u5F84\u3002", recovery: { state: "input", attempts } };
       return null;
     }
   }
@@ -2292,8 +2313,8 @@ var datesBetween = (from, to) => {
   for (let d = from; d <= to; d = new Date(Date.parse(`${d}T00:00:00Z`) + 864e5).toISOString().slice(0, 10)) out.push(d);
   return out;
 };
-function zhibo8Result(list, { from, to, today, sports = null, team = "", focus = [], clock = "", window = null }) {
-  const all = list.map(normalizeZhibo8);
+function zhibo8Result(list2, { from, to, today, sports = null, team = "", focus = [], clock = "", window = null }) {
+  const all = list2.map(normalizeZhibo8);
   const days = datesBetween(from, to);
   const have = new Set(all.map((e) => e.date));
   const covered = days.every((d) => have.has(d));
@@ -2572,8 +2593,8 @@ async function getSportsScores(args = {}, { get, signal, retrieval, now = Date.n
   };
   try {
     progress?.("\u6B63\u5728\u67E5\u76F4\u64AD\u5427\u7684\u8D5B\u7A0B\u548C\u6BD4\u5206");
-    const list = await fetchZhibo8({ get, signal, refresh, requests });
-    primary = zhibo8Result(selected.length ? list.filter((e) => selectedTeam(`${e.home_team} ${e.visit_team}`, selected)) : list, { from, to, today: beijingDate(now), sports: zhibo8Sports(args, asked, named), team: args.team, focus: named, clock: `${beijingDate(now)} ${beijingClock(now)}`, window });
+    const list2 = await fetchZhibo8({ get, signal, refresh, requests });
+    primary = zhibo8Result(selected.length ? list2.filter((e) => selectedTeam(`${e.home_team} ${e.visit_team}`, selected)) : list2, { from, to, today: beijingDate(now), sports: zhibo8Sports(args, asked, named), team: args.team, focus: named, clock: `${beijingDate(now)} ${beijingClock(now)}`, window });
   } catch (error) {
     throwControl(error, signal);
   }
@@ -2968,17 +2989,17 @@ function createEvidenceStore({ store = collection("kv"), now = Date.now, limits 
         });
       }
       const idx = await store.get(INDEX).catch(() => null);
-      let list = (idx?.list || []).filter((x) => x && !sids.includes(x.sid));
-      list.push(...sids.map((sid) => ({ sid, at: now() })));
-      list.sort((a, b) => a.at - b.at);
-      const gone = list.filter((x, i) => now() - x.at >= limits.ttlMs || i < list.length - limits.sessions);
+      let list2 = (idx?.list || []).filter((x) => x && !sids.includes(x.sid));
+      list2.push(...sids.map((sid) => ({ sid, at: now() })));
+      list2.sort((a, b) => a.at - b.at);
+      const gone = list2.filter((x, i) => now() - x.at >= limits.ttlMs || i < list2.length - limits.sessions);
       for (const x of gone) {
         cache.delete(x.sid);
         await store.delete(recId(x.sid)).catch(() => {
         });
       }
-      list = list.filter((x) => !gone.includes(x));
-      await store.put({ id: INDEX, list }).catch(() => {
+      list2 = list2.filter((x) => !gone.includes(x));
+      await store.put({ id: INDEX, list: list2 }).catch(() => {
       });
     });
     return writing;
@@ -3707,6 +3728,195 @@ function createDeepseekSearch({ deepseekSearchEnabled, deepseekSearchKey, fetchV
   };
 }
 
+// src/agent/openaiSearch.js
+var secret3 = (value) => typeof value === "string" && !value.startsWith("\u2022\u2022\u2022\u2022") ? value.trim() : "";
+var failure = (message, code) => Object.assign(new Error(message), { kind: "api", code });
+var protocols = { responses: "responses", "chat-completions": "chat/completions" };
+var list = (value) => Array.isArray(value) ? value.slice(0, 50) : [];
+function openaiSearchOptions(cfg = {}) {
+  return {
+    openaiSearchEnabled: cfg.openaiSearchEnabled === true,
+    openaiSearchBaseURL: String(cfg.openaiSearchBaseURL || "").trim(),
+    openaiSearchKey: secret3(cfg.openaiSearchKey),
+    openaiSearchModel: String(cfg.openaiSearchModel || "").trim(),
+    openaiSearchProtocol: cfg.openaiSearchProtocol || "responses"
+  };
+}
+function publicAddress(value) {
+  try {
+    const parsed = new URL(String(value));
+    const host = parsed.hostname.replace(/\.$/, "");
+    if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password || !host.includes(".") || isPrivateHost(host) || host.endsWith(".internal") || parsed.href.length > 8192) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+function openaiSearchEndpoint(baseURL, protocol = "responses") {
+  if (!Object.hasOwn(protocols, protocol)) throw failure("\u8BF7\u9009\u62E9 Responses \u6216 Chat Completions \u641C\u7D22\u534F\u8BAE", "OPENAI_SEARCH_PROTOCOL");
+  const suffix = protocols[protocol];
+  const parsed = publicAddress(String(baseURL || "").trim());
+  if (!parsed || parsed.protocol !== "https:" || parsed.search || parsed.hash)
+    throw failure("\u641C\u7D22\u5730\u5740\u987B\u4E3A\u516C\u7F51 HTTPS \u63A5\u53E3\uFF0C\u4E0D\u80FD\u5305\u542B\u8D26\u53F7\u3001\u5BC6\u7801\u3001\u53C2\u6570\u6216\u7247\u6BB5", "OPENAI_SEARCH_ADDRESS");
+  const path4 = parsed.pathname.replace(/\/+$/, "");
+  if (/\/(?:responses|chat\/completions|messages)$/.test(path4) && !path4.endsWith("/" + suffix))
+    throw failure("\u641C\u7D22\u5730\u5740\u4E0E\u6240\u9009\u534F\u8BAE\u4E0D\u4E00\u81F4\uFF0C\u8BF7\u586B\u5199\u5BF9\u5E94\u63A5\u53E3\u6216 Base URL", "OPENAI_SEARCH_PROTOCOL");
+  parsed.pathname = path4.endsWith("/" + suffix) ? path4 : `${path4 || "/v1"}/${suffix}`;
+  return parsed.href;
+}
+function requestBody(model, protocol, query, count, freshness) {
+  const period = { day: "\u6700\u8FD1\u4E00\u5929", week: "\u6700\u8FD1\u4E00\u5468", month: "\u6700\u8FD1\u4E00\u4E2A\u6708", year: "\u6700\u8FD1\u4E00\u5E74" }[freshness];
+  const today = (/* @__PURE__ */ new Date()).toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" });
+  const input = `\u8BF7\u8054\u7F51\u641C\u7D22\u4EE5\u4E0B\u95EE\u9898\uFF0C\u6700\u591A\u8FD4\u56DE ${count} \u4E2A\u76F8\u5173\u6765\u6E90\uFF0C\u9644\u7B80\u77ED\u6458\u8981\u53CA\u6765\u6E90\u5F15\u7528\u3002\u53EA\u4F7F\u7528\u672C\u6B21\u641C\u7D22\u7ED3\u679C\uFF0C\u4E0D\u7528\u8BB0\u5FC6\u8865\u5199\u3002${period ? `\u4F18\u5148${period}\u53D1\u5E03\u7684\u5185\u5BB9\uFF0C` : ""}\u4ECA\u5929\u662F${today}\u3002
+\u641C\u7D22\u8BCD\uFF1A${query}`;
+  if (protocol === "responses") return {
+    model,
+    stream: false,
+    store: false,
+    input,
+    tools: [{ type: "web_search", search_context_size: "low" }],
+    tool_choice: { type: "web_search" },
+    max_tool_calls: 1,
+    include: ["web_search_call.action.sources"],
+    max_output_tokens: 1600
+  };
+  return {
+    model,
+    stream: false,
+    messages: [{ role: "user", content: input }],
+    web_search_options: { search_context_size: "low" },
+    max_tokens: 1600
+  };
+}
+function openaiSearchHits(data, count = 6, key = "") {
+  const rows = [];
+  let sourceMetadata = Array.isArray(data?.search_results) || Array.isArray(data?.citations);
+  const clean2 = (value) => {
+    const text2 = String(value || "");
+    return (key ? text2.split(key).join("[\u5DF2\u9690\u85CF]") : text2).replace(/\b(?:sk-|tvly-)[A-Za-z0-9_-]{8,}/g, "[\u5DF2\u9690\u85CF]");
+  };
+  const add = (item2, evidenceType = "provider_citation", citedSummary = "") => {
+    const entry = typeof item2 === "string" ? { url: item2 } : item2;
+    const url = publicAddress(entry?.url);
+    if (!url) return;
+    let decoded = url.href;
+    try {
+      decoded = decodeURIComponent(decoded);
+    } catch {
+      return;
+    }
+    if (key && (url.href.includes(key) || decoded.includes(key))) return;
+    const existing = rows.find((row) => row.url === url.href);
+    if (existing) {
+      if (entry.title && existing.title === url.hostname) existing.title = clean2(entry.title).slice(0, 200);
+      if (!existing.snippet && citedSummary) Object.assign(existing, {
+        snippet: clean2(citedSummary).slice(0, 800),
+        summaryEvidence: "provider_cited_summary",
+        originalRead: false
+      });
+      return;
+    }
+    if (rows.length >= count) return;
+    rows.push({
+      title: clean2(entry.title || url.hostname).slice(0, 200),
+      url: url.href,
+      snippet: clean2(evidenceType === "search_result" ? entry.snippet || entry.summary || entry.content : citedSummary).slice(0, 800),
+      source: "openai-compatible",
+      evidenceType,
+      ...citedSummary && { summaryEvidence: "provider_cited_summary", originalRead: false },
+      publishedAt: clean2(entry.publishedAt || entry.published_date || entry.date).slice(0, 50)
+    });
+  };
+  for (const item2 of list(data?.search_results)) add(item2, "search_result");
+  for (const item2 of list(data?.citations)) add(item2);
+  const annotations = (items, text2) => {
+    for (const item2 of list(items)) {
+      if (item2?.type !== "url_citation") continue;
+      sourceMetadata = true;
+      const citation = item2.url_citation || item2;
+      const start = citation.start_index, end = citation.end_index;
+      let summary = "";
+      if (typeof text2 === "string" && Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end > start && end <= text2.length) {
+        const from = Math.max(0, start - 650, text2.lastIndexOf("\n", Math.max(0, start - 1)) + 1);
+        summary = text2.slice(from, Math.min(end, from + 800)).trim();
+      }
+      add(citation, "provider_citation", summary);
+    }
+  };
+  for (const choice of list(data?.choices)) annotations(choice?.message?.annotations, choice?.message?.content);
+  for (const output of list(data?.output)) {
+    if (output?.type === "web_search_call" && output.status === "completed") {
+      sourceMetadata = true;
+      for (const item2 of list(output.action?.sources)) add(item2);
+    }
+    if (output?.type === "message") for (const part of list(output.content)) annotations(part.annotations, part.text);
+  }
+  if (!sourceMetadata)
+    throw failure("\u641C\u7D22\u63A5\u53E3\u6CA1\u6709\u8FD4\u56DE\u7ED3\u6784\u5316\u8054\u7F51\u6765\u6E90\uFF1B\u8BF7\u786E\u8BA4\u8BE5\u6A21\u578B\u652F\u6301\u6240\u9009\u8054\u7F51\u641C\u7D22\u534F\u8BAE", "OPENAI_SEARCH_NO_SOURCES");
+  return rows;
+}
+function createOpenaiSearch(options = {}) {
+  const cfg = openaiSearchOptions(options);
+  if (!cfg.openaiSearchEnabled) return null;
+  const get = options.openaiSearchFetch || options.fetchViaGateway || options.fetchImpl || ((...args) => globalThis.fetch(...args));
+  return {
+    name: "\u81EA\u5B9A\u4E49\u8054\u7F51\u641C\u7D22\uFF08OpenAI \u517C\u5BB9\uFF09",
+    async search(query, count = 6, { signal, freshness } = {}) {
+      throwControl(null, signal);
+      const endpoint = openaiSearchEndpoint(cfg.openaiSearchBaseURL, cfg.openaiSearchProtocol);
+      const key = cfg.openaiSearchKey;
+      if (!key) throw failure("\u8BF7\u5148\u4FDD\u5B58\u81EA\u5B9A\u4E49\u8054\u7F51\u641C\u7D22\u7684 API Key", "OPENAI_SEARCH_KEY_MISSING");
+      if (!cfg.openaiSearchModel || cfg.openaiSearchModel.length > 200)
+        throw failure("\u8BF7\u586B\u5199\u670D\u52A1\u5546\u63D0\u4F9B\u7684\u8054\u7F51\u641C\u7D22\u6A21\u578B ID", "OPENAI_SEARCH_MODEL");
+      const value = String(query || "").trim();
+      if (!value || value.length > 2e3) throw failure("\u641C\u7D22\u8BCD\u987B\u4E3A 1 \u5230 2000 \u4E2A\u5B57\u7B26", "OPENAI_SEARCH_QUERY");
+      const limit = Math.max(1, Math.min(10, Math.floor(Number(count)) || 6));
+      return withWebDeadline(async (activeSignal) => {
+        let response;
+        try {
+          response = await get(endpoint, {
+            method: "POST",
+            signal: activeSignal,
+            redirect: "error",
+            headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
+            body: JSON.stringify(requestBody(cfg.openaiSearchModel, cfg.openaiSearchProtocol, value, limit, freshness))
+          });
+        } catch (error) {
+          throwControl(error, activeSignal);
+          if (["EVAL_QUOTA", "EVAL_EXPIRED"].includes(error?.code)) throw error;
+          if (error?.code === "REDIRECT_BLOCKED") throw failure("\u641C\u7D22\u63A5\u53E3\u4E0D\u5141\u8BB8\u91CD\u5B9A\u5411\uFF0C\u8BF7\u586B\u5199\u6700\u7EC8\u5730\u5740", "REDIRECT_BLOCKED");
+          if (error?.code === "PRIVATE_NETWORK_BLOCKED")
+            throw Object.assign(failure("\u641C\u7D22\u63A5\u53E3\u987B\u89E3\u6790\u5230\u516C\u7F51\u5730\u5740", "PRIVATE_NETWORK_BLOCKED"), { status: 403 });
+          if (error?.name === "TimeoutError" || error?.kind === "timeout")
+            throw Object.assign(new Error("\u81EA\u5B9A\u4E49\u8054\u7F51\u641C\u7D22\u8BF7\u6C42\u8D85\u65F6"), { kind: "timeout", name: "TimeoutError", code: "OPENAI_SEARCH_TIMEOUT" });
+          throw Object.assign(new Error("\u81EA\u5B9A\u4E49\u8054\u7F51\u641C\u7D22\u8FDE\u63A5\u5931\u8D25"), { kind: "network", name: "NetworkError", code: "OPENAI_SEARCH_NETWORK" });
+        }
+        if (!response.ok) {
+          await response.body?.cancel?.();
+          const reason = response.status === 401 || response.status === 403 ? "\u641C\u7D22 Key \u6216\u6743\u9650\u6821\u9A8C\u5931\u8D25" : response.status === 402 ? "\u670D\u52A1\u5546\u8D26\u6237\u4F59\u989D\u4E0D\u8DB3" : response.status === 429 ? "\u8BF7\u6C42\u53D7\u5230\u9650\u6D41" : [400, 404, 422].includes(response.status) ? "\u8BF7\u6838\u5BF9\u5730\u5740\u3001\u6A21\u578B\u53CA\u8054\u7F51\u534F\u8BAE" : "\u641C\u7D22\u63A5\u53E3\u6682\u4E0D\u53EF\u7528";
+          throw Object.assign(httpError(response.status, reason, "\u81EA\u5B9A\u4E49\u8054\u7F51\u641C\u7D22"), { retryAfterMs: searchRetryAfter(response) });
+        }
+        let bytes;
+        try {
+          bytes = await webBody(response, 2 * 1024 * 1024, activeSignal);
+        } catch (error) {
+          await response.body?.cancel?.().catch(() => {
+          });
+          throw error;
+        }
+        let data;
+        try {
+          data = JSON.parse(new TextDecoder().decode(bytes));
+        } catch {
+          throw failure("\u641C\u7D22\u63A5\u53E3\u672A\u8FD4\u56DE\u6709\u6548 JSON", "OPENAI_SEARCH_FORMAT");
+        }
+        if (data?.error || data?.status === "failed") throw failure("\u641C\u7D22\u670D\u52A1\u8FD4\u56DE\u5931\u8D25\uFF0C\u8BF7\u6838\u5BF9\u8054\u7F51\u6A21\u578B\u4E0E\u534F\u8BAE", "OPENAI_SEARCH_FAILED");
+        return openaiSearchHits(data, limit, key);
+      }, { signal, timeoutMs: 2e4 });
+    }
+  };
+}
+
 // src/agent/searchSources.js
 function sourceQueue(max = 4) {
   let active = 0;
@@ -3924,12 +4134,13 @@ function searchPlan(query, region, freshness = "", now = Date.now()) {
 function createSearch(options = {}) {
   const { bochaKey, tavilyKey, fetchViaGateway, searchRegion = "auto" } = options;
   const guard = (engine, id) => guardedSearchRoute(engine, id, options.now);
+  const custom = guard(createOpenaiSearch(options), "openai-compatible");
   const qianfan = guard(createQianfanSearch(options), "qianfan");
   const deepseek = guard(createDeepseekSearch(options), "deepseek");
   const keyless = guard(keylessSearch(fetchViaGateway, searchRegion), "keyless");
   const bocha = guard(bochaKey ? bochaSearch(bochaKey, fetchViaGateway) : null, "bocha");
   const tavily = guard(tavilyKey ? tavilySearch(tavilyKey, fetchViaGateway) : null, "tavily");
-  const all = [qianfan, deepseek, bocha, tavily, keyless].filter(Boolean);
+  const all = [custom, qianfan, deepseek, bocha, tavily, keyless].filter(Boolean);
   if (!all.length) return null;
   return {
     get name() {
@@ -3939,8 +4150,8 @@ function createSearch(options = {}) {
     async search(query, n = 6, opts = {}) {
       if (opts.signal?.aborted) throw opts.signal.reason;
       const zh = /[\u4e00-\u9fff]/.test(query);
-      const order = (zh ? [qianfan, deepseek, bocha, keyless, tavily] : [deepseek, qianfan, tavily, bocha, keyless]).filter(Boolean);
-      return staggeredSearch(order, query, n, opts, [qianfan, deepseek].filter(Boolean));
+      const order = (zh ? [custom, qianfan, deepseek, bocha, keyless, tavily] : [custom, deepseek, qianfan, tavily, bocha, keyless]).filter(Boolean);
+      return staggeredSearch(order, query, n, opts, [custom, qianfan, deepseek].filter(Boolean));
     }
   };
 }
@@ -3952,7 +4163,7 @@ function staggeredSearch(order, query, n, opts = {}, preferred = null, staggerMs
   outer?.addEventListener("abort", stop, { once: true });
   const hits = [];
   const errors = [];
-  let started = 0, settled = 0, done = false, timer = null, preferredHit = false;
+  let started = 0, settled = 0, done = false, timer = null, preferredHit = false, controlFailure = null;
   return new Promise((resolve, reject) => {
     const finish = () => {
       if (done) return;
@@ -3961,6 +4172,7 @@ function staggeredSearch(order, query, n, opts = {}, preferred = null, staggerMs
       outer?.removeEventListener("abort", stop);
       ctrl.abort();
       if (outer?.aborted) reject(outer.reason ?? Object.assign(new Error("aborted"), { name: "AbortError" }));
+      else if (controlFailure) reject(controlFailure);
       else if (hits.length) resolve(hits.slice(0, n));
       else if (errors.length) reject(Object.assign(new Error(errors.map((e) => e.message).join("\uFF1B")), { cause: errors.at(-1), kind: errors.at(-1)?.kind, status: errors.at(-1)?.status, code: errors.at(-1)?.code, name: errors.at(-1)?.name }));
       else resolve([]);
@@ -3972,13 +4184,19 @@ function staggeredSearch(order, query, n, opts = {}, preferred = null, staggerMs
       const e = order[started++];
       opts.progress?.("\u6B63\u5728\u5C1D\u8BD5" + e.name);
       Promise.resolve().then(() => e.search(query, n, { ...opts, signal: ctrl.signal })).then((raw) => {
-        const list = screenSearchHits(raw, opts.requestText || query).hits;
-        for (const h of list ?? []) if (!hits.some((x) => x.url === h.url)) hits.push(h);
-        if ((Array.isArray(preferred) ? preferred : [preferred]).includes(e)) preferredHit = Boolean(list.length);
+        if (done) return;
+        const screened = screenSearchHits(raw, opts.requestText || query).hits;
+        const list2 = typeof opts.acceptHit === "function" ? screened.filter(opts.acceptHit) : screened;
+        for (const h of list2 ?? []) if (!hits.some((x) => x.url === h.url)) hits.push(h);
+        if ((Array.isArray(preferred) ? preferred : [preferred]).includes(e)) preferredHit = Boolean(list2.length);
         const label = e.name === "\u767E\u5EA6\u5343\u5E06\u641C\u7D22" ? "\u767E\u5EA6\u641C\u7D22" : e.name.startsWith("DeepSeek Search") ? "DeepSeek\u641C\u7D22" : e.name;
-        opts.progress?.(`${label}\u8FD4\u56DE${list.length}\u6761\u7ED3\u679C\uFF08\u7B5B\u9009\u540E\uFF09${list.length ? "" : "\uFF0C\u7EE7\u7EED\u5176\u4ED6\u6765\u6E90"}`);
+        opts.progress?.(`${label}\u8FD4\u56DE${list2.length}\u6761\u7ED3\u679C\uFF08\u7B5B\u9009\u540E\uFF09${list2.length ? "" : "\uFF0C\u7EE7\u7EED\u5176\u4ED6\u6765\u6E90"}`);
       }).catch((err) => {
         if (done) return;
+        if (err.name === "AbortError" || ["RETRIEVAL_BUDGET", "EVAL_QUOTA", "EVAL_EXPIRED"].includes(err.code)) {
+          controlFailure = err;
+          return finish();
+        }
         errors.push(err);
         opts.progress?.(`${e.name}\uFF1A${searchFailureLabel(err)}`);
       }).finally(() => {
