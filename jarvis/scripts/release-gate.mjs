@@ -76,7 +76,7 @@ function main(args) {
     const begin = Date.now();
     // 与 CI 相同：bash -e、在 jarvis/ 下执行、RUNNER_TEMP 指向独立临时目录
     // CI 里用 GitHub 变量算版本号的地方（如打服务器包）换成本机测试版本号
-    const script = step.run.replace(/\$\{\{[^}]*\}\}/g, '0.0.0-local');
+    const script = step.run.replace(/\$\{\{[\s\S]*?\}\}/g, "0.0.0-local");
     const run = spawnSync('bash', ['-e', '-c', script], { cwd: ROOT, stdio: 'inherit', env: { ...process.env, RUNNER_TEMP: temp, CI: '1' } });
     results.push({ name: step.name, state: run.status === 0 ? 'passed' : 'failed', seconds: Math.round((Date.now() - begin) / 1000) });
   }
