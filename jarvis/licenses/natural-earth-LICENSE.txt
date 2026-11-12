@@ -1,0 +1,53 @@
+Natural Earth 地理轮廓数据使用说明
+
+适用文件：src/agent/visualChinaMap.js 中的 MAP_PATHS 静态路径数据。
+来源：Natural Earth，1:10m Admin 0 – Countries。
+许可：Public domain（公共领域）。没有复制上游程序代码或执行下载脚本。
+作者：Tom Patterson、Nathaniel Vaughn Kelso 和 Natural Earth 贡献者。
+核验日期：2026-11-12。
+
+固定来源
+仓库：https://github.com/nvkelso/natural-earth-vector
+提交：ca96624a56bd078437bca8184e78163e5039ad19
+数据：https://raw.githubusercontent.com/nvkelso/natural-earth-vector/ca96624a56bd078437bca8184e78163e5039ad19/geojson/ne_10m_admin_0_countries.geojson
+数据 SHA-256：239eec57ac17f100a11e2536cffc56752c318b50ae765b0918ff7aab4ce8f255
+固定版本许可说明：https://raw.githubusercontent.com/nvkelso/natural-earth-vector/ca96624a56bd078437bca8184e78163e5039ad19/README.md
+上述 README 的 SHA-256：28b7c031e45c88d7ce20b7782373aaac378f459e9460001dadc8cfd824c3173b
+
+固定版本 README 许可原文
+“Natural Earth is a public domain map dataset available at 1:10m, 1:50m,
+and 1:110 million scales.”
+“Natural Earth was built through a collaboration of many volunteers and is
+supported by NACIS (North American Cartographic Information Society), and
+is free for use in any type of project (see our Terms of Use page for more
+information).”
+
+官方使用条款
+网址：https://www.naturalearthdata.com/about/terms-of-use/
+2026-11-12 获取 HTML 的 SHA-256：8ccbbbaddf9bef2209767839a9fc1f5a02fe64f37a9a0e0d3b2a887976774948
+许可段落原文（去除 HTML 标签）：
+“All versions of Natural Earth raster + vector map data found on this website
+are in the public domain. You may use the maps in any manner, including
+modifying the content and design, electronic dissemination, and offset
+printing. The primary authors, Tom Patterson and Nathaniel Vaughn Kelso,
+and all other contributors renounce all financial claim to the maps and
+invites you to use them for personal, educational, and commercial purposes.”
+
+生成方式和展示范围
+1. 从上述固定 GeoJSON 选择 ADM0_A3 值 CHN、TWN、HKG、MAC 的几何。
+   仅以这些代码选择源几何；上游国家分类、争议归属、名称及其他行政属性
+   不作为本产品的行政区划结论。界面名称独立使用地理短名称。
+2. 保留所有 84 个多边形：70 + 8 + 4 + 2；含大陆、海南、台湾、港澳及源数据
+   已有近海岛屿。未手绘省界或海域归属线，没有补造数据缺失的岛屿。
+3. 统一等距经纬投影到 960 × 720 视口：
+   x = (经度 - 70) × 960 / 70；y = (55 - 纬度) × 720 / 40。
+4. 每个大于 25 点的闭合环，以距首点最远的原始顶点切为两条折线，分别用
+   Douglas–Peucker 0.12 视口像素容差简化，再闭合；简化不足 3 个不同顶点
+   则保留原环。小环直接保留原始顶点。投影坐标四舍五入到 2 位小数。
+5. 结果为 4 个区域、84 个闭合子路径、6296 个 M/L 坐标点；仅含 M/L/Z 指令。
+   路径模块小于 90KB，运行时不下载地图、不调用模型、不执行上游代码。
+
+此图仅是东经 70°—140°、北纬 15°—55°的局部地理视觉示意，
+并非官方审定地图，不作为完整行政区划、边界或海域主张的依据。
+北纬 15°以南范围不在该视口内；不应把该视图称作完整全国行政地图。
+展示署名建议：地理轮廓：Natural Earth · 局部示意展示。

@@ -67,11 +67,17 @@ function posterColors(options, hasBody) {
 /** 文字不截断，不自动删除空行；小数比例明确表示文字区在指定方向的占比。 */
 export function normalizePosterInput(options = {}) {
   if (!options || typeof options !== 'object' || Array.isArray(options)) throw posterError('海报参数必须是对象');
-  const { width = 1080, height = 1920, text_position = 'bottom', text_fraction = 0.48, font_family = 'sans' } = options;
+  const { width = 1080, height = 1920, text_position = 'bottom', text_style = 'panel', font_family = 'sans', gradient_opacity = 0.85 } = options;
+  const text_fraction = options.text_fraction ?? (text_style === 'gradient' ? 0.35 : 0.48);
+  const text_align = options.text_align ?? (text_style === 'gradient' || text_position === 'center' ? 'center' : 'left');
   if (![width, height].every((v) => Number.isInteger(v) && v >= POSTER_LIMITS.minSide && v <= POSTER_LIMITS.maxSide) || width * height > POSTER_LIMITS.maxPixels) {
     throw posterError('海报宽高需为256–4096的整数，且总像素不超过1600万', 'INVALID_POSTER', { field: 'width/height' });
   }
   if (!['top', 'bottom', 'left', 'right', 'center'].includes(text_position)) throw posterError('文字位置必须是 top、bottom、left、right 或 center');
+  if (!['panel', 'gradient'].includes(text_style)) throw posterError('文字样式必须是 panel 或 gradient');
+  if (!['left', 'center'].includes(text_align)) throw posterError('文字对齐必须是 left 或 center');
+  if (!Number.isFinite(gradient_opacity) || gradient_opacity < 0 || gradient_opacity > 1) throw posterError('渐变不透明度需为0到1之间的数字');
+  if (text_style === 'gradient' && text_position !== 'bottom') throw posterError('沉浸渐变目前用于底部文字区，请使用text_position=bottom');
   if (!Number.isFinite(text_fraction) || text_fraction < 0.15 || text_fraction > 1) throw posterError('文字区比例需在0.15到1之间');
   if (!Object.hasOwn(FONT_FAMILIES, font_family)) throw posterError('字体需为 sans 或 serif');
   const title = textValue(options.title, 'title');
@@ -86,7 +92,7 @@ export function normalizePosterInput(options = {}) {
   const fonts = [...FONT_FAMILIES[font_family]];
   return {
     width, height, title, subtitle, lines, footer, texts, fonts,
-    text_position, text_fraction, font_family,
+    text_position, text_fraction, text_style, text_align, gradient_opacity, font_family,
     fontFamily: `${fonts.join(', ')}, ${font_family === 'serif' ? 'serif' : 'sans-serif'}`,
     ...posterColors(options, Boolean(subtitle || footer || lines.some((line) => line.trim())))
   };

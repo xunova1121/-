@@ -33,6 +33,8 @@ import { createNumberReconcileTool } from './numberReconcile.js';
 import { createGongwenCheckTool } from './gongwenCheck.js';
 import { createWritingCheckTool } from './writingChecks.js';
 import { createPosterTool, toBase64 } from './posterTool.js';
+import { createVisualDemoTool } from './visualDemoTool.js';
+import { deliverGeneratedImage } from './imageDelivery.js';
 import { createImageTaskTool } from './imageTasks.js';
 import { checkpointView } from '../../shared/taskCheckpoint.js';
 import { skillCompatibility } from './skillCompatibility.js';
@@ -140,6 +142,7 @@ export function createTools(ctx) {
     createImageTaskTool(ctx),
     // 服务器上没有浏览器画布：插画底图用服务器的 SVG 渲染器转 PNG
     createPosterTool({ ...ctx, rasterizeSvg: ctx.renderSvg ? async (svg) => ({ mime: 'image/png', data: toBase64(new Uint8Array(await (await ctx.renderSvg(svg)).arrayBuffer())) }) : null }),
+    createVisualDemoTool(ctx),
     createTimeCalcTool(ctx),
     createWorkRecordsTool(),
     createSongTool(ctx),
@@ -341,14 +344,11 @@ export function createTools(ctx) {
         }
         if (images.length && !ctx.imageEdit) throw Object.assign(new Error('当前线路未提供原图编辑能力，不能把重新生成冒充编辑'), { code: 'IMAGE_EDIT_UNAVAILABLE', kind: 'capability' });
         const options = Object.fromEntries(Object.entries({ quality, outputFormat, background }).filter(([, value]) => value !== undefined));
-        const r = await (images.length ? ctx.imageEdit : ctx.imageGen)({ prompt: imagePrompt, images, size: size || '1024x1024', signal, beforeRequest: () => retrieval?.consume('model'), ...options });
+        const r = await (images.length ? ctx.imageEdit : ctx.imageGen)({ prompt: imagePrompt, images, ...(size && { size }), signal, beforeRequest: () => retrieval?.consume('model'), ...options });
         const ext = /jpe?g/.test(r.blob.type) ? 'jpg' : /webp/.test(r.blob.type) ? 'webp' : 'png';
         await assertImageExtension('image.' + ext, r.blob);
         const name = String(imagePrompt).replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 16) || 'image';
-        const w = await ws.write(`images/${name}-${Date.now().toString(36)}.${ext}`, r.blob);
-        ctx.onFileChanged?.(w.path);
-        ctx.onImage?.(URL.createObjectURL(r.blob), w.path);
-        return `已生成图片（${r.model}）并显示在对话里，保存在工作区 ${w.path}。生成成功不代表已通过视觉验收；需要时用inspect_image读取该文件检查。${r.revised ? `模型改写后的描述：${r.revised}` : ''}`;
+        return JSON.stringify(await deliverGeneratedImage(r, { path: `images/${name}-${Date.now().toString(36)}.${ext}`, signal, onFileChanged: ctx.onFileChanged, onImage: ctx.onImage }));
       }
     },
     {

@@ -347,6 +347,12 @@ jobs:
         run: node e2e/ppt-image-layout.mjs "$RUNNER_TEMP/jarvis-e2e/ppt-image-layout"
       - name: 验证中文图片程序排字、三格式交付与真实浏览器及Office渲染
         run: node e2e/poster-composition.mjs "$RUNNER_TEMP/jarvis-e2e/poster-composition"
+      - name: 验证4K大屏同设计PNG与离线交互Demo
+        run: node e2e/visual-demo.mjs "$RUNNER_TEMP/jarvis-e2e/visual-demo"
+      - name: 验证沉浸海报连续渐变、中文与可编辑PPTX
+        run: node e2e/poster-gradient.mjs "$RUNNER_TEMP/jarvis-e2e/poster-gradient"
+      - name: 验证分享返回状态、原字节和同账号会话恢复（原生事件模拟）
+        run: node e2e/share-return.mjs "$RUNNER_TEMP/jarvis-e2e/share-return"
       - name: 验证四种Excel样式、公式筛选与真实PDF
         run: node e2e/spreadsheet-styles.mjs "$RUNNER_TEMP/jarvis-e2e/spreadsheet-styles"
       - name: 验证文档场景模板、精确修改及真实PDF逐页检查

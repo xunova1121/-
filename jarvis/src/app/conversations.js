@@ -15,6 +15,7 @@ import * as sessionsApi from '../agent/sessions.js';
 import { $, DESKTOP, COMPACT, toast } from './env.js';
 import { sportsCardRefresh } from './sportsCards.js';
 import { loadSongAsset } from '../../shared/musicAsset.js';
+import { createNewSessionAction, noteSessionNavigation } from './sessionNavigation.js';
 
 export function createConversations(app) {
   const transcript = new Transcript($('#transcript'), {
@@ -155,11 +156,13 @@ export function createConversations(app) {
     app.callouts?.set(openingSuggestions({ desktop: Boolean(DESKTOP), hasSkills, resume: await resumeSuggestion() }));
   }
 
-  async function switchTo(next) {
+  async function switchTo(next, { reflect = true, isCurrent = () => true } = {}) {
+    if (!isCurrent()) return false;
     // 正在干活：不停下，转到后台接着做（做完记回原来的对话）；只是在朗读就停掉
     if (app.active && !app.active.streamDone) app.toBackground(app.active);
     else app.interrupt();
-    if (app.settings.autoMemory) await app.reflectNow();
+    if (reflect && app.settings.autoMemory) await app.reflectNow();
+    if (!isCurrent()) return false;
     app.session = next;
     app.reflectFrom = app.history.length;
     replayTranscript();
@@ -187,15 +190,9 @@ export function createConversations(app) {
     else openingCallouts();
     app.sessionsPanel?.refresh();
     app.setTask('idle');
+    return true;
   }
-  function newSession() {
-    if (!app.history.length) {
-      $('#prompt').focus();
-      return;
-    }
-    switchTo(sessionsApi.create());
-    $('#prompt').focus();
-  }
+  const newSession = createNewSessionAction(app, { create: sessionsApi.create, focus: () => $('#prompt').focus() });
   addEventListener('jarvis:open-session', (e) => {
     openSession(e.detail).then(() => app.showPanel('sessions'));
   });
@@ -214,6 +211,7 @@ export function createConversations(app) {
   }
   let opening = 0; // 连点了好几段对话：只认最后点的那段
   async function openSession(id) {
+    noteSessionNavigation(app);
     noteAction('切换对话');
     // 点的就是当前对话：服务器模式下从服务器取一次最新进度（另一台设备可能接着聊过）
     if (id === app.session.id) {

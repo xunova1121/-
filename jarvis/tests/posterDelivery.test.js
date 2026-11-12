@@ -25,6 +25,17 @@ function png(width, height) {
   return new Blob([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', head), chunk('IDAT', deflateSync(Buffer.alloc((width * 3 + 1) * height))), chunk('IEND', Buffer.alloc(0))], { type: 'image/png' });
 }
 
+it('4K成品单独说明底图实际尺寸与2.5倍放大，不冒称原生细节通过', async () => {
+  const source = png(1536, 864);
+  await ws.write('海报回归/低于4K底图.png', source);
+  const renderPoster = vi.fn(async () => ({ blob: png(3840, 2160), fontCheck: { status: 'passed' } }));
+  const receipt = JSON.parse(await createPosterTool({ renderPoster }).run({ title: '气象演示海报', width: 3840, height: 2160, background_path: '海报回归/低于4K底图.png', path: '海报回归/4K导出.png' }));
+  expect(receipt).toMatchObject({ status: 'complete', width: 3840, height: 2160, background: { width: 1536, height: 864, dimensions: 'verified', scale: 2.5, upscaled: true, cropped: false, detail: 'not_checked' } });
+  expect(receipt.notes.join('')).toContain('不证明底图具有同等细节');
+  expect(await (await ws.readBlob('海报回归/低于4K底图.png')).arrayBuffer()).toEqual(await source.arrayBuffer());
+  expect(renderPoster).toHaveBeenCalledTimes(1);
+});
+
 it('最终PNG和可编辑两份源文件同尺寸保存并读回，渲染通过不能冒充视觉已核对', async () => {
   const changed = vi.fn(), checkpoint = vi.fn();
   const renderPoster = vi.fn(async () => ({ blob: png(512, 768), fontCheck: { status: 'passed' } }));

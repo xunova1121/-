@@ -1,5 +1,6 @@
 /** 同一份像素版式生成自包含 SVG 与可编辑 PPTX；文字始终是字体文本，不交给图片模型画。 */
 import { normalizePosterInput, normalizePosterBackground, posterError } from './posterCompositionInput.js';
+import { applyPosterGradient } from './posterGradientPptx.js';
 
 const PX_PER_INCH = 96;
 const round = (value) => Math.round(value * 1000) / 1000;
@@ -112,10 +113,10 @@ export function composePosterLayout(options) {
       else upper = middle;
     }
   }
-  const offset = input.text_position === 'center' ? (inner.h - fit.used) / 2 : 0;
+  const offset = input.text_position === 'center' || input.text_style === 'gradient' ? (inner.h - fit.used) / 2 : 0;
   const blocks = fit.blocks.map((block) => {
     const y = block.role === 'footer' ? inner.y + inner.h - block.h : block.y + offset;
-    const align = input.text_position === 'center' ? 'center' : 'left';
+    const align = input.text_align;
     const rows = block.rowTexts.map((text, index) => ({ text, x: block.x, y: round(y + index * block.lineHeight), w: block.w, h: block.lineHeight, baseline: round(y + index * block.lineHeight + block.fontSize) }));
     return { ...block, y: round(y), align, rows };
   });
@@ -137,12 +138,13 @@ function backgroundShapes(input, background) {
     shapes.push({ type: 'circle', cx: width * 0.76, cy: height * 0.21, r: Math.min(width, height) * 0.18, color: '#FFFFFF', opacity: 0.1 });
     shapes.push({ type: 'circle', cx: width * 0.2, cy: height * 0.38, r: Math.min(width, height) * 0.1, color: '#FFFFFF', opacity: 0.07 });
   }
-  // 文字区实色填充，用户指定的前景/底色对比度不受随机底图明暗破坏。
-  shapes.push({ type: 'rect', ...textPanel(input), color: panelColor, opacity: 1 });
+  // 实色模式保持旧版安全底板；渐变使用两端透明度连续过渡，不用色带假装平滑渐变。
+  shapes.push({ type: input.text_style === 'gradient' ? 'gradient' : 'rect', ...textPanel(input), color: panelColor, opacity: input.text_style === 'gradient' ? input.gradient_opacity : 1 });
   return shapes;
 }
 
 function shapeSvg(shape) {
+  if (shape.type === 'gradient') return `<rect x="${round(shape.x)}" y="${round(shape.y)}" width="${round(shape.w)}" height="${round(shape.h)}" fill="url(#poster-text-gradient)"/>`;
   const fill = `fill="${shape.color}" fill-opacity="${shape.opacity}"`;
   if (shape.type === 'circle') return `<circle cx="${round(shape.cx)}" cy="${round(shape.cy)}" r="${round(shape.r)}" ${fill}/>`;
   return `<rect x="${round(shape.x)}" y="${round(shape.y)}" width="${round(shape.w)}" height="${round(shape.h)}" ${fill}/>`;
@@ -151,6 +153,7 @@ function shapeSvg(shape) {
 function composeSvg(layout, shapes, background) {
   const { input, width, height } = layout;
   const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`];
+  if (input.text_style === 'gradient') parts.push(`<defs><linearGradient id="poster-text-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${input.panelColor}" stop-opacity="0"/><stop offset="1" stop-color="${input.panelColor}" stop-opacity="${input.gradient_opacity}"/></linearGradient></defs>`);
   parts.push(shapeSvg(shapes[0]));
   if (background) parts.push(`<image x="0" y="0" width="${width}" height="${height}" href="${background.data}" preserveAspectRatio="xMidYMid slice"/>`);
   parts.push(...shapes.slice(1).map(shapeSvg));
@@ -168,8 +171,9 @@ function addPptShape(pptx, slide, shape) {
   const box = shape.type === 'circle' ? { x: shape.cx - shape.r, y: shape.cy - shape.r, w: shape.r * 2, h: shape.r * 2 } : shape;
   slide.addShape(shape.type === 'circle' ? pptx.ShapeType.ellipse : pptx.ShapeType.rect, {
     x: box.x / PX_PER_INCH, y: box.y / PX_PER_INCH, w: box.w / PX_PER_INCH, h: box.h / PX_PER_INCH,
-    fill: { color: shape.color.slice(1), transparency: Math.round((1 - shape.opacity) * 100) },
-    line: { color: shape.color.slice(1), transparency: 100 }
+    fill: { color: shape.color.slice(1), transparency: shape.type === 'gradient' ? 0 : Math.round((1 - shape.opacity) * 100) },
+    line: { color: shape.color.slice(1), transparency: 100 },
+    ...(shape.type === 'gradient' && { objectName: 'poster-text-gradient' })
   });
 }
 
@@ -200,7 +204,8 @@ async function composePptx(layout, shapes, background) {
       paraSpaceAfterPt: 0, paraSpaceBeforePt: 0, objectName: `poster-${block.role}-${block.index ?? 0}-${index}`
     }));
   }
-  return pptx.write({ outputType: 'blob' });
+  const blob = await pptx.write({ outputType: 'blob' });
+  return input.text_style === 'gradient' ? applyPosterGradient(blob, { color: input.panelColor, opacity: input.gradient_opacity }) : blob;
 }
 
 /** @returns {Promise<{svg:string,pptx:Blob,layout:object,width:number,height:number,texts:string[],fonts:string[],fontFamily:string}>} */

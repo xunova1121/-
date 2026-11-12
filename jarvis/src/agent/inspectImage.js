@@ -1,7 +1,8 @@
 import { IMAGE_READING_RULES, independentImageQuestion } from './imageReading.js';
 import * as workspace from './workspace.js';
 import { throwControl } from '../core/networkRequest.js';
-import { cropImageRegion, visualRegion, imageData } from './imageRegion.js';
+import { cropImageRegion, imageData } from './imageRegion.js';
+import { normalizeImageRegions, IMAGE_REGION_SCHEMA, IMAGE_REGION_ITEM_SCHEMA } from './imageRegionInput.js';
 import { imageFingerprint, visualReceiptText } from './visualEvidence.js';
 import { visualFields } from './visualFields.js';
 import { imageFormat } from './imageFormat.js';
@@ -13,19 +14,14 @@ export function createInspectImageTool(ctx) {
   return {
     name: 'inspect_image',
     description:
-      '重新读取工作区原图，核对场景、仪表数字或参考图。数字看不清或用户纠错时指定region局部裁剪放大；每个字段逐项给原始数字与单位，看不清不补零，冲突保留。',
+      '重新读取工作区原图，核对场景、仪表数字或参考图。分析整图只传path和question，省略region与regions，不填空regions数组。数字看不清或用户纠错时指定region局部裁剪放大；局部坐标使用0～1比例，不能混用像素或百分制。每个字段逐项给原始数字与单位，看不清不补零，冲突保留。',
     input_schema: {
       type: 'object',
       properties: {
         path: { type: 'string' },
         question: { type: 'string', maxLength: 1000 },
-        region: {
-          type: 'object',
-          properties: Object.fromEntries(['x', 'y', 'width', 'height'].map((key) => [key, { type: 'number', minimum: 0, maximum: 1 }])),
-          required: ['x', 'y', 'width', 'height'],
-          additionalProperties: false
-        },
-        regions: { type: 'array', minItems: 1, maxItems: 4, description: '密集多列文字按左到右分区，最多4区；与region不能同时使用', items: { type: 'object', properties: Object.fromEntries(['x', 'y', 'width', 'height'].map((key) => [key, { type: 'number', minimum: 0, maximum: 1 }])), required: ['x', 'y', 'width', 'height'], additionalProperties: false } },
+        region: IMAGE_REGION_SCHEMA,
+        regions: { type: ['array', 'null'], minItems: 1, maxItems: 4, description: '需要多区时提供1～4个非空区域；分析整图须省略或null，不能传[]；与非空region不能同时使用', items: IMAGE_REGION_ITEM_SCHEMA },
         readText: { type: 'boolean', description: '需要读数字或文字时同时尝试OCR；没有配置则明确提示' }
       },
       required: ['path', 'question'],
@@ -33,10 +29,7 @@ export function createInspectImageTool(ctx) {
     },
     run: async ({ path, question, region, regions, readText = true }, { signal, rawRequestText } = {}) => {
       assertDiagramTarget(path, rawRequestText);
-      visualRegion(region);
-      if (regions !== undefined && (!Array.isArray(regions) || regions.length < 1 || regions.length > 4 || region))
-        throw Object.assign(new Error('多区域必须1～4个且不能与region并用'), { code: 'IMAGE_REGION', kind: 'input' });
-      regions?.forEach(visualRegion);
+      ({ region, regions } = normalizeImageRegions({ region, regions }));
       signal?.throwIfAborted();
       if (!/\.(svg|png|jpe?g|webp|gif|bmp)$/i.test(path)) throw Object.assign(new Error('局部复核仅支持图片或SVG文件'), { code: 'IMAGE_INPUT', kind: 'input' });
       const original = await workspace.readBlob(path);

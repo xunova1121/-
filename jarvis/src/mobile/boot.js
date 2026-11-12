@@ -10,6 +10,7 @@ import { MOBILE } from '../config.js';
 import { wrapFetch, nativeFetcher, nativeStreamFetcher, nativeRouter } from './nativeFetch.js';
 import { installSpeechShim } from './speechShim.js';
 import { createNativeSaver, createNativeSharer } from './saveNative.js';
+import { createShareReturnCoordinator } from './shareReturn.js';
 import { applyDisplayMode } from './renderHealth.js';
 import { startScreenTrail } from './renderDiagnostics.js';
 import { summarizeExits, dropMemoryNotes, KILLED_TIP } from './exitReasons.js';
@@ -17,6 +18,15 @@ import { topColor } from './topColor.js';
 
 if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
   const { CapacitorHttp, registerPlugin: register } = await import('@capacitor/core');
+  let shareStorage = null;
+  try { shareStorage = globalThis.localStorage; } catch { /* 无持久化时保留当前页面的互斥。 */ }
+  const shareReturn = createShareReturnCoordinator({
+    storage: shareStorage,
+    native: register('ShareReturn'),
+    context: () => globalThis.__jarvisGetShareContext?.(),
+    foreground: () => globalThis.__jarvisForeground !== false
+  });
+  globalThis.__jarvisShareReturn = shareReturn;
   // 原生网络：大模型的流式回答边收边显示（NativeStream），其余一次性请求
   const native = nativeRouter(nativeFetcher(CapacitorHttp), nativeStreamFetcher(register('NativeStream')));
   globalThis.__jarvisNativeFetch = native;
@@ -55,6 +65,7 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
     globalThis.__jarvisForeground = true;
     App.addListener('appStateChange', ({ isActive }) => {
       globalThis.__jarvisForeground = isActive;
+      shareReturn.foreground(isActive);
       dispatchEvent(new CustomEvent('jarvis:foreground', { detail: { active: isActive } }));
       if (!isActive) globalThis.__jarvisTTS?.stop().catch(() => {});
     });
@@ -144,7 +155,7 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
   // 下载：WebView 里网页下载不起作用。只存到“文档/Jarvis”，不自动跳去别的应用；点“分享”才弹系统分享面板
   const nativeFiles = async () => {
     const [{ Filesystem, Directory }, { Share }] = await Promise.all([import('@capacitor/filesystem'), import('@capacitor/share')]);
-    return { Filesystem, Directory, Share, toast: (t) => globalThis.__jarvisToast?.(t) };
+    return { Filesystem, Directory, Share, shareReturn, manageShareCache: true, toast: (t) => globalThis.__jarvisToast?.(t) };
   };
   globalThis.__jarvisSaveFile = async (blob, name) => createNativeSaver(await nativeFiles())(blob, name);
   globalThis.__jarvisShareFile = async (blob, name) => createNativeSharer(await nativeFiles())(blob, name);

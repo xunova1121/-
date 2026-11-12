@@ -46,6 +46,9 @@ public class CrashLogPlugin extends Plugin {
         result.put("softwareLayer",getContext().getSharedPreferences("render-health",android.content.Context.MODE_PRIVATE).getBoolean("softwareLayer",false));
         result.put("exitDetails",ExitReasons.since(getContext(),0));
         result.put("lastRenderer",getContext().getSharedPreferences("render-health",android.content.Context.MODE_PRIVATE).getString("lastRenderer",""));
+        android.content.SharedPreferences share=getContext().getSharedPreferences("share-return",android.content.Context.MODE_PRIVATE);
+        result.put("shareReturnStage",share.getString("lastStage",""));
+        result.put("shareReturnStageAt",share.getLong("lastStageAt",0));
         if(android.os.Build.VERSION.SDK_INT>=26){android.content.pm.PackageInfo web=android.webkit.WebView.getCurrentWebViewPackage();result.put("webview",web==null?"unknown":web.versionName);}
         if(android.os.Build.VERSION.SDK_INT>=30){
             org.json.JSONArray exits=new org.json.JSONArray();

@@ -43,6 +43,9 @@ jobs:
       - name: 中文图片真实渲染与原服务器模式
         run: |
           node e2e/poster-composition.mjs "$RUNNER_TEMP/candidate/poster"
+          node e2e/poster-gradient.mjs "$RUNNER_TEMP/candidate/poster-gradient"
+          node e2e/visual-demo.mjs "$RUNNER_TEMP/candidate/visual-demo"
+          node e2e/share-return.mjs "$RUNNER_TEMP/candidate/share-return"
           node e2e/server-mode.mjs "$RUNNER_TEMP/candidate/server-mode"
           node e2e/agent-resources-cross-origin.mjs "$RUNNER_TEMP/candidate/cross-origin"
           WEIYANG_CHAT_OUTAGE=1 node e2e/pc-cloud-chat.mjs "$RUNNER_TEMP/candidate/pc-chat"

@@ -14,7 +14,7 @@ export async function editImage(cfg, { prompt: imagePrompt, images, gateway = nu
     try {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       const { base, headers } = providerEndpoint(cfgForLine(cfg, line), gateway);
-      const parameters = imageRequestOptions(line.model, { ...cfg.imageOptions, ...options });
+      const parameters = imageRequestOptions(line.model, { ...cfg.imageOptions, ...Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined)) });
       const form = new FormData();
       form.append('model', line.model);
       form.append('prompt', String(imagePrompt).slice(0, 12000));
@@ -22,7 +22,7 @@ export async function editImage(cfg, { prompt: imagePrompt, images, gateway = nu
       form.append('n', '1');
       images.forEach((image, index) => form.append(images.length === 1 ? 'image' : 'image[]', image, `reference-${index + 1}.${/jpeg/.test(image.type) ? 'jpg' : /webp/.test(image.type) ? 'webp' : 'png'}`));
       beforeRequest?.();
-      return await requestImage(base + '/images/edits', { method: 'POST', headers, body: form }, { fetchImpl, download, signal, model: line.model, operation: '原图编辑' });
+      return await requestImage(base + '/images/edits', { method: 'POST', headers, body: form }, { fetchImpl, download, signal, model: line.model, parameters, operation: '原图编辑' });
     } catch (error) {
       throwControl(error, signal);
       failure = error;

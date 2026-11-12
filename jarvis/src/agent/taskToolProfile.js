@@ -3,6 +3,7 @@ import { DOCUMENT_TASK_CORE } from './documentToolProfile.js';
 import { CORE } from './toolLoader.js';
 import { isPhoneRequest } from '../../shared/phoneControl.js';
 import { textPosterRequest, POSTER_TOOLS } from './posterRouting.js';
+import { visualSceneRequest, VISUAL_SCENE_TOOLS } from './visualSceneRouting.js';
 
 const BASIC = ['execution_capabilities', 'read_task_requirements', 'read_tool_result', 'review_task', 'need_more_time', 'request_capable_model'];
 const MEMORY = ['recall', 'remember', 'kb_search', 'search_conversations', 'read_conversation', 'list_my_messages', 'list_work_records'];
@@ -11,10 +12,12 @@ const SEARCH = ['web_search', 'fetch_url', 'read_evidence', 'fetch_json', 'recon
 
 /** 只决定先展示哪些 schema；所有工具仍可通过目录发现、按名字直接调用，权限边界不变。 */
 export function taskToolCore(intent, text, { images = [], computerTask = false, strict = false } = {}) {
-  if (strict || images.length || computerTask) return CORE;
+  if (computerTask) return CORE;
   const value = String(text || '');
   const names = new Set([...BASIC, ...MEMORY]);
   const add = list => list.forEach(name => names.add(name));
+  if (visualSceneRequest(value)) { add(VISUAL_SCENE_TOOLS); return names; }
+  if (strict || images.length) return CORE;
   if (isPhoneRequest(value)) { add(['phone_devices', 'phone_action', 'get_current_time', 'time_calc']); return names; }
   if (textPosterRequest(value)) { add(POSTER_TOOLS); return names; }
   if (intent?.category === 'code') { add(CODE_TASK_CORE); add(FILES); return names; }

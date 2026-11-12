@@ -3,10 +3,21 @@ import * as ws from './workspace.js';
 import { imageFingerprint } from './visualEvidence.js';
 import { throwControl } from '../core/networkRequest.js';
 
-const FIELDS = ['title', 'subtitle', 'lines', 'footer', 'width', 'height', 'text_position', 'text_fraction', 'font_family', 'text_color', 'panel_color', 'background_color', 'theme', 'background_path'];
+const FIELDS = ['title', 'subtitle', 'lines', 'footer', 'width', 'height', 'text_position', 'text_fraction', 'text_style', 'text_align', 'gradient_opacity', 'font_family', 'text_color', 'panel_color', 'background_color', 'theme', 'background_path'];
 const problem = (message, code = 'POSTER_DESIGN_INVALID') => Object.assign(new Error(message), { code, kind: 'input' });
 const pick = value => Object.fromEntries(FIELDS.filter(key => Object.hasOwn(value, key)).map(key => [key, value[key]]));
 const EXPECTED_BACKGROUND = Symbol('posterBackgroundHash');
+
+/** 明确从实色切换渐变时启用新样式默认；本轮显式给出的版式和已有渐变稿均保留。 */
+export function mergePosterDesignOptions(previous, input) {
+  const options = { ...previous, ...input };
+  if (input.text_style === 'gradient' && (!previous.text_style || previous.text_style === 'panel')) {
+    for (const key of ['text_position', 'text_fraction', 'text_align']) {
+      if (!Object.hasOwn(input, key)) delete options[key];
+    }
+  }
+  return options;
+}
 
 export async function posterDesignInput(input, signal) {
   if (!input?.source_path) return input;
@@ -19,11 +30,12 @@ export async function posterDesignInput(input, signal) {
   if (design?.kind !== 'poster-design' || design.version !== 1 || !design.options || typeof design.options !== 'object' || Array.isArray(design.options)) throw problem('不是支持的海报设计文件');
   const previous = pick(design.options);
   const backgroundPath = input.background_path ?? previous.background_path;
+  const sameBackground = backgroundPath && previous.background_path && ws.normalize(backgroundPath) === ws.normalize(previous.background_path);
   if (design.backgroundHash != null && !/^[a-f0-9]{64}$/.test(design.backgroundHash)) throw problem('海报底图摘要无效');
-  if (backgroundPath && backgroundPath === previous.background_path && !design.backgroundHash) throw problem('原设计没有可核验的底图摘要；请明确指定另一份已确认的底图', 'POSTER_BACKGROUND_UNVERIFIED');
+  if (sameBackground && !design.backgroundHash) throw problem('原设计没有可核验的底图摘要；请明确指定另一份已确认的底图', 'POSTER_BACKGROUND_UNVERIFIED');
   throwControl(null, signal);
-  const options = { ...previous, ...input };
-  if (backgroundPath && backgroundPath === previous.background_path && design.backgroundHash)
+  const options = mergePosterDesignOptions(previous, input);
+  if (sameBackground && design.backgroundHash)
     Object.defineProperty(options, EXPECTED_BACKGROUND, { value: design.backgroundHash });
   // 改画幅时，不能让上一版的width/height压过这次明确指定的size。
   if (Object.hasOwn(input, 'size') && input.width === undefined && input.height === undefined) {

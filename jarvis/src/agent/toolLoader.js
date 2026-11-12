@@ -4,7 +4,7 @@
  *   常驻    常用工具（读写文件、写文档、搜索、运行代码……）每轮都带完整说明
  *   按需    其余工具只在系统提示里列出名字和一句话用途；模型用 tool_search 按关键词或名字加载完整说明后再调用
  *   宽松    模型直接调用了没加载的工具（名字在列表里）也照常执行，参数不对会按校验结果提示它
- *   不变    工具总数不超过 LIMIT 时全部常驻，和以前一样
+ *   不变    工具总数不超过 LIMIT 时其余工具全部常驻；视觉Demo仍按任务加载
  *   MCP     用户自己连的 MCP 工具不多时也常驻（特意连上的，多半要用）
  */
 
@@ -63,12 +63,14 @@ export function createToolLoader(tools, { limit = LIMIT, defer = null, core = CO
     return until;
   };
   const available = tool => !cooldownUntil(tool.name);
-  const deferredMode = tools.length > limit;
+  // 视觉Demo的长schema只随该任务加载；即使工具很少，也保留目录发现和按名调用。
+  const scoped = tool => tool.name === 'create_visual_demo' && !core.has(tool.name);
+  const deferredMode = tools.length > limit || tools.some(scoped);
   // 用户自己连的 MCP 服务是特意要用的：工具不多（≤ MCP_CORE 个）时也常驻
   const mcp = tools.filter((t) => t.name.startsWith('mcp_'));
   // defer：这一轮多半用不上的常驻工具也先只列名字（普通问答不带做文档的长说明，每步少发几千字）；直接按名字调用照样能用
   const keep = (t) => (core.has(t.name) && !defer?.has(t.name)) || (mcp.length <= MCP_CORE && t.name.startsWith('mcp_'));
-  const active = new Set(deferredMode ? tools.filter(keep).map((t) => t.name) : tools.map((t) => t.name));
+  const active = new Set(tools.filter(tool => tools.length > limit ? keep(tool) : !scoped(tool)).map(tool => tool.name));
   const deferred = () => tools.filter((t) => !active.has(t.name) && available(t));
 
   const searchTool = {

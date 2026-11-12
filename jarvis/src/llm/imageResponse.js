@@ -1,8 +1,9 @@
 import { webBody } from '../agent/webBody.js';
 import { imageFormat } from '../agent/imageFormat.js';
+import { imageFormatMatch, imageRequestReceipt, imageSizeMatch, readImageMetadata } from '../agent/imageMetadata.js';
 
 /** 一次收费请求及下载共限4分钟；超时只结束等待，不自动再生成。 */
-export async function requestImage(url, init, { fetchImpl, download, signal, model, operation = '画图', timeoutMs = 240000 }) {
+export async function requestImage(url, init, { fetchImpl, download, signal, model, parameters, operation = '画图', timeoutMs = 240000 }) {
   const controller = new AbortController();
   let rejectStopped;
   const stopped = new Promise((_, reject) => {
@@ -22,7 +23,7 @@ export async function requestImage(url, init, { fetchImpl, download, signal, mod
     const work = Promise.resolve().then(async () => {
       if (controller.signal.aborted) throw controller.signal.reason;
       const response = await fetchImpl(url, { ...init, signal: controller.signal });
-      return readImageResponse(response, { model, download: typeof download === 'function' ? download : fetchImpl, signal: controller.signal, operation });
+      return readImageResponse(response, { model, parameters, download: typeof download === 'function' ? download : fetchImpl, signal: controller.signal, operation });
     });
     return await Promise.race([work, stopped]);
   } finally {
@@ -32,7 +33,7 @@ export async function requestImage(url, init, { fetchImpl, download, signal, mod
 }
 
 /** 结果下载不携带服务商凭据；正文与图片分别限40MB/20MB。 */
-export async function readImageResponse(response, { model, download, signal, operation = '画图' }) {
+export async function readImageResponse(response, { model, parameters, download, signal, operation = '画图' }) {
   let result;
   const raw = new TextDecoder().decode(await webBody(response, 40000000, signal));
   try {
@@ -67,5 +68,7 @@ export async function readImageResponse(response, { model, download, signal, ope
   if (format?.ext === 'svg' || /^text\/|application\/json/.test(blob.type))
     throw Object.assign(new Error('画图接口返回了文本或SVG，不能冒充位图'), { code: 'IMAGE_RESPONSE_FORMAT', kind: 'api' });
   if (format) blob = new Blob([blob], { type: format.mime });
-  return { blob, model, revised: data.revised_prompt };
+  const requested = imageRequestReceipt(model, parameters);
+  const actual = await readImageMetadata(blob, { signal });
+  return { blob, model, revised: data.revised_prompt, requested, actual, sizeMatch: imageSizeMatch(requested, actual), formatMatch: imageFormatMatch(requested, actual) };
 }

@@ -8,9 +8,10 @@ import { throwControl } from '../core/networkRequest.js';
 import { errorKind } from '../core/suggest.js';
 import { assertArchitectureToolCall } from './architectureStateProtection.js';
 import { toolFailureScope } from './toolFailureScope.js';
+import { recordImageInputRecovery } from './imageInputRecovery.js';
 
 /** 产出文件、核对数字的本地工具：联网到点后照常可用 */
-export const OUTPUT_TOOLS = /^(?:create_document|write_long_document|edit_office_document|check_document|write_file|edit_file|preview|create_diagram|export_diagram|reconcile_numbers|verify_numbers|time_calc)$/;
+export const OUTPUT_TOOLS = /^(?:create_document|write_long_document|edit_office_document|check_document|write_file|edit_file|preview|create_diagram|export_diagram|make_poster|create_visual_demo|reconcile_numbers|verify_numbers|time_calc)$/;
 
 /** 原顺序执行副作用，仅将连续的只读调用并行；检查点先于操作落盘。 */
 export async function executeToolCalls(
@@ -140,7 +141,7 @@ export async function executeToolCalls(
     for (const attempt of lookupRecovery?.attempts || []) {
       if (attempt.failure === 'cooling') loader.cool?.(attempt.tool, attempt.cooldownUntil);
     }
-    const recovery = diagramRecovery?.record(c.name, c.args, failure);
+    const recovery = recordImageInputRecovery(executionScope ?? seen, c.name, c.args, failure) || diagramRecovery?.record(c.name, c.args, failure);
     const diagnostics = diagramFailureDetails(failure);
     if (diagnostics.length) output += '\n定点修复：' + JSON.stringify(diagnostics);
     if (Number.isSafeInteger(failure?.diagnosticCount) && failure.diagnosticCount > 8) output += `\n共有${Math.min(80, failure.diagnosticCount)}条事实未通过，本次仅列前8条；按同一原文核对全部facts，不把未列出的条目当通过。`;
@@ -170,7 +171,7 @@ export async function executeToolCalls(
       results.push(result);
       if (result.recoveryStop) {
         // 已停止本批执行，仍补齐工具响应，避免用户同时插话后续请求缺tool_call_id。
-        for (const pending of calls.slice(i + 1)) results.push({ c: pending, ok: false, output: (result.c.name === 'phone_action' ? '手机操作已停止，此操作未执行；' : '本轮图形恢复上限已触发，此操作未执行；') + result.recoveryStop, outImages: [] });
+        for (const pending of calls.slice(i + 1)) results.push({ c: pending, ok: false, output: (result.c.name === 'phone_action' ? '手机操作已停止，此操作未执行；' : result.c.name === 'inspect_image' ? '本轮原图复核参数纠正上限已触发，此操作未执行；' : '本轮图形恢复上限已触发，此操作未执行；') + result.recoveryStop, outImages: [] });
         break;
       }
       i++;

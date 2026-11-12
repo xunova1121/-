@@ -4,9 +4,11 @@ import { imageFormat, assertImageExtension } from './imageFormat.js';
 import { composePoster } from './posterComposition.js';
 import { posterPngInfo } from './posterCompositionInput.js';
 import { renderPoster } from './posterRaster.js';
+import { renderVisualScene } from './visualSceneRaster.js';
 import { themeById } from './themes.js';
 import { posterDesignInput, posterDesignBlob, checkPosterDesignBackground } from './posterDesignSource.js';
 import { throwControl } from '../core/networkRequest.js';
+import { imageCoverReceipt, readImageMetadata } from './imageMetadata.js';
 
 const SIZES = { 竖版: [1080, 1920], 横版: [1920, 1080], 方形: [1440, 1440], 朋友圈封面: [1440, 1080], 小红书: [1024, 1536] };
 const inputError = message => Object.assign(new Error(message), { name: 'ValidationError', code: 'INVALID_POSTER', kind: 'input' });
@@ -89,7 +91,9 @@ function safeFailure(error, phase) {
   return { code, message: descriptions[code] || (phase === 'render' ? '成品图片未渲染成功；已保存的可编辑源文件仍可使用' : '该格式文件尚未成功保存并读回') };
 }
 
-async function rasterize(ctx, svg, options) {
+async function rasterize(ctx, svg, options, textStyle) {
+  // 只有本工具的受控渐变设计使用视觉渲染器；旧海报SVG白名单和实色路径保持不变。
+  if (textStyle === 'gradient') return (ctx.renderVisualScene || renderVisualScene)(svg, options);
   if (ctx.renderPoster) return ctx.renderPoster(svg, options);
   // 兼容旧桌面扩展注入，但仍核验输出尺寸；旧接口无法证明字体检测，单独标为未检查。
   if (ctx.rasterizeSvg) {
@@ -102,7 +106,7 @@ async function rasterize(ctx, svg, options) {
 export function createPosterDeliveryTool(ctx = {}) {
   return {
     name: 'make_poster',
-    description: '制作中文海报/封面：把工作区底图与准确文案用真实字体程序排版，直接输出同尺寸PNG成品、自包含可编辑SVG和可编辑PPTX。先定尺寸/文字位置，再让generate_image只画无字底图；已有底图直接复用。文字不交给画图模型生成。下方1/3留给标题时text_position=bottom,text_fraction=0.333333。partial表示成品尚未全部交付；真实渲染通过也不代表已经人工或视觉模型核对。',
+    description: '制作中文海报/封面：把工作区底图与准确文案用真实字体程序排版，直接输出同尺寸PNG成品、自包含可编辑SVG和可编辑PPTX。先定尺寸/文字位置，再让generate_image只画无字底图；已有底图直接复用。文字不交给画图模型生成。沉浸海报用text_style=gradient，默认底部35%透明到深色渐变、文字居中；实色面板用panel。下方1/3留给标题时text_position=bottom,text_fraction=0.333333。partial表示成品尚未全部交付；真实渲染通过也不代表已经人工或视觉模型核对。',
     input_schema: {
       type: 'object',
       properties: {
@@ -117,6 +121,9 @@ export function createPosterDeliveryTool(ctx = {}) {
         source_path: { type: 'string', description: '修改已有海报时传上次返回的designPath（.poster.json）；复用原底图和版式，只填写要改的文字/字段，不重新生图' },
         text_position: { type: 'string', enum: ['top', 'bottom', 'left', 'right', 'center'] },
         text_fraction: { type: 'number', description: '文字面板占画幅比例；下方三分之一用0.333333' },
+        text_style: { type: 'string', enum: ['panel', 'gradient'], description: 'panel实色文字区；gradient沉浸渐变，默认底部35%从透明过渡至文字区底色' },
+        text_align: { type: 'string', enum: ['left', 'center'], description: '程序文字左对齐或居中；gradient默认center' },
+        gradient_opacity: { type: 'number', minimum: 0, maximum: 1, description: '渐变底部不透明度，默认0.85；实际底图对比仍需视觉核对' },
         font_family: { type: 'string', enum: ['sans', 'serif'], description: 'sans黑体，serif宋体' },
         text_color: { type: 'string', description: '十六进制颜色，如黑色#111111' },
         panel_color: { type: 'string', description: '文字区底色，如浅米白#FFF8EC' },
@@ -142,6 +149,20 @@ export function createPosterDeliveryTool(ctx = {}) {
       const out = await composePoster({ ...defaults, ...input, width, height, background });
       throwControl(null, signal);
       const receipt = { kind: 'poster', status: 'partial', width, height, files: [], textRendering: 'program', visual: 'not_checked', fontCheck: 'not_checked', notes: [background ? `底图：${input.background_path}` : '底图：未央原创插画', '文案由程序排版；尚未做视觉模型或人工验收，不能声称绝对无错字'], errors: [] };
+      const normalized = out.layout.input;
+      receipt.textStyle = normalized.text_style;
+      receipt.textAlign = normalized.text_align;
+      if (normalized.text_style === 'gradient') {
+        receipt.gradient = { opacity: normalized.gradient_opacity, fraction: normalized.text_fraction, contrast: 'not_checked' };
+        receipt.notes.push('底部使用真实透明渐变，未用硬边色块覆盖底图；文字与渐变终点配色经过检查，但渐变叠加实际底图后的对比度尚未视觉验收');
+      }
+      if (background) {
+        const actual = await readImageMetadata(new Blob([background.bytes], { type: background.mime }), { signal });
+        receipt.background = { path: input.background_path, ...imageCoverReceipt(actual, width, height) };
+        receipt.notes.push(actual.dimensions === 'verified'
+          ? `底图${actual.width}×${actual.height}，按cover缩放${Number(receipt.background.scale.toFixed(4))}倍；成品${width}×${height}是导出尺寸，不证明底图具有同等细节`
+          : '底图实际像素尺寸未核实；不能把成品画布尺寸说成底图原生清晰度');
+      }
       for (const [format, blob] of [['svg', new Blob([out.svg], { type: 'image/svg+xml' })], ['pptx', out.pptx]]) {
         try {
           const path = await saveReadback(`${base}.${format}`, blob, ctx, signal);
@@ -149,12 +170,12 @@ export function createPosterDeliveryTool(ctx = {}) {
         } catch (error) { throwControl(error, signal); receipt.errors.push(safeFailure(error, 'save')); }
       }
       try {
-        const design = await posterDesignBlob(input, { width, height, background });
+        const design = await posterDesignBlob({ ...input, text_style: normalized.text_style, text_align: normalized.text_align, gradient_opacity: normalized.gradient_opacity, text_position: normalized.text_position, text_fraction: normalized.text_fraction }, { width, height, background });
         receipt.designPath = await saveReadback(`${base}.poster.json`, design, ctx, signal);
       } catch (error) { throwControl(error, signal); receipt.errors.push(safeFailure(error, 'design_save')); }
       try {
         progress?.('正在检查字体并渲染最终PNG图片…');
-        const rendered = await rasterize(ctx, out.svg, { signal });
+        const rendered = await rasterize(ctx, out.svg, { signal }, normalized.text_style);
         const blob = rendered instanceof Blob ? rendered : rendered.blob;
         await assertPosterPng(blob, width, height);
         const path = await saveReadback(`${base}.png`, blob, ctx, signal);

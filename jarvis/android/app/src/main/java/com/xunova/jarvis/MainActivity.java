@@ -37,6 +37,7 @@ public class MainActivity extends BridgeActivity {
     @Override public void onCreate(Bundle state) {
         CrashLog.install(this);
         registerPlugin(PhoneControlPlugin.class);
+        registerPlugin(ShareReturnPlugin.class);
         registerPlugin(WeatherLocationPlugin.class);registerPlugin(CompanionWallpaperPlugin.class);registerPlugin(WindowColorPlugin.class);registerPlugin(AppUpdatePlugin.class);registerPlugin(CrashLogPlugin.class);
         registerPlugin(NativeStreamPlugin.class);registerPlugin(MobileSpeechPlugin.class);registerPlugin(EdgeSpeechPlugin.class);
         registerPlugin(QwenRealtimePlugin.class);registerPlugin(BackgroundTaskPlugin.class);registerPlugin(KeepAwakePlugin.class);

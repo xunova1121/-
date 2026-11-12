@@ -9,8 +9,10 @@ import { loadMemory, clearMemory } from '../core/memoryStore.js';
 import { storageProblem } from '../agent/store.js';
 import * as sessionsApi from '../agent/sessions.js';
 import { $, COMPACT, storage, toast } from './env.js';
+import { createShareRecovery } from './shareReturn.js';
 
 export function createRecovery(app) {
+  const shareRecovery = createShareRecovery(app, { toast });
   /** 启动时接回上次的对话 / 没做完的任务 */
   async function resumeOnStart() {
     // 本地数据库打不开（比如另一个标签页还开着旧版、挡住了升级）：告诉用户，并且不做迁移，免得旧数据迁到临时存储里丢掉
@@ -19,6 +21,8 @@ export function createRecovery(app) {
       toast(problem);
       return;
     }
+    // 分享恢复只读接回原会话，必须先于pending任务的自动续做分支。
+    if (await shareRecovery.restore()) return;
     if (app.settings.persistMemory) {
       await sessionsApi.migrateLegacy(loadMemory(storage)).catch(() => null);
       clearMemory(storage);

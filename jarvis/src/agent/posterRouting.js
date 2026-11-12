@@ -1,6 +1,8 @@
+import { visualSceneRequest } from './visualSceneRouting.js';
 /** 图片明确要求排字、海报/封面标题走现有工具；无字素材、Office正文和架构图保留原路由。 */
 export function textPosterRequest(text = '') {
   const value = String(text).slice(-6000);
+  if (visualSceneRequest(value)) return false;
   const poster = /海报|封面/.test(value);
   const imageText = /图片|宣传图|活动图|配图|图像/.test(value) && /写上|印上|(?:加|放|叠)上.{0,12}(?:标题|文字|中文|文案|字)|(?:上面|图中|图上).{0,8}(?:写|加|放)|(?:黑体|宋体|楷体).{0,3}字/.test(value);
   if (!poster && !imageText) return false;
@@ -19,7 +21,7 @@ export function textPosterRequest(text = '') {
 
 export const POSTER_TOOLS = ['generate_image', 'make_poster', 'process_image', 'inspect_image', 'read_image_text', 'read_file', 'list_files', 'find_files', 'preview', 'update_plan'];
 
-export const POSTER_GUIDANCE = '图片明确要求写上中文、使用黑体字，或海报/封面的标题、活动文案、日期和联系方式需要准确排字时：优先复用用户已有底图并把真实路径交给make_poster的background_path；没有合适底图时，先generate_image生成“不要任何文字”的底图并留出文字空间，再make_poster程序排字。改字时把上次回执designPath传给make_poster.source_path，只传要改的文字，保留原尺寸和无字底图，不把最终带字PNG当作新底图。保留用户原文，文案较多时分清标题、要点与页脚，不擅自删字。交付最终PNG、自包含可编辑SVG和PPTX，不能只交PPTX让用户自行导出，也不要改走sandbox、run_python、手写HTML截图或render_diagram。只有用户明确要无字素材或图像模型直接画字时才采用相应图片路线。按make_poster真实回执区分已生成、读回、字体检查和视觉检查；生成成功不等于视觉验收，不承诺绝对无错字。局部失败保留已有文件并说明缺失格式/阶段，不反复重画底图。';
+export const POSTER_GUIDANCE = '图片明确要求写上中文、使用黑体字，或海报/封面的标题、活动文案、日期和联系方式需要准确排字时：优先复用用户已有底图并把真实路径交给make_poster的background_path；没有合适底图时，先generate_image生成“不要任何文字”的底图并留出文字空间，再make_poster程序排字。沉浸式、去拼接感、不要硬色块或渐变蒙版用text_style=gradient，默认底部35%渐变、居中排字；在既有source_path上只改这个参数就能复用原底图，不重新生图。改字时把上次回执designPath传给make_poster.source_path，只传要改的文字，保留原尺寸和无字底图，不把最终带字PNG当作新底图。保留用户原文，文案较多时分清标题、要点与页脚，不擅自删字。交付最终PNG、自包含可编辑SVG和PPTX，不能只交PPTX让用户自行导出，也不要改走sandbox、run_python、手写HTML截图或render_diagram。只有用户明确要无字素材或图像模型直接画字时才采用相应图片路线。按make_poster真实回执区分已生成、读回、字体检查和视觉检查；生成成功不等于视觉验收，不承诺绝对无错字。局部失败保留已有文件并说明缺失格式/阶段，不反复重画底图。';
 
 /** 仅收实际工具返回的三格式回执，不凭“已生成”或文件名认定海报完成。 */
 export function posterReceipt(ok, output = '') {

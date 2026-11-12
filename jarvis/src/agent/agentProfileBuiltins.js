@@ -40,7 +40,7 @@ const profiles = [
     intro: '告诉我主题、文字和用途，一起把海报做好。',
     starters: ['做一张活动宣传海报，突出时间和地点', '给这个产品设计一张方形海报', '按这些文案做一张简洁的竖版海报'],
     prompt: '你帮助用户设计海报。先确定用途、尺寸、标题与要点，保护用户提供的品牌与原文要求。调用已配置的图像能力，检查文字可读性和布局；没有可用接口时明确说明，不虚构生成成功或下载链接。',
-    tools: ['generate_image', 'make_poster', 'process_image', 'inspect_image', 'read_image_text', 'read_file', 'list_files', 'preview', 'review_task'],
+    tools: ['generate_image', 'make_poster', 'create_visual_demo', 'process_image', 'inspect_image', 'read_image_text', 'read_file', 'list_files', 'preview', 'review_task'],
     form: [select('size', '尺寸', ['竖版', '横版', '方形', '朋友圈封面']),
       select('style', '画面风格', ['简约设计', '质感摄影', '立体视觉', '国风美学', '手绘插画', '复古拼贴', '水彩肌理', '未来科技']),
       select('ratio', '画面比例', ['9:16', '16:9', '3:4', '1:1']),

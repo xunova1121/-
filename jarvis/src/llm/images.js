@@ -43,12 +43,13 @@ export function imageModelOf(cfg) {
 }
 
 /**
- * 画图用谁：能力表里“画图”的常用 → 备用（见 abilities.js）；常用出错（断网、额度、模型不在）换备用再画一次。
+ * 画图用谁：能力表里“画图”的常用 → 备用（见 abilities.js）；仅明确拒绝才尝试备用，结果未知不重复收费。
  * 能力表里一个能画图的都没有时，照旧用当前服务商 + imageModelOf（老配置）。
- * @returns {Promise<{ blob: Blob, model: string, revised?: string }>}
+ * @returns {Promise<{ blob: Blob, model: string, revised?: string, requested: object, actual: object, sizeMatch: boolean|null, formatMatch: boolean|null }>}
  */
 export async function generateImage(cfg, options = {}) {
-  options = { ...cfg.imageOptions, ...options };
+  // 工具未填写的可选值不能覆盖用户已保存的尺寸和画质；显式auto等值仍优先。
+  options = { ...cfg.imageOptions, ...Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined)) };
   const { main, backup } = abilityLines(cfg, 'image');
   const lines = main ? [main, backup].filter(Boolean) : [{ provider: cfg.provider, model: imageModelOf(cfg) }];
   let failure;
@@ -74,5 +75,5 @@ async function drawWith(cfg, model, { prompt: imagePrompt, gateway = null, fetch
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify({ model, prompt: imagePrompt, ...parameters, n: 1 }),
-  }, { fetchImpl, download, signal, model });
+  }, { fetchImpl, download, signal, model, parameters });
 }

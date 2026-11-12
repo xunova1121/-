@@ -1,12 +1,6 @@
 /** 区域用0～1坐标；原图只在本次调用内处理，不写入对话和缓存。 */
-export function visualRegion(value) {
-  if (value == null) return null;
-  const { x, y, width, height } = value;
-  if (![x, y, width, height].every(Number.isFinite) || x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 1.000001 || y + height > 1.000001) {
-    throw Object.assign(new Error('图片区域必须在0～1范围内且不能越界'), { code: 'IMAGE_REGION', kind: 'input' });
-  }
-  return { x, y, width, height };
-}
+import { visualRegion } from './imageRegionInput.js';
+export { visualRegion } from './imageRegionInput.js';
 
 export async function cropImageRegion(blob, value, { signal } = {}) {
   const region = visualRegion(value);
