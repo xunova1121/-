@@ -191,3 +191,10 @@ it('公共目录到期清理不删除私人收藏；归档快照仍可打开原�
   await f.center.change({ action: 'favorite', id: saved.id, enabled: false });
   expect((await f.center.list({ favorites: 'true' })).total).toBe(0);
 });
+
+it('金额区间、负数和有歧义的限定语不截成一个可筛选预算', () => {
+  for (const value of ['100-200万元', '100–200万元', '100万元-200万元', '-100万元', '100万元（暂定）', '100万元人民币至200万元'])
+    expect(tenderBudget(value)).toBeNull();
+  expect(tenderBudget('人民币 1,200.50 万元')).toBe(12005000);
+  expect(tenderBudget('0元')).toBe(0);
+});

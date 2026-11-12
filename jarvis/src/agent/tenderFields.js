@@ -1,8 +1,11 @@
 import { htmlToText } from './docs.js';
 import { parseTenderNotice } from './tenderNotices.js';
+import { tenderBudget } from '../core/tenderCenterData.js';
 
 const amount = value => {
   const text = String(value || '').trim().replace(/[,，]/g, '');
+  // 不截取区间的第一个数；含多个数、外币或限定语时保持未知。
+  if (tenderBudget(text) === null) return null;
   const match = text.match(/^(?:人民币\s*|[￥¥]\s*)?(\d+(?:\.\d+)?)\s*([亿万]?元)/);
   return match ? `${match[1]}${match[2]}` : null;
 };

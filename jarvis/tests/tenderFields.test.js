@@ -19,3 +19,9 @@ it('纯文本预算正常解析，压平表格缺列/多包不猜金额，截止
   expect(parseTenderFields(header + '设备 200.00 150.00 1 设备2 100.00 90.00 1 三、资格要求', row, 0).budgetText).toBeNull();
   expect(parseTenderFields('预算金额（元） 名称 200.00 其他100.00', row, 0).budgetText).toBeNull();
 });
+
+it('原文预算区间和负数不提取首项作为确定总预算', () => {
+  for (const text of ['100-200万元', '100–200万元', '100万元-200万元', '-100万元', '100万元（暂定）'])
+    expect(parseTenderFields('预算金额：' + text, row, 0).budgetText).toBeNull();
+  expect(parseTenderFields('预算金额：100万元', row, 0).budgetText).toBe('100万元');
+});

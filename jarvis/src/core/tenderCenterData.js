@@ -5,10 +5,9 @@ const fail = message => Object.assign(new Error(message), { status: 400, code: '
 /** 金额只认明确人民币单值；多包件、范围、外币和未知值不猜成预算。 */
 export function tenderBudget(value) {
   const text = String(value || '').replace(/[,，\s]/g, '');
-  if (!text || /美元|欧元|港币|日元|至|~|～|—|;|；/.test(text)) return null;
-  const hits = [...text.matchAll(/(?:人民币|￥|¥)?(\d+(?:\.\d+)?)(亿元|万元|元)(?:人民币)?/g)];
-  if (hits.length !== 1) return null;
-  const number = Number(hits[0][1]) * ({ 元: 1, 万元: 10000, 亿元: 1e8 }[hits[0][2]]);
+  const match = text.match(/^(?:人民币|￥|¥)?(\d+(?:\.\d+)?)(亿元|万元|元)(?:人民币)?$/);
+  if (!match) return null;
+  const number = Number(match[1]) * ({ 元: 1, 万元: 10000, 亿元: 1e8 }[match[2]]);
   return Number.isFinite(number) ? number : null;
 }
 
