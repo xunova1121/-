@@ -1,6 +1,6 @@
 # 未央（WEIYANG AI，原名贾维斯）开发约定
 
-> 最新用户交接（2026-11-12）：本批已发布1.0.430，近期开发交给Claude继续审核。请先读 [`docs/交接给Claude-近期开发汇总与审核-20261112.md`](docs/交接给Claude-近期开发汇总与审核-20261112.md)。远端Claude已提交部分复审补丁，已保留但尚未发版；不要把部分复审写成全部通过，或把后续补丁写成430已包含。
+> 最新用户交接（2026-11-12）：Claude 复审修复已随 1.0.431 三端发布（海报排字识别、大屏地图合规与字号、真实像素对比度、联网地址补拦、本机发布门禁 `scripts/release-gate.mjs`），详见已修问题清单末尾。发版前先跑 `node scripts/release-gate.mjs`。待办：DNS 检查后固定连接地址（需引入 undici）、HTML 模板海报（第0–3步清单待用户批准）。
 
 > DSH专项交接（2026-11-12）：“借鉴 DeepSeek Harness / 与它联动”交给 Codex，见 [`docs/交接给Codex-DeepSeekHarness借鉴与联动-20261112.md`](docs/交接给Codex-DeepSeekHarness借鉴与联动-20261112.md)。该专项待按序逐项实施。
 
