@@ -42,6 +42,9 @@ jobs:
           npm run build:mobile
       - name: 中文图片真实渲染与原服务器模式
         run: |
+          node e2e/image-inspection.mjs
+          node e2e/diagram-render.mjs "$RUNNER_TEMP/candidate/diagram-render"
+          node e2e/image-followup.mjs
           node e2e/poster-composition.mjs "$RUNNER_TEMP/candidate/poster"
           node e2e/poster-gradient.mjs "$RUNNER_TEMP/candidate/poster-gradient"
           node e2e/visual-demo.mjs "$RUNNER_TEMP/candidate/visual-demo"
