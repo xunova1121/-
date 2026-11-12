@@ -772,6 +772,7 @@ export function createTools(ctx) {
         depth: { type: 'string', enum: Object.keys(DEPTHS), description: 'quick 快速（约 4 个来源）/ standard 标准（约 8 个）/ deep 深入（约 14 个，多轮补查）' }
       }, ['question']),
       run: async ({ question, depth = 'standard' }, { progress, signal, retrieval, sessionId } = {}) => {
+        retrieval?.beginResearch?.(depth);
         const r = await deepResearch({
           question, depth, llm: ctx.llm ?? null, signal,
           consume: kind => retrieval?.consume(kind),

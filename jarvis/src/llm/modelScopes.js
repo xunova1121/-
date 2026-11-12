@@ -47,6 +47,9 @@ export function createModelScopes({ getLocal, saveLocal, getClient, onServerSave
           if (confirmed.keys?.[id] !== `••••${key.trim().slice(-4)}`)
             throw Object.assign(new Error('云服务器Key读回核对不一致，未确认保存；请刷新后重试'), { code: 'MODEL_KEY_SAVE' });
         }
+        const searchKey = delta.openaiSearchKey;
+        if (typeof searchKey === 'string' && searchKey.trim() && !searchKey.startsWith('••••') && confirmed.openaiSearchKey !== `••••${searchKey.trim().slice(-4)}`)
+          throw Object.assign(new Error('云服务器搜索Key读回核对不一致，未确认保存；请刷新后重试'), { code: 'MODEL_KEY_SAVE' });
         serverConfig = confirmed;
         onServerSaved(serverConfig);
         return serverConfig;

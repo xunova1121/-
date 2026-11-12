@@ -81,10 +81,13 @@ export function datedSearchHits(hits, query, { freshness, now = Date.now(), requ
 }
 
 export function formatSearchHit(hit, { query = '', requestText = '', freshness } = {}) {
-  const provider = hit.source === 'qianfan' ? '百度搜索' : hit.source === 'deepseek' ? 'DeepSeek检索' : '';
+  const provider = hit.source === 'qianfan' ? '百度搜索' : hit.source === 'deepseek' ? 'DeepSeek检索' : hit.source === 'openai-compatible' ? '自定义联网搜索' : '';
   const publication = qianfanPublishedAt(hit.publishedAt);
   const constrained = searchDate(requestText, freshness) || searchDate(query, freshness);
-  const label = provider ? `\n  （${provider}摘要，未读原文）` : '';
+  const evidence = hit.source === 'openai-compatible' && hit.evidenceType === 'provider_citation'
+    ? hit.summaryEvidence === 'provider_cited_summary' ? '模型带引文摘要，未读原文' : '来源链接，待打开原文核实'
+    : '摘要，未读原文';
+  const label = provider ? `\n  （${provider}${evidence}）` : '';
   const date = publication ? ' 发布时间：' + publication + '（北京时间）' : provider ? ' 日期未知' : '';
   const uncertain = constrained && !publication ? '\n  （可能相关、日期未核实，不能作为指定日期的事实）' : '';
   return `- ${hit.title}\n  ${hit.url}\n  ${String(hit.snippet || '').slice(0, provider ? 800 : 300)}${label}${date}${uncertain}`;

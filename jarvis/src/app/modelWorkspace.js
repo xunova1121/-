@@ -2,6 +2,8 @@ import { createModelLocalOptions } from './modelLocalOptions.js';
 import { localLookup } from './lookup.js';
 import { testDeepseekSearch } from '../agent/deepseekSearch.js';
 import { testQianfanSearch } from '../agent/qianfanSearch.js';
+import { testOpenaiSearch } from '../agent/openaiSearch.js';
+import { createOpenaiSearchFetch } from '../core/openaiSearchGateway.js';
 /** 模型工作台：分位置读写配置，界面细节放在ui，不改任务执行中的运行位置。 */
 import { createModelScopes } from '../llm/modelScopes.js';
 import { copyModelSettings, chooseLine, currentLine, hasRouting } from '../llm/modelLibrary.js';
@@ -9,7 +11,7 @@ import { loadServerSettings, saveServerSettings, createServerClient } from '../c
 import { fetchModelCatalog } from '../llm/modelCatalog.js';
 import { initModelLibrary } from '../ui/modelLibrary.js';
 import { listDocumentStyles, deleteDocumentStyle, vectorStatus } from '../agent/memory.js';
-import { $, toast } from './env.js';
+import { $, toast, storage } from './env.js';
 import { readinessReport, normalizeReadiness, readinessItem } from '../../shared/capabilityReadiness.js';
 import { abortableFetch } from '../core/abortableFetch.js';
 
@@ -123,6 +125,14 @@ export function createModelWorkspace(app) {
         return client.testDeepseekSearch('qianfan', signal);
       }
       return testQianfanSearch(app.panels.config, { signal, fetchViaGateway: app.fetchViaGateway() });
+    },
+    async testOpenaiSearch(target = scope, signal) {
+      if (target === 'server') {
+        const client = getClient();
+        if (!client) throw Object.assign(new Error('请先登录云服务器'), { kind: 'api', code: 'SERVER_NOT_CONNECTED' });
+        return client.testOpenaiSearch(signal);
+      }
+      return testOpenaiSearch(app.panels.config, { signal, openaiSearchFetch: createOpenaiSearchFetch(app, { storage }) });
     },
     async catalog(provider, signal, target = scope) {
       if (target === 'server') {

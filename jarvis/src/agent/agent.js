@@ -505,7 +505,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     }
     // 普通查询到点/次数用完却一条可用结果都没有：不收工说“查不到”，交给模型接着想办法（只一次，之后按放宽后的上限收尾）
     // 模型自己已经换着试过3次以上仍失败的，算已经自主尝试过，按原规矩收尾；手里没有联网工具的也不启动
-    if (allowWebSearch && retrieval.reason && !retrieval.extensive && !selfDriven && !signal?.aborted && !triedCalls.some(c => c.ok) && triedCalls.length < 3 && (loader.get('web_search') || loader.get('fetch_url')) && !(preFound && !['failed', 'input'].includes(preFound.recovery?.state))) {
+    if (allowWebSearch && retrieval.reason && !retrieval.extensive && !selfDriven && !signal?.aborted && review.report().retrievalReceipts === 0 && triedCalls.length < 3 && (loader.get('web_search') || loader.get('fetch_url')) && !(preFound && !['failed', 'input'].includes(preFound.recovery?.state))) {
       convo.push({ role: 'user', content: selfDrive(preFound?.recovery) });
     }
     const closing = allowWebSearch && Boolean(retrieval.reason);
@@ -747,9 +747,13 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       lookupModel = null;
       emit({ type: 'fallback', from, to: cur.model, reason: '任务能力升级（最多一次）', capability: true });
     }
-    for (const { c, ok, output, outImages } of results) {
+    for (const { c, ok, output, outImages, dataRetrieved } of results) {
       toolCount++;
-      if (WEB_TOOLS.has(c.name)) { retrieval.end(ok); triedCalls.push({ name: c.name, args: c.args, ok, output: ok ? '' : String(output).slice(0, 300) }); }
+      if (WEB_TOOLS.has(c.name)) {
+        const retrieved = ok && dataRetrieved !== false;
+        retrieval.end(retrieved);
+        triedCalls.push({ name: c.name, args: c.args, ok: retrieved, output: retrieved ? '' : String(output).slice(0, 300) });
+      }
       if (ok && /^(write_file|edit_file|code_write|code_edit)$/.test(c.name) && CODE_FILE.test(String(c.args?.path ?? ''))) wroteCode = true;
       if (ok && (/^(run_javascript|run_python|computer_run|run_project_tests)$/.test(c.name) || c.name === 'code_run' && c.args?.command === 'test')) ranCode = true;
       if (!ok) failCount++;

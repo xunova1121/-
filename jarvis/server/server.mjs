@@ -1,5 +1,6 @@
 import { createQwenVoiceCatalog, qwenVoiceModel } from './qwenVoices.mjs';
 import { proxyDeepseekTool } from './deepseekProxy.mjs';
+import { proxyOpenaiSearch } from './openaiSearchProxy.mjs';
 /**
  * 未央 API 网关 + 静态资源服务（Node 18+，除 Anthropic SDK 外零依赖）。
  *
@@ -45,6 +46,8 @@ import { createRuntimeReadiness } from './runtimeReadiness.mjs';
 const CORS_PATHS = /^\/api\/(health|readiness|local\/metrics|llm\/.+|tts\/edge|voice\/qwen\/voices)$/;
 /** 服务器模式里允许跨域调用的接口（手机 App、电脑版连自己的服务器） */
 const SERVER_CORS = /^\/api\/(health|server\/.+|phone\/(?:devices(?:\/[a-f0-9-]{36})?|transport)|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?|work-records(\/[^/]+)?|weather(\/cities)?|sports\/scores|voice\/qwen\/voices)$/;
+// PC/手机借云网关使用自己保存的搜索Key时也要先过预检，仅开放已实现的两个搜索POST。
+const SEARCH_PROXY_CORS = /^\/api\/llm\/openai-search\/(?:responses|chat-completions)$/;
 // 独立业务路由不在 /api/server 下；PC本机页面连云服务器也必须能预检。
 // 仅列出已实现的资源路径，实际请求继续走下方登录与成员权限校验。
 const SERVER_RESOURCE_CORS = [
@@ -226,6 +229,11 @@ export function createServer({
   }
 
   async function handleLlmProxy(req, res, id, rest, search, cross = false) {
+    if (id === 'openai-search') {
+      if (!serverMode && !cross && !sameOriginOnly(req)) return json(res, 403, { error: '只允许本机未央页面调用' });
+      if (search) return json(res, 400, { error: '搜索接口不接受网址参数' });
+      return proxyOpenaiSearch(req, res, rest, { json });
+    }
     if (id === 'deepseek' && /^tools\/(search|fetch)$/.test(rest))
       return proxyDeepseekTool(req, res, rest.slice(6), { serverMode: Boolean(serverMode), json });
     let base = id === 'ollama' ? `${ollama.host}/v1` : (upstreamFor(id) ?? EXTRA_UPSTREAMS[id]);
@@ -338,10 +346,11 @@ export function createServer({
       // 服务器模式：除了健康检查和登录，所有接口都要先登录（别人拿不到你的模型额度、看不到你的对话）
       if (serverMode && pathname.startsWith('/api/')) {
         // 手机 App、电脑版的页面不是从这个网址打开的：允许跨域调用服务器模式的接口（凭令牌，不用 Cookie，所以对所有来源开放是安全的）
-        if (req.headers.origin && (SERVER_CORS.test(pathname) || SERVER_RESOURCE_CORS.some(pattern => pattern.test(pathname)))) {
+        if (req.headers.origin && (SERVER_CORS.test(pathname) || SEARCH_PROXY_CORS.test(pathname) || SERVER_RESOURCE_CORS.some(pattern => pattern.test(pathname)))) {
           res.setHeader('Access-Control-Allow-Origin', '*');
           if (req.method === 'OPTIONS') {
-            res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE', 'Access-Control-Allow-Headers': 'authorization, content-type, last-event-id, x-jarvis-device', 'Access-Control-Max-Age': '600' });
+            const searchProxy = SEARCH_PROXY_CORS.test(pathname);
+            res.writeHead(204, { 'Access-Control-Allow-Methods': searchProxy ? 'POST' : 'GET, POST, PUT, PATCH, DELETE', 'Access-Control-Allow-Headers': searchProxy ? 'authorization, content-type, x-jarvis-client, x-jarvis-upstream, x-jarvis-search-key' : 'authorization, content-type, last-event-id, x-jarvis-device', 'Access-Control-Max-Age': '600' });
             return res.end();
           }
         }

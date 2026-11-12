@@ -7,6 +7,7 @@ import { businessDate, businessError, businessSource, businessWindow, businessSn
 import { parseTenderListing, parseGgzyListing, parseTenderNotice, ggzyBodyUrl } from './tenderNotices.js';
 import { queryQibookCompany } from './qibookCompany.js';
 import { qibookConfig, qibookSelected } from '../core/qibook.js';
+import { companyProfileHit } from './companyProfileSources.js';
 
 export const BUSINESS_TOOL_NAMES = ['search_tenders', 'read_tender_notice', 'lookup_company'];
 const str = description => ({ type: 'string', description });
@@ -24,6 +25,11 @@ const emptyState = (warnings, jobs) => {
   const failed = new Set(warnings.map(row => row.source));
   return jobs.every(([source]) => failed.has(source)) ? 'unavailable' : warnings.length ? 'partial' : 'empty';
 };
+function rethrowBusinessControl(error, signal) {
+  throwControl(error, signal);
+  // 评测授权的次数/期限同样是整轮控制信号，不能换来源后继续发收费请求。
+  if (['EVAL_QUOTA', 'EVAL_EXPIRED'].includes(error?.code)) throw error;
+}
 
 function searchHit(row) {
   const source = businessSource(row.url);
@@ -40,6 +46,7 @@ function pack(value) {
     if (value.leads?.length) value.leads.pop(); else value.items.pop();
     value.truncated = true;
   }
+  if ('dataRetrieved' in value) value.dataRetrieved = Boolean(value.items?.length || value.rows?.length);
   return encode();
 }
 
@@ -56,12 +63,12 @@ export function createBusinessTools(ctx, engine) {
     const byUrl = new Map(fresh.map((row, i) => [row.url, ids[i]]));
     return rows.map(row => ({ ...row, ...(!row.evidenceId && byUrl.get(row.url) && { evidenceId: byUrl.get(row.url) }) }));
   }
-  async function search(query, execution) {
+  async function search(query, execution, acceptHit) {
     if (!engine) throw businessError('当前没有可用搜索通道，仍可读取公开采购公告或已知原文链接', 'BUSINESS_SEARCH_UNAVAILABLE', 'api');
     const { retrieval, signal, progress } = execution;
     retrieval?.registerQuery?.(query);
     retrieval?.consume('search');
-    return withWebDeadline(s => engine.search(query, 8, { signal: s, progress, routeContext: retrieval, consume: kind => retrieval?.consume(kind) }), { signal, timeoutMs: Math.min(14000, retrieval?.remaining ?? Infinity) });
+    return withWebDeadline(s => engine.search(query, 8, { signal: s, progress, routeContext: retrieval, consume: kind => retrieval?.consume(kind), ...(acceptHit && { acceptHit }) }), { signal, timeoutMs: Math.min(14000, retrieval?.remaining ?? Infinity) });
   }
   async function listing(execution, provider = 'ccgp') {
     execution.retrieval?.consume('read');
@@ -102,7 +109,7 @@ export function createBusinessTools(ctx, engine) {
   async function collect(jobs, execution, warnings) {
     const result = await Promise.allSettled(jobs.map(async ([source, work]) => {
       try { return await work(); }
-      catch (error) { throwControl(error, execution.signal); warnings.push(issue(source, error)); return []; }
+      catch (error) { rethrowBusinessControl(error, execution.signal); warnings.push(issue(source, error)); return []; }
     }));
     // 所有Promise均观察，停止/预算信号必须传播，不能转成“查不到”。
     for (const row of result) if (row.status === 'rejected') throw row.reason;
@@ -143,7 +150,7 @@ export function createBusinessTools(ctx, engine) {
             const full = await detail(row.url, row.title, execution);
             if (inWindow(full.publishedAt, window) && noticeMatches({ ...full, snippet: full.excerpt }, filters)) verified.push(full);
             else if (!full.publishedAt) pending.push({ ...row, reason: '原文未识别到发布日期' });
-          } catch (error) { throwControl(error, execution.signal); warnings.push(issue(row.source || businessSource(row.url)?.label, error)); pending.push(row); }
+          } catch (error) { rethrowBusinessControl(error, execution.signal); warnings.push(issue(row.source || businessSource(row.url)?.label, error)); pending.push(row); }
         }
         const sorted = verified.sort((a, b) => String(b.publishedAt).localeCompare(String(a.publishedAt))).slice(0, limit);
         const items = (await remember(sorted, execution)).map(({ title, titleTruncated, url, source, publishedAt, region, type, evidence, evidenceId, status, deadlineText, budgetText, projectNumber }) => ({ title, titleTruncated, url, source: source || businessSource(url)?.label, publishedAt, region, type, evidence, evidenceId, status: status || 'needs_verification', deadlineText, budgetText, projectNumber }));
@@ -161,7 +168,7 @@ export function createBusinessTools(ctx, engine) {
     },
     {
       name: 'lookup_company', sourceHealthManaged: true,
-      description: '查企业工商、股东、投资或近期公告。默认检索免费公开来源，缺失的信息明确标待核实。用户选择企百科且已配置凭证时才用source=qibook（可能计费），失败仍可走公开检索。法定代表人不等于实际控制人。',
+      description: '查企业简介、工商、股东、投资或近期公告。默认检索免费公开来源；basic缺少官方资料时补充全网简介线索，须用fetch_url读取原文，搜索摘要不能当工商/股权事实。用户选择企百科且已配置凭证时才用source=qibook（可能计费），失败仍可走公开检索。法定代表人不等于实际控制人。',
       input_schema: schema({ company: str('企业全称优先，也支持简称或统一社会信用代码；同名企业须按地区/信用代码区分'),
         section: { type: 'string', enum: ['basic', 'shareholders', 'executives', 'investments', 'news'], description: '基本信息/股东/高管/投资/近期公告；默认basic' },
         source: { type: 'string', enum: ['public', 'qibook'], description: '默认public公开来源；只有用户要求或表单选择企百科时使用qibook' }, ...timeFields }, ['company']),
@@ -173,24 +180,37 @@ export function createBusinessTools(ctx, engine) {
           if (!qibookSelected(execution.requestText)) throw businessError('本轮未选择企百科，请使用公开来源；收费来源须由用户选择', 'QIBOOK_NOT_SELECTED');
           try {
             const result = await queryQibookCompany(subject, section, { config: qibookConfig(ctx), get, ...execution });
-            if (result.rows.length) return pack({ ...result, retrievedAt: new Date(now()).toISOString() });
+            if (result.rows.length) return pack({ ...result, dataRetrieved: true, retrievedAt: new Date(now()).toISOString() });
             warnings.push({ source: '企百科', code: 'QIBOOK_EMPTY' });
           }
-          catch (error) { throwControl(error, execution.signal); warnings.push(issue('企百科', error)); }
+          catch (error) { rethrowBusinessControl(error, execution.signal); warnings.push(issue('企百科', error)); }
         }
         const label = { basic: '统一社会信用代码 企业信息', shareholders: '股东 持股 年报', executives: '董事 高管', investments: '对外投资 年报', news: '公告 最新动态' }[section];
         if (!label) throw businessError('企业资料类型无效');
         const window = section === 'news' ? businessWindow(dates, now()) : null;
+        const officialHit = row => {
+          const hit = searchHit(row);
+          return hit && companyMatches(hit, subject, section) ? hit : null;
+        };
+        const acceptOfficial = row => Boolean(officialHit(row));
         const jobs = [
-          ['政府公开资料', async () => (await search(`${subject} ${label} site:gov.cn`, execution)).map(searchHit).filter(Boolean)],
-          ['上市公司披露', async () => (await search(`${subject} ${label} site:cninfo.com.cn`, execution)).map(searchHit).filter(Boolean)]
+          ['政府公开资料', async () => (await search(`${subject} ${label} site:gov.cn`, execution, acceptOfficial)).map(officialHit).filter(Boolean)],
+          ['上市公司披露', async () => (await search(`${subject} ${label} site:cninfo.com.cn`, execution, acceptOfficial)).map(officialHit).filter(Boolean)]
         ];
-        const rows = uniqueNotices(await collect(jobs, execution, warnings)).filter(row => companyMatches(row, subject, section)).slice(0, 6);
-        const items = await remember(rows.filter(row => !window || inWindow(row.publishedAt, window)), execution);
-        return pack({ state: items.length ? 'unverified' : emptyState(warnings, jobs), company: subject, section, source: '公开资料', window,
+        let rows = uniqueNotices(await collect(jobs, execution, warnings)).slice(0, 6);
+        // 只为基本简介增加一次有界补搜，不把工商/股权查询降级成一般网页事实。
+        if (!rows.length && section === 'basic') {
+          const profileHit = row => companyProfileHit(row, subject);
+          const fallback = ['企业简介公开检索', async () => (await search(`${subject} 公司简介 主营业务`, execution, row => Boolean(profileHit(row)))).map(profileHit).filter(Boolean)];
+          jobs.push(fallback);
+          rows = uniqueNotices(await collect([fallback], execution, warnings)).slice(0, 6);
+        }
+        const items = await remember(rows.filter(row => row.evidence !== 'source_link' && (!window || inWindow(row.publishedAt, window))), execution);
+        const leads = rows.filter(row => row.evidence === 'source_link' || window && !row.publishedAt).slice(0, 3).map(row => ({ title: row.title, url: row.url, evidence: 'unverified', reason: row.evidence === 'source_link' ? '仅取得服务商引文链接，未取得简介内容；请用fetch_url读取原文' : '未识别到发布日期，不属于已核实的近期动态' }));
+        return pack({ state: items.length || leads.length ? 'unverified' : emptyState(warnings, jobs), dataRetrieved: Boolean(items.length), company: subject, section, source: '公开资料', window,
           items: items.map(row => ({ ...row, snippet: row.snippet.slice(0, 240) })),
-          leads: rows.filter(row => window && !row.publishedAt).slice(0, 3).map(row => ({ title: row.title, url: row.url, evidence: 'unverified', reason: '未识别到发布日期，不属于已核实的近期动态' })), warnings, retrievedAt: new Date(now()).toISOString(),
-          note: '公开搜索线索，未读原文，不能据此宣称工商/股权已核实或实时完整。须核对企业全称与信用代码、年报对应日期；工商股东、上市公司十大股东与实际控制人分开。法定代表人不等于老板，个人同名不能合并。没有数据不得推断不存在。' });
+          leads, warnings, retrievedAt: new Date(now()).toISOString(),
+          note: '公开搜索线索，未读原文，不能据此宣称工商/股权已核实或实时完整。company_profile仅为企业简介线索，应使用fetch_url读取链接原文再整理主营业务；不能从域名或自称官网推定来源身份。须核对企业全称与信用代码、年报对应日期；工商股东、上市公司十大股东与实际控制人分开。法定代表人不等于老板，个人同名不能合并。没有数据不得推断不存在。' });
       }
     }
   ];

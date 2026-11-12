@@ -22,6 +22,7 @@ import {
 } from '../llm/modelLibrary.js';
 import { modelKind } from '../llm/images.js';
 import { deepseekSearchPanel } from './deepseekSearchPanel.js';
+import { openaiSearchPanel } from './openaiSearchPanel.js';
 import { serverKeysPanel } from './serverKeysPanel.js';
 import { documentStylesPanel } from './documentStylesPanel.js';
 import { abilityTable } from './abilityTable.js';
@@ -535,6 +536,7 @@ export function initModelLibrary({ root, workspace, toast }) {
     }
     // 联网搜索、文档审查与写作偏好放在服务商后面：先选模型，再管搜索，审查和偏好不常改，收起来
     providersHost.append(deepseekSearchPanel({ cfg, workspace, node, toast }));
+    providersHost.append(openaiSearchPanel({ cfg, workspace, node, toast }));
     providersHost.append(publicDataPanel({ cfg, workspace, node, toast }));
     providersHost.append(lookupPanel({ cfg, workspace, node, toast }));
     const review = node(

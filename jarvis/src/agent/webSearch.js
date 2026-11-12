@@ -1,5 +1,6 @@
 import { createQianfanSearch } from './qianfanSearch.js';
 import { createDeepseekSearch } from './deepseekSearch.js';
+import { createOpenaiSearch } from './openaiSearch.js';
 import { collectSearchSources, sourceQueue } from './searchSources.js';
 import { mergeSearchHits, officialQueries } from './officialSources.js';
 import { retryRead, throwControl, httpError } from '../core/networkRequest.js';
@@ -207,18 +208,19 @@ export function searchPlan(query, region, freshness = '', now = Date.now()) {
 /** 各个搜索源（设置里“测试联网搜索”逐个测） */
 export function searchEngines(options = {}) {
   const { bochaKey, tavilyKey, fetchViaGateway, searchRegion = 'auto' } = options;
-  return [createDeepseekSearch(options), bochaKey && bochaSearch(bochaKey, fetchViaGateway), tavilyKey && tavilySearch(tavilyKey, fetchViaGateway), keylessSearch(fetchViaGateway, searchRegion)].filter(Boolean);
+  return [createOpenaiSearch(options), createDeepseekSearch(options), bochaKey && bochaSearch(bochaKey, fetchViaGateway), tavilyKey && tavilySearch(tavilyKey, fetchViaGateway), keylessSearch(fetchViaGateway, searchRegion)].filter(Boolean);
 }
 
 export function createSearch(options = {}) {
   const { bochaKey, tavilyKey, fetchViaGateway, searchRegion = 'auto' } = options;
   const guard = (engine, id) => guardedSearchRoute(engine, id, options.now);
+  const custom = guard(createOpenaiSearch(options), 'openai-compatible');
   const qianfan = guard(createQianfanSearch(options), 'qianfan');
   const deepseek = guard(createDeepseekSearch(options), 'deepseek');
   const keyless = guard(keylessSearch(fetchViaGateway, searchRegion), 'keyless');
   const bocha = guard(bochaKey ? bochaSearch(bochaKey, fetchViaGateway) : null, 'bocha');
   const tavily = guard(tavilyKey ? tavilySearch(tavilyKey, fetchViaGateway) : null, 'tavily');
-  const all = [qianfan, deepseek, bocha, tavily, keyless].filter(Boolean);
+  const all = [custom, qianfan, deepseek, bocha, tavily, keyless].filter(Boolean);
   if (!all.length) return null;
   // 中文优先千帆、再DeepSeek；英文相反。失败或筛选后为空立即换源，慢源错峰并发。
   return {
@@ -227,8 +229,8 @@ export function createSearch(options = {}) {
     async search(query, n = 6, opts = {}) {
       if (opts.signal?.aborted) throw opts.signal.reason;
       const zh = /[\u4e00-\u9fff]/.test(query);
-      const order = (zh ? [qianfan, deepseek, bocha, keyless, tavily] : [deepseek, qianfan, tavily, bocha, keyless]).filter(Boolean);
-      return staggeredSearch(order, query, n, opts, [qianfan, deepseek].filter(Boolean));
+      const order = (zh ? [custom, qianfan, deepseek, bocha, keyless, tavily] : [custom, deepseek, qianfan, tavily, bocha, keyless]).filter(Boolean);
+      return staggeredSearch(order, query, n, opts, [custom, qianfan, deepseek].filter(Boolean));
     }
   };
 }
@@ -242,7 +244,7 @@ export function staggeredSearch(order, query, n, opts = {}, preferred = null, st
   outer?.addEventListener('abort', stop, { once: true });
   const hits = [];
   const errors = [];
-  let started = 0, settled = 0, done = false, timer = null, preferredHit = false;
+  let started = 0, settled = 0, done = false, timer = null, preferredHit = false, controlFailure = null;
   return new Promise((resolve, reject) => {
     const finish = () => {
       if (done) return;
@@ -251,6 +253,7 @@ export function staggeredSearch(order, query, n, opts = {}, preferred = null, st
       outer?.removeEventListener('abort', stop);
       ctrl.abort();
       if (outer?.aborted) reject(outer.reason ?? Object.assign(new Error('aborted'), { name: 'AbortError' }));
+      else if (controlFailure) reject(controlFailure);
       else if (hits.length) resolve(hits.slice(0, n));
       else if (errors.length) reject(Object.assign(new Error(errors.map((e) => e.message).join('；')), { cause: errors.at(-1), kind: errors.at(-1)?.kind, status: errors.at(-1)?.status, code: errors.at(-1)?.code, name: errors.at(-1)?.name }));
       else resolve([]);
@@ -265,8 +268,11 @@ export function staggeredSearch(order, query, n, opts = {}, preferred = null, st
       Promise.resolve()
         .then(() => e.search(query, n, { ...opts, signal: ctrl.signal }))
         .then((raw) => {
+          if (done) return;
           // 先筛选再决定是否收尾，不能让旧闻/日历抢先返回、挡住备用API。
-          const list = screenSearchHits(raw, opts.requestText || query).hits;
+          const screened = screenSearchHits(raw, opts.requestText || query).hits;
+          // 企业等任务的专用筛选须在收尾前完成，否则首源的无关命中会挡住备用源。
+          const list = typeof opts.acceptHit === 'function' ? screened.filter(opts.acceptHit) : screened;
           for (const h of list ?? []) if (!hits.some((x) => x.url === h.url)) hits.push(h);
           if ((Array.isArray(preferred) ? preferred : [preferred]).includes(e)) preferredHit = Boolean(list.length);
           const label = e.name === '百度千帆搜索' ? '百度搜索' : e.name.startsWith('DeepSeek Search') ? 'DeepSeek搜索' : e.name;
@@ -274,6 +280,11 @@ export function staggeredSearch(order, query, n, opts = {}, preferred = null, st
         })
         .catch((err) => {
           if (done) return;
+          // 停止和整轮额度是控制信号，不能借换源绕过，也不能用先前的命中吞掉。
+          if (err.name === 'AbortError' || ['RETRIEVAL_BUDGET', 'EVAL_QUOTA', 'EVAL_EXPIRED'].includes(err.code)) {
+            controlFailure = err;
+            return finish();
+          }
           errors.push(err);
           opts.progress?.(`${e.name}：${searchFailureLabel(err)}`);
         })

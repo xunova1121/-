@@ -152,6 +152,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
       if (toolName === 'code_read' && files.has(key)) files.get(key).verified = true;
     }
     if (validation) return validation;
+    return { dataRetrieved };
   };
   // 验收结果通常在工具运行中发来，那次调用记回执时序号才加一，所以默认记成 sequence + 1
   const artifact = (event, at = sequence + 1) => {

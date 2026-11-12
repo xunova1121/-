@@ -1,5 +1,6 @@
 import { todayNewsIntent } from '../newsIntent.js';
 import { createQueryLedger } from '../retrievalQuality.js';
+import { RESEARCH_BUDGETS } from '../researchBudget.js';
 /** 普通问题快查；报告、多项核验和明确的深度研究保留较长预算。预算从首次联网开始。 */
 export const QUICK_RETRIEVAL_MS = 45_000;
 export const DEEP_RETRIEVAL_MS = 8 * 60_000;
@@ -19,6 +20,7 @@ export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs, cloc
   const totalLimit = limits.search + limits.read;
   let strict = strictVerification(text);
   let extensive = extensiveRetrieval(text), started = null, calls = 0, failed = 0, reason = '', override = null;
+  let researchLimits = null;
   const duration = () => override ?? timeBudgetMs ?? (strict ? VERIFICATION_MS : extensive ? DEEP_RETRIEVAL_MS : QUICK_RETRIEVAL_MS);
   const check = () => {
     if (!reason && started !== null) {
@@ -34,13 +36,28 @@ export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs, cloc
     consume(kind) {
       // 整轮已收尾时，写清是哪一类先用完、这次哪一步没执行（用户 2026-10-29：读网页却报“search 调用已达到预算”，看不懂）
       if (reason || started !== null && (clock && clock.retrievalRemaining() <= 0 || duration()>0 && now()-started>=duration())) throw Object.assign(new Error(`${reason || '本轮联网检索已达到时间预算'}，这次${KIND_LABEL[kind] || kind}没有执行`), {code:'RETRIEVAL_BUDGET'});
-      const limit = (strict ? { search:20, read:16 } : !extensive ? limits : {})[kind];
+      const baseLimit = (strict ? { search:20, read:16 } : !extensive ? limits : {})[kind];
+      const limit = researchLimits ? Math.min(researchLimits[kind] ?? Infinity, strict ? baseLimit ?? Infinity : Infinity) : baseLimit;
       // 某一类用完：整轮检索就此收尾（主循环下一步会让模型直接用已有资料回答，而不是换个工具接着查）
-      if (limit && resources[kind] >= limit) { reason ||= `${strict ? '逐项核验' : '普通查询'}的${KIND_LABEL[kind] || kind}（${kind}）预算已用完（${limit}次）`; throw Object.assign(new Error(reason), { code:'RETRIEVAL_BUDGET' }); }
+      if (limit && resources[kind] >= limit) { reason ||= `${researchLimits ? '本轮调研' : strict ? '逐项核验' : '普通查询'}的${KIND_LABEL[kind] || kind}（${kind}）预算已用完（${limit}次）`; throw Object.assign(new Error(reason), { code:'RETRIEVAL_BUDGET' }); }
       if (kind in resources) resources[kind]++;
     },
     get active() { return started !== null; },
     get resources() { return {...resources}; },
+    beginResearch(depth = 'standard') {
+      // 只在真正执行调研工具前调整一次；重试、换问题或升档都不能重置计数或续时。
+      if (researchLimits) return;
+      if (check()) throw Object.assign(new Error(reason), { code: 'RETRIEVAL_BUDGET' });
+      const profile = RESEARCH_BUDGETS[depth] ?? RESEARCH_BUDGETS.standard;
+      const elapsed = started === null ? 0 : now() - started;
+      researchLimits = Object.fromEntries(['search', 'read', 'model'].map(kind => [kind, resources[kind] + profile[kind]]));
+      // 显式指定的检索期限仍优先，不能借工具升级绕开调用方约束。
+      override = Math.min(timeBudgetMs ?? Infinity, elapsed + profile.durationMs);
+      if (clock?.extend && Number.isFinite(clock.remaining?.())) {
+        clock.extend(Math.max(0, override - elapsed + SUMMARY_RESERVE_MS - clock.remaining()));
+      }
+      extensive = true;
+    },
     end(ok) { failed = ok ? 0 : failed + 1; },
     upgrade(text) { if (extensiveRetrieval(text)) extensive = true; if (strictVerification(text)) strict = true; },
     close(why) { reason ||= why; },

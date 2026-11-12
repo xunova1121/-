@@ -3,6 +3,8 @@ import { editImage } from '../llm/imageEdit.js';
 import { localLookup } from './lookup.js';
 import { qweatherConfig } from '../core/qweather.js';
 import { deepseekSearchOptions } from '../agent/deepseekSearch.js';
+import { openaiSearchOptions } from '../agent/openaiSearch.js';
+import { createOpenaiSearchFetch } from '../core/openaiSearchGateway.js';
 /**
  * 智能体能用的工具：基础工具（文件、联网、文档……）+ 桌面版的电脑操作（鼠标键盘）+ MCP 连接的外部工具。
  * 也管桌面版的全局热键（呼出、紧急停止）和“本次都允许”的确认记录。
@@ -15,7 +17,7 @@ import { generateVideo } from '../llm/videos.js';
 import { createDocumentReviewer } from '../llm/documentReviewer.js';
 import { createAdapter } from '../llm/config.js';
 import { createHelperLlm } from '../llm/helper.js';
-import { $, body, DESKTOP, COMPACT, toast } from './env.js';
+import { $, body, DESKTOP, COMPACT, toast, storage } from './env.js';
 import { ocrLine, recognizeText } from '../llm/ocr.js';
 
 export function createToolbox(app) {
@@ -80,6 +82,8 @@ export function createToolbox(app) {
       ...createTools({
         metrics: app.metrics,
         ...deepseekSearchOptions(app.llmConfig),
+        ...openaiSearchOptions(app.llmConfig),
+        openaiSearchFetch: createOpenaiSearchFetch(app, { storage }),
         qianfanSearchKey: app.llmConfig.qianfanSearchKey,
         qianfanSearchTopK: app.llmConfig.qianfanSearchTopK,
         tavilyKey: app.llmConfig.tavilyKey,

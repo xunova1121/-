@@ -24,7 +24,11 @@ export async function queryQibookCompany(company, section, { config, get, signal
   return withWebDeadline(async activeSignal => {
     let response;
     try { response = await get(endpoint.href, { headers: { access_key: config.key }, signal: activeSignal, redirect: 'error' }); }
-    catch (error) { throwControl(error, activeSignal); throw businessError('企百科连接失败，可继续使用公开来源', 'QIBOOK_NETWORK', 'network'); }
+    catch (error) {
+      throwControl(error, activeSignal);
+      if (['EVAL_QUOTA', 'EVAL_EXPIRED'].includes(error?.code)) throw error;
+      throw businessError('企百科连接失败，可继续使用公开来源', 'QIBOOK_NETWORK', 'network');
+    }
     if (!response.ok) throw Object.assign(businessError(`企百科HTTP ${response.status}，未取得企业资料`, 'QIBOOK_HTTP', 'api'), { status: response.status });
     let result;
     try { result = JSON.parse(new TextDecoder().decode(await webBody(response, 1024 * 1024, activeSignal))); }

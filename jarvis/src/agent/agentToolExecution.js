@@ -95,6 +95,8 @@ export async function executeToolCalls(
       // 工具可以返回 { text, images }：图片会交给模型“看”（如截屏、工作区里的图片）
       const progress = (text) => emit({ type: 'tool_progress', id: c.id, name: c.name, text });
       const web = webTools.has(c.name);
+      // 必须先协调预算再创建工具截止时间，避免深度流程仍被普通查询的3次/60秒限制截断。
+      if (c.name === 'deep_research') retrieval.beginResearch?.(c.args?.depth);
       if (web && !retrieval.begin()) throw new Error(retrieval.note);
       const run = (s) =>
         tool.run(c.args, {
@@ -133,6 +135,7 @@ export async function executeToolCalls(
       lookupRecovery = e.lookupRecovery;
       if (e.code === 'RETRIEVAL_BUDGET') retrieval.close(e.message);
       output = `错误：${e.message || e}`;
+      if (c.name === 'deep_research' && e.code === 'RETRIEVAL_BUDGET' && e.partialEvidence) output += '\n' + String(e.partialEvidence).slice(0, 1800);
       const scope = toolFailureScope(c.name, e);
       if (scope) output += '\n影响范围：' + scope;
       if (['verify_numbers', 'time_calc'].includes(c.name) && (e.name === 'ValidationError' || /^INVALID_/.test(e.code || ''))) output += '\n请按参数说明改写后重试一次。仍无法计算时必须给用户明确答复；能推算的注明“工具没能计算，以下按常识推算”，列基准和算式，不能称工具已核验，不能只说正在处理。';
@@ -154,9 +157,9 @@ export async function executeToolCalls(
     await checkpoint?.({ type: 'tool_end', id: c.id, name: c.name, ok, output });
     emit({ type: 'tool_end', id: c.id, name: c.name, ok, output: c.name === 'phone_action' && ok ? '手机已返回操作回执；页面文字和截图仅供本轮核对，不写入进度记录。' : output, ...(failure && { errorKind: errorKind(failure), code: failure.code }), ms: Date.now() - t0 });
     if (failure?.code !== 'RETRIEVAL_BUDGET') throwControl(failure, signal);
-    review.record({ name: c.name, args: c.args, ok, output, code: failure?.code, lookupRecovery });
+    const receipt = review.record({ name: c.name, args: c.args, ok, output, code: failure?.code, lookupRecovery });
     const phoneStopped = c.name === 'phone_action' && /^PHONE_(RESULT_UNKNOWN|STOPPED|CANCELLED|LOCKED|DISABLED|PAUSED|DISCONNECTED|OFFLINE|EXPIRED|SCOPE|AUTH)$/.test(failure?.code || '');
-    return { c, ok, output, outImages, ...(lookupRecovery && { lookupRecovery }), ...(failure && { failure: { code: failure.code, name: failure.name, kind: failure.kind, status: failure.status, cooldownUntil: failure.cooldownUntil, tool: failure.tool } }), ...(recovery?.stopped && { recoveryStop: recovery.message }), ...(phoneStopped && { recoveryStop: output + '\n手机操作已停止，请核对手机上的实际状态后再继续。' }) };
+    return { c, ok, output, outImages, ...(receipt?.dataRetrieved !== undefined && { dataRetrieved: receipt.dataRetrieved }), ...(lookupRecovery && { lookupRecovery }), ...(failure && { failure: { code: failure.code, name: failure.name, kind: failure.kind, status: failure.status, cooldownUntil: failure.cooldownUntil, tool: failure.tool } }), ...(recovery?.stopped && { recoveryStop: recovery.message }), ...(phoneStopped && { recoveryStop: output + '\n手机操作已停止，请核对手机上的实际状态后再继续。' }) };
   };
   // 互不影响的只读调用（搜索、读文件、读网页……）同时做；其余按顺序一个个做
   const results = [];

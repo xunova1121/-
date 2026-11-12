@@ -1,4 +1,5 @@
 import { throwControl } from '../core/networkRequest.js';
+import { researchPartialEvidence } from './researchBudget.js';
 /**
  * 深度调研：像研究员一样多轮“规划 → 搜索 → 阅读 → 找缺口 → 补查”，最后写出带引用的报告。
  * 思路参考 GPT Researcher / open_deep_research / node-DeepResearch：
@@ -66,7 +67,18 @@ export const researchEvidenceKey = question => 'research|' + today() + '|' + Str
  * @param {AbortSignal} [o.signal]
  * @returns {Promise<{ title: string, markdown: string, sources: Array<{n,title,url}>, queries: string[], rounds: number }>}
  */
-export async function deepResearch({ question, depth = 'standard', llm = null, search, read, onProgress, signal, consume = () => {}, evidence = [], onEvidence = null }) {
+export async function deepResearch(options) {
+  const sources = [];
+  try {
+    return await runResearch({ ...options, sources });
+  } catch (error) {
+    // 控制信号照常向上抛；同时携带已经取得的有限要点，供主循环收尾，不另发模型请求。
+    if (!options.signal?.aborted && error?.code === 'RETRIEVAL_BUDGET') error.partialEvidence = researchPartialEvidence(sources);
+    throw error;
+  }
+}
+
+async function runResearch({ question, depth = 'standard', llm = null, search, read, onProgress, signal, consume = () => {}, evidence = [], onEvidence = null, sources }) {
   const evidenceKey = researchEvidenceKey(question);
   const cached = new Map(evidence.filter(item => item.key === evidenceKey && Date.now() - item.savedAt >= 0 && Date.now() - item.savedAt < 600000)
     .flatMap(item => item.sources ?? []).slice(-12).map(source => [source.url, String(source.text || '').slice(0, 6000)]));
@@ -92,7 +104,6 @@ export async function deepResearch({ question, depth = 'standard', llm = null, s
     queries = [question, `${question} ${new Date().getFullYear()}`, `${question} 分析`].slice(0, cfg.queries);
   }
 
-  const sources = []; // { n, title, url, snippet, points: string[] }
   const seen = new Set();
   const allQueries = [];
   let round = 0;
@@ -111,7 +122,7 @@ export async function deepResearch({ question, depth = 'standard', llm = null, s
     // 按名次轮流取（每个搜索词的第 1 名、再第 2 名…），同一网站最多 PER_SITE 篇
     const perSite = new Map(sources.map((s) => [host(s.url), 0]));
     for (const s of sources) perSite.set(host(s.url), (perSite.get(host(s.url)) ?? 0) + 1);
-    const budget = Math.ceil(cfg.pages / cfg.rounds) + (round === 0 ? cfg.pages % cfg.rounds : 0);
+    const budget = Math.min(cfg.pages - seen.size, Math.ceil(cfg.pages / cfg.rounds));
     const pick = [];
     for (const r of found.sort((a, b) => a.rank - b.rank)) {
       if (pick.length >= budget) break;
@@ -137,6 +148,7 @@ export async function deepResearch({ question, depth = 'standard', llm = null, s
           else {
             consume('read');
             text = String(await read(r.url)).slice(0, PAGE_CHARS);
+            check();
             if (text.trim()) await onEvidence?.({ key: evidenceKey, savedAt: Date.now(), sources: [{ url: r.url, title: r.title, text }] });
           }
         } catch (error) { throwControl(error, signal); }

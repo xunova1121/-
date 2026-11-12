@@ -19,7 +19,7 @@ const store = (() => { try { return privateStorage(globalThis.localStorage); } c
 /** 语音：engine 为 auto 时按已有密钥自动挑最自然的云端声音，都没有就用浏览器自带 */
 export const DEFAULT_VOICE = { engine: 'auto', voices: GENTLE_VOICES, profile: 'gentle-child', fx: 'gentle', cues: true, browserVoice: '', qwenRegion: 'beijing' };
 export const DEFAULT_STT = { engine: 'auto', customURL: '', customModel: '' };
-export const DEFAULT_CONFIG = { provider: 'mock', models: {}, keys: {}, baseURLs: {}, claudeWebSearch: true, tavilyKey: '', bochaKey: '', qianfanSearchKey: '', qianfanSearchTopK: 10, deepseekSearchEnabled: false, deepseekSearchKey: '', falKey: '', voice: DEFAULT_VOICE, stt: DEFAULT_STT };
+export const DEFAULT_CONFIG = { provider: 'mock', models: {}, keys: {}, baseURLs: {}, claudeWebSearch: true, tavilyKey: '', bochaKey: '', qianfanSearchKey: '', qianfanSearchTopK: 10, deepseekSearchEnabled: false, deepseekSearchKey: '', openaiSearchEnabled: false, openaiSearchBaseURL: '', openaiSearchKey: '', openaiSearchModel: '', openaiSearchProtocol: 'responses', falKey: '', voice: DEFAULT_VOICE, stt: DEFAULT_STT };
 
 export function loadConfig() {
   let cfg = { ...DEFAULT_CONFIG };

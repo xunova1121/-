@@ -17,6 +17,7 @@ import { compareDiagramPpt } from './diagramCompare.mjs';
 import { cropImageRegion } from './imageRegion.mjs';
 import { qweatherConfig } from '../src/core/qweather.js';
 import { deepseekSearchOptions } from '../src/agent/deepseekSearch.js';
+import { openaiSearchOptions } from '../src/agent/openaiSearch.js';
 import { evaluationTools, bindEvaluation } from './evaluation.mjs';
 import { measureModelInput } from '../shared/modelMetrics.js';
 import { createHelperLlm } from '../src/llm/helper.js';
@@ -321,6 +322,14 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const taskLookup = task.evaluationId ? createLookupService({ storage: memoryLookupStorage(), get: publicFetch }) : lookupService;
     const tools = evaluationTools(makeTools({
       ...deepseekSearchOptions(cfg), qianfanSearchKey: cfg.qianfanSearchKey, qianfanSearchTopK: cfg.qianfanSearchTopK,
+      ...openaiSearchOptions(cfg),
+      openaiSearchFetch: (url, init) => {
+        init?.signal?.throwIfAborted();
+        // 自定义搜索是一次模型请求加一次原生搜索，评测额度不能因域名未知漏计。
+        chargeEvaluation('model');
+        chargeEvaluation('search');
+        return publicFetch(url, init);
+      },
       qibookAccessKey: cfg.qibookAccessKey, qibookBaseUrl: cfg.qibookBaseUrl,
       // 评测不读用户保存的文档偏好（字号、风格），结果才能复现
       ...(task.evaluationId && { documentStylePreferences: async () => '' }),

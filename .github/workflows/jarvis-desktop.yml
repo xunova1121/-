@@ -371,6 +371,7 @@ jobs:
           node e2e/server-mode.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/server-auth.mjs "$RUNNER_TEMP/jarvis-e2e/server-auth"
           node e2e/qianfan-search.mjs "$RUNNER_TEMP/jarvis-e2e/qianfan-search"
+          node e2e/openai-search-settings.mjs "$RUNNER_TEMP/jarvis-e2e/openai-search-settings"
           node e2e/runtime-switch.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/code-repos.mjs "$RUNNER_TEMP/jarvis-e2e/code-repos"
           node e2e/code-work.mjs "$RUNNER_TEMP/jarvis-e2e/code-work"
@@ -530,7 +531,13 @@ jobs:
       - name: 写发布说明
         run: |
           cat > release-notes.md <<'NOTES'
-          ## 本版更新 · 中文图片制作与PC连接恢复
+          ## 本版更新 · 自定义联网搜索与企业查询修复
+          - 新增独立OpenAI兼容搜索配置：地址、API Key、模型和协议按本机/云服务器分别保存；支持Responses联网搜索及Chat Completions搜索模型，保存后可检测来源返回。
+          - 企业简介在官方来源未取得资料时继续全网检索；无关结果不再阻止尝试备用引擎，空资料不再误判为成功取数。股权等登记信息保留严格核验。
+          - 多轮调研使用有界的专用预算，保留已获得资料；修复普通查询3次辅助调用限制导致调研中途停止的问题。
+          - 新增协议、配置读回、搜索换源和预算回归；保留全部既有测试及固定安卓签名。真实API GET账号、用户服务器与Android/Windows真机尚未验收。
+
+          ## 保留近期修复
           - 中文海报、封面与明确要求排字的图片，支持模型生成无字底图后用真实字体排版；工作区底图直接复用，不需要传入代码沙箱。
           - 同一版式直接交付PNG成品、自包含SVG与可编辑PPTX；支持精确像素尺寸、五种文字位置、黑体/宋体和指定文字区比例。长文不截断，放不下明确报错。
           - 检查实际字体字形、颜色对比度和PNG尺寸；生成、文件读回和视觉验收分开显示，渲染失败保留源文件，不用PPT代替最终图片冒称完成。
