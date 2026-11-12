@@ -1,3 +1,4 @@
+import { mountTenderCenter } from './tenderCenter.js';
 /**
  * 智能体广场接入（第2步）：打开广场、选智能体开新对话、空对话显示起始页、顶栏显示智能体名字、抽屉入口和历史图标。
  * 配置只从注册表读（本机或服务器上本人的），选了智能体只是记在对话上；真正执行时主循环 / 服务器再按编号解析（见 agentTurn.js）。
@@ -25,6 +26,7 @@ export const DRAWER_PICKS = ['ppt-maker', 'gongwen-writer', 'health-advisor'];
 export function createAgents(app) {
   const cache = new Map(registry.ALL_BUILTIN_AGENTS.map((p) => [p.id, p]));
   let cacheVersion = 0;
+  let tenderView = null;
   const listAgents = async () => {
     const version = cacheVersion;
     const token = userStorageSuffix();
@@ -184,6 +186,8 @@ export function createAgents(app) {
     const session = app.session;
     const draw = (profile) => {
       if (app.session !== session || app.history.length) return;
+      tenderView?.destroy();
+      tenderView = null;
       root.querySelector('.wy-agent-start')?.remove();
       if (!profile) {
         root.append(
@@ -203,6 +207,8 @@ export function createAgents(app) {
           onTemplates: () => library.open()
         })
       );
+      if (profile.id === 'business-intelligence' && profile.source === 'builtin')
+        tenderView = mountTenderCenter(app, root.querySelector('.wy-agent-start'), fill);
       root.scrollTop = 0;
       decorateTitle();
     };
@@ -247,6 +253,8 @@ export function createAgents(app) {
 
   // 服务器模式切换后，个人智能体从服务器读：清掉本机缓存里的非内置项
   function resetCache() {
+    tenderView?.destroy();
+    tenderView = null;
     cacheVersion++;
     for (const [id, p] of cache) if (p.source !== 'builtin') cache.delete(id);
     editor.close();

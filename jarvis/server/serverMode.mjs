@@ -1,3 +1,5 @@
+import { createTenderCenter } from './tenderCenter.mjs';
+import { createTenderRoutes } from './tenderRoutes.mjs';
 import { createUserStore, currentUser, PRIMARY_USER, runAsUser, userDataDir, userService } from './userScope.mjs';
 import { memberModelConfig } from './userRoutes.mjs';
 import { createAgentProfileRoutes } from './agentProfileRoutes.mjs';
@@ -131,7 +133,7 @@ export function mergeConfig(old, next) {
 /**
  * @param {{ dataDir: string, password: string, maxRunning?: number, runner?: object }} o
  */
-export function createServerMode({ dataDir, password, maxRunning = 2, runner: injected = null, appDir = APP_DIR, updateUnit = UPDATE_UNIT, makeModelAdapter, makeTaskAdapter, autoSchedules = false, codeHosting = createGitHubHost(), codeGit, codeSandbox = null, lookupService: injectedLookup = null, readinessRuntime, searchFetch } = {}) {
+export function createServerMode({ dataDir, password, maxRunning = 2, runner: injected = null, appDir = APP_DIR, updateUnit = UPDATE_UNIT, makeModelAdapter, makeTaskAdapter, autoSchedules = false, codeHosting = createGitHubHost(), codeGit, codeSandbox = null, lookupService: injectedLookup = null, readinessRuntime, searchFetch, tenderCollector, autoTenderRefresh = autoSchedules } = {}) {
   if (!password || String(password).length < 6) throw new Error('服务器模式需要设置 JARVIS_PASSWORD（至少 6 位）');
   const security = createAccessSecurity({ dataDir, password: String(password) });
   const evaluationAccess = createEvaluationAccess({ store: createUserStore(dataDir), dataDir, security });
@@ -190,6 +192,8 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
   const schedules = userService(() => createServerSchedules({ runner, active: () => security.users.active(currentUser()) }));
   // 启动时为每个有效身份恢复提醒；新建成员的定时器在首次请求时启动。
   if (autoSchedules) for (const id of security.users.ids()) runAsUser(id, () => schedules.start());
+  const tenders = createTenderCenter({ dataDir, get: publicFetch, collector: tenderCollector, users: () => security.users.ids(), active: id => security.users.active(id) });
+  if (autoTenderRefresh) tenders.start();
   let activePCModels = 0;
   let activeCatalogs = 0;
   // WebSocket等只需主人身份；普通HTTP由access逐项判定权限及403。
@@ -249,6 +253,7 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
     req.on('close', cleanup);
   }
 
+  const tenderRoutes = createTenderRoutes({ center: tenders, readJson, json });
   const agentProfileRoutes = createAgentProfileRoutes({ readJson, json });
   const studioRoutes = createStudioRoutes({ dataDir, readJson, json, activeUser: id => security.users.active(id) });
   const phoneRoutes = createPhoneRoutes({ broker: phoneBroker, readJson, json, principal: security.authenticate });
@@ -272,6 +277,7 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
     if (await accessRoutes.handle(req, res, pathname)) return true;
     if (await agentProfileRoutes(req, res, pathname, url)) return true;
     if (await studioRoutes(req, res, pathname, url)) return true;
+    if (await tenderRoutes(req, res, pathname, url, principal)) return true;
     if (await phoneRoutes(req, res, pathname)) return true;
     if (pathname === '/api/server/readiness') {
       if (!authorized(req)) { json(res, 401, { error: '服务器登录已失效' }); return true; }
@@ -427,7 +433,7 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
       }
     }
     if (pathname === '/api/server/schedules' && req.method === 'GET') { json(res, 200, await scheduler.list()); return true; }
-    if (pathname === '/api/server/notices' && req.method === 'GET') { const after = Number(url.searchParams.get('after')) || 0; const securityNotices = security.overview(principal).notices.filter(n => n.at > after).map(n => ({ id: n.id, at: n.at, kind: 'security', deviceId: n.sessionId, title: '新设备登录', body: `${new Date(n.at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })} · ${n.ip} · ${n.device}；可在设置→服务器→登录安全中退出此设备` })); json(res, 200, [...await scheduleNotices(after), ...securityNotices].sort((a, b) => a.at - b.at)); return true; }
+    if (pathname === '/api/server/notices' && req.method === 'GET') { const after = Number(url.searchParams.get('after')) || 0; const securityNotices = security.overview(principal).notices.filter(n => n.at > after).map(n => ({ id: n.id, at: n.at, kind: 'security', deviceId: n.sessionId, title: '新设备登录', body: `${new Date(n.at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })} · ${n.ip} · ${n.device}；可在设置→服务器→登录安全中退出此设备` })); json(res, 200, [...await scheduleNotices(after), ...await tenders.notices(after), ...securityNotices].sort((a, b) => a.at - b.at)); return true; }
     const sch = pathname.match(/^\/api\/server\/schedules\/([\w-]{1,60})(\/run)?$/);
     if (sch) {
       if (sch[2] && req.method === 'POST') {
@@ -570,5 +576,5 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
     return false;
   }
 
-  return { authorized, watchAccess: (req, close) => { const principal = security.authenticate(req); return security.onRevoke(id => { if (id === principal?.id) close(); }); }, access: req => runAsUser(security.authenticate(req)?.userId || PRIMARY_USER, () => accessRoutes.access(req)), handle, runner, schedules, store, ready, realtimeKey: () => loadConfig().keys?.qwen || '', qweather: () => qweatherConfig(loadConfig()) };
+  return { authorized, watchAccess: (req, close) => { const principal = security.authenticate(req); return security.onRevoke(id => { if (id === principal?.id) close(); }); }, access: req => runAsUser(security.authenticate(req)?.userId || PRIMARY_USER, () => accessRoutes.access(req)), handle, runner, schedules, tenders, store, ready, realtimeKey: () => loadConfig().keys?.qwen || '', qweather: () => qweatherConfig(loadConfig()) };
 }

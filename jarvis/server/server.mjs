@@ -422,7 +422,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   const mcp = process.env.JARVIS_NO_MCP || serverMode ? null : createMcpManager({ log: (m) => console.log(m) });
   const server = createServer({ mcp, serverMode });
   mcp?.startAll();
-  const shutdown = async () => { await mcp?.closeAll(); process.exit(0); };
+  const shutdown = async () => { await serverMode?.tenders.stop(); await mcp?.closeAll(); process.exit(0); };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
   server.listen(port, host, () => {
