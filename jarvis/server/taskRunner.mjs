@@ -122,9 +122,14 @@ export async function publicFetch(url, init = {}, fetchImpl = globalThis.fetch, 
     if (!(res.status >= 300 && res.status < 400 && loc)) return res;
     if (init.redirect === 'error') throw Object.assign(new Error('此请求不允许重定向'), { code: 'REDIRECT_BLOCKED', kind: 'api' });
     if (hop >= 5) throw new Error('重定向次数过多');
-    u = new URL(loc, u);
+    const next = new URL(loc, u);
+    // 跳到别的站点时去掉凭据头（同 Fetch 标准）：手动跟随重定向会把同一份请求头带到每一跳，
+    // 搜索/图库等服务的 Key 放在请求头里，不能因为一次跨站重定向就交给第三方。
+    if (next.origin !== u.origin) for (const name of [...headers.keys()]) if (CREDENTIAL_HEADER.test(name)) headers.delete(name);
+    u = next;
   }
 }
+const CREDENTIAL_HEADER = /^(?:authorization|proxy-authorization|cookie|x-api-key|api-key|apikey|access[_-]?key|x-access-key|x-auth-token|x-goog-api-key)$/i;
 
 const clip = (s, n) => (typeof s === 'string' && s.length > n ? `${s.slice(0, n)}…（已截断）` : s);
 

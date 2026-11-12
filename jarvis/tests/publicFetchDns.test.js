@@ -169,3 +169,20 @@ describe('网页读取与真实公网校验接缝（纯模拟）', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
+
+describe('公网抓取：重定向不把凭据带到别的站点', () => {
+  it('跨站重定向去掉 Authorization / Key 类请求头，普通头保留；同站重定向照常带上', async () => {
+    const seen = [];
+    const fetchImpl = vi.fn(async (u, init) => {
+      seen.push({ host: new URL(u).host, auth: init.headers.get('authorization'), key: init.headers.get('access_key'), xkey: init.headers.get('x-api-key'), lang: init.headers.get('accept-language') });
+      if (seen.length === 1) return new Response('', { status: 302, headers: { location: '/v2' } });
+      if (seen.length === 2) return new Response('', { status: 302, headers: { location: 'https://other.example/' } });
+      return new Response('ok');
+    });
+    const res = await publicFetch('https://api.example/v1', { headers: { Authorization: 'Bearer secret-key', access_key: 'secret2', 'X-Api-Key': 'secret3' } }, fetchImpl, async () => publicAddress);
+    expect(await res.text()).toBe('ok');
+    expect(seen[1]).toMatchObject({ host: 'api.example', auth: 'Bearer secret-key', key: 'secret2', xkey: 'secret3' });
+    expect(seen[2]).toMatchObject({ host: 'other.example', auth: null, key: null, xkey: null });
+    expect(seen[2].lang).toContain('zh-CN');
+  });
+});
