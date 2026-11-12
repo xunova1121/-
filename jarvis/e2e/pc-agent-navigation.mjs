@@ -29,6 +29,24 @@ try {
     });
     await page.fill('#prompt', '这段草稿切换页面后应保留');
     const entry = page.locator('.rail [data-destination="agents"]');
+    if (width === 1440) {
+      // 固定打开页与下一帧的顺序，复现慢机器上返回按钮抢走搜索输入焦点。
+      await page.evaluate(() => {
+        const original = window.requestAnimationFrame;
+        window.__agentOpenFrames = [];
+        window.requestAnimationFrame = callback => { window.__agentOpenFrames.push(callback); return 0; };
+        try { document.querySelector('.rail [data-destination="agents"]').click(); }
+        finally { window.requestAnimationFrame = original; }
+      });
+      await page.locator('.wy-agents-search-input').fill('招投标');
+      await page.evaluate(() => { for (const callback of window.__agentOpenFrames) callback(performance.now()); delete window.__agentOpenFrames; });
+      check('打开后的下一帧不能抢走搜索框焦点', await page.locator('.wy-agents-search-input').evaluate(n => n === document.activeElement));
+      await page.waitForFunction(() => document.querySelectorAll('.wy-agent-card[data-agent]').length === 1);
+      await page.locator('.wy-agents-search-input').fill('');
+      await page.waitForFunction(() => document.querySelectorAll('.wy-agent-card[data-agent]').length === 9);
+      check('清空搜索恢复全部智能体', await page.inputValue('.wy-agents-search-input') === '');
+      await page.locator('.wb-agent-square .wy-agents-back').click();
+    }
     check(`${tag} 入口位于新建对话后，顶栏不再重复`, await entry.evaluate(n => n.previousElementSibling?.classList.contains('wb-new')) && await page.locator('.topbar [data-destination="agents"]').count() === 0);
     await entry.click(); await page.waitForSelector('.wb-agent-square:not([hidden]) .wy-agent-card[data-agent]');
     await page.waitForFunction(() => document.querySelector('.rail [data-destination="agents"]').getAttribute('aria-current') === 'page');

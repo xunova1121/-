@@ -145,8 +145,9 @@ export function createAgentSquare({ listAgents, onPick, onEdit, studio, onClose 
     search.value = state.query;
     root.hidden = false;
     document.body.classList.add('wy-agents-open');
+    // 打开当下设置初始焦点，不能在下一帧抢走用户刚开始输入的搜索框。
+    back.focus();
     load();
-    requestAnimationFrame(() => back.focus());
   }
   function close() {
     if (root.hidden) return;
