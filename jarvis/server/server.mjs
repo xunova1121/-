@@ -45,6 +45,13 @@ import { createRuntimeReadiness } from './runtimeReadiness.mjs';
 const CORS_PATHS = /^\/api\/(health|readiness|local\/metrics|llm\/.+|tts\/edge|voice\/qwen\/voices)$/;
 /** 服务器模式里允许跨域调用的接口（手机 App、电脑版连自己的服务器） */
 const SERVER_CORS = /^\/api\/(health|server\/.+|phone\/(?:devices(?:\/[a-f0-9-]{36})?|transport)|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?|work-records(\/[^/]+)?|weather(\/cities)?|sports\/scores|voice\/qwen\/voices)$/;
+// 独立业务路由不在 /api/server 下；PC本机页面连云服务器也必须能预检。
+// 仅列出已实现的资源路径，实际请求继续走下方登录与成员权限校验。
+const SERVER_RESOURCE_CORS = [
+  /^\/api\/agent-profiles(?:\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*)?$/,
+  /^\/api\/studio\/(?:preferences|works|versions|copy|edit|inspect|preview|team(?:\/[a-f0-9-]{36}(?:\/copy)?)?)$/,
+  /^\/api\/tenders\/(?:catalog|mine|settings|refresh)$/
+];
 export const EXTRA_UPSTREAMS = { qianfan: 'https://qianfan.baidubce.com', tavily: 'https://api.tavily.com', bocha: 'https://api.bochaai.com', elevenlabs: 'https://api.elevenlabs.io', fal: 'https://queue.fal.run' };
 // 读取网页时用常见浏览器的请求头：不少网站（包括搜索引擎）会拒绝或降级陌生的客户端
 const FETCH_HEADERS = {
@@ -331,7 +338,7 @@ export function createServer({
       // 服务器模式：除了健康检查和登录，所有接口都要先登录（别人拿不到你的模型额度、看不到你的对话）
       if (serverMode && pathname.startsWith('/api/')) {
         // 手机 App、电脑版的页面不是从这个网址打开的：允许跨域调用服务器模式的接口（凭令牌，不用 Cookie，所以对所有来源开放是安全的）
-        if (req.headers.origin && SERVER_CORS.test(pathname)) {
+        if (req.headers.origin && (SERVER_CORS.test(pathname) || SERVER_RESOURCE_CORS.some(pattern => pattern.test(pathname)))) {
           res.setHeader('Access-Control-Allow-Origin', '*');
           if (req.method === 'OPTIONS') {
             res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE', 'Access-Control-Allow-Headers': 'authorization, content-type, last-event-id, x-jarvis-device', 'Access-Control-Max-Age': '600' });

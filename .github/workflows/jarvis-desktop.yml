@@ -487,6 +487,7 @@ jobs:
           node e2e/business-intelligence.mjs "$RUNNER_TEMP/jarvis-e2e/business-intelligence"
           node e2e/tender-center.mjs "$RUNNER_TEMP/jarvis-e2e/tender-center"
           node e2e/pc-agent-navigation.mjs "$RUNNER_TEMP/jarvis-e2e/pc-agent-navigation"
+          node e2e/agent-resources-cross-origin.mjs "$RUNNER_TEMP/jarvis-e2e/agent-resources-cross-origin"
           node e2e/studio-library.mjs "$RUNNER_TEMP/jarvis-e2e/studio-library"
           node e2e/studio-team.mjs "$RUNNER_TEMP/jarvis-e2e/studio-team"
       - name: 保存验证截图和日志
