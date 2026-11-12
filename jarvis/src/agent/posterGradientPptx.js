@@ -7,10 +7,11 @@ const SLIDE = 'ppt/slides/slide1.xml';
 const invalid = message => Object.assign(new Error(message), { code: 'POSTER_GRADIENT_INVALID', kind: 'validation' });
 const children = node => Array.from(node.childNodes).filter(child => child.nodeType === 1);
 
-function gradientXml(color, opacity) {
+function gradientXml(color, opacity, mid = null) {
   const alpha = Math.round(opacity * 100000);
   const stop = (position, value) => `<a:gs pos="${position}"><a:srgbClr val="${color}"><a:alpha val="${value}"/></a:srgbClr></a:gs>`;
-  return `<a:gradFill rotWithShape="1"><a:gsLst>${stop(0, 0)}${stop(100000, alpha)}</a:gsLst><a:lin ang="5400000" scaled="0"/></a:gradFill>`;
+  const middle = mid ? stop(Math.round(mid.offset * 100000), Math.round(mid.opacity * 100000)) : '';
+  return `<a:gradFill rotWithShape="1"><a:gsLst>${stop(0, 0)}${middle}${stop(100000, alpha)}</a:gsLst><a:lin ang="5400000" scaled="0"/></a:gradFill>`;
 }
 
 /** 只替换spPr的直接子填充，不能误改线条、文字或其他嵌套对象的颜色。 */
@@ -39,7 +40,7 @@ function replaceShapeFill(shape, replacement) {
   return shape.replace(properties[0], properties[0].replace(content, () => changed));
 }
 
-function rewriteSlide(xml, color, opacity) {
+function rewriteSlide(xml, color, opacity, mid = null) {
   if (xml.length > 1e6 || /<!DOCTYPE|<!ENTITY/i.test(xml)) throw invalid('海报页面结构超出限制');
   let doc;
   try { doc = new DOMParser({ onError: () => { throw invalid('海报页面XML无效'); } }).parseFromString(xml, 'application/xml'); }
@@ -57,14 +58,14 @@ function rewriteSlide(xml, color, opacity) {
     const name = /<p:cNvPr\b[^>]*\bname="([^"]*)"/.exec(shape)?.[1];
     if (name !== TARGET) return shape;
     count++;
-    return replaceShapeFill(shape, gradientXml(color, opacity));
+    return replaceShapeFill(shape, gradientXml(color, opacity, mid));
   });
   if (count !== 1 || output === xml) throw invalid('海报PPT渐变没有准确写入');
   return output;
 }
 
 /** 原生透明渐变从上到下，0%完全透明至100%指定不透明度；其他ZIP部件内容逐字节保留。 */
-export async function applyPosterGradient(blob, { color, opacity = 0.85 } = {}) {
+export async function applyPosterGradient(blob, { color, opacity = 0.85, mid = null } = {}) {
   if (!(blob instanceof Blob) || !blob.size || blob.size > 20e6 || typeof color !== 'string' || !/^#?[\da-f]{6}$/i.test(color) || !Number.isFinite(opacity) || opacity < 0 || opacity > 1)
     throw invalid('海报PPT渐变参数无效');
   const normalized = color.replace(/^#/, '').toUpperCase();
@@ -77,7 +78,7 @@ export async function applyPosterGradient(blob, { color, opacity = 0.85 } = {}) 
     if (slides.length !== 1 || slides[0].name !== SLIDE || slides[0]._data?.uncompressedSize > 1e6)
       throw invalid('海报渐变仅支持本程序生成的单页PPT');
     const source = await slides[0].async('string');
-    zip.file(SLIDE, rewriteSlide(source, normalized, opacity));
+    zip.file(SLIDE, rewriteSlide(source, normalized, opacity, mid));
     const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
     if (bytes.byteLength > 20e6) throw invalid('海报PPT渐变输出超过大小限制');
     return new Blob([bytes], { type: blob.type || 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });

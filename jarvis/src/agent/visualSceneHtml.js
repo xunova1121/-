@@ -1,5 +1,6 @@
 import { validateVisualSceneSvg } from './visualSceneSvg.js';
 import { readImageMetadata } from './imageMetadata.js';
+import { rangeLabel } from './visualScene.js';
 
 const MAX_METADATA = 128_000;
 const MAX_PNG = 24e6;
@@ -89,7 +90,7 @@ function sceneBootstrap(selectionFor) {
     }
     byId('scene-detail-content').replaceChildren(list);
   };
-  const provenance = () => [['数据说明', design.dataMode === 'demo' ? '演示数据，不用于业务或气象决策' : '提供的数据快照'], ['来源', design.source || '未提供'], ['数据时间', design.asOf || '未提供']];
+  const provenance = () => [['数据说明', design.dataMode === 'demo' ? `演示数据，不用于${design.preset === 'weather' ? '气象' : '业务'}决策` : '提供的数据快照'], ['来源', design.source || '未提供'], ['数据时间', design.asOf || '未提供']];
   function clearSelection() {
     if (selected) {
       selected.removeAttribute('data-selected');
@@ -189,7 +190,7 @@ function sceneBootstrap(selectionFor) {
     byId('layer-' + layer + '-control').hidden = !nodes.length;
     byId('layer-' + layer).addEventListener('change', event => {
       nodes.forEach(node => node.setAttribute('visibility', event.target.checked ? 'visible' : 'hidden'));
-      announce((layer === 'radar' ? '雷达' : '网格') + '图层已' + (event.target.checked ? '显示' : '隐藏'));
+      announce((layer === 'radar' ? (design.preset === 'weather' ? '雷达' : '覆盖范围') : '网格') + '图层已' + (event.target.checked ? '显示' : '隐藏'));
     });
   }
   byId('scene-zoom').addEventListener('change', event => {
@@ -268,7 +269,7 @@ export async function createVisualSceneHtml({ design, svg, pngBlob } = {}) {
 <html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${escapeHtml(csp)}"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(design.title)} · 交互设计</title><style>${CSS}</style></head>
 <body data-theme="${design.theme === 'light' ? 'light' : 'midnight'}"><div class="shell">
 <header class="masthead"><div><p class="eyebrow">WEIYANG / VISUAL STUDIO</p><h1>${escapeHtml(design.title)}</h1><p class="subtitle">${escapeHtml(design.subtitle || '同一设计，自由探索')}</p></div><span class="badge">${badge}</span></header>
-<div class="toolbar" aria-label="设计操作"><div class="tools"><label class="control" id="scene-date-control" hidden>时段观察<select id="scene-date" aria-label="选择已有趋势时段"><option value="">完整快照</option></select></label><label class="layer" id="layer-radar-control" hidden><input id="layer-radar" type="checkbox" checked>雷达</label><label class="layer" id="layer-grid-control" hidden><input id="layer-grid" type="checkbox" checked>网格</label><label class="control">视图<select id="scene-zoom" aria-label="视图缩放"><option value="fit">适应窗口</option><option value="detail">细节放大 2×</option></select></label><button id="scene-reset" type="button">重置视图</button></div><div class="tools downloads">${png ? `<a class="download primary" id="download-png" href="${png}" download="${escapeHtml(String(design.title || '设计稿').replace(/[\\/:*?"<>|]/g, '_'))}-初始视图.png">下载初始 PNG · ${design.width}×${design.height}</a>` : ''}<button id="download-svg" type="button">导出当前 SVG</button></div></div>
+<div class="toolbar" aria-label="设计操作"><div class="tools"><label class="control" id="scene-date-control" hidden>时段观察<select id="scene-date" aria-label="选择已有趋势时段"><option value="">完整快照</option></select></label><label class="layer" id="layer-radar-control" hidden><input id="layer-radar" type="checkbox" checked>${rangeLabel(design)}</label><label class="layer" id="layer-grid-control" hidden><input id="layer-grid" type="checkbox" checked>网格</label><label class="control">视图<select id="scene-zoom" aria-label="视图缩放"><option value="fit">适应窗口</option><option value="detail">细节放大 2×</option></select></label><button id="scene-reset" type="button">重置视图</button></div><div class="tools downloads">${png ? `<a class="download primary" id="download-png" href="${png}" download="${escapeHtml(String(design.title || '设计稿').replace(/[\\/:*?"<>|]/g, '_'))}-初始视图.png">下载初始 PNG · ${design.width}×${design.height}</a>` : ''}<button id="download-svg" type="button">导出当前 SVG</button></div></div>
 <main class="workspace"><section class="canvas-card" aria-label="设计画布"><div class="canvas-heading"><strong>${isPoster ? '原稿预览' : '态势总览'}</strong><span>中文矢量文字 · 可交互</span></div><div id="scene-stage" data-zoom="fit">${scene}</div><div class="canvas-foot"><span>${escapeHtml(design.asOf || '时间未提供')}</span><span>来源：${escapeHtml(design.source || '未提供')}</span></div></section><aside class="detail" id="scene-detail" aria-label="选中内容详情"><p class="eyebrow" id="scene-detail-kind">DESIGN INSPECTOR</p><h2 id="scene-detail-title">探索这份设计</h2><div id="scene-detail-content"></div><button type="button" id="scene-copy-text" hidden>复制选中文字</button><p class="note">${instructions}${isPoster ? '' : '时段观察仅选中已有趋势点，其他指标保持原始快照。'}${png ? 'PNG 保存初始视图，SVG 保存当前图层与选中状态。' : '未附初始 PNG，可导出当前 SVG。'}</p></aside></main>
-<footer class="footer"><p id="scene-status" role="status" aria-live="polite">${design.dataMode === 'demo' ? '演示数据，不用于业务或气象决策。' : '离线数据快照，未连接实时数据接口。'}</p><span class="offline">离线可用</span></footer></div><textarea id="scene-copy-buffer" aria-hidden="true" tabindex="-1"></textarea><noscript>启用 JavaScript 后可点选详情和导出当前 SVG；原稿与初始 PNG 仍可查看。</noscript><script id="scene-data" type="application/json">${data}</script><script>${script}</script></body></html>`;
+<footer class="footer"><p id="scene-status" role="status" aria-live="polite">${design.dataMode === 'demo' ? `演示数据，不用于${design.preset === 'weather' ? '气象' : '业务'}决策。` : '离线数据快照，未连接实时数据接口。'}</p><span class="offline">离线可用</span></footer></div><textarea id="scene-copy-buffer" aria-hidden="true" tabindex="-1"></textarea><noscript>启用 JavaScript 后可点选详情和导出当前 SVG；原稿与初始 PNG 仍可查看。</noscript><script id="scene-data" type="application/json">${data}</script><script>${script}</script></body></html>`;
 }

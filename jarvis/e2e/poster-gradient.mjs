@@ -57,10 +57,10 @@ async function screenshot(page, url, filename, description) {
   await page.screenshot({ path: path.join(output, filename), fullPage: true });
 }
 
-async function verifyGradientPixels(page, label, url) {
+async function verifyGradientPixels(page, label, url, mid = null) {
   const pixels = await page.evaluate(inspectGradient, {
     imageUrl: url, width: gradientSample.width, height: gradientSample.height,
-    start: layout.panel.y, opacity: gradientSample.gradient_opacity
+    start: layout.panel.y, opacity: gradientSample.gradient_opacity, mid
   });
   await saveJson(`${label}-gradient-pixels.json`, pixels);
   check(`${label}：真实1080×1440画幅`, pixels.width === 1080 && pixels.height === 1440, pixels);
@@ -84,9 +84,10 @@ async function verifyTextPixels(page, label, url, svg, reference) {
 }
 
 async function createNodeProduct(page, background) {
-  let renders = 0;
+  // 2026-11-12 复审：渐变先渲无字版（文字全透明）量真实像素对比度；成品（带字）仍只渲一次
+  let renders = 0, measures = 0;
   const tool = createPosterTool({
-    renderVisualScene: async (...args) => { renders++; return renderVisualScene(...args); },
+    renderVisualScene: async (...args) => { if (String(args[0]).includes('<g opacity="0"><text')) measures++; else renders++; return renderVisualScene(...args); },
     renderPoster: async () => { throw new Error('渐变不得进入旧实色SVG渲染器'); },
     imageGen: async () => { modelCalls++; throw new Error('合成底图不应调用图片模型'); }
   });
@@ -95,7 +96,10 @@ async function createNodeProduct(page, background) {
   await saveJson('node-receipt.json', receipt);
   check('Node工具真实交付PNG/SVG/PPTX且字体通过', receipt.status === 'complete' && receipt.fontCheck === 'passed' && receipt.files.length === 3, receipt);
   check('渐变只走受控视觉渲染器且未重复渲染', renders === 1);
-  check('回执保留视觉未验收而非承诺底图对比', receipt.visual === 'not_checked' && receipt.gradient?.contrast === 'not_checked', receipt);
+  check('按真实像素量了对比度（无字版测量1～4次）且回执写明结果', measures >= 1 && measures <= 4 && ['passed', 'failed'].includes(receipt.gradient?.contrast), receipt.gradient);
+  // 2026-11-12 复审：对比度改为按真实像素实测，结论必须带每块文字的实测数值；整体视觉仍未验收
+  check('回执保留视觉未验收而非承诺底图对比', receipt.visual === 'not_checked' && receipt.gradient?.contrast === 'passed'
+    && receipt.gradient.measured?.length >= 2 && receipt.gradient.measured.every(item => item.contrast >= item.minimum), receipt);
   const files = {};
   for (const file of receipt.files) {
     files[file.format] = await ws.readBlob(file.path);
@@ -109,11 +113,16 @@ async function createNodeProduct(page, background) {
   const gradient = documentSvg.getElementsByTagName('linearGradient')[0];
   const stops = Array.from(gradient?.getElementsByTagName('stop') || []);
   const gradientRect = Array.from(documentSvg.getElementsByTagName('rect')).find(rect => rect.getAttribute('fill') === 'url(#poster-text-gradient)');
-  check('SVG使用原生连续透明渐变', gradient?.getAttribute('y2') === '1' && stops.length === 2 && stops[0].getAttribute('stop-opacity') === '0' && stops[1].getAttribute('stop-opacity') === '0.85');
+  // 2026-11-12 复审：实测对比不足时在标题高度多一个中间色标；仍须首尾为0→0.85、不透明度不递减、中间色标与回执一致
+  const svgOpacity = stops.map(stop => Number(stop.getAttribute('stop-opacity')));
+  const boosted = receipt.gradient?.boosted;
+  check('SVG使用原生连续透明渐变', gradient?.getAttribute('y2') === '1' && stops.length === (boosted ? 3 : 2) && stops[0].getAttribute('stop-opacity') === '0' && stops.at(-1).getAttribute('stop-opacity') === '0.85'
+    && svgOpacity.every((value, index) => !index || value >= svgOpacity[index - 1])
+    && (!boosted || Number(stops[1].getAttribute('offset')) === boosted.offset && svgOpacity[1] === boosted.opacity), svgOpacity);
   check('默认渐变严格位于底部35%', Math.abs(layout.panel.y - 936) < 1e-8 && Math.abs(layout.panel.h - 504) < 1e-8 && layout.blocks.every(block => block.align === 'center'), layout.panel);
   check('实际SVG渐变区使用精确936起点和504像素高度', gradientRect?.getAttribute('x') === '0' && gradientRect.getAttribute('y') === '936' && gradientRect.getAttribute('width') === '1080' && gradientRect.getAttribute('height') === '504');
   const pixels = await verifyTextPixels(page, 'node', imageUrl(await files.png.arrayBuffer()), svg);
-  await verifyGradientPixels(page, 'node', imageUrl(await files.png.arrayBuffer()));
+  await verifyGradientPixels(page, 'node', imageUrl(await files.png.arrayBuffer()), receipt.gradient?.boosted);
   await screenshot(page, imageUrl(await files.png.arrayBuffer()), 'node-screen.png', '1080×1440真实Node渐变PNG；中文程序排字，原创合成底图');
   return { input, files, svg, receipt, pixels };
 }
@@ -136,7 +145,7 @@ async function verifyBrowserProduct(page, product, background) {
   check('浏览器与Node消费完全相同的SVG设计', result.svg === product.svg);
   const bytes = Buffer.from(result.png, 'base64');
   await fs.writeFile(path.join(output, 'browser.png'), bytes);
-  await verifyGradientPixels(page, 'browser', imageUrl(bytes));
+  await verifyGradientPixels(page, 'browser', imageUrl(bytes), result.receipt.gradient?.boosted);
   await verifyTextPixels(page, 'browser', imageUrl(bytes), product.svg);
   await screenshot(page, imageUrl(bytes), 'browser-screen.png', '1080×1440真实浏览器渐变PNG；同SVG设计，不是截图放大');
 }
@@ -147,7 +156,12 @@ async function verifyOfficeProduct(page, product) {
   const shapes = Array.from(slide.getElementsByTagName('p:sp'));
   const gradient = shapes.find(shape => shape.getElementsByTagName('p:cNvPr')[0]?.getAttribute('name') === 'poster-text-gradient');
   const stops = Array.from(gradient?.getElementsByTagName('a:gs') || []);
-  check('PPTX渐变为原生透明度而非截图/硬色块', stops.length === 2 && stops[0].getAttribute('pos') === '0' && stops[1].getAttribute('pos') === '100000' && stops[0].getElementsByTagName('a:alpha')[0]?.getAttribute('val') === '0' && stops[1].getElementsByTagName('a:alpha')[0]?.getAttribute('val') === '85000');
+  // 2026-11-12 复审：与SVG同一组色标（可能多一个标题高度的中间色标）
+  const boosted = product.receipt.gradient?.boosted;
+  const alphas = stops.map(stop => Number(stop.getElementsByTagName('a:alpha')[0]?.getAttribute('val')));
+  check('PPTX渐变为原生透明度而非截图/硬色块', stops.length === (boosted ? 3 : 2) && stops[0].getAttribute('pos') === '0' && stops.at(-1).getAttribute('pos') === '100000' && alphas[0] === 0 && alphas.at(-1) === 85000
+    && alphas.every((value, index) => !index || value >= alphas[index - 1])
+    && (!boosted || Number(stops[1].getAttribute('pos')) === Math.round(boosted.offset * 100000) && alphas[1] === Math.round(boosted.opacity * 100000)), alphas);
   const textShapes = shapes.filter(shape => shape.getElementsByTagName('a:t').length);
   check('PPTX每行文字独立可编辑', textShapes.length === rows.length && textShapes.map(shape => Array.from(shape.getElementsByTagName('a:t')).map(node => node.textContent).join('')).join('') === rows.map(row => row.text).join(''));
   check('LibreOffice真实转换能力可用', await officeRenderAvailable());
@@ -161,7 +175,7 @@ async function verifyOfficeProduct(page, product) {
   check('Office输出单页原画幅', result.pages === 1 && result.width === 1080 && result.height === 1440, result.points);
   for (const text of [gradientSample.title, gradientSample.subtitle, ...gradientSample.lines, gradientSample.footer])
     check(`Office保留可抽取全文：${text}`, result.text.replace(/\s/g, '').includes(text.replace(/\s/g, '')));
-  await verifyGradientPixels(page, 'office', result.png);
+  await verifyGradientPixels(page, 'office', result.png, product.receipt.gradient?.boosted);
   await verifyTextPixels(page, 'office', result.png, product.svg, product.pixels);
   await screenshot(page, result.png, 'office-screen.png', '真实LibreOffice：原生透明渐变PPTX → PDF，全文可抽取');
 }

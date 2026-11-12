@@ -121,3 +121,13 @@ describe('中文海报通用路由与真实交付', () => {
     expect(result.text).not.toContain('部分完成');
   });
 });
+
+describe('2026-11-12 复审：宣传单、易拉宝、请柬等常见说法也走程序排字', () => {
+  it.each(['做一张招生宣传单，写上报名电话13800000000', '做个易拉宝，标题是新品发布会', '做一张婚礼电子请柬，写上新郎新娘名字和日期', '帮我做个朋友圈九宫格配图，每张写一句话', '设计一张公众号头图，标题“周末去哪儿”', '画一张中秋节贺卡，写上中秋快乐', '做一张宣传单，文案你来写'])('%s → 程序排字', text => {
+    expect(textPosterRequest(text)).toBe(true);
+    expect(mediaRequirement(text)).toMatchObject({ kind: 'poster', tool: 'make_poster' });
+  });
+  it.each(['帮我写一份招生宣传单文案', '写一段婚礼请柬的措辞', '易拉宝一般多大尺寸', '怎么做易拉宝', '用Word做一份宣传单', '请柬用什么纸好', '帮我想几个公众号头图的标题'])('%s → 不出图', text => {
+    expect(textPosterRequest(text)).toBe(false);
+  });
+});

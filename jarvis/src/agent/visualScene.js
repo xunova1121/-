@@ -1,7 +1,7 @@
 /** 设计稿与状态只生成一份静态 SVG，HTML 使用这一份图形，不再独立排版。 */
 import { normalizeVisualDesign, visualError } from './visualSceneInput.js';
 import { normalizePosterBackground } from './posterCompositionInput.js';
-import { chinaMapPaths, projectChina } from './visualChinaMap.js';
+import { projectChina } from './visualChinaMap.js';
 
 const FONT = 'Noto Sans CJK SC,Microsoft YaHei,PingFang SC,Noto Sans SC,Source Han Sans SC,Droid Sans Fallback';
 const xml = value => String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[ch]);
@@ -43,7 +43,7 @@ function painter(colors, texts) {
   const heading = (title, sub, x, y, width) => {
     rect(x, y - 18, 4, 22, colors.accent, 'rx="2"');
     text(title, x + 16, y, 22);
-    if (sub) text(sub, x + width, y - 1, fit(sub, 13, width - 180), colors.muted, 'text-anchor="end"');
+    if (sub) text(sub, x + width, y - 1, fit(sub, 14, width - 180), colors.muted, 'text-anchor="end"');
   };
   return { parts, add, rect, line, circle, text, panel, heading };
 }
@@ -55,7 +55,7 @@ function header(p, design, c) {
   p.line(67, 72, 76, 53, c.accent, 'stroke-width="3" stroke-linecap="round"');
   p.text(design.title, 102, 76, fit(design.title, 36, 1120, 24));
   p.text(design.subtitle, 104, 112, fit(design.subtitle, 16, 1120), c.muted);
-  p.text(design.preset === 'weather' ? 'WEATHER OBSERVATORY' : 'REGIONAL OPERATIONS', 1880, 48, 13, c.muted, 'text-anchor="end" letter-spacing="2"');
+  p.text(design.preset === 'weather' ? 'WEATHER OBSERVATORY' : 'REGIONAL OPERATIONS', 1880, 48, 14, c.muted, 'text-anchor="end" letter-spacing="2"');
   const timeSize = units(design.asOf) * 14 > 500 ? 14 : fit(design.asOf, 21, 500);
   const timeRows = rows(design.asOf, timeSize, 500);
   p.add('<g data-viz="time-label" data-index="0">');
@@ -80,11 +80,11 @@ function metrics(p, design, c) {
     p.rect(x + 24, 164, 3, 14, index % 2 ? c.accent2 : c.accent, 'rx="1"');
     p.text(item.label, x + 36, 178, fit(item.label, 17, width - 72), c.muted);
     const unitSize = fit(item.unit, 18, 120), unitWidth = units(item.unit) * unitSize;
-    const size = fit(item.value, 43, width - 64 - unitWidth, 12);
+    const size = fit(item.value, 43, width - 64 - unitWidth, 14);
     p.text(item.value, x + 24, 227, size);
     p.text(item.unit, x + 40 + units(item.value) * size, 226, unitSize, c.muted);
-    const detailRows = rows(item.detail, 10.5, width - 48);
-    detailRows.forEach((row, rowIndex) => p.text(row, x + 24, (detailRows.length > 1 ? 245 : 252) + rowIndex * 13, 10.5, c.muted));
+    const detailRows = rows(item.detail, 14, width - 48);
+    detailRows.forEach((row, rowIndex) => p.text(row, x + 24, (detailRows.length > 1 ? 246 : 254) + rowIndex * 16, 14, c.muted));
     p.add('</g>');
   });
 }
@@ -114,7 +114,7 @@ function markerLabels(p, design, c, map, state) {
       occupied.push(selectedBox);
       p.rect(selectedBox.x, selectedBox.y, w, h, c.surface, 'rx="5" fill-opacity="0.92"');
       nameRows.forEach((row, rowIndex) => p.text(row, selectedBox.x + 6, selectedBox.y + 17 + rowIndex * 18, size));
-    } else p.text(String(index + 1), x + 9, y - 9, 12, c.accent);
+    } else p.text(String(index + 1), x + 9, y - 9, 14, c.accent);
     p.add('</g>');
   });
 }
@@ -138,26 +138,32 @@ function mapPanel(p, design, c, state, art) {
   p.line(720, 372, 720, 878, c.accent, 'stroke-opacity="0.12"');
   p.line(374, 625, 1066, 625, c.accent, 'stroke-opacity="0.12"');
   p.add('</g>');
-  p.add(`<g transform="translate(${map.x} ${map.y}) scale(${map.scale})">`);
-  for (const item of chinaMapPaths()) p.add(`<path d="${xml(item.d)}" fill="${c.map}" fill-opacity="${art ? 0.2 : 0.94}" stroke="${art ? c.text : c.mapLine}" stroke-width="1.25" stroke-linejoin="round"/>`);
-  p.add('</g>');
+  // 2026-11-12 复审：不画国界轮廓。Natural Earth 按实际控制线画国界、本视图又截掉南海诸岛，
+  // 按国内地图管理规定属于不合规的全国地图；点位仍按经纬度投影，只作位置示意。需要地图底图时用带审图号的标准地图。
   if (art) p.rect(68, 386, 166, 206, c.surface, 'rx="9" fill-opacity="0.94"');
   p.text(design.preset === 'weather' ? '观测视野' : '协同视野', 76, 408, 17, c.muted);
-  p.text('CHINA', 76, 445, 28, c.text, 'letter-spacing="3"');
-  p.text('15°N — 55°N', 76, 473, 13, c.muted);
+  p.text('点位示意', 76, 445, 26, c.text);
+  p.text('按经纬度定位', 76, 473, 14, c.muted);
   p.line(76, 493, 196, 493, c.line);
-  p.text('图层示意', 76, 518, 13, c.muted);
+  p.text('图层示意', 76, 518, 14, c.muted);
   p.circle(82, 543, 4, c.accent);
-  p.text('数据点位', 96, 548, 13, c.muted);
+  p.text('数据点位', 96, 548, 14, c.muted);
   p.circle(82, 572, 4, c.accent2);
-  p.text('区域轮廓', 96, 577, 13, c.muted);
+  p.text(rangeLabel(design), 96, 577, 14, c.muted);
   markerLabels(p, design, c, map, state);
   if (!design.markers.length) p.text('暂无提供的点位数据', 720, 640, 22, c.muted, 'text-anchor="middle"');
   p.rect(68, 899, 1124, 57, c.surface2, 'rx="10"');
   p.text(`${design.markers.length} 个${design.dataMode === 'demo' ? '演示' : '提供'}点位`, 88, 933, 17);
-  p.text(art ? '背景：视觉素材 · 非实况影像' : 'Natural Earth · 地理示意', 1172, 932, 13, c.muted, 'text-anchor="end"');
-  if (art) p.text('Natural Earth · 地理示意', 600, 932, 12, c.muted, 'text-anchor="middle"');
+  p.text(art ? '背景：视觉素材 · 非实况影像' : MAP_NOTE, 1172, 932, 14, c.muted, 'text-anchor="end"');
+  if (art) p.text(MAP_NOTE, 600, 932, 14, c.muted, 'text-anchor="middle"');
 }
+
+/** 大屏最小字号：设计稿按1920×1080，4K放大2倍；小于14会在远看时读不清（2026-11-12 复审） */
+export const VISUAL_MIN_FONT = 14;
+/** 地图说明：只示意点位，不画国界。 */
+const MAP_NOTE = '点位按经纬度示意 · 未绘制国界';
+/** 范围图层：气象叫雷达，其他场景叫覆盖范围（不把气象专用词带进别的大屏） */
+export const rangeLabel = design => design.preset === 'weather' ? '雷达' : '覆盖范围';
 
 function trendPanel(p, design, c, state) {
   p.panel(1240, 294, 640, 340);
@@ -175,7 +181,7 @@ function trendPanel(p, design, c, state) {
   for (let i = 0; i < 4; i++) {
     const y = chart.y + i * chart.h / 3;
     p.line(chart.x, y, chart.x + chart.w, y, c.line, 'stroke-dasharray="3 7"');
-    p.text(valueLabel(high - (high - low) * i / 3), chart.x - 14, y + 4, 12, c.muted, 'text-anchor="end"');
+    p.text(valueLabel(high - (high - low) * i / 3), chart.x - 14, y + 4, 14, c.muted, 'text-anchor="end"');
   }
   const points = values.map((value, index) => ({ x: chart.x + (values.length === 1 ? chart.w / 2 : chart.w * index / (values.length - 1)), y: chart.y + chart.h * (high - value) / (high - low) }));
   const line = points.map((point, index) => `${index ? 'L' : 'M'}${n(point.x)} ${n(point.y)}`).join(' ');
@@ -193,11 +199,11 @@ function trendPanel(p, design, c, state) {
     p.circle(point.x, point.y, selected ? 5 : 3.5, c.surface, `stroke="${c.accent}" stroke-width="2"`);
     if (index % every === 0 || index === points.length - 1 && (index - 1) % every !== 0) {
       const anchor = index === 0 ? 'start' : index === points.length - 1 ? 'end' : 'middle';
-      p.text(item.label, point.x, chart.y + chart.h + 28, 13, c.muted, `text-anchor="${anchor}"`);
+      p.text(item.label, point.x, chart.y + chart.h + 28, 14, c.muted, `text-anchor="${anchor}"`);
     }
     p.add('</g>');
   });
-  p.text(design.dataMode === 'demo' ? '示例序列 · 选择时段查看对应数值' : '来源序列 · 不推算缺失时段', 1268, 612, 13, c.muted);
+  p.text(design.dataMode === 'demo' ? '示例序列 · 选择时段查看对应数值' : '来源序列 · 不推算缺失时段', 1268, 612, 14, c.muted);
 }
 
 function alertsPanel(p, design, c) {
@@ -212,10 +218,10 @@ function alertsPanel(p, design, c) {
     p.add(`<g data-viz="alert" data-index="${index}" data-label="${xml(item.title)}">`);
     p.rect(1268, y, 584, 67, c.surface2, 'rx="9"');
     p.rect(1268, y + 14, 3, 38, color, 'rx="1"');
-    p.text(item.title, 1286, y + 27, fit(item.title, 17, 365, 13));
-    rows(item.time, 10, 160).forEach((row, rowIndex) => p.text(row, 1836, y + 17 + rowIndex * 12, 10, c.muted, 'text-anchor="end"'));
-    const detailRows = rows(item.detail, 12, 548);
-    detailRows.forEach((row, rowIndex) => p.text(row, 1286, y + (detailRows.length > 1 ? 44 : 51) + rowIndex * 15, 12, c.muted));
+    p.text(item.title, 1286, y + 27, fit(item.title, 17, 365, 14));
+    rows(item.time, 14, 160).forEach((row, rowIndex) => p.text(row, 1836, y + 17 + rowIndex * 16, 14, c.muted, 'text-anchor="end"'));
+    const detailRows = rows(item.detail, 14, 548);
+    detailRows.forEach((row, rowIndex) => p.text(row, 1286, y + (detailRows.length > 1 ? 44 : 51) + rowIndex * 16, 14, c.muted));
     p.add('</g>');
   });
 }
@@ -238,11 +244,11 @@ export function composeVisualScene(input, { background = null, state = {} } = {}
   trendPanel(p, design, c, state);
   alertsPanel(p, design, c);
   p.line(40, 1006, 1880, 1006, c.line);
-  p.text(design.dataMode === 'demo' ? '演示数据 · 非实时气象或业务信息 · 不用于决策' : '提供数据 · 按来源记录展示 · 未独立核验', 40, 1035, 15, c.muted);
-  const sourceRows = rows(`来源：${design.source}`, 12, 950);
-  sourceRows.forEach((row, rowIndex) => p.text(row, 1880, (sourceRows.length > 1 ? 1029 : 1035) + rowIndex * 16, 12, c.muted, 'text-anchor="end"'));
-  p.text('WEIYANG  /  VISUAL STUDIO', 40, 1062, 10, c.muted, 'letter-spacing="1.5"');
-  p.text('地图为地理示意，雷达图层为视觉示意，均非实况影像', 1880, 1062, 11, c.muted, 'text-anchor="end"');
+  p.text(design.dataMode === 'demo' ? `演示数据 · 非实时${design.preset === 'weather' ? '气象' : '业务'}信息 · 不用于决策` : '提供数据 · 按来源记录展示 · 未独立核验', 40, 1035, 15, c.muted);
+  const sourceRows = rows(`来源：${design.source}`, 14, 950);
+  sourceRows.forEach((row, rowIndex) => p.text(row, 1880, (sourceRows.length > 1 ? 1027 : 1035) + rowIndex * 17, 14, c.muted, 'text-anchor="end"'));
+  p.text('WEIYANG  /  VISUAL STUDIO', 40, 1066, 14, c.muted, 'letter-spacing="1.5"');
+  p.text(`点位按经纬度示意、未绘制国界，${rangeLabel(design)}图层为视觉示意，均非实况影像`, 1880, 1066, 14, c.muted, 'text-anchor="end"');
   p.add('</g></svg>');
   return { svg: p.parts.join(''), width: design.width, height: design.height, texts,
     backgroundPlacement: art ? { mode: 'map', fit: 'cover', x: n(dx + 68 * scale), y: n(dy + 380 * scale), width: n(1124 * scale), height: n(500 * scale), sourceWidth: art.width, sourceHeight: art.height, overlayOpacity: design.theme === 'light' ? 0.2 : 0.28, label: '视觉素材，非实况或真实地图影像' } : null };

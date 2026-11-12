@@ -80,6 +80,10 @@ export function normalizePosterInput(options = {}) {
   if (text_style === 'gradient' && text_position !== 'bottom') throw posterError('沉浸渐变目前用于底部文字区，请使用text_position=bottom');
   if (!Number.isFinite(text_fraction) || text_fraction < 0.15 || text_fraction > 1) throw posterError('文字区比例需在0.15到1之间');
   if (!Object.hasOwn(FONT_FAMILIES, font_family)) throw posterError('字体需为 sans 或 serif');
+  // 可选中间色标：按真实像素量出标题处对比不足时，由程序在标题高度加深遮罩（不传则与原渐变完全相同）
+  const gradient_mid = options.gradient_mid == null ? null : options.gradient_mid;
+  if (gradient_mid && !(Number.isFinite(gradient_mid.offset) && gradient_mid.offset > 0 && gradient_mid.offset < 1 && Number.isFinite(gradient_mid.opacity) && gradient_mid.opacity >= 0 && gradient_mid.opacity <= 1))
+    throw posterError('渐变中间色标需为0到1之间的位置和不透明度');
   const title = textValue(options.title, 'title');
   if (!title.trim()) throw posterError('海报要有主标题');
   const subtitle = textValue(options.subtitle ?? '', 'subtitle');
@@ -93,6 +97,7 @@ export function normalizePosterInput(options = {}) {
   return {
     width, height, title, subtitle, lines, footer, texts, fonts,
     text_position, text_fraction, text_style, text_align, gradient_opacity, font_family,
+    ...(gradient_mid && text_style === 'gradient' && { gradient_mid: { offset: gradient_mid.offset, opacity: gradient_mid.opacity } }),
     fontFamily: `${fonts.join(', ')}, ${font_family === 'serif' ? 'serif' : 'sans-serif'}`,
     ...posterColors(options, Boolean(subtitle || footer || lines.some((line) => line.trim())))
   };

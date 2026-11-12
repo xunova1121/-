@@ -20,7 +20,7 @@ export const gradientSample = Object.freeze({
 });
 
 /** 在无文字、无装饰的固定列逐像素检查；硬色板或离散色带均不能通过。 */
-export async function inspectGradient({ imageUrl, width, height, start, opacity, base = [205, 170, 125], color = [20, 32, 44] }) {
+export async function inspectGradient({ imageUrl, width, height, start, opacity, mid = null, base = [205, 170, 125], color = [20, 32, 44] }) {
   const img = new Image();
   img.src = imageUrl;
   await img.decode();
@@ -38,7 +38,9 @@ export async function inspectGradient({ imageUrl, width, height, start, opacity,
     if (y < start - 1 && rgb.some((value, channel) => Math.abs(value - base[channel]) > 2)) aboveChanges++;
     if (y >= start) {
       colors.add(rgb.join(','));
-      const fraction = Math.min(1, Math.max(0, (y + 0.5 - start) / (height - start))) * opacity;
+      // 2026-11-12 复审：实测对比不足时多一个中间色标，按两段直线插值（0→中间→终点）
+      const t = Math.min(1, Math.max(0, (y + 0.5 - start) / (height - start)));
+      const fraction = !mid ? t * opacity : t <= mid.offset ? (t / mid.offset) * mid.opacity : mid.opacity + ((t - mid.offset) / (1 - mid.offset)) * (opacity - mid.opacity);
       rgb.forEach((value, channel) => {
         maxFormulaError = Math.max(maxFormulaError, Math.abs(value - (base[channel] * (1 - fraction) + color[channel] * fraction)));
       });

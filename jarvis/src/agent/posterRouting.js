@@ -1,21 +1,26 @@
 import { visualSceneRequest } from './visualSceneRouting.js';
 /** 图片明确要求排字、海报/封面标题走现有工具；无字素材、Office正文和架构图保留原路由。 */
+const POSTER_KINDS = '海报|封面|宣传单|传单|易拉宝|展架|横幅|条幅|展板|请柬|请帖|贺卡|明信片|头图|题图|首图|桌牌|台卡';
+const POSTER_KIND = new RegExp(POSTER_KINDS);
 export function textPosterRequest(text = '') {
   const value = String(text).slice(-6000);
   if (visualSceneRequest(value)) return false;
-  const poster = /海报|封面/.test(value);
-  const imageText = /图片|宣传图|活动图|配图|图像/.test(value) && /写上|印上|(?:加|放|叠)上.{0,12}(?:标题|文字|中文|文案|字)|(?:上面|图中|图上).{0,8}(?:写|加|放)|(?:黑体|宋体|楷体).{0,3}字/.test(value);
+  // 2026-11-12 复审：宣传单、易拉宝、请柬、贺卡、公众号头图等同样要准确中文，按海报排字处理
+  const poster = POSTER_KIND.test(value);
+  const imageText = /图片|宣传图|活动图|配图|图像/.test(value) && /写上|印上|(?:加|放|叠)上.{0,12}(?:标题|文字|中文|文案|字)|(?:上面|图中|图上|每张|每一张).{0,8}(?:写|加|放)|写(?:一句|一行|几句|几个字)|(?:黑体|宋体|楷体).{0,3}字/.test(value);
   if (!poster && !imageText) return false;
   if (/^(?:解释|介绍|讨论|如何|怎么|什么|有哪些)|提示词|制作方法/.test(value.trim())) return false;
   if (/(?:不要|不用|无需|别|暂不|不必|先不).{0,8}(?:生成|制作|设计|画)/.test(value)) return false;
   if (/架构图|流程图|关系图|组织图|拓扑图/.test(value)) return false;
   if (/(?:开发|实现|编写|提供|交付|写一段).{0,12}(?:代码|程序|脚本|应用)|(?:只给|只要)(?:代码|脚本)/.test(value)) return false;
   if (/(?:图像模型|图片模型|生图模型|generate_image).{0,12}直接.{0,8}(?:画字|写字|画带字|生成文字)/i.test(value)) return false;
-  if (/(?:Word|docx|Excel|xlsx|文档|报告).{0,6}封面|(?:Word|docx|Excel|xlsx).{0,12}(?:海报|告示)|(?:海报|封面).{0,12}(?:Word|docx|Excel|xlsx)/i.test(value)) return false;
+  if (/(?:Word|docx|Excel|xlsx|文档|报告).{0,6}封面/i.test(value) || new RegExp(`(?:Word|docx|Excel|xlsx).{0,12}(?:${POSTER_KINDS}|告示)|(?:${POSTER_KINDS}).{0,12}(?:Word|docx|Excel|xlsx)`, 'i').test(value)) return false;
+  // 只要宣传单/请柬的文案、话术，不出图
+  if (new RegExp(`(?:${POSTER_KINDS})的?(?:文案|话术|文字稿|措辞|内容)`).test(value) && !/图|画|设计|排版|做成|生成/.test(value.replace(new RegExp(`(?:${POSTER_KINDS})的?(?:文案|话术|文字稿|措辞|内容)`, 'g'), ''))) return false;
   if (!/海报|(?:PPT|幻灯片)[的 ]*封面/i.test(value) && /(?:做|制作|生成).{0,8}(?:PPT|演示文稿|幻灯片)/i.test(value)) return false;
   const addingText = /(?:再|然后|最后).{0,12}(?:排|加|放|写).{0,10}(?:字|文案|标题)/.test(value);
   if (!addingText && /(?:无字|不带字|不含文字|没有文字|不要(?:任何)?文字)|(?:只要|只做|只画|仅生成).{0,8}(?:底图|背景)/.test(value)) return false;
-  return /(?:画|生成|制作|设计|做|重画|修改|改成|来)[^。！？\n]{0,40}(?:海报|封面)|(?:海报|封面)[^。！？\n]{0,40}(?:加上|写上|改成|排版|换字|改字)/.test(value)
+  return new RegExp(`(?:画|生成|制作|设计|做|重画|修改|改成|来)[^。！？\\n]{0,40}(?:${POSTER_KINDS})|(?:${POSTER_KINDS})[^。！？\\n]{0,40}(?:加上|写上|改成|排版|换字|改字)`).test(value)
     || imageText && /(?:画|生成|制作|设计|做|重画|修改|改成)[^。！？\n]{0,40}(?:图片|宣传图|活动图|配图|图像)|(?:图片|宣传图|活动图|配图|图像)[^。！？\n]{0,30}(?:写上|加上|叠上|换字|改字)/.test(value);
 }
 

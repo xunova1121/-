@@ -1,3 +1,4 @@
+import { chinaMapPaths } from '../src/agent/visualChinaMap.js';
 import { describe, expect, it } from 'vitest';
 import { DOMParser } from '@xmldom/xmldom';
 import { normalizeVisualDesign, visualNumber } from '../src/agent/visualSceneInput.js';
@@ -57,11 +58,18 @@ describe('同一设计生成可复用静态场景', () => {
     expect(JSON.stringify(design)).toBe(before);
     expect(checked).toMatchObject({ width: 3840, height: 2160 });
     expect(checked.text).toBe(scene.texts.join(''));
-    expect(checked.text).toContain('演示数据 · 非实时气象或业务信息');
-    expect(checked.text).toContain('Natural Earth · 地理示意');
-    expect(checked.text).toContain('雷达图层为视觉示意');
+    // 2026-11-12 复审：免责文字按场景区分；不画非标准国界轮廓（缺南海诸岛、国界画法非标准），改为点位示意
+    expect(checked.text).toContain(preset === 'weather' ? '演示数据 · 非实时气象信息' : '演示数据 · 非实时业务信息');
+    expect(checked.text).toContain('点位按经纬度示意 · 未绘制国界');
+    expect(checked.text).toContain(preset === 'weather' ? '雷达图层为视觉示意' : '覆盖范围图层为视觉示意');
+    if (preset !== 'weather') expect(checked.text).not.toMatch(/雷达|气象/);
+    expect(checked.text).not.toContain('CHINA');
+    expect(scene.svg).not.toContain(chinaMapPaths()[0].d.slice(0, 40));
     expect(checked.families).toContain('Noto Sans CJK SC');
-    expect(all(scene.svg, 'path').length).toBeGreaterThanOrEqual(6);
+    // 原“路径≥6”里有4条是国界轮廓；不画轮廓后改为核对趋势线和全部点位仍在
+    expect(all(scene.svg, 'path').length).toBeGreaterThanOrEqual(2);
+    expect(scene.svg.match(/data-viz="marker"/g)).toHaveLength(design.markers.length);
+    expect(design.markers.length).toBeGreaterThanOrEqual(6);
   });
 
   it('每个交互元素都有稳定类型与索引，选择状态不改原数据', () => {
@@ -148,5 +156,17 @@ describe('独立视觉SVG的有界静态输入', () => {
     expect(() => validateVisualSceneSvg(svg('<circle r="1"/>'.repeat(6001)))).toThrow();
     expect(() => validateVisualSceneSvg(svg('').replace('viewBox="0 0 640 360"', 'viewBox="0 0 1280 720"'))).toThrow();
     expect(() => validateVisualSceneSvg(svg('').replace('安全中文', ''))).toThrow();
+  });
+});
+
+describe('2026-11-12 复审：4K 大屏远看可读', () => {
+  it.each(['weather', 'operations'])('%s：所有文字字号不小于14（按1920×1080设计稿），字段写满也不报溢出', preset => {
+    const long = (n, ch = '测') => ch.repeat(n);
+    for (const design of [normalizeVisualDesign({ preset }), normalizeVisualDesign({ preset, dataMode: 'provided', source: long(60), metrics: Array.from({ length: 4 }, () => ({ label: long(16), value: '1'.repeat(18), unit: '项', detail: long(40) })), alerts: Array.from({ length: 3 }, () => ({ title: long(24), detail: long(60), time: '2026-11-12 14:30', level: 'info' })), series: [{ label: '一', value: 1 }, { label: '二', value: 2 }], markers: [{ name: '北京', lon: 116.4, lat: 39.9, value: '1' }] })]) {
+      const scene = composeVisualScene(design);
+      const sizes = [...scene.svg.matchAll(/<text[^>]*font-size="([\d.]+)"/g)].map(m => Number(m[1]));
+      expect(sizes.length).toBeGreaterThan(10);
+      expect(Math.min(...sizes)).toBeGreaterThanOrEqual(14);
+    }
   });
 });

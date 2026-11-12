@@ -153,7 +153,7 @@ function shapeSvg(shape) {
 function composeSvg(layout, shapes, background) {
   const { input, width, height } = layout;
   const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`];
-  if (input.text_style === 'gradient') parts.push(`<defs><linearGradient id="poster-text-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${input.panelColor}" stop-opacity="0"/><stop offset="1" stop-color="${input.panelColor}" stop-opacity="${input.gradient_opacity}"/></linearGradient></defs>`);
+  if (input.text_style === 'gradient') parts.push(`<defs><linearGradient id="poster-text-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${input.panelColor}" stop-opacity="0"/>${input.gradient_mid ? `<stop offset="${input.gradient_mid.offset}" stop-color="${input.panelColor}" stop-opacity="${input.gradient_mid.opacity}"/>` : ''}<stop offset="1" stop-color="${input.panelColor}" stop-opacity="${input.gradient_opacity}"/></linearGradient></defs>`);
   parts.push(shapeSvg(shapes[0]));
   if (background) parts.push(`<image x="0" y="0" width="${width}" height="${height}" href="${background.data}" preserveAspectRatio="xMidYMid slice"/>`);
   parts.push(...shapes.slice(1).map(shapeSvg));
@@ -205,7 +205,7 @@ async function composePptx(layout, shapes, background) {
     }));
   }
   const blob = await pptx.write({ outputType: 'blob' });
-  return input.text_style === 'gradient' ? applyPosterGradient(blob, { color: input.panelColor, opacity: input.gradient_opacity }) : blob;
+  return input.text_style === 'gradient' ? applyPosterGradient(blob, { color: input.panelColor, opacity: input.gradient_opacity, mid: input.gradient_mid }) : blob;
 }
 
 /** @returns {Promise<{svg:string,pptx:Blob,layout:object,width:number,height:number,texts:string[],fonts:string[],fontFamily:string}>} */

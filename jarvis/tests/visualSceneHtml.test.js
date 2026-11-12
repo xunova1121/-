@@ -52,7 +52,13 @@ describe('同设计离线交互 HTML', () => {
     const html = await createVisualSceneHtml({ design, svg });
     expect(html).toContain(svg);
     expect(content(html)).toEqual(design);
-    expect(html).toContain('演示数据，不用于业务或气象决策');
+    // 2026-11-12 复审：免责文字按场景区分（本夹具为气象）；非气象大屏不出现“雷达”开关
+    expect(html).toContain('演示数据，不用于气象决策');
+    expect(html).toContain('checked>雷达</label>');
+    const ops = await createVisualSceneHtml({ design: { ...design, preset: 'operations' }, svg });
+    expect(ops).toContain('演示数据，不用于业务决策');
+    expect(ops).toContain('checked>覆盖范围</label>');
+    expect(ops).not.toContain('checked>雷达');
     expect(html).toContain('时段观察仅选中已有趋势点，其他指标保持原始快照');
     expect(html).not.toMatch(/<(?:script|link|iframe)[^>]+(?:src|href)=/);
     expect(html).not.toContain('workspace:');

@@ -9,6 +9,7 @@ import { themeById } from './themes.js';
 import { posterDesignInput, posterDesignBlob, checkPosterDesignBackground } from './posterDesignSource.js';
 import { throwControl } from '../core/networkRequest.js';
 import { imageCoverReceipt, readImageMetadata } from './imageMetadata.js';
+import { decodePngRgba, measureTextContrast, withoutText } from './posterContrast.js';
 
 const SIZES = { 竖版: [1080, 1920], 横版: [1920, 1080], 方形: [1440, 1440], 朋友圈封面: [1440, 1080], 小红书: [1024, 1536] };
 const inputError = message => Object.assign(new Error(message), { name: 'ValidationError', code: 'INVALID_POSTER', kind: 'input' });
@@ -103,6 +104,38 @@ async function rasterize(ctx, svg, options, textStyle) {
   return renderPoster(svg, options);
 }
 
+/**
+ * 渐变文字叠在底图上：按真实像素量文字背后的对比度（2026-11-12 复审）。不够就在标题高度加深遮罩，最多再试三档；
+ * 只改遮罩，不改文字、不重新生图。解码不了时如实返回 not_checked。
+ */
+async function gradientContrast(ctx, compose, out, signal) {
+  const measure = async (result) => {
+    const rendered = await rasterize(ctx, withoutText(result.svg), { signal }, 'gradient');
+    const blob = rendered instanceof Blob ? rendered : rendered.blob;
+    const image = await decodePngRgba(new Uint8Array(await blob.arrayBuffer()));
+    if (!image || image.width !== result.layout.width || image.height !== result.layout.height) return null;
+    const boxes = result.layout.blocks.flatMap(block => block.rows.map(row => {
+      const w = Math.min(row.w, [...row.text].length * block.fontSize);
+      return { role: block.role, fontSize: block.fontSize, x: block.align === 'center' ? row.x + (row.w - w) / 2 : row.x, y: row.y, w, h: row.h };
+    }));
+    return measureTextContrast(image, boxes, result.layout.input.textColor);
+  };
+  let current = out, check = await measure(out);
+  if (!check) return { out, contrast: 'not_checked' };
+  const panel = out.layout.panel, first = out.layout.blocks[0];
+  // 加深点放在标题上沿往下四分之一处，从轻到重逐档试：只加深到够用为止，过渡尽量缓（用户不喜欢硬色块）
+  const offset = Math.min(0.9, Math.max(0.05, (first.y + first.h * 0.25 - panel.y) / panel.h));
+  for (const opacity of [0.45, 0.65, 0.85]) {
+    if (check.ok) break;
+    throwControl(null, signal);
+    const next = await compose({ gradient_mid: { offset: Math.round(offset * 1000) / 1000, opacity } });
+    const nextCheck = await measure(next);
+    if (!nextCheck) break;
+    current = next; check = nextCheck;
+  }
+  return { out: current, contrast: check.ok ? 'passed' : 'failed', blocks: check.blocks, ...(current !== out && { boosted: current.layout.input.gradient_mid }) };
+}
+
 export function createPosterDeliveryTool(ctx = {}) {
   return {
     name: 'make_poster',
@@ -146,15 +179,26 @@ export function createPosterDeliveryTool(ctx = {}) {
       progress?.('正在按指定尺寸用真实字体排版中文…');
       const palette = input.theme ? themeById(input.theme)?.colors : null;
       const defaults = palette ? { background_color: '#' + palette.primary, ...(!input.text_color && { panel_color: '#' + palette.primary }) } : {};
-      const out = await composePoster({ ...defaults, ...input, width, height, background });
+      const compose = (extra = {}) => composePoster({ ...defaults, ...input, ...extra, width, height, background });
+      let out = await compose();
       throwControl(null, signal);
+      let measured = null;
+      if (out.layout.input.text_style === 'gradient') {
+        progress?.('正在按底图真实像素检查文字对比度…');
+        try { measured = await gradientContrast(ctx, compose, out, signal); out = measured.out; }
+        catch (error) { throwControl(error, signal); measured = { contrast: 'not_checked' }; }
+      }
       const receipt = { kind: 'poster', status: 'partial', width, height, files: [], textRendering: 'program', visual: 'not_checked', fontCheck: 'not_checked', notes: [background ? `底图：${input.background_path}` : '底图：未央原创插画', '文案由程序排版；尚未做视觉模型或人工验收，不能声称绝对无错字'], errors: [] };
       const normalized = out.layout.input;
       receipt.textStyle = normalized.text_style;
       receipt.textAlign = normalized.text_align;
       if (normalized.text_style === 'gradient') {
-        receipt.gradient = { opacity: normalized.gradient_opacity, fraction: normalized.text_fraction, contrast: 'not_checked' };
-        receipt.notes.push('底部使用真实透明渐变，未用硬边色块覆盖底图；文字与渐变终点配色经过检查，但渐变叠加实际底图后的对比度尚未视觉验收');
+        receipt.gradient = { opacity: normalized.gradient_opacity, fraction: normalized.text_fraction, contrast: measured?.contrast || 'not_checked',
+          ...(measured?.blocks && { measured: measured.blocks.slice(0, 12).map(({ role, contrast, minimum }) => ({ role, contrast, minimum })) }),
+          ...(measured?.boosted && { boosted: measured.boosted }) };
+        if (measured?.contrast === 'passed') receipt.notes.push(measured.boosted ? '底部使用真实透明渐变；按底图真实像素测得标题处对比不足，已在标题高度加深遮罩，复测通过' : '底部使用真实透明渐变；按底图真实像素复测，文字对比度达标');
+        else if (measured?.contrast === 'failed') { receipt.notes.push('按底图真实像素测得部分文字对比度不足，加深遮罩后仍未达标；建议换更暗/更简洁的底图或改用实色文字区'); receipt.errors.push({ code: 'POSTER_CONTRAST_LOW', message: '部分文字在实际底图上对比度不足' }); }
+        else receipt.notes.push('底部使用真实透明渐变，未用硬边色块覆盖底图；当前环境无法解码成品像素，渐变叠加实际底图后的对比度尚未视觉验收');
       }
       if (background) {
         const actual = await readImageMetadata(new Blob([background.bytes], { type: background.mime }), { signal });

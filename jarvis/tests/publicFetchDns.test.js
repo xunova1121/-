@@ -186,3 +186,19 @@ describe('公网抓取：重定向不把凭据带到别的站点', () => {
     expect(seen[2].lang).toContain('zh-CN');
   });
 });
+
+describe('2026-11-12 复审：服务器抓网页补拦几类内网/保留地址', () => {
+  it.each([
+    ['100.100.100.100', '运营商级NAT（如云厂商内部元数据网段）'], ['0.0.0.1', '0.0.0.0/8'], ['198.18.0.1', '基准测试网段'], ['224.0.0.1', '组播'],
+    ['::7f00:1', 'IPv4兼容写法的127.0.0.1'], ['64:ff9b::a00:1', 'NAT64里的10.0.0.1'], ['2002:c0a8:101::1', '6to4里的192.168.1.1'],
+    ['2001:0:4136:e378:8000:63bf:3fff:fdd2', 'Teredo隧道'], ['ff02::1', 'IPv6组播'], ['fec0::1', '旧站点本地']
+  ])('DNS解析到 %s（%s）也拦下，不发HTTP请求', async address => {
+    const fetchImpl = vi.fn();
+    await expect(publicFetch('https://public.example/', {}, fetchImpl, async () => [{ address }])).rejects.toMatchObject({ code: 'PRIVATE_NETWORK_BLOCKED' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it.each(['93.184.216.34', '2606:2800:220:1:248:1893:25c8:1946', '64:ff9b::5db8:d822'])('正常公网地址 %s 照常放行', async address => {
+    const fetchImpl = vi.fn(async () => new Response('ok'));
+    expect(await (await publicFetch('https://public.example/', {}, fetchImpl, async () => [{ address }])).text()).toBe('ok');
+  });
+});

@@ -97,16 +97,22 @@ it('渐变经专用渲染器，原稿保存样式、对齐、透明度；改字�
   const renderPoster = vi.fn(), imageGen = vi.fn();
   const tool = createPosterDeliveryTool({ renderVisualScene, renderPoster, imageGen });
   const first = JSON.parse(await tool.run({ title: '秋季养生汤', width: 512, height: 768, text_style: 'gradient', text_align: 'center', gradient_opacity: 0.72, background_path: '渐变回归/原底图.png', path: '渐变回归/初稿.png' }));
-  expect(first).toMatchObject({ status: 'complete', textStyle: 'gradient', textAlign: 'center', visual: 'not_checked', gradient: { opacity: 0.72, fraction: 0.35, contrast: 'not_checked' } });
-  expect(first.notes.join('')).toContain('对比度尚未视觉验收');
+  // 2026-11-12 复审：渲染器给出真实像素时按实测判定对比度，结论带每块文字的数值；整体视觉仍未验收
+  expect(first).toMatchObject({ status: 'complete', textStyle: 'gradient', textAlign: 'center', visual: 'not_checked', gradient: { opacity: 0.72, fraction: 0.35 } });
+  expect(['passed', 'failed']).toContain(first.gradient.contrast);
+  expect(first.gradient.measured.length).toBeGreaterThan(0);
+  expect(first.notes.join('')).toContain('按底图真实像素');
   const stored = JSON.parse(await ws.readText(first.designPath));
   expect(stored.options).toMatchObject({ text_style: 'gradient', text_align: 'center', gradient_opacity: 0.72, text_fraction: 0.35 });
   const second = JSON.parse(await tool.run({ source_path: first.designPath, title: '冬日暖心汤' }));
   expect(second).toMatchObject({ status: 'complete', textStyle: 'gradient', gradient: { opacity: 0.72, fraction: 0.35 } });
   const svg = await ws.readText(first.files.find(file => file.format === 'svg').path);
   const revised = await ws.readText(second.files.find(file => file.format === 'svg').path);
-  expect(svg).toBe(renderVisualScene.mock.calls[0][0]);
-  expect(revised).toBe(renderVisualScene.mock.calls[1][0]);
+  // 2026-11-12 复审：渐变海报先渲一份无字版量真实像素对比度，渲染调用变多；成品仍须与保存的SVG逐字相同
+  const finals = renderVisualScene.mock.calls.map(call => call[0]).filter(value => !value.includes('<g opacity="0"><text'));
+  expect(finals).toHaveLength(2);
+  expect(svg).toBe(finals[0]);
+  expect(revised).toBe(finals[1]);
   expect(revised).toBe(svg.replace('秋季养生汤', '冬日暖心汤'));
   expect(await (await ws.readBlob('渐变回归/原底图.png')).arrayBuffer()).toEqual(await source.arrayBuffer());
   expect(renderPoster).not.toHaveBeenCalled();
