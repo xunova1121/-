@@ -68,6 +68,7 @@ try {
     }, profile);
     check(`${width} 个人智能体跨域新增/修改/读取/删除可用`, crud);
     await page.locator('.wy-agent-card[data-agent="business-intelligence"]').click();
+    await page.getByRole('tab', { name: '找招标', exact: true }).click();
     await page.waitForSelector('.wy-tender-card h3');
     check(`${width} 招投标目录通过远端接口展示`, (await page.locator('.wy-tender-card h3').first().textContent()).includes('跨域验收夹具'));
     await page.getByLabel('关键词 / 行业 / 企业名称').fill('农业');
