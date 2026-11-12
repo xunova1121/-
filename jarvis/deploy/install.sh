@@ -64,6 +64,11 @@ if [[ "${JARVIS_NO_OFFICE:-}" != 1 ]] && ! command -v soffice >/dev/null 2>&1; t
   fi
 fi
 
+# 海报文字栅格化独立于 Office；已有 Office 的升级也可能缺少字体。
+# 仅跳过字体可设 JARVIS_NO_POSTER_FONTS=1；失败不能阻断既有服务的安装与启动。
+bash "$APP/deploy/install-poster-fonts.sh" \
+  || echo "== 海报字体准备失败，继续安装服务；中文海报 PNG 暂不可用，请按上方提示补装"
+
 if ! id jarvis >/dev/null 2>&1; then
   echo "== 新建系统账号 jarvis（不能登录，只用来运行未央）"
   useradd --system --home-dir "$BASE" --shell /sbin/nologin jarvis

@@ -198,12 +198,11 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: 使用Ubuntu官方软件源（仅临时构建机）
         run: bash scripts/ci-official-apt.sh
-      - name: 安装 ffmpeg（SVG 直接栅格化的单元测试要用；GitHub 的 Ubuntu 镜像不再自带）
+      - name: 安装 ffmpeg 和海报中文字体（单元测试需真实栅格化与字体检查）
         timeout-minutes: 20
         run: |
-          command -v ffmpeg && exit 0
           for i in 1 2 3; do
-            if timeout 360 sh -c 'sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg'; then exit 0; fi
+            if timeout 360 sh -c 'sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg fontconfig fonts-noto-cjk'; then exit 0; fi
             echo "第 $i 次安装没完成，重试"
           done
           exit 1
@@ -293,12 +292,11 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
-      - name: 安装 ffmpeg（SVG 直接栅格化的单元测试要用；GitHub 的 Ubuntu 镜像不再自带）
+      - name: 安装 ffmpeg 和海报中文字体（单元测试需真实栅格化与字体检查）
         timeout-minutes: 20
         run: |
-          command -v ffmpeg && exit 0
           for i in 1 2 3; do
-            if timeout 360 sh -c 'sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg'; then exit 0; fi
+            if timeout 360 sh -c 'sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg fontconfig fonts-noto-cjk'; then exit 0; fi
             echo "第 $i 次安装没完成，重试"
           done
           exit 1
@@ -347,6 +345,8 @@ jobs:
         run: node e2e/presentation-report.mjs "$RUNNER_TEMP/jarvis-e2e/presentation-report"
       - name: 验证六份PPT图片美学版式、真实PDF与逐页截图
         run: node e2e/ppt-image-layout.mjs "$RUNNER_TEMP/jarvis-e2e/ppt-image-layout"
+      - name: 验证中文图片程序排字、三格式交付与真实浏览器及Office渲染
+        run: node e2e/poster-composition.mjs "$RUNNER_TEMP/jarvis-e2e/poster-composition"
       - name: 验证四种Excel样式、公式筛选与真实PDF
         run: node e2e/spreadsheet-styles.mjs "$RUNNER_TEMP/jarvis-e2e/spreadsheet-styles"
       - name: 验证文档场景模板、精确修改及真实PDF逐页检查
@@ -524,13 +524,12 @@ jobs:
       - name: 写发布说明
         run: |
           cat > release-notes.md <<'NOTES'
-          ## 本版更新 · 招投标资源自动更新
-          - 企业与招投标新增公告中心：进入就能浏览缓存公告，按关键词、地区、日期、类型和预算筛选；支持个人收藏、自动订阅、提醒和已读同步。
-          - 服务器每30分钟独立采集公开公告；手机/电脑关闭仍更新，不创建对话、不调用模型或付费检索，不批量下载附件。
-          - 单个来源失败不清空公告，显示最近成功时间和覆盖范围。同一公告修订重复匹配不重复提醒；预算和截止变化有前后对照，重启后恢复。
-          - 本批目录覆盖已接入的政府采购/公共资源公开列表，不代表全国全量数据；未知预算和无法读取的原文明确标记，企业股权完整变更不属于本次自动来源。
-          - 手机、电脑、服务器同批发布，继续保留1.0.420安装权限修复及固定安卓签名。用户服务器网络、真实模型、安卓/Windows真机未验收。
-          - PC智能体移到左侧主导航，广场使用主内容区；统一线性图标、搜索分类与卡片，侧栏切换保留对话草稿，短窗口仍可查看最近对话。
+          ## 本版更新 · 中文图片制作与PC连接恢复
+          - 中文海报、封面与明确要求排字的图片，支持模型生成无字底图后用真实字体排版；工作区底图直接复用，不需要传入代码沙箱。
+          - 同一版式直接交付PNG成品、自包含SVG与可编辑PPTX；支持精确像素尺寸、五种文字位置、黑体/宋体和指定文字区比例。长文不截断，放不下明确报错。
+          - 检查实际字体字形、颜色对比度和PNG尺寸；生成、文件读回和视觉验收分开显示，渲染失败保留源文件，不用PPT代替最终图片冒称完成。
+          - 修复PC智能体、作品与招投标接口跨域遗漏。对话观察断线有界重连并显示状态，恢复原任务，不重复提交；服务器登录错误与模型Key错误分别提示。
+          - 手机、电脑、服务器同批发布，保留固定安卓签名和服务器安装权限保护。用户服务器、真实图像模型与安卓/Windows真机未验收；PC所有连接失败的外部原因未据此确认解决。
 
           ## 更新与使用
           先在设置里“立即更新服务器”，再更新电脑和手机。仅安装APK不会替换远端服务器代码。

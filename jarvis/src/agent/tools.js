@@ -329,8 +329,8 @@ export function createTools(ctx) {
     },
     {
       name: 'generate_image',
-      description: '画图 / 生成图片（海报、插画、头像、配图等）：用服务商的画图模型（如 gpt-image）按描述生成一张图片，保存到工作区并显示在对话里。用户说“画一张… / 做个…的图片 / 生成图片”时使用。描述先明确主体、构图、风格、光线和必须保留/避免的内容。修改或参考已有图必须传referencePaths，不能只凭文字重画冒充原图编辑；精确架构图用create_diagram。',
-      input_schema: S({ prompt: str('先写主体、构图、用途、风格与精确文字；改图还要写保留和修改范围'), size: str('标准尺寸或auto；GPT Image 2可用16倍数的自定义尺寸，如1536x864'), quality: { type: 'string', enum: ['auto', 'low', 'medium', 'high'] }, outputFormat: { type: 'string', enum: ['png', 'jpeg', 'webp'] }, background: { type: 'string', enum: ['auto', 'opaque', 'transparent'] }, referencePaths: { type: 'array', maxItems: 3, items: { type: 'string' }, description: '参考/编辑已有图片时必须传真实工作区原图路径；不传表示从零创作' } }, ['prompt']),
+      description: '画图 / 生成图片（海报底图、插画、头像、配图等）：用服务商的画图模型（如 gpt-image）按描述生成一张图片，保存到工作区并显示在对话里。用户说“画一张… / 做个…的图片 / 生成图片”时使用。描述先明确主体、构图、风格、光线和必须保留/避免的内容。图片明确要求写上中文/黑体字，或海报/封面需要准确的标题、文案、日期时，优先复用已有底图；否则只生成“不要任何文字”的底图，再make_poster程序排字，交付最终PNG和可编辑SVG/PPTX，不能只交底图或让用户自己导出。用户明确要求模型直接画字时照要求处理并如实核对。修改或参考已有图必须传referencePaths，不能只凭文字重画冒充原图编辑；精确架构图用create_diagram。',
+      input_schema: S({ prompt: str('写主体、构图、用途、风格；精确文字海报只描述无字底图并留白，文字交make_poster；改图写保留和修改范围'), size: str('标准尺寸或auto；GPT Image 2可用16倍数的自定义尺寸，如1536x864'), quality: { type: 'string', enum: ['auto', 'low', 'medium', 'high'] }, outputFormat: { type: 'string', enum: ['png', 'jpeg', 'webp'] }, background: { type: 'string', enum: ['auto', 'opaque', 'transparent'] }, referencePaths: { type: 'array', maxItems: 3, items: { type: 'string' }, description: '参考/编辑已有图片时必须传真实工作区原图路径；不传表示从零创作' } }, ['prompt']),
       run: async ({ prompt: imagePrompt, size, referencePaths = [], quality, outputFormat, background }, { signal, retrieval } = {}) => {
         if (!ctx.imageGen) throw new Error('当前环境不能画图');
         const images = [];

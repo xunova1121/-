@@ -1,4 +1,5 @@
 import { presentationAnswerIssues } from './presentationReceipt.js';
+import { posterAnswerIssues } from './posterRouting.js';
 import { repositoryReceipt, repositoryRepair, repositoryDeliveryIssue, correctRepositoryLinks, repositoryTextStream } from './codeRepositoryReview.js';
 import { IMAGE_RECHECK } from './imageReading.js';
 import { newsCandidates } from './newsDelivery.js';
@@ -158,6 +159,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     artifacts.set(event.path.slice(0, 400), {
       path: event.path.slice(0, 400),
       format: String(data.format || '').slice(0, 8),
+      ...(data.kind === 'poster' && { kind: 'poster' }),
       ...(data.wordCount && { wordCount: { count: data.wordCount.count, min: data.wordCount.min, max: data.wordCount.max, passed: data.wordCount.passed === true } }),
       readback: data.readback,
       structure: data.structure,
@@ -225,10 +227,13 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     });
     const pending = [...files.values()].filter((file) => !file.verified && (file.workspaceId || codeFiles.includes(file))).map((file) => file.path);
     const codeFailures = [...latest.values()].filter(receipt => receipt.tool === 'code_run' && unresolved(receipt));
+    const media = mediaDelivery(request, current);
     return {
-      media: mediaDelivery(request, receipts.filter((receipt) => receipt.version === version)),
+      media,
       pendingFormats: taskContract(request).formats.filter(
-        (format) => ![...artifacts.values()].some((item) => item.format === format && item.readback === 'passed' && !item.errors)
+        (format) => media?.kind === 'poster'
+          ? !media.outputs?.some(item => item.format === format && item.readback === 'passed' && item.structure === 'passed')
+          : ![...artifacts.values()].some((item) => item.format === format && item.readback === 'passed' && !item.errors)
       ),
       request,
       retrievalReceipts: receipts.filter((receipt) => receipt.version === version && receipt.ok && receipt.dataRetrieved !== false && /^(?:search_tenders|read_tender_notice|lookup_company|get_today_news|fetch_json|web_search|fetch_url|fact_check|deep_research|get_weather|get_stock_kline|get_market_quote|get_sports_scores|read_evidence)$/.test(receipt.tool)).length,
@@ -269,7 +274,9 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     const style = styleNote(request, lastDocument());
     if (style) issues.push(style);
     if (result.visualIssue) issues.push(result.visualIssue);
-    if (result.media && result.media.state !== 'completed') issues.push(`用户要求生成${result.media.label}，当前${result.media.state}；应实际调用${result.media.tool}取得文件，不能只写“我来做”收尾。已有歌词/文字保留，失败明确区分，不能虚构下载或播放。`);
+    if (result.media && result.media.state !== 'completed') issues.push(result.media.kind === 'poster'
+      ? `用户要求海报PNG及可编辑SVG/PPTX，当前${result.media.state}；须取得make_poster对应三格式的真实读回回执。保留已生成底图和源文件，按回执说明缺失格式与失败阶段，不能只交PPTX让用户自行导出，也不能靠重画底图冒充完成。`
+      : `用户要求生成${result.media.label}，当前${result.media.state}；应实际调用${result.media.tool}取得文件，不能只写“我来做”收尾。已有歌词/文字保留，失败明确区分，不能虚构下载或播放。`);
     if (result.sourceIssue) issues.push(result.sourceIssue);
     if (result.calculation === 'failed') issues.push('关键verify_numbers校验失败；先根据工具错误修正参数重算，无法核验则明确校验失败、请人工复核，不能声称已通过');
     if (result.pendingFormats.length)
@@ -281,7 +288,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     if (!result.memoryChecked) issues.push('用户问有没有记住：先用 recall 查，查到了再回答，查不到就如实说没记，并问要不要现在记');
     if (result.pendingReadback.length) issues.push('这些修改尚未读回核对：' + result.pendingReadback.join('、'));
     if (result.codeExecution === 'not_run') issues.push('已修改代码但没有实际运行记录；先运行适用测试，无法执行就明确未验证');
-    if (result.artifacts.some(item => item.format === 'svg' && (item.visual !== 'passed' || item.business !== 'passed'))) issues.push('架构图按实际回执交付；摘录匹配不等于业务全面核实，未完成视觉检查要说明，不要为补状态重复生成');
+    if (result.artifacts.some(item => item.format === 'svg' && item.kind !== 'poster' && (item.visual !== 'passed' || item.business !== 'passed'))) issues.push('架构图按实际回执交付；摘录匹配不等于业务全面核实，未完成视觉检查要说明，不要为补状态重复生成');
     if (result.artifacts.some((item) => item.errors > 0)) issues.push('文档仍有生成器报告的问题，不能宣称排版或公式全部通过');
     if (result.failures.length)
       issues.push('本轮这些操作失败后没有成功补做：' + [...new Set(result.failures)].join('、') + '；补做只指重试失败的这一步（不能改做用户这次没要求的别的事），没补救的在回答里一句话说明，不要为此重新读取已交付的文件');
@@ -298,6 +305,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   const checkAnswer = (text, now) => {
     selectedNews = new Set((String(text).match(/https?:\/\/[^\s)）\]，。]+/g) || []).filter(url => newsOriginals.has(url)));
     answerIssues = [...answerConstraintIssues(request, text, now), ...priceComparisonIssues(request, text), ...presentationAnswerIssues(request, text, lastDocument())];
+    answerIssues.push(...posterAnswerIssues(text, mediaDelivery(request, receipts.filter(receipt => receipt.version === version))));
     // 数字定案（用户 2026-11-05：南京地铁 611 / 757 / 556.8 公里同时出现）：用了定案就只用主数字；没定案时查明显的前后不一致
     answerIssues.push(...(numberDecisions.length ? reconcileAnswerIssues(text, numberDecisions) : numericLookup() ? conflictingNumbers(text) : []));
     if (weatherAsked()) answerIssues.push(...weatherConflicts(text));
@@ -318,7 +326,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   const numericLookup = () => NUMERIC_FACT.test(String(request)) && receipts.filter(r => r.ok && /^(?:web_search|fetch_url|fetch_json|deep_research|fact_check)$/.test(r.tool)).length >= 2;
   const guardsAnswer = () => {
     const rules = answerConstraints(request);
-    return numberDecisions.length > 0 || numericLookup() || weatherAsked() || lastDocument()?.format === 'pptx' || visualEvidence.active() || (styleRequests(request).length > 0 && Boolean(lastDocument())) || rules.noTime || rules.literals.length > 0 || rules.todayNews || rules.care || rules.priceComparison || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
+    return numberDecisions.length > 0 || numericLookup() || weatherAsked() || taskContract(request).media?.kind === 'poster' || lastDocument()?.format === 'pptx' || visualEvidence.active() || (styleRequests(request).length > 0 && Boolean(lastDocument())) || rules.noTime || rules.literals.length > 0 || rules.todayNews || rules.care || rules.priceComparison || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
   };
   /** 改写一次后仍对不上：不吞掉回答（文件链接要留着），末尾补一句读回的实际情况 */
   const styleCorrection = () => (styleProblems.length ? '（读回文件核对：' + styleNote(request, lastDocument()).replace(/^用户要的调整，读回文件的实际结果：/, '').replace(/。回答照这个说$/, '') + '。）' : '');

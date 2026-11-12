@@ -1,9 +1,9 @@
 /**
  * 海报（智能体专业化第 2 批）：图像模型只画不带字的底图（或用用户的图 / 未央原创插画），中文标题、时间地点等文字由程序排版叠加，
- * 保证没有错字乱码；交付一页可编辑的 PPTX（PowerPoint / WPS 里能直接改字、换图，导出图片用“另存为 PNG”）。
+ * 旧接口保留可编辑 PPTX；make_poster 工具由专用模块交付 PNG、SVG 和 PPTX，并区分渲染和视觉验收。
  * 排版规则：安全边距 6%；主标题最大（按字数和画幅自动定字号），副标题次之，要点和时间地点在下方；文字压在半透明色带上保证可读。
  */
-import * as ws from './workspace.js';
+import { createPosterDeliveryTool } from './posterDeliveryTool.js';
 import { themeById } from './themes.js';
 import { artSvg } from './pptTemplateArt.js';
 import { rasterize as browserRasterize } from './slidePreview.js';
@@ -93,39 +93,5 @@ export async function makePoster({ size = '竖版', title, subtitle = '', lines 
 }
 
 export function createPosterTool(ctx = {}) {
-  return {
-    name: 'make_poster',
-    description: '做海报：程序排版中文标题、副标题、要点和时间地点，叠在底图上，保证文字没有错字乱码；输出一页可编辑 PPTX（能直接改字换图）。底图可以用工作区里的图片（用户的图或 generate_image 画的不带字的底图），不给就用未央原创插画。先用 generate_image 画底图时，提示词写“不要任何文字”。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        title: { type: 'string', description: '主标题，建议 12 字以内' },
-        subtitle: { type: 'string' },
-        lines: { type: 'array', maxItems: 6, items: { type: 'string' }, description: '要点：时间、地点、亮点等，每条一句' },
-        footer: { type: 'string', description: '底部一行：主办单位、联系方式等' },
-        size: { type: 'string', enum: Object.keys(POSTER_SIZES) },
-        background_path: { type: 'string', description: '工作区里的底图路径（PNG / JPEG），可选' },
-        theme: { type: 'string', description: '配色 id，如 business、gov-red、sunset-boulevard、violet-glass' },
-        path: { type: 'string', description: '保存路径，默认 海报/标题.pptx' }
-      },
-      required: ['title'],
-      additionalProperties: false
-    },
-    run: async ({ title, subtitle = '', lines = [], footer = '', size = '竖版', background_path: bg = '', theme = 'business', path = '' } = {}) => {
-      if (!String(title || '').trim()) throw Object.assign(new Error('海报要有主标题'), { name: 'ValidationError', code: 'INVALID_POSTER', kind: 'input' });
-      let background = null;
-      if (bg) {
-        if (!/\.(png|jpe?g)$/i.test(bg)) throw Object.assign(new Error('底图需为 PNG 或 JPEG'), { name: 'ValidationError', code: 'INVALID_POSTER', kind: 'input' });
-        background = new Uint8Array(await (await ws.readBlob(bg)).arrayBuffer());
-      }
-      const out = await makePoster({ title: String(title).trim(), subtitle, lines, footer, size, background, theme, rasterizeSvg: ctx.rasterizeSvg || null });
-      const safe = String(title).replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 20) || '海报';
-      const target = path && /\.pptx$/i.test(path) ? path : `海报/${safe}.pptx`;
-      const saved = await ws.write(target, out.pptx);
-      ctx.onFileChanged?.(saved.path);
-      const notes = [`${size}海报（${POSTER_SIZES[size].px.join('×')}）已保存为可编辑 PPTX：${saved.path}`, background ? `底图：${bg}` : '底图：未央原创插画', '文字由程序排版，可在 PowerPoint / WPS 里直接改字、换图，导出图片用“另存为 PNG”'];
-      if (out.layout.overflow) notes.push('文字偏多，下方可能拥挤：建议精简要点或改用横版');
-      return notes.join('；');
-    }
-  };
+  return createPosterDeliveryTool(ctx);
 }

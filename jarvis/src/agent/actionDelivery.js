@@ -1,9 +1,11 @@
+import { textPosterRequest, posterReceipt } from './posterRouting.js';
 /** 只识别明确的媒体制作动作；讲方法、写提示词、题设和技能说明不等于要立即调用生成服务。 */
 export function mediaRequirement(text = '') {
   const value = String(text).slice(-6000);
   // 明确拒绝制作时不能用收尾检查反向要求调用付费服务。
   if (/(?:不要|不用|无需|别|暂不|不必|先不).{0,8}(?:生成|制作|画|谱曲|演唱|唱)/.test(value)) return null;
   if (/^(?:解释|介绍|讨论|如何|怎么|什么|有哪些)|题设|模拟|假设|提示词|写歌词|歌词模板|制作方法|技能/i.test(value)) return null;
+  if (textPosterRequest(value)) return { kind: 'poster', tool: 'make_poster', label: '海报PNG及可编辑SVG/PPTX' };
   if (/(?:画|生成|制作|做|重画).{0,20}(?:架构图|流程图|关系图|组织图|拓扑图)/.test(value)) {
     // Word/Excel仍走文档；PPT架构图与SVG共用设计稿。参考附件文件名不算输出要求。
     if (/(?:用|输出|导出|生成|制作|做成|保存为).{0,8}(?:Word|docx|Excel|xlsx)|(?:Word|docx).{0,3}(?:格式|版本)/i.test(value)) return null;
@@ -17,6 +19,7 @@ export function mediaRequirement(text = '') {
 }
 
 export function mediaReceipt(toolName, ok, output = '') {
+  if (toolName === 'make_poster') return posterReceipt(ok, output);
   if (toolName === 'build_architecture') {
     let value; try { value = JSON.parse(String(output)); } catch { value = null; }
     const complete = ok && value?.status === 'complete' && Array.isArray(value.completedViews) && value.completedViews.length > 0 && value.completedViews.every(view => view.editable === true && ['svg','png','pdf','pptx'].every(format => view.files?.some(file => file.format === format && typeof file.path === 'string')));
@@ -36,7 +39,7 @@ export function mediaDelivery(request, receipts) {
   if (!required) return null;
   const relevant = receipts.map((receipt) => receipt.media).filter((receipt) => receipt?.kind === required.kind);
   const latest = relevant.at(-1);
-  return { ...required, state: latest?.state || 'not_started', files: latest?.files || [] };
+  return { ...required, ...(latest || { state: 'not_started', files: [] }) };
 }
 
 /** 安装拒绝后只处理当前目标，不能把旧对话里的文档任务拿来当补救。 */

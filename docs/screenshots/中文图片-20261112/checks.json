@@ -1,0 +1,1149 @@
+{
+  "checks": [
+    {
+      "label": "portrait-bottom-sans：真实Node工具完整交付",
+      "pass": true,
+      "detail": {
+        "kind": "poster",
+        "status": "complete",
+        "width": 1024,
+        "height": 1536,
+        "files": [
+          {
+            "format": "png",
+            "path": "海报/portrait-bottom-sans.png",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "passed"
+          },
+          {
+            "format": "svg",
+            "path": "海报/portrait-bottom-sans.svg",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "pptx",
+            "path": "海报/portrait-bottom-sans.pptx",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          }
+        ],
+        "textRendering": "program",
+        "visual": "not_checked",
+        "fontCheck": "passed",
+        "notes": [
+          "底图：底图/原创秋日汤碗.png",
+          "文案由程序排版；尚未做视觉模型或人工验收，不能声称绝对无错字"
+        ],
+        "errors": [],
+        "designPath": "海报/portrait-bottom-sans.poster.json"
+      }
+    },
+    {
+      "label": "portrait-bottom-sans：读回通过但视觉状态仍未虚报",
+      "pass": true
+    },
+    {
+      "label": "portrait-bottom-sans：小型设计文件保留底图指纹和准确尺寸",
+      "pass": true
+    },
+    {
+      "label": "1024×1536文字区严格位于下方三分之一",
+      "pass": true
+    },
+    {
+      "label": "portrait-bottom-sans：PNG解码尺寸精确",
+      "pass": true
+    },
+    {
+      "label": "portrait-bottom-sans：与实际SVG渲染像素吻合",
+      "pass": true,
+      "detail": 0.0052458445231119795
+    },
+    {
+      "label": "portrait-bottom-sans：每行中文在成品中有真实字形",
+      "pass": true,
+      "detail": [
+        {
+          "text": "秋季养生汤",
+          "ink": 20587,
+          "referenceInk": 20784,
+          "mismatch": 0.07842771112459736,
+          "bounds": {
+            "x": 63,
+            "y": 1099,
+            "width": 475,
+            "height": 92
+          }
+        },
+        {
+          "text": "一碗温润，慢享秋日",
+          "ink": 4464,
+          "referenceInk": 4448,
+          "mismatch": 0.24018003273322422,
+          "bounds": {
+            "x": 63,
+            "y": 1245,
+            "width": 360,
+            "height": 39
+          }
+        },
+        {
+          "text": "莲藕 · 山药 · 红枣",
+          "ink": 2309,
+          "referenceInk": 2315,
+          "mismatch": 0.22953388170779476,
+          "bounds": {
+            "x": 63,
+            "y": 1319,
+            "width": 280,
+            "height": 30
+          }
+        },
+        {
+          "text": "家常食材，暖心滋味",
+          "ink": 2986,
+          "referenceInk": 3011,
+          "mismatch": 0.15403573629081946,
+          "bounds": {
+            "x": 63,
+            "y": 1382,
+            "width": 283,
+            "height": 30
+          }
+        },
+        {
+          "text": "原创合成底图 · 中文由程序排版",
+          "ink": 3108,
+          "referenceInk": 3153,
+          "mismatch": 0.16724941724941725,
+          "bounds": {
+            "x": 62,
+            "y": 1444,
+            "width": 354,
+            "height": 23
+          }
+        }
+      ]
+    },
+    {
+      "label": "portrait-bottom-sans：全文未删字",
+      "pass": true
+    },
+    {
+      "label": "portrait-bottom-sans：实际字形在安全文字区域内",
+      "pass": true,
+      "detail": {
+        "x": 62,
+        "y": 1099,
+        "width": 476,
+        "height": 369
+      }
+    },
+    {
+      "label": "portrait-bottom-sans：PPTX文字可编辑",
+      "pass": true
+    },
+    {
+      "label": "landscape-left-sans：真实Node工具完整交付",
+      "pass": true,
+      "detail": {
+        "kind": "poster",
+        "status": "complete",
+        "width": 1536,
+        "height": 1024,
+        "files": [
+          {
+            "format": "png",
+            "path": "海报/landscape-left-sans.png",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "passed"
+          },
+          {
+            "format": "svg",
+            "path": "海报/landscape-left-sans.svg",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "pptx",
+            "path": "海报/landscape-left-sans.pptx",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          }
+        ],
+        "textRendering": "program",
+        "visual": "not_checked",
+        "fontCheck": "passed",
+        "notes": [
+          "底图：底图/原创秋日汤碗.png",
+          "文案由程序排版；尚未做视觉模型或人工验收，不能声称绝对无错字"
+        ],
+        "errors": [],
+        "designPath": "海报/landscape-left-sans.poster.json"
+      }
+    },
+    {
+      "label": "landscape-left-sans：读回通过但视觉状态仍未虚报",
+      "pass": true
+    },
+    {
+      "label": "landscape-left-sans：小型设计文件保留底图指纹和准确尺寸",
+      "pass": true
+    },
+    {
+      "label": "横版文字区位于左栏",
+      "pass": true
+    },
+    {
+      "label": "landscape-left-sans：PNG解码尺寸精确",
+      "pass": true
+    },
+    {
+      "label": "landscape-left-sans：与实际SVG渲染像素吻合",
+      "pass": true,
+      "detail": 0.0039323170979817705
+    },
+    {
+      "label": "landscape-left-sans：每行中文在成品中有真实字形",
+      "pass": true,
+      "detail": [
+        {
+          "text": "秋日好汤",
+          "ink": 15948,
+          "referenceInk": 16096,
+          "mismatch": 0.07271733187534171,
+          "bounds": {
+            "x": 63,
+            "y": 76,
+            "width": 379,
+            "height": 91
+          }
+        },
+        {
+          "text": "把暖意带回家",
+          "ink": 3926,
+          "referenceInk": 3816,
+          "mismatch": 0.26310839407477077,
+          "bounds": {
+            "x": 63,
+            "y": 221,
+            "width": 243,
+            "height": 38
+          }
+        },
+        {
+          "text": "温润清甜",
+          "ink": 1658,
+          "referenceInk": 1638,
+          "mismatch": 0.21046831955922865,
+          "bounds": {
+            "x": 63,
+            "y": 295,
+            "width": 124,
+            "height": 30
+          }
+        },
+        {
+          "text": "慢炖一锅家常好味",
+          "ink": 2876,
+          "referenceInk": 2899,
+          "mismatch": 0.18129218900675023,
+          "bounds": {
+            "x": 62,
+            "y": 358,
+            "width": 252,
+            "height": 30
+          }
+        },
+        {
+          "text": "原创合成验收样例",
+          "ink": 1885,
+          "referenceInk": 1913,
+          "mismatch": 0.181021897810219,
+          "bounds": {
+            "x": 62,
+            "y": 932,
+            "width": 194,
+            "height": 23
+          }
+        }
+      ]
+    },
+    {
+      "label": "landscape-left-sans：全文未删字",
+      "pass": true
+    },
+    {
+      "label": "landscape-left-sans：实际字形在安全文字区域内",
+      "pass": true,
+      "detail": {
+        "x": 62,
+        "y": 75,
+        "width": 380,
+        "height": 881
+      }
+    },
+    {
+      "label": "landscape-left-sans：PPTX文字可编辑",
+      "pass": true
+    },
+    {
+      "label": "square-long-serif：真实Node工具完整交付",
+      "pass": true,
+      "detail": {
+        "kind": "poster",
+        "status": "complete",
+        "width": 1200,
+        "height": 1200,
+        "files": [
+          {
+            "format": "png",
+            "path": "海报/square-long-serif.png",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "passed"
+          },
+          {
+            "format": "svg",
+            "path": "海报/square-long-serif.svg",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "pptx",
+            "path": "海报/square-long-serif.pptx",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          }
+        ],
+        "textRendering": "program",
+        "visual": "not_checked",
+        "fontCheck": "passed",
+        "notes": [
+          "底图：底图/原创秋日汤碗.png",
+          "文案由程序排版；尚未做视觉模型或人工验收，不能声称绝对无错字"
+        ],
+        "errors": [],
+        "designPath": "海报/square-long-serif.poster.json"
+      }
+    },
+    {
+      "label": "square-long-serif：读回通过但视觉状态仍未虚报",
+      "pass": true
+    },
+    {
+      "label": "square-long-serif：小型设计文件保留底图指纹和准确尺寸",
+      "pass": true
+    },
+    {
+      "label": "square-long-serif：PNG解码尺寸精确",
+      "pass": true
+    },
+    {
+      "label": "square-long-serif：与实际SVG渲染像素吻合",
+      "pass": true,
+      "detail": 0.016029166666666667
+    },
+    {
+      "label": "square-long-serif：每行中文在成品中有真实字形",
+      "pass": true,
+      "detail": [
+        {
+          "text": "秋季养生汤：把一整个秋",
+          "ink": 24034,
+          "referenceInk": 24079,
+          "mismatch": 0.1613421032025683,
+          "bounds": {
+            "x": 74,
+            "y": 565,
+            "width": 957,
+            "height": 83
+          }
+        },
+        {
+          "text": "天的温润与暖意盛进碗里",
+          "ink": 30743,
+          "referenceInk": 31033,
+          "mismatch": 0.19544586276947334,
+          "bounds": {
+            "x": 75,
+            "y": 686,
+            "width": 954,
+            "height": 84
+          }
+        },
+        {
+          "text": "随四时而食，尝日常之美",
+          "ink": 3551,
+          "referenceInk": 3579,
+          "mismatch": 0.3708690330477356,
+          "bounds": {
+            "x": 75,
+            "y": 819,
+            "width": 404,
+            "height": 38
+          }
+        },
+        {
+          "text": "莲藕、山药、红枣，用平凡食材煮出温暖",
+          "ink": 3767,
+          "referenceInk": 3546,
+          "mismatch": 0.2993827160493827,
+          "bounds": {
+            "x": 73,
+            "y": 886,
+            "width": 516,
+            "height": 30
+          }
+        },
+        {
+          "text": "认真吃饭，慢慢生活",
+          "ink": 2117,
+          "referenceInk": 1958,
+          "mismatch": 0.32914572864321606,
+          "bounds": {
+            "x": 73,
+            "y": 943,
+            "width": 257,
+            "height": 30
+          }
+        },
+        {
+          "text": "原创合成验收样例 · 宋体长标题",
+          "ink": 2075,
+          "referenceInk": 2203,
+          "mismatch": 0.3713951675759938,
+          "bounds": {
+            "x": 73,
+            "y": 1100,
+            "width": 306,
+            "height": 21
+          }
+        }
+      ]
+    },
+    {
+      "label": "square-long-serif：全文未删字",
+      "pass": true
+    },
+    {
+      "label": "square-long-serif：实际字形在安全文字区域内",
+      "pass": true,
+      "detail": {
+        "x": 73,
+        "y": 564,
+        "width": 958,
+        "height": 558
+      }
+    },
+    {
+      "label": "square-long-serif：PPTX文字可编辑",
+      "pass": true
+    },
+    {
+      "label": "改标题仍完整交付原画幅",
+      "pass": true,
+      "detail": {
+        "kind": "poster",
+        "status": "complete",
+        "width": 1024,
+        "height": 1536,
+        "files": [
+          {
+            "format": "png",
+            "path": "海报/portrait-bottom-sans-修改-mwd311sl.png",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "passed"
+          },
+          {
+            "format": "svg",
+            "path": "海报/portrait-bottom-sans-修改-mwd311sl.svg",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "pptx",
+            "path": "海报/portrait-bottom-sans-修改-mwd311sl.pptx",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          }
+        ],
+        "textRendering": "program",
+        "visual": "not_checked",
+        "fontCheck": "passed",
+        "notes": [
+          "底图：底图/原创秋日汤碗.png",
+          "文案由程序排版；尚未做视觉模型或人工验收，不能声称绝对无错字"
+        ],
+        "errors": [],
+        "designPath": "海报/portrait-bottom-sans-修改-mwd311sl.poster.json"
+      }
+    },
+    {
+      "label": "改标题另存，旧三格式和设计文件不覆盖",
+      "pass": true
+    },
+    {
+      "label": "改标题复用相同无字底图和排版参数",
+      "pass": true
+    },
+    {
+      "label": "改稿保留全文，只换指定主标题",
+      "pass": true
+    },
+    {
+      "label": "改标题实际PNG：PNG解码尺寸精确",
+      "pass": true
+    },
+    {
+      "label": "改标题实际PNG：与实际SVG渲染像素吻合",
+      "pass": true,
+      "detail": 0.005198160807291667
+    },
+    {
+      "label": "改标题实际PNG：每行中文在成品中有真实字形",
+      "pass": true,
+      "detail": [
+        {
+          "text": "冬日暖心汤",
+          "ink": 19203,
+          "referenceInk": 19364,
+          "mismatch": 0.08591117147024797,
+          "bounds": {
+            "x": 65,
+            "y": 1099,
+            "width": 473,
+            "height": 92
+          }
+        },
+        {
+          "text": "一碗温润，慢享秋日",
+          "ink": 4464,
+          "referenceInk": 4448,
+          "mismatch": 0.24018003273322422,
+          "bounds": {
+            "x": 63,
+            "y": 1245,
+            "width": 360,
+            "height": 39
+          }
+        },
+        {
+          "text": "莲藕 · 山药 · 红枣",
+          "ink": 2309,
+          "referenceInk": 2315,
+          "mismatch": 0.22953388170779476,
+          "bounds": {
+            "x": 63,
+            "y": 1319,
+            "width": 280,
+            "height": 30
+          }
+        },
+        {
+          "text": "家常食材，暖心滋味",
+          "ink": 2986,
+          "referenceInk": 3011,
+          "mismatch": 0.15403573629081946,
+          "bounds": {
+            "x": 63,
+            "y": 1382,
+            "width": 283,
+            "height": 30
+          }
+        },
+        {
+          "text": "原创合成底图 · 中文由程序排版",
+          "ink": 3108,
+          "referenceInk": 3153,
+          "mismatch": 0.16724941724941725,
+          "bounds": {
+            "x": 62,
+            "y": 1444,
+            "width": 354,
+            "height": 23
+          }
+        }
+      ]
+    },
+    {
+      "label": "改标题实际PNG：全文未删字",
+      "pass": true
+    },
+    {
+      "label": "改标题实际PNG：实际字形在安全文字区域内",
+      "pass": true,
+      "detail": {
+        "x": 62,
+        "y": 1099,
+        "width": 476,
+        "height": 369
+      }
+    },
+    {
+      "label": "改稿PNG上方底图实际像素完全未变、标题像素确实改变",
+      "pass": true,
+      "detail": {
+        "backgroundDifferences": 0,
+        "titleDifferences": 55086
+      }
+    },
+    {
+      "label": "旧文件SHA256保持：海报/portrait-bottom-sans.png",
+      "pass": true
+    },
+    {
+      "label": "旧文件SHA256保持：海报/portrait-bottom-sans.svg",
+      "pass": true
+    },
+    {
+      "label": "旧文件SHA256保持：海报/portrait-bottom-sans.pptx",
+      "pass": true
+    },
+    {
+      "label": "旧文件SHA256保持：海报/portrait-bottom-sans.poster.json",
+      "pass": true
+    },
+    {
+      "label": "旧文件SHA256保持：底图/原创秋日汤碗.png",
+      "pass": true
+    },
+    {
+      "label": "改标题未调用图片模型",
+      "pass": true
+    },
+    {
+      "label": "服务器拒绝外部href",
+      "pass": true
+    },
+    {
+      "label": "服务器真实字体检测拒绝缺字",
+      "pass": true
+    },
+    {
+      "label": "渲染失败明确partial，无成品PNG，保留两种源文件",
+      "pass": true,
+      "detail": {
+        "kind": "poster",
+        "status": "partial",
+        "width": 1024,
+        "height": 1536,
+        "files": [
+          {
+            "format": "svg",
+            "path": "故障/保留源文件.svg",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "pptx",
+            "path": "故障/保留源文件.pptx",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          }
+        ],
+        "textRendering": "program",
+        "visual": "not_checked",
+        "fontCheck": "not_checked",
+        "notes": [
+          "底图：未央原创插画",
+          "文案由程序排版；尚未做视觉模型或人工验收，不能声称绝对无错字"
+        ],
+        "errors": [
+          {
+            "code": "POSTER_RENDER_UNAVAILABLE",
+            "message": "当前环境缺少海报渲染能力"
+          }
+        ],
+        "designPath": "故障/保留源文件.poster.json"
+      }
+    },
+    {
+      "label": "放不下的全文明确失败，不截字",
+      "pass": true
+    },
+    {
+      "label": "web：浏览器专用渲染和字体检查通过",
+      "pass": true,
+      "detail": {
+        "kind": "poster",
+        "status": "complete",
+        "width": 1024,
+        "height": 1536,
+        "files": [
+          {
+            "format": "png",
+            "path": "浏览器/portrait-bottom-sans.png",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "passed"
+          },
+          {
+            "format": "svg",
+            "path": "浏览器/portrait-bottom-sans.svg",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "pptx",
+            "path": "浏览器/portrait-bottom-sans.pptx",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          }
+        ],
+        "textRendering": "program",
+        "visual": "not_checked",
+        "fontCheck": "passed",
+        "notes": [
+          "底图：底图/原创秋日汤碗.png",
+          "文案由程序排版；尚未做视觉模型或人工验收，不能声称绝对无错字"
+        ],
+        "errors": [],
+        "designPath": "浏览器/portrait-bottom-sans.poster.json"
+      }
+    },
+    {
+      "label": "web：PNG解码尺寸精确",
+      "pass": true
+    },
+    {
+      "label": "web：与实际SVG渲染像素吻合",
+      "pass": true,
+      "detail": 0
+    },
+    {
+      "label": "web：每行中文在成品中有真实字形",
+      "pass": true,
+      "detail": [
+        {
+          "text": "秋季养生汤",
+          "ink": 20784,
+          "referenceInk": 20784,
+          "mismatch": 0,
+          "bounds": {
+            "x": 63,
+            "y": 1099,
+            "width": 475,
+            "height": 93
+          }
+        },
+        {
+          "text": "一碗温润，慢享秋日",
+          "ink": 4448,
+          "referenceInk": 4448,
+          "mismatch": 0,
+          "bounds": {
+            "x": 63,
+            "y": 1245,
+            "width": 360,
+            "height": 40
+          }
+        },
+        {
+          "text": "莲藕 · 山药 · 红枣",
+          "ink": 2315,
+          "referenceInk": 2315,
+          "mismatch": 0,
+          "bounds": {
+            "x": 63,
+            "y": 1318,
+            "width": 280,
+            "height": 32
+          }
+        },
+        {
+          "text": "家常食材，暖心滋味",
+          "ink": 3011,
+          "referenceInk": 3011,
+          "mismatch": 0,
+          "bounds": {
+            "x": 63,
+            "y": 1381,
+            "width": 283,
+            "height": 32
+          }
+        },
+        {
+          "text": "原创合成底图 · 中文由程序排版",
+          "ink": 3153,
+          "referenceInk": 3153,
+          "mismatch": 0,
+          "bounds": {
+            "x": 62,
+            "y": 1443,
+            "width": 353,
+            "height": 25
+          }
+        }
+      ]
+    },
+    {
+      "label": "web：全文未删字",
+      "pass": true
+    },
+    {
+      "label": "web：实际字形在安全文字区域内",
+      "pass": true,
+      "detail": {
+        "x": 62,
+        "y": 1099,
+        "width": 476,
+        "height": 369
+      }
+    },
+    {
+      "label": "web：页面没有横向溢出",
+      "pass": true
+    },
+    {
+      "label": "web：没有外部请求或页面异常",
+      "pass": true,
+      "detail": {
+        "external": [],
+        "pageErrors": []
+      }
+    },
+    {
+      "label": "web：外部图片引用拒绝",
+      "pass": true,
+      "detail": {
+        "external": "POSTER_UNSAFE",
+        "missingGlyph": "POSTER_FONT_GLYPHS_MISSING",
+        "aborted": "AbortError"
+      }
+    },
+    {
+      "label": "web：真实缺字拒绝",
+      "pass": true,
+      "detail": {
+        "external": "POSTER_UNSAFE",
+        "missingGlyph": "POSTER_FONT_GLYPHS_MISSING",
+        "aborted": "AbortError"
+      }
+    },
+    {
+      "label": "web：取消不转成成品",
+      "pass": true
+    },
+    {
+      "label": "web：拒绝外部引用时没有发起请求",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "label": "mobile：浏览器专用渲染和字体检查通过",
+      "pass": true,
+      "detail": {
+        "kind": "poster",
+        "status": "complete",
+        "width": 1200,
+        "height": 1200,
+        "files": [
+          {
+            "format": "png",
+            "path": "浏览器/square-long-serif.png",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "passed"
+          },
+          {
+            "format": "svg",
+            "path": "浏览器/square-long-serif.svg",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "pptx",
+            "path": "浏览器/square-long-serif.pptx",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          }
+        ],
+        "textRendering": "program",
+        "visual": "not_checked",
+        "fontCheck": "passed",
+        "notes": [
+          "底图：底图/原创秋日汤碗.png",
+          "文案由程序排版；尚未做视觉模型或人工验收，不能声称绝对无错字"
+        ],
+        "errors": [],
+        "designPath": "浏览器/square-long-serif.poster.json"
+      }
+    },
+    {
+      "label": "mobile：PNG解码尺寸精确",
+      "pass": true
+    },
+    {
+      "label": "mobile：与实际SVG渲染像素吻合",
+      "pass": true,
+      "detail": 0
+    },
+    {
+      "label": "mobile：每行中文在成品中有真实字形",
+      "pass": true,
+      "detail": [
+        {
+          "text": "秋季养生汤：把一整个秋",
+          "ink": 24079,
+          "referenceInk": 24079,
+          "mismatch": 0,
+          "bounds": {
+            "x": 74,
+            "y": 564,
+            "width": 957,
+            "height": 83
+          }
+        },
+        {
+          "text": "天的温润与暖意盛进碗里",
+          "ink": 31033,
+          "referenceInk": 31033,
+          "mismatch": 0,
+          "bounds": {
+            "x": 74,
+            "y": 685,
+            "width": 955,
+            "height": 84
+          }
+        },
+        {
+          "text": "随四时而食，尝日常之美",
+          "ink": 3579,
+          "referenceInk": 3579,
+          "mismatch": 0,
+          "bounds": {
+            "x": 75,
+            "y": 818,
+            "width": 404,
+            "height": 39
+          }
+        },
+        {
+          "text": "莲藕、山药、红枣，用平凡食材煮出温暖",
+          "ink": 3546,
+          "referenceInk": 3546,
+          "mismatch": 0,
+          "bounds": {
+            "x": 73,
+            "y": 887,
+            "width": 516,
+            "height": 30
+          }
+        },
+        {
+          "text": "认真吃饭，慢慢生活",
+          "ink": 1958,
+          "referenceInk": 1958,
+          "mismatch": 0,
+          "bounds": {
+            "x": 73,
+            "y": 944,
+            "width": 257,
+            "height": 30
+          }
+        },
+        {
+          "text": "原创合成验收样例 · 宋体长标题",
+          "ink": 2203,
+          "referenceInk": 2203,
+          "mismatch": 0,
+          "bounds": {
+            "x": 73,
+            "y": 1099,
+            "width": 306,
+            "height": 23
+          }
+        }
+      ]
+    },
+    {
+      "label": "mobile：全文未删字",
+      "pass": true
+    },
+    {
+      "label": "mobile：实际字形在安全文字区域内",
+      "pass": true,
+      "detail": {
+        "x": 73,
+        "y": 564,
+        "width": 958,
+        "height": 558
+      }
+    },
+    {
+      "label": "mobile：页面没有横向溢出",
+      "pass": true
+    },
+    {
+      "label": "mobile：没有外部请求或页面异常",
+      "pass": true,
+      "detail": {
+        "external": [],
+        "pageErrors": []
+      }
+    },
+    {
+      "label": "mobile：外部图片引用拒绝",
+      "pass": true,
+      "detail": {
+        "external": "POSTER_UNSAFE",
+        "missingGlyph": "POSTER_FONT_GLYPHS_MISSING",
+        "aborted": "AbortError"
+      }
+    },
+    {
+      "label": "mobile：真实缺字拒绝",
+      "pass": true,
+      "detail": {
+        "external": "POSTER_UNSAFE",
+        "missingGlyph": "POSTER_FONT_GLYPHS_MISSING",
+        "aborted": "AbortError"
+      }
+    },
+    {
+      "label": "mobile：取消不转成成品",
+      "pass": true
+    },
+    {
+      "label": "mobile：拒绝外部引用时没有发起请求",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "label": "LibreOffice真实渲染可用",
+      "pass": true
+    },
+    {
+      "label": "PPTX实际转换PDF成功",
+      "pass": true
+    },
+    {
+      "label": "Office为单页原画幅",
+      "pass": true,
+      "detail": {
+        "width": 767.990551181102,
+        "height": 1152
+      }
+    },
+    {
+      "label": "Office全文保留：秋季养生汤",
+      "pass": true
+    },
+    {
+      "label": "Office全文保留：一碗温润，慢享秋日",
+      "pass": true
+    },
+    {
+      "label": "Office全文保留：莲藕 · 山药 · 红枣",
+      "pass": true
+    },
+    {
+      "label": "Office全文保留：家常食材，暖心滋味",
+      "pass": true
+    },
+    {
+      "label": "Office全文保留：原创合成底图 · 中文由程序排版",
+      "pass": true
+    },
+    {
+      "label": "Office与PNG的底图裁切、面板位置和字形整体一致",
+      "pass": true,
+      "detail": 0.011672337849934896
+    },
+    {
+      "label": "Office每行均实际显示，位置无大幅偏移",
+      "pass": true,
+      "detail": [
+        {
+          "text": "秋季养生汤",
+          "ink": 21031,
+          "referenceInk": 20784,
+          "mismatch": 0.057889080969957485,
+          "bounds": {
+            "x": 62,
+            "y": 1099,
+            "width": 476,
+            "height": 93
+          }
+        },
+        {
+          "text": "一碗温润，慢享秋日",
+          "ink": 4789,
+          "referenceInk": 4448,
+          "mismatch": 0.13173773129525343,
+          "bounds": {
+            "x": 63,
+            "y": 1245,
+            "width": 360,
+            "height": 40
+          }
+        },
+        {
+          "text": "莲藕 · 山药 · 红枣",
+          "ink": 2384,
+          "referenceInk": 2315,
+          "mismatch": 0.6928651059085842,
+          "bounds": {
+            "x": 62,
+            "y": 1319,
+            "width": 310,
+            "height": 30
+          }
+        },
+        {
+          "text": "家常食材，暖心滋味",
+          "ink": 3041,
+          "referenceInk": 3011,
+          "mismatch": 0.27251254797756125,
+          "bounds": {
+            "x": 63,
+            "y": 1382,
+            "width": 283,
+            "height": 30
+          }
+        },
+        {
+          "text": "原创合成底图 · 中文由程序排版",
+          "ink": 3213,
+          "referenceInk": 3153,
+          "mismatch": 0.5953245574216977,
+          "bounds": {
+            "x": 62,
+            "y": 1444,
+            "width": 367,
+            "height": 23
+          }
+        }
+      ]
+    },
+    {
+      "label": "底图原件字节保持",
+      "pass": true
+    }
+  ],
+  "passed": 84,
+  "total": 84,
+  "modelCalls": 0,
+  "syntheticBackground": true,
+  "realDevice": false,
+  "scope": "full"
+}

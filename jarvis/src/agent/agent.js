@@ -21,6 +21,7 @@ import { createDiagramRecovery } from './diagramRecovery.js';
 import { runArchitectureDirector } from './architectureDirector.js';
 import { asksDocumentStyles } from './documentStyleQuery.js';
 import { IMAGE_RECHECK, IMAGE_READING_RULES } from './imageReading.js';
+import { textPosterRequest, POSTER_GUIDANCE } from './posterRouting.js';
 import { conversationFocus } from '../core/responseRevision.js';
 import { responseGuidance } from './responseGuidance.js';
 import { DIAGRAM_PLANNING, strictArchitecture, STRICT_PIPELINE } from './diagramPlanning.js';
@@ -289,7 +290,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   if (sportsNewsOnly) tools = tools.filter(tool => tool.name !== 'get_sports_scores' && (tool.name !== 'get_today_news' || supportsSportsNews(tool)));
   const capabilities = capabilityBlock(availableTools);
   // 环境完全没有产物/计算核验能力时，直接说明未验收，不空转两轮模型。
-  const canReview = availableTools.some(tool => /^(?:create_document|write_long_document|edit_office_document|read_file|write_file|run_javascript|run_python|computer_run|computer_read_file|verify_numbers|time_calc|create_diagram|export_diagram|generate_image|sing_song|generate_video|code_read|code_edit|code_write|code_run)$/.test(tool.name));
+  const canReview = availableTools.some(tool => /^(?:create_document|write_long_document|edit_office_document|read_file|write_file|run_javascript|run_python|computer_run|computer_read_file|verify_numbers|time_calc|create_diagram|export_diagram|generate_image|make_poster|sing_song|generate_video|code_read|code_edit|code_write|code_run)$/.test(tool.name));
   const review = createExecutionReview(requirementText, { visual: images.length > 0 || history.some(message => message.images?.length) });
   const retrieval = createRetrievalBudget(codeWork?.enabled ? '代码开发' : images.length ? `逐项核验 ${requirementText}` : retrievalText ?? requirementText, { now, timeBudgetMs, clock: lookupControl });
   let lookupDelivery = createLookupDelivery(requirementText, now);
@@ -316,7 +317,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   if (codeWork?.enabled) ctx.dynamic = (ctx.dynamic || '') + '\n' + codeWorkBlock(codeWork, await packs.get('code-development'));
   const convo = [...history.map((m) => ({ ...m })), { role: 'user', content: userText, ...(images.length && { images }) }];
   if (images.length || IMAGE_RECHECK.test(requirementText) || /OCR|读数|数值|重新看|看错|识图|截图/i.test(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n' + IMAGE_READING_RULES + '\n图片核对：用户纠正读数或要求OCR时，先用inspect_image读取工作区原图（需要时指定region），不要复述旧识别结果；密集多列用regions最多4个物理分区一次复核，保留列行对应。用户提供数字只能标作用户纠正，不能直接改口称独立看清；不确定必须具体到字符，已看清的部分照常给出。成功回执只能证明本次执行，不能证明数字正确；来源冲突明确报告。没有原图或能力时说明缺失，不声称已重新识别。';
-  if (/架构图|流程图|关系图|原图|旧图|先前.*图|SVG|画图|改图|生成图片/i.test(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n' + DIAGRAM_PLANNING + '\n图形任务：先明确读者、主结论及主次关系，再选主题和结构。分层架构一律create_diagram生成同一.diagram.json设计稿，SVG/PNG/PDF/PPT共用坐标与换行；换格式用export_diagram，不让普通PPT工具重新画。多页汇报里插入架构图也先生成同稿图片再引用。PPT展示版是同图，不冒充可编辑；原生可编辑版须实际渲染对比通过。Image2只做创意图片/视觉素材，不承担精确文字连线。已有图片修改必须传真实原图referencePaths。用户说先前那张时核对确切路径版本，不凭名称或时间替换；多候选无法区分需简短追问。SVG可inspect_image，转PNG可render_diagram。不把展示当验收、源图改了旧验收失效，失败只修指定问题再核。';
+  if (textPosterRequest(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n' + POSTER_GUIDANCE;
+  else if (/架构图|流程图|关系图|原图|旧图|先前.*图|SVG|画图|改图|生成图片/i.test(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n' + DIAGRAM_PLANNING + '\n图形任务：先明确读者、主结论及主次关系，再选主题和结构。分层架构一律create_diagram生成同一.diagram.json设计稿，SVG/PNG/PDF/PPT共用坐标与换行；换格式用export_diagram，不让普通PPT工具重新画。多页汇报里插入架构图也先生成同稿图片再引用。PPT展示版是同图，不冒充可编辑；原生可编辑版须实际渲染对比通过。Image2只做创意图片/视觉素材，不承担精确文字连线。已有图片修改必须传真实原图referencePaths。用户说先前那张时核对确切路径版本，不凭名称或时间替换；多候选无法区分需简短追问。SVG可inspect_image，转PNG可render_diagram。不把展示当验收、源图改了旧验收失效，失败只修指定问题再核。';
   // 当前模型看不了图：图片先交给看图模型写成文字（见 imageSight.js）
   const see = createImageSight({ model, describe: describeImages, label: visionLabel, emit, readText: readImageText, onEvidence: review.noteVisual });
   for (const m of convo) await see(m, { hint: requirementText, signal, ocr: m === convo.at(-1) });
@@ -357,7 +359,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   // 工具按需加载：工具多时只带常用的完整说明，其余列名字、用 tool_search 加载（见 toolLoader.js）
   // 普通问答、查资料：做文档的工具先只列名字（用到时按名字调用或 tool_search 加载）
   // “字大点 / 不要横线”这类短句是在改刚做的文件：做文档的工具要常驻（第一轮 30 题实测：被当成普通问答，先搜工具、再找文件、先试改文字失败，一道题 15 次调用）
-  let loader = createToolLoader(light ? [] : questionProfile ? tools : [...tools, ...own], { defer: isQuickLookup(requirementText, images) && !styleRequests(requirementText).length ? DOCUMENT_TOOLS : null, core: codeWork?.enabled ? new Set([...CODE_TASK_CORE, ...taskToolCore(taskIntent, requirementText)]) : makingFile && !pipelineContext && !images.length && !/架构图|流程图|关系图|拓扑图|生成图片/.test(requirementText) ? DOCUMENT_TASK_CORE : taskToolCore(taskIntent, requirementText, { images, computerTask, strict: pipelineContext }) });
+  let loader = createToolLoader(light ? [] : questionProfile ? tools : [...tools, ...own], { defer: isQuickLookup(requirementText, images) && !styleRequests(requirementText).length ? DOCUMENT_TOOLS : null, core: codeWork?.enabled ? new Set([...CODE_TASK_CORE, ...taskToolCore(taskIntent, requirementText)]) : makingFile && !pipelineContext && !images.length && !textPosterRequest(requirementText) && !/架构图|流程图|关系图|拓扑图|生成图片/.test(requirementText) ? DOCUMENT_TASK_CORE : taskToolCore(taskIntent, requirementText, { images, computerTask, strict: pipelineContext }) });
   const loadGUI=()=>{if(availableTools.some(t=>t.name==='computer_look'))for(const name of ['computer_look','computer_click','computer_type','computer_key','computer_scroll','computer_drag'])loader.get(name);};
   if(!light&&(computerTask==='gui'||computerTaskKind(requirementText,{history})==='gui'))loadGUI();
   let outputRepairs = 0;

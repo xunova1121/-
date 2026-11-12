@@ -11,6 +11,7 @@ import { codeFollowup, codeTaskPolicy, CODE_TASK_MS } from './codeTaskPolicy.mjs
 import { prepareCodeWork } from './codeWorkContext.mjs';
 import { editImage } from '../src/llm/imageEdit.js';
 import { renderSvg } from './svgRender.mjs';
+import { renderPoster } from './posterRaster.mjs';
 import { compareDiagramPpt } from './diagramCompare.mjs';
 import { cropImageRegion } from './imageRegion.mjs';
 import { qweatherConfig } from '../src/core/qweather.js';
@@ -336,6 +337,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       imageEdit: (o) => editImage(cfg, { ...o, fetchImpl: evaluationModelFetch, download: publicFetch }),
       cropImage: cropImageRegion,
       renderSvg,
+      renderPoster,
       compareDiagramPpt,
       visionLlm: sight(cfg, task).describeImages || null,
       ocr: ocrLine(cfg) ? (file, o) => recognizeText(cfg, file, { ...o, fetchImpl: evaluationModelFetch }) : null, // 文字识别（智谱 GLM-OCR）

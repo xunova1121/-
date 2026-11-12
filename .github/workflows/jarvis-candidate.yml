@@ -1,0 +1,70 @@
+# 开发环境的软件图形栈不稳定时，在正式CI执行原门禁；不打安装包、不创建或修改Release。
+name: 未央候选发布门禁
+on:
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - name: 使用官方软件源
+        run: bash scripts/ci-official-apt.sh
+      - name: 安装原测试及中文排版依赖
+        timeout-minutes: 20
+        run: |
+          for i in 1 2 3; do
+            if timeout 360 sh -c 'sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg fontconfig fonts-noto-cjk fonts-wqy-microhei libreoffice-writer libreoffice-impress libreoffice-calc poppler-utils'; then exit 0; fi
+          done
+          exit 1
+      - name: 安装依赖与真实浏览器
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: 全量单元测试
+        run: npm test
+      - name: 代码检查
+        run: npm run lint
+      - name: 构建正式网页
+        run: |
+          npm run build
+          npm run build:mobile
+      - name: 中文图片真实渲染与原服务器模式
+        run: |
+          node e2e/poster-composition.mjs "$RUNNER_TEMP/candidate/poster"
+          node e2e/server-mode.mjs "$RUNNER_TEMP/candidate/server-mode"
+          node e2e/agent-resources-cross-origin.mjs "$RUNNER_TEMP/candidate/cross-origin"
+          WEIYANG_CHAT_OUTAGE=1 node e2e/pc-cloud-chat.mjs "$RUNNER_TEMP/candidate/pc-chat"
+          WEIYANG_CHAT_OUTAGE=submit node e2e/pc-cloud-chat.mjs "$RUNNER_TEMP/candidate/pc-submit"
+      - name: 原smoke与standalone门禁
+        run: |
+          mkdir -p "$RUNNER_TEMP/candidate"
+          node server/server.mjs > "$RUNNER_TEMP/candidate/gateway.log" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          node --input-type=module -e 'for(let i=0;i<100;i++){try{if((await fetch("http://127.0.0.1:8787/api/health")).ok)process.exit(0)}catch{}await new Promise(r=>setTimeout(r,100))}process.exit(1)'
+          node e2e/smoke.mjs "$RUNNER_TEMP/candidate/smoke"
+          kill "$SERVER_PID"
+          wait "$SERVER_PID" 2>/dev/null || true
+          trap - EXIT
+          npm run build:standalone
+          node e2e/standalone.mjs "$RUNNER_TEMP/candidate/standalone"
+      - name: 保留验收记录
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-${{ github.run_id }}
+          retention-days: 1
+          path: ${{ runner.temp }}/candidate

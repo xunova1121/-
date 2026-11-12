@@ -41,15 +41,16 @@ export function taskContract(text = '') {
     formats,
     remembering,
     askingMemory: asking,
-    coding: creating && /代码|程序|脚本|JavaScript|TypeScript|Python|应用|网页|网站|接口/i.test(value) && (!formats.length || /(?:同时|另外|并且|还要|以及|并).{0,12}(?:开发|实现|编写|提供|生成|运行|测试).{0,12}(?:代码|程序|脚本|JavaScript|TypeScript|Python|网页|网站|接口代码)/i.test(value)),
+    coding: media?.kind !== 'poster' && creating && /代码|程序|脚本|JavaScript|TypeScript|Python|应用|网页|网站|接口/i.test(value) && (!formats.length || /(?:同时|另外|并且|还要|以及|并).{0,12}(?:开发|实现|编写|提供|生成|运行|测试).{0,12}(?:代码|程序|脚本|JavaScript|TypeScript|Python|网页|网站|接口代码)/i.test(value)),
     calculation,
     researching: /查|搜索|核实|调研|研究|最新|今天|行情/.test(value),
     criteria: [
       ...(media ? [`实际调用${media.tool}并取得${media.label}文件回执，排队或口头承诺不算完成`] : []),
+      ...(media?.kind === 'poster' ? ['复用已有底图，或generate_image先画无字底图，再make_poster排字', '最终PNG、自包含可编辑SVG和PPTX分别按真实回执交付；局部失败保留源文件，不让用户自行导出图片', '生成、读回、字体检查与视觉验收分别报告，不承诺绝对无错字'] : []),
       ...(calculation ? ['先用time_calc、verify_numbers或代码核对数值和日期基准，再给结论'] : []),
       ...(/日K|K线|最高价|最低价/i.test(value) ? ['历史日K优先get_stock_kline，明确证券代码、日期、复权和返回范围，不用搜索摘要冒充日K数据'] : []),
       ...(formats.length ? ['实际文件存在且可读回', '分别报告结构、内容、渲染和未解决问题'] : []),
-      ...(creating && /代码|程序|脚本|网页|网站/.test(value)
+      ...(media?.kind !== 'poster' && creating && /代码|程序|脚本|网页|网站/.test(value)
         ? ['先读现状与项目规则，execution_capabilities核对实际执行环境', '修改后运行适用测试，区分未执行与通过']
         : [])
     ]
