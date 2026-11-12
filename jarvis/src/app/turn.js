@@ -25,6 +25,7 @@ import { SentenceChunker } from '../core/sentenceChunker.js';
 import { followUpSuggestions, interruptionMark } from '../core/suggest.js';
 import { savePending, clearPending } from '../core/pendingTask.js';
 import { runRemote } from '../core/serverClient.js';
+import { serverObservationActions, serverTaskMayBeRunning } from '../core/serverConnection.js';
 import { HEDGE_MS } from '../agent/hedgedRequest.js';
 import { createTaskKeeper } from '../mobile/backgroundTasks.js';
 import { noteAction } from '../mobile/renderDiagnostics.js';
@@ -507,6 +508,7 @@ export function createTurn(app) {
       if (!app.speaker.speaking) finishTurn();
     } catch (err) {
       if (err.name === 'AbortError') return;
+      turn.observationLost = serverTaskMayBeRunning(err);
       if (turn.background) {
         finishBackground(turn, { error: app.friendlyError(err), shown: st.shown, usedTools, files: madeFiles });
         return;
@@ -538,7 +540,11 @@ export function createTurn(app) {
           },
           turn.session
         );
-      app.callouts?.set(followUpSuggestions({ error: true, resumable, userText: text, desktop: Boolean(DESKTOP) }));
+      app.callouts?.set(
+        turn.observationLost || err.requestTiming
+          ? serverObservationActions()
+          : followUpSuggestions({ error: true, resumable, userText: text, desktop: Boolean(DESKTOP) })
+      );
     } finally {
       if (MOBILE) clearPending(storage, turn.session.id, turn.t0);
       await app.persistSession(turn.session);
@@ -547,7 +553,7 @@ export function createTurn(app) {
       // 回答写完的一瞬间又收到的话（没来得及交给模型）：接着当一句新话处理
       const left = turn.inbox.splice(0);
       const later = turn.later?.splice(0) ?? []; // 干活时说的“另一件事”
-      const canSend = !ctrl.signal.aborted && !turn.background && app.session === turn.session;
+      const canSend = !ctrl.signal.aborted && !turn.background && !turn.observationLost && app.session === turn.session;
       const putBack = (texts, words) => {
         app.prompt.value += (app.prompt.value.trim() ? '\n' : '') + texts.join('\n');
         app.autosize();

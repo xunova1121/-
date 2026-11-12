@@ -1,7 +1,10 @@
 import { errorKind } from './suggest.js';
 import { credentialErrorText } from '../llm/credentialContext.js';
+import { serverRequestErrorText } from './serverConnection.js';
 /** 不从429或网络中断推断欠费，也不虚构已经重试。 */
 export function friendlyError(error) {
+  const server = serverRequestErrorText(error);
+  if (server) return server;
   const credential = credentialErrorText(error);
   if (credential) return credential;
   const msg = String(error?.message ?? error ?? '');

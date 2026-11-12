@@ -15,7 +15,10 @@ export function createPCModelAdapter(client,{task='chat',onModel}={}) {
       if(ctrl.signal.aborted)throw new Error('aborted');
       const res=await client.modelEvents({task,preferredModel,system:o.system,messages:o.messages,tools:o.tools,
         effort:o.effort,allowWebSearch:o.allowWebSearch,stallTimeouts:o.stallTimeouts,maxTransientRetries:o.maxTransientRetries},ctrl.signal);
-      if(!res.ok)throw Object.assign(new Error(res.status===401?'服务器登录已失效，请重新登录':`服务器PC模型接口返回${res.status}`),{status:res.status});
+      if(!res.ok)throw Object.assign(new Error(res.status===401?'服务器登录已失效，请重新登录':`服务器PC模型接口返回${res.status}`),{
+        status:res.status,
+        requestTiming:{path:'/api/server/pc-model',method:'POST',status:res.status,kind:'api',attempt:1}
+      });
       if(!res.body)throw new Error('服务器没有返回模型事件流');
       reader=res.body.getReader();
       const cancel=()=>reader.cancel().catch(()=>{});ctrl.signal.addEventListener('abort',cancel,{once:true});

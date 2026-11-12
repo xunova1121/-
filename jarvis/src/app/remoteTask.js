@@ -2,6 +2,7 @@
  * 服务器模式：接上服务器上正在做的任务（另一台设备发起的、或 App 重新打开时），把服务器生成的文件取回本机。
  */
 import { runRemote } from '../core/serverClient.js';
+import { serverConnectionText, serverObservationActions } from '../core/serverConnection.js';
 import { toolLabel } from '../ui/transcript.js';
 import * as ws from '../agent/workspace.js';
 import * as sessionsApi from '../agent/sessions.js';
@@ -30,6 +31,7 @@ export function createRemoteTask(app) {
     app.liveBubble = bubble;
     app.setTask('processing', '服务器上正在做');
     const cards = new Map();
+    let failed = false;
     try {
       await runRemote(app.server, {
         taskId: s.taskId,
@@ -39,25 +41,45 @@ export function createRemoteTask(app) {
         signal: ctrl.signal,
         onFile: (p) => pullServerFile(p, turn),
         emit: (e) => {
-          if (app.active !== turn) return;
-          if (e.type === 'text') bubble.append(e.delta);
+          if (turn.streamDone || ctrl.signal.aborted) return;
+          if (e.type === 'server_connection') {
+            const message = serverConnectionText(e);
+            turn.status = message;
+            if (app.active === turn) app.setTask('processing', message);
+            bubble.status?.(message);
+          } else if (e.type === 'text') bubble.append(e.delta);
           else if (e.type === 'sports_scores') bubble.sports?.(e.value);
           else if (e.type === 'plan') bubble.plan?.(e.steps);
           else if (e.type === 'tool_start' && e.name !== 'update_plan') {
             cards.set(e.id, bubble.toolCard(e.name, e.args));
             turn.steps++;
-            app.setTask('processing', toolLabel(e.name));
+            turn.status = toolLabel(e.name);
+            if (app.active === turn) app.setTask('processing', turn.status);
           } else if (e.type === 'tool_progress') cards.get(e.id)?.progress(e.text);
           else if (e.type === 'tool_end') cards.get(e.id)?.done(e.ok, e.output, e.ms);
         }
       });
     } catch (e) {
-      if (e.name !== 'AbortError' && app.active === turn) toast(e.message);
+      if (e.name !== 'AbortError') {
+        failed = true;
+        const message = app.friendlyError(e);
+        bubble.append(`\n（${message}）`);
+        if (app.active === turn) {
+          toast(message);
+          if (e.code === 'TASK_OBSERVATION_LOST') app.callouts?.set(serverObservationActions());
+        }
+      }
+    } finally {
+      turn.streamDone = true;
+      app.backgroundTurns?.delete(turn);
+      bubble.done();
+      if (app.active === turn) {
+        app.active = null;
+        app.setTask(failed ? 'error' : 'idle', failed ? '请求失败' : undefined);
+      }
     }
-    if (app.active === turn) {
-      app.active = null;
-      app.setTask('idle');
-    }
+    // 观察失败不代表任务结束；保留提示和已收到的内容，避免旧历史覆盖它。
+    if (failed) return;
     // 换成服务器上记下的完整对话（回答、用到的工具、生成的文件）
     const fresh = await sessionsApi.get(s.id).catch(() => null);
     if (fresh && app.session.id === s.id && !app.active) {

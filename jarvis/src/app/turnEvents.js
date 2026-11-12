@@ -2,6 +2,7 @@
 import { MOBILE } from '../config.js';
 import { savePending } from '../core/pendingTask.js';
 import { failedStep } from '../agent/failedSteps.js';
+import { serverConnectionText } from '../core/serverConnection.js';
 import { toolLabel, summarizeArgs, searchBrand } from '../ui/transcript.js';
 import { now, storage, toast, markActivity } from './env.js';
 
@@ -9,6 +10,14 @@ export function createTurnEvents(app) {
   /** 这一轮的进度事件 → 界面：文字、工具卡片、模型切换、团队分工……（切到别的对话后只记进这一轮的气泡） */
   function turnEvents(turn, st, { bubble, speech, cards, doneSteps, model }) {
     return (e) => {
+      if (e.type === 'server_connection') {
+        const message = serverConnectionText(e);
+        turn.status = message;
+        if (!turn.background && app.active === turn) app.setTask('processing', message);
+        // setTask会刷新气泡的活动文案，连接状态放在它之后，避免被“思考中”覆盖。
+        bubble.status?.(message);
+        return;
+      }
       if (e.type === 'sports_scores') {
         turn.sports = e.value;
         bubble.sports?.(e.value);

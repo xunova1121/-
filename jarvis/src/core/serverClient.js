@@ -113,6 +113,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
   }
   /** 最近几次请求花了多久、走的哪种网络（设置 → 服务器模式里显示，查“为什么慢”用） */
   const timings = [];
+  const responseTimings = new WeakMap();
   let taskProtocol = null;
   const requestId = () => globalThis.crypto?.randomUUID?.() || 'r_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2);
   async function taskWrite(path, body) {
@@ -152,7 +153,8 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
         headers: { ...(token && { Authorization: `Bearer ${token}` }), ...(body !== undefined && !(body instanceof Blob) && { 'Content-Type': 'application/json' }), ...headers },
         ...(body !== undefined && { body: body instanceof Blob ? body : JSON.stringify(body) })
       });
-      note(path, t0, res.ok, { method, status: res.status, kind: res.ok ? 'response' : 'api', attempt });
+      const receipt = note(path, t0, res.ok, { method, status: res.status, kind: res.ok ? 'response' : 'api', attempt });
+      responseTimings.set(res, { path: receipt.path, method, status: res.status, kind: receipt.kind, attempt });
       return res;
     } catch (e) {
       const failure = signal?.aborted ? signal.reason ?? e : ctrl.timedOut
@@ -182,7 +184,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
       return {};
     });
     if (signal?.aborted) throw signal.reason ?? Object.assign(new Error('已停止'), { name: 'AbortError' });
-    if (!res.ok) throw Object.assign(new Error(res.status === 401 ? '服务器登录已失效，请到 设置 → 服务器模式 重新登录' : data.error || `服务器返回 ${res.status}`), { status: res.status, ...(data.code && { code: data.code }), ...(data.kind && { kind: data.kind }), ...(data.upstreamStatus && { upstreamStatus: data.upstreamStatus }) });
+    if (!res.ok) throw Object.assign(new Error(res.status === 401 ? '服务器登录已失效，请到 设置 → 服务器模式 重新登录' : data.error || `服务器返回 ${res.status}`), { status: res.status, requestTiming: responseTimings.get(res), ...(data.code && { code: data.code }), ...(data.kind && { kind: data.kind }), ...(data.upstreamStatus && { upstreamStatus: data.upstreamStatus }) });
     return data;
   }
   let warmedAt = 0;
@@ -301,56 +303,86 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
  * 收一个任务的进度：断线自动重连（从收到的最后一个序号接着收），直到任务结束
  * @returns {Promise<object>} 结束时的 task_state 事件
  */
-export async function followTask(client, id, { onEvent, signal, after = 0, retryMs = [1000, 2000, 4000, 8000], checkMs = 10000, idleMs = 45000, firstMs = STREAM_FIRST_MS } = {}) {
+export async function followTask(client, id, { onEvent, signal, after = 0, retryMs = [1000, 2000, 4000, 8000], checkMs = 10000, idleMs = 45000, firstMs = STREAM_FIRST_MS, maxConsecutiveFailures = 5 } = {}) {
   let last = after, failures = 0, reader = null, attempt = null;
   let touched = Date.now(), checking = false;
+  let connection = 'connected', finalFailure = null, downgraded = false, closed = false;
+  const limit = Number.isInteger(maxConsecutiveFailures) && maxConsecutiveFailures > 0 ? maxConsecutiveFailures : 5;
+  const waiting = new AbortController();
   const aborted = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
+  const terminal = (value, path = `/api/tasks/${encodeURIComponent(id)}/events`) => {
+    const status = value?.status;
+    if (![401, 403, 404].includes(status)) return null;
+    return Object.assign(new Error(status === 404 ? '服务器上找不到这个任务了（可能服务器重启过），结果请看对话记录' :
+      status === 401 ? '服务器登录已失效，请到 设置 → 服务器模式 重新登录' : '服务器拒绝访问，请检查服务器访问权限'),
+    { status, final: true, requestTiming: value.requestTiming || { path, method: 'GET', status, kind: 'api', attempt: failures + 1 } });
+  };
+  const connectionState = (state, count) => {
+    if (connection === state) return;
+    connection = state;
+    onEvent?.({ type: 'server_connection', state, attempt: count });
+  };
   // 仅重开同一任务的观察连接，不停止或重新提交服务器任务。
   const reconnect = () => { attempt?.abort(); reader?.cancel().catch(() => {}); };
-  const stop = () => reconnect();
+  const stop = () => { closed = true; waiting.abort(); reconnect(); };
   if (signal?.aborted) throw aborted();
   signal?.addEventListener('abort', stop, { once: true });
   const watch = setInterval(async () => {
+    if (closed) return;
     if (Date.now() - touched >= idleMs) reconnect();
     if (checking) return;
     checking = true;
     const current = attempt;
     try {
       const t = await client.getTask(id);
+      if (closed) return;
       if (current === attempt && ['done', 'error', 'stopped'].includes(t?.status) && t.seq > last) reconnect();
-    } catch { /* 临时网络故障不终止任务 */ }
+    } catch (error) {
+      // 状态查询也可能先发现登录失效；立即结束观察，但不取消服务器任务。
+      if (!closed && current === attempt && (finalFailure = terminal(error, `/api/tasks/${encodeURIComponent(id)}`))) { waiting.abort(); reconnect(); }
+    }
     finally { checking = false; }
   }, checkMs);
   try {
     for (;;) {
       if (signal?.aborted) throw aborted();
+      if (finalFailure) throw finalFailure;
       attempt = new AbortController();
       touched = Date.now();
-      let got = false, firstTimer = null;
+      let got = false, firstTimer = null, fastRetry = false;
       const trying = Boolean(client.streaming);
+      const downgrade = () => {
+        if (!trying || got || downgraded) return;
+        if (client.streamFailed?.()) { downgraded = true; fastRetry = true; }
+      };
       try {
         const res = await client.events(id, last, attempt.signal);
         if (signal?.aborted) throw aborted();
-        if ([401,403,404].includes(res.status)) throw Object.assign(new Error(
-          res.status === 404 ? '服务器上找不到这个任务了（可能服务器重启过），结果请看对话记录' :
-          res.status === 401 ? '服务器登录已失效，请到 设置 → 服务器模式 重新登录' : '服务器拒绝访问，请检查服务器访问权限'
-        ), { final: true, status: res.status });
+        if (finalFailure) throw finalFailure;
+        const denied = terminal(res);
+        if (denied) throw denied;
         if (!res.ok || !res.body) throw new Error(`服务器返回 ${res.status}`);
         reader = res.body.getReader();
-        if (signal?.aborted || attempt.signal.aborted) { await reader.cancel(); if (signal?.aborted) throw aborted(); continue; }
+        if (signal?.aborted || attempt.signal.aborted) { await reader.cancel(); if (signal?.aborted) throw aborted(); throw new Error('任务观察连接已中断'); }
         // 服务器一连上就会先补发已有的进度：几秒都没收到任何东西，说明这条边收边显示的路不通
-        if (trying) firstTimer = setTimeout(() => { if (!got) { client.streamFailed?.(); reconnect(); } }, firstMs);
+        if (trying) firstTimer = setTimeout(() => { if (!got) { downgrade(); reconnect(); } }, firstMs);
         const dec = new TextDecoder();
         let buf = '';
         for (;;) {
           const { value, done } = await reader.read();
           if (signal?.aborted) throw aborted();
+          if (finalFailure) throw finalFailure;
           if (done) break;
-          got = true;
-          touched = Date.now(); // 服务器心跳只维持观察连接，不冒充模型进展。
-          failures = 0;
-          const { events, rest } = parseSse(buf + dec.decode(value, { stream: true }));
+          const input = buf + dec.decode(value, { stream: true });
+          const { events, rest } = parseSse(input);
           buf = rest;
+          // 只认有效事件或SSE心跳；HTTP 200 空响应/错误页不能冒充恢复。
+          if (events.length || /(?:^|\n):[^\n]*\n/.test(input)) {
+            got = true;
+            touched = Date.now(); // 心跳只维持观察连接，不冒充模型进展。
+            connectionState('connected', failures + 1);
+            failures = 0;
+          }
           for (const ev of events) {
             if (ev.seq <= last) continue;
             last = ev.seq;
@@ -360,9 +392,12 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
         }
       } catch (e) {
         if (signal?.aborted) throw aborted();
+        if (finalFailure) throw finalFailure;
+        const denied = terminal(e);
+        if (denied) throw denied;
         if (e.final) throw e;
         // 边收边显示的路一点东西都没收到就断了：马上改用一次给全的方式重连，不再原样重试
-        if (trying && !got && client.streamFailed?.()) { failures = 0; continue; }
+        downgrade();
         // 观察连接自行中断（含失活检测）时继续按序号重连。
       } finally {
         clearTimeout(firstTimer);
@@ -370,9 +405,17 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
         reader = null;
         attempt?.abort();
       }
-      await sleep(retryMs[Math.min(failures++, retryMs.length - 1)], signal);
+      failures++;
+      // 一次瞬断透明恢复；持续断线只在状态变化时提示，避免重复刷屏。
+      if (failures >= 2) connectionState('reconnecting', failures);
+      if (signal?.aborted) throw aborted();
+      if (failures >= limit) throw Object.assign(new Error('任务已提交，但暂时无法接收服务器进度；服务器可能继续运行，请稍后打开原对话查看。'), { code: 'TASK_OBSERVATION_LOST', kind: 'network' });
+      if (fastRetry) continue;
+      try { await sleep(retryMs[Math.min(failures - 1, retryMs.length - 1)], waiting.signal); }
+      catch (error) { if (signal?.aborted) throw aborted(); throw finalFailure || error; }
     }
   } finally {
+    closed = true;
     clearInterval(watch);
     signal?.removeEventListener('abort', stop);
     reconnect();
@@ -385,7 +428,7 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
    * @param {{ sessionId: string, userText: string, images?: Array<{ mime: string, data: string }>, emit: (e: object) => void, signal?: AbortSignal, onFile?: (path: string) => void, onStarted?: (task: { id: string }) => void, taskId?: string }} o
    * @returns {Promise<{ text: string, toolCalls: number, steps: number }>}
    */
-  export async function runRemote(client, { sessionId, userText, images = [], voice = false, emit, signal, onFile, onStarted, taskId = null, agentId = null, agentForm = null }) {
+  export async function runRemote(client, { sessionId, userText, images = [], voice = false, emit, signal, onFile, onStarted, taskId = null, agentId = null, agentForm = null, observation = {} }) {
     if(signal?.aborted)throw Object.assign(new Error('aborted'),{name:'AbortError'});
     const task = taskId ? { id: taskId } : await client.startTask({ sessionId, text: userText, ...(images.length && { images }), ...(voice && { voice: true }), ...(agentId && { agentId }), ...(agentId && agentForm && { agentForm }) });
     const stop = () => client.stopTask(task.id).catch(() => {});
@@ -395,6 +438,7 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
       await onStarted?.(task);
       if(signal?.aborted)throw Object.assign(new Error('aborted'),{name:'AbortError'});
       const end = await followTask(client, task.id, {
+        ...observation,
         signal,
         onEvent: (ev) => {
           if (ev.type === 'file') onFile?.(ev.path);
