@@ -5,7 +5,7 @@ import { withWebDeadline } from '../agent/retrievalBudget.js';
 /** 取消、任务预算是控制信号，任何降级都不能把它们变成“没有结果”。 */
 export function throwControl(error, signal) {
   if (signal?.aborted) throw signal.reason ?? Object.assign(new Error('已停止'), { name: 'AbortError' });
-  if (error?.name === 'AbortError' || error?.code === 'RETRIEVAL_BUDGET') throw error;
+  if (error?.name === 'AbortError' || ['RETRIEVAL_BUDGET', 'EVAL_QUOTA', 'EVAL_EXPIRED'].includes(error?.code)) throw error;
 }
 
 export function httpError(httpStatus, detail = '', service = '网络服务') {

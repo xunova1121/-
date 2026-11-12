@@ -3,6 +3,7 @@ import { MOBILE } from '../config.js';
 import { savePending } from '../core/pendingTask.js';
 import { failedStep } from '../agent/failedSteps.js';
 import { serverConnectionText } from '../core/serverConnection.js';
+import { mergeMarketSnapshots } from '../../shared/marketSnapshot.js';
 import { toolLabel, summarizeArgs, searchBrand } from '../ui/transcript.js';
 import { now, storage, toast, markActivity } from './env.js';
 
@@ -10,6 +11,12 @@ export function createTurnEvents(app) {
   /** 这一轮的进度事件 → 界面：文字、工具卡片、模型切换、团队分工……（切到别的对话后只记进这一轮的气泡） */
   function turnEvents(turn, st, { bubble, speech, cards, doneSteps, model }) {
     return (e) => {
+      if (e.type === 'market_quote') {
+        if (turn.streamDone || turn.ctrl?.signal.aborted || (!turn.background && app.active !== turn)) return;
+        turn.markets = mergeMarketSnapshots(turn.markets, e.value);
+        bubble.marketCards?.(turn.markets);
+        return;
+      }
       if (e.type === 'server_connection') {
         const message = serverConnectionText(e);
         turn.status = message;

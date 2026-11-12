@@ -19,6 +19,7 @@ import { createAgentProfileActions } from './agentProfileActions.js';
 import { createStudioActions } from './studioActions.js';
 import { createStudioPanel } from '../ui/studioLibrary.js';
 import { createStudioHub } from '../ui/studioHub.js';
+import { createCompanyLookup } from './companyLookup.js';
 
 /** 抽屉“发现智能体”卡片上的三个常用入口 */
 export const DRAWER_PICKS = ['ppt-maker', 'gongwen-writer', 'health-advisor'];
@@ -27,6 +28,17 @@ export function createAgents(app) {
   const cache = new Map(registry.ALL_BUILTIN_AGENTS.map((p) => [p.id, p]));
   let cacheVersion = 0;
   let tenderView = null;
+  let startRoot = null;
+  const businessDrafts = new WeakMap();
+  const queryCompany = createCompanyLookup(app);
+  function dismissStart() {
+    startRoot?.businessStartController?.destroy();
+    tenderView?.destroy();
+    tenderView = null;
+    startRoot?.remove();
+    startRoot = null;
+  }
+  $('#transcript').addEventListener('jarvis:before-transcript-message', dismissStart);
   const listAgents = async () => {
     const version = cacheVersion;
     const token = userStorageSuffix();
@@ -184,10 +196,12 @@ export function createAgents(app) {
     if (!id || app.history.length) return false;
     const root = $('#transcript');
     const session = app.session;
+    const version = cacheVersion;
+    const server = app.server;
+    const identity = userStorageSuffix();
     const draw = (profile) => {
-      if (app.session !== session || app.history.length) return;
-      tenderView?.destroy();
-      tenderView = null;
+      if (app.session !== session || app.history.length || version !== cacheVersion || app.server !== server || identity !== userStorageSuffix()) return;
+      dismissStart();
       root.querySelector('.wy-agent-start')?.remove();
       if (!profile) {
         root.append(
@@ -195,20 +209,28 @@ export function createAgents(app) {
         );
         return;
       }
-      root.prepend(
-        agentStartView(profile, {
-          values: session.agentForm || {},
-          onFill: fill,
-          onForm: (values) => {
+      let view;
+      const valid = () => app.session === session && app.server === server && identity === userStorageSuffix() && Boolean(view?.isConnected);
+      const state = businessDrafts.get(session) || {};
+      businessDrafts.set(session, state);
+      const changeMode = (mode) => {
+        if (mode === 'tenders' && valid() && !tenderView) tenderView = mountTenderCenter(app, view, fill);
+      };
+      view = agentStartView(profile, {
+        values: session.agentForm || {},
+        onFill: fill,
+        onForm: (values) => {
+          if (app.session === session && app.server === server && identity === userStorageSuffix())
             session.agentForm = Object.keys(values).length ? values : undefined;
-          },
-          onUpload: () => $('#file-input')?.click(),
-          onBack: () => square.open(),
-          onTemplates: () => library.open()
-        })
-      );
-      if (profile.id === 'business-intelligence' && profile.source === 'builtin')
-        tenderView = mountTenderCenter(app, root.querySelector('.wy-agent-start'), fill);
+        },
+        onUpload: () => $('#file-input')?.click(),
+        onBack: () => square.open(),
+        onTemplates: () => library.open(),
+        business: { state, valid, onModeChange: changeMode, onCompanyQuery: queryCompany }
+      });
+      startRoot = view;
+      root.prepend(view);
+      view.businessStartController?.selectMode(state.mode);
       root.scrollTop = 0;
       decorateTitle();
     };
@@ -254,8 +276,7 @@ export function createAgents(app) {
 
   // 服务器模式切换后，个人智能体从服务器读：清掉本机缓存里的非内置项
   function resetCache() {
-    tenderView?.destroy();
-    tenderView = null;
+    dismissStart();
     cacheVersion++;
     for (const [id, p] of cache) if (p.source !== 'builtin') cache.delete(id);
     editor.close();
@@ -273,6 +294,7 @@ export function createAgents(app) {
       openSquare,
       start,
       renderStart,
+      dismissStart,
       decorateTitle,
       rowIcon,
       resetCache,

@@ -6,6 +6,7 @@ import { WEATHER_FETCH_MS } from './weatherLimits.js';
 import { localLookupFailure } from './healthPolicy.js';
 import { SEARCH_WINDOW_MS } from '../searchPolicy.js';
 import { SPORTS_OPERATION_MS, sportsDiagnostics } from '../sportsRequest.js';
+import { fetchUrlPlan } from '../fetchPageTool.js';
 
 /** 沿用原工具的提供者、凭据和回执；记录的是整项查询健康，不冒充单个上游可用性。 */
 export const LOOKUP_OPERATIONS = [
@@ -43,7 +44,10 @@ export async function runLookupOperation(tool, args, execution, lookup = {}) {
     const status = perSource ? null : await lookup.health?.get(source.id);
     if (signal?.aborted) throw signal.reason;
     if (status?.cooling) throw Object.assign(new Error(`${source.label}连续连接失败，冷却至${new Date(status.cooldownUntil).toISOString()}；冷却期间不要再调用此工具，可改用其他可用来源`), { code: 'LOOKUP_SOURCE_COOLING', cooldownUntil: status.cooldownUntil, tool: tool.name });
-    const timeoutMs = Math.min(perSource && tool.name === 'web_search' ? SEARCH_WINDOW_MS : source.timeoutMs, retrieval?.remaining ?? Infinity);
+    const pages = tool.name === 'fetch_url' && tool.input_schema?.properties?.url ? fetchUrlPlan(args) : null;
+    // 逐页最多3个地址各保留原8秒读取窗口，但仍受本轮剩余时间限制；备选竞速不加时。
+    const operationMs = pages?.mode === 'all' ? source.timeoutMs * pages.urls.length : perSource && tool.name === 'web_search' ? SEARCH_WINDOW_MS : source.timeoutMs;
+    const timeoutMs = Math.min(operationMs, retrieval?.remaining ?? Infinity);
     if (timeoutMs <= 0) throw Object.assign(new Error('本轮查询时间已用完，未发起新请求'), { code: 'RETRIEVAL_BUDGET' });
     try {
       const result = await withWebDeadline(activeSignal => tool.run(args, { ...execution, signal: activeSignal }), { signal, timeoutMs });

@@ -36,12 +36,14 @@ try {
     check(`${width} 搜索可找到新入口`, await page.locator('.wy-agent-card[data-agent="business-intelligence"]').count() === 1);
     await page.click('.wy-agent-card[data-agent="business-intelligence"]');
     await page.waitForSelector('.wy-agent-start[data-agent="business-intelligence"]');
+    await page.locator('.wy-business-more > summary').click();
     await page.fill('[data-field="region"] input', '江苏南京');
     await page.selectOption('[data-field="period"] select', '最近7天');
     await page.selectOption('[data-field="notice"] select', '招标采购');
     await page.selectOption('[data-field="company_source"] select', '公开来源');
     await page.evaluate(() => window.__jarvis.agents.renderStart());
     check(`${width} 表单重绘保留地区时间类型`, await page.inputValue('[data-field="region"] input') === '江苏南京' && await page.inputValue('[data-field="notice"] select') === '招标采购');
+    await page.locator('.wy-business-advanced > summary').click();
     for (const label of ['找招标', '查企业', '读公告', '跟踪项目']) {
       await page.getByRole('button', { name: new RegExp('^' + label) }).click();
       check(`${width} ${label}只填草稿`, (await page.inputValue('#prompt')).length > 8 && await page.locator('#transcript .msg').count() === 0);

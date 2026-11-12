@@ -1,5 +1,6 @@
 import { shortSourceRetry } from './lookup/sourceRetry.js';
 import { httpError, throwControl } from '../core/networkRequest.js';
+import { normalizeMarketSnapshot } from '../../shared/marketSnapshot.js';
 import { parseMoment, momentInfo } from './timeMoment.js';
 
 const invalid = (message) => Object.assign(new Error(message), { name: 'ValidationError', code: 'INVALID_STOCK_INPUT' });
@@ -151,6 +152,13 @@ export function createStockKlineTool(ctx = {}) {
           const result = summarizeKline(rows, { start, end });
           const requested = result.bars.slice(-limit);
           const trimmed = summarizeKline(requested, { start, end });
+          throwControl(null, signal);
+          const snapshot = normalizeMarketSnapshot({
+            version: 1, kind: 'kline', title: symbol + ' 日K行情', symbol, unit: /^(?:sh000|sz399)/.test(symbol) ? '点' : '元', adjustment,
+            source: { name: provider.source, url: provider.url }, fetchedAt: Date.now(), bars: trimmed.bars,
+            note: '仅展示来源返回的交易日收盘价，末条可能包含盘中数据；不代表实时成交价。'
+          });
+          if (snapshot) { try { ctx.onMarketQuote?.(snapshot); } catch { /* 卡片展示失败不更换行情来源 */ } }
           return JSON.stringify({
             symbol,
             source: provider.source,

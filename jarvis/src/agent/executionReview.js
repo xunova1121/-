@@ -4,6 +4,7 @@ import { visualSceneAnswerIssues } from './visualSceneRouting.js';
 import { repositoryReceipt, repositoryRepair, repositoryDeliveryIssue, correctRepositoryLinks, repositoryTextStream } from './codeRepositoryReview.js';
 import { IMAGE_RECHECK } from './imageReading.js';
 import { newsCandidates } from './newsDelivery.js';
+import { pageReadSources } from './pageReadReceipt.js';
 import { mediaReceipt, mediaDelivery, imageDeliveryAnswerIssues, blockedAfterDenial } from './actionDelivery.js';
 import { createVisualEvidence, readVisualReceipt } from './visualEvidence.js';
 import { taskContract } from './taskContract.js';
@@ -87,7 +88,13 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
         for (const item of (value.items || []).slice(0, 24)) if (newsOriginals.size < 24 && /^https:\/\//.test(item.url)) newsOriginals.add(item.url);
       } catch { dataRetrieved = false; }
     }
-    if (ok && toolName === 'fetch_url' && newsOriginals.has(args.url) && !/^原网页读取失败/.test(String(output))) newsRead.add(args.url);
+    if (ok && toolName === 'fetch_url') {
+      const pages = pageReadSources(output);
+      dataRetrieved = pages ? pages.some(page => page.read) : Boolean(String(output).trim());
+      if (pages) {
+        for (const page of pages) if (page.read && newsOriginals.has(page.url)) newsRead.add(page.url);
+      } else if (dataRetrieved && newsOriginals.has(args.url)) newsRead.add(args.url);
+    }
     if (ok && toolName === 'web_search' && answerConstraints(request).todayNews) {
       for (const item of newsCandidates(output)) {
         if (newsLinks.size < 8) newsLinks.set(item.url, item);

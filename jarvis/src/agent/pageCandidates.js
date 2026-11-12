@@ -30,7 +30,7 @@ export function readPageCandidates(addresses, { read, signal, accept = () => tru
       if (!settled && accept(text)) finish(null, { url, text });
     }).catch(error => {
       if (settled) return;
-      if (error.name === 'AbortError' || ['RETRIEVAL_BUDGET', 'PRIVATE_NETWORK_BLOCKED'].includes(error.code)) finish(error);
+      if (error.name === 'AbortError' || ['RETRIEVAL_BUDGET', 'EVAL_QUOTA', 'EVAL_EXPIRED', 'PRIVATE_NETWORK_BLOCKED'].includes(error.code)) finish(error);
       else errors.push(error);
     }).finally(() => {
       if (!settled && --remaining === 0) finish(errors.length === urls.length ? new AggregateError(errors, errors.map(e => e.message).join('；')) : null, null);

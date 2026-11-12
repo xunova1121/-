@@ -51,7 +51,7 @@ export function createTurn(app) {
     if (app.active) app.callouts?.show();
     if (app.active) {
       const turn = app.active;
-      if (!turn.streamDone && (turn.shown?.trim() || turn.files?.size))
+      if (!turn.streamDone && (turn.shown?.trim() || turn.files?.size || turn.markets?.length))
         app.rememberTurn(
           'assistant',
           (turn.shown || '').trim() + '\n\n（已打断，还没完成；以上内容已保留）',
@@ -59,6 +59,7 @@ export function createTurn(app) {
             ...(turn.usedTools?.length && { tools: [...new Set(turn.usedTools)] }),
             ...(turn.files?.size && { files: [...turn.files] }),
             ...(turn.sports && { sports: turn.sports }),
+            ...(turn.markets?.length && { markets: turn.markets }),
             ...(turn.failedSteps?.length && { failures: turn.failedSteps })
           },
           turn.session
@@ -190,13 +191,15 @@ export function createTurn(app) {
     backgroundTurns.delete(turn);
     const extra = {
       ...(turn.sports && { sports: turn.sports }),
+      ...(turn.markets?.length && { markets: turn.markets }),
       ...(usedTools.length && { tools: [...new Set(usedTools)] }),
       ...(files.size && { files: [...files].slice(-12) }),
       ...(turn.failedSteps?.length && { failures: turn.failedSteps })
     };
     const title = turn.session.title || '另一个对话';
     if (error) {
-      if (shown.trim() || usedTools.length) app.rememberTurn('assistant', `${shown.trim()}\n\n${interruptionMark(error)}`, extra, turn.session);
+      if (shown.trim() || usedTools.length || turn.markets?.length)
+        app.rememberTurn('assistant', `${shown.trim()}\n\n${interruptionMark(error)}`, extra, turn.session);
       toast(`「${title}」里的任务没做完：${error.slice(0, 40)}`);
     } else {
       app.rememberTurn('assistant', text || '（完成）', extra, turn.session);
@@ -478,6 +481,7 @@ export function createTurn(app) {
         result.text || '（完成）',
         {
           ...(turn.sports && { sports: turn.sports }),
+          ...(turn.markets?.length && { markets: turn.markets }),
           ...(usedTools.length && { tools: [...new Set(usedTools)] }),
           ...(madeFiles.size && { files: [...madeFiles].slice(-12) }),
           ...(turn.failedSteps?.length && { failures: turn.failedSteps })
@@ -527,7 +531,7 @@ export function createTurn(app) {
       app.setTask('error', '请求失败');
       app.hud.think(`✕ ${msg.slice(0, 40)}`, 'bad');
       // 已经写了一部分或做了几步：记进对话，点“继续”从断开的地方接着做，而不是从头再来
-      const resumable = Boolean(st.shown.trim() || usedTools.length);
+      const resumable = Boolean(st.shown.trim() || usedTools.length || turn.markets?.length);
       if (resumable)
         app.rememberTurn(
           'assistant',
@@ -536,6 +540,7 @@ export function createTurn(app) {
             ...(usedTools.length && { tools: [...new Set(usedTools)] }),
             ...(madeFiles.size && { files: [...madeFiles].slice(-12) }),
             ...(turn.sports && { sports: turn.sports }),
+            ...(turn.markets?.length && { markets: turn.markets }),
             ...(turn.failedSteps?.length && { failures: turn.failedSteps })
           },
           turn.session

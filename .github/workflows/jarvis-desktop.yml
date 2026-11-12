@@ -492,6 +492,8 @@ jobs:
           node e2e/ppt-sources.mjs "$RUNNER_TEMP/jarvis-e2e/ppt-sources"
           node e2e/agent-studio.mjs "$RUNNER_TEMP/jarvis-e2e/agent-studio"
           node e2e/business-intelligence.mjs "$RUNNER_TEMP/jarvis-e2e/business-intelligence"
+          node e2e/business-company-query.mjs "$RUNNER_TEMP/jarvis-e2e/business-company-query"
+          node e2e/market-card.mjs "$RUNNER_TEMP/jarvis-e2e/market-card"
           node e2e/tender-center.mjs "$RUNNER_TEMP/jarvis-e2e/tender-center"
           node e2e/pc-agent-navigation.mjs "$RUNNER_TEMP/jarvis-e2e/pc-agent-navigation"
           node e2e/agent-resources-cross-origin.mjs "$RUNNER_TEMP/jarvis-e2e/agent-resources-cross-origin"
@@ -531,11 +533,12 @@ jobs:
       - name: 写发布说明
         run: |
           cat > release-notes.md <<'NOTES'
-          ## 本版更新 · 自定义联网搜索与企业查询修复
-          - 新增独立OpenAI兼容搜索配置：地址、API Key、模型和协议按本机/云服务器分别保存；支持Responses联网搜索及Chat Completions搜索模型，保存后可检测来源返回。
-          - 企业简介在官方来源未取得资料时继续全网检索；无关结果不再阻止尝试备用引擎，空资料不再误判为成功取数。股权等登记信息保留严格核验。
-          - 多轮调研使用有界的专用预算，保留已获得资料；修复普通查询3次辅助调用限制导致调研中途停止的问题。
-          - 新增协议、配置读回、搜索换源和预算回归；保留全部既有测试及固定安卓签名。真实API GET账号、用户服务器与Android/Windows真机尚未验收。
+          ## 本版更新 · 企业直查工作台与新闻读取修复
+          - 企业招投标首屏简化为“查企业 / 找招标”：输入公司名称即可直接查询资料和来源，不必先发送聊天；复杂分析和文件解读保留对话入口，企百科由用户明确选择。
+          - 新闻读取支持模型仅传多个urls时逐页读取，保留每页成功、失败与证据归属；原单网址与备用网址方式继续可用。修复DNS解析失败误报“只允许访问公网地址”，私网限制保持。
+          - 所有智能体开始对话后恢复统一阅读边距；关闭起始页时停止企业查询和公告轮询，切换账号或会话不接收旧页面结果。
+          - 行情工具成功取数后展示报价与历史收盘价卡片，保留实际来源和时间；不额外请求行情，不从模型文字生成报价，不虚构走势点。
+          - 新增企业HTTP权限隔离、批量读取、DNS分类、行情卡及真实浏览器回归；原测试门禁和安卓签名保留。真实API GET WebSearch协议、用户服务器与Android/Windows真机尚未验收。
 
           ## 保留近期修复
           - 中文海报、封面与明确要求排字的图片，支持模型生成无字底图后用真实字体排版；工作区底图直接复用，不需要传入代码沙箱。

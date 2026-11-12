@@ -128,7 +128,7 @@ function posterWorkspace(root, onFill, heroNode) {
   choose('inspiration');
 }
 
-export function enhanceAgentStart(root, profile, { onFill }) {
+export function enhanceAgentStart(root, profile, { onFill, business }) {
   root.classList.add('wy-studio-start');
   const header = root.querySelector('.wy-agent-start-head');
   const intro = root.querySelector('.wy-agent-start-intro');
@@ -165,5 +165,5 @@ export function enhanceAgentStart(root, profile, { onFill }) {
     heroNode.after(upload);
   }
   if (profile.id === 'ppt-maker' && upload) heroNode.after(upload);
-  if (profile.id === 'business-intelligence' && profile.source === 'builtin') enhanceBusinessStart(root, { onFill });
+  if (profile.id === 'business-intelligence' && profile.source === 'builtin') root.businessStartController = enhanceBusinessStart(root, { onFill, ...business });
 }

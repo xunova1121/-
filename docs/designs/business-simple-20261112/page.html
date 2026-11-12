@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>未央 · 企业与招投标简洁版 UI 预览</title>
+  <style>/* PROTOTYPE_CSS */</style>
+</head>
+<body>
+  <div class="preview-bar"><span><i></i> UI 交互预览 <b>· 演示数据，不进行真实查询</b></span><button id="reset-preview">重置预览</button></div>
+  <aside class="sidebar">
+    <div class="brand"><img src="__BRAND__" alt="未央"><div><strong>未央</strong><span>你的 AI 工作台</span></div></div>
+    <div class="nav-caption">智能体工作台</div>
+    <nav aria-label="工作台导航">
+      <button data-nav="company"><span data-icon="building"></span>查企业</button>
+      <button data-nav="tenders"><span data-icon="briefcase"></span>找招标</button>
+      <button data-nav="notice"><span data-icon="file"></span>读公告</button>
+      <div class="nav-divider"></div>
+      <button data-nav="watch"><span data-icon="star"></span>我的关注<span class="nav-count">2</span></button>
+      <button data-nav="chat"><span data-icon="chat"></span>对话样式</button>
+    </nav>
+    <div class="sidebar-note"><span data-icon="spark"></span><b>资料先到位，再开始分析</b><p>查到的数据、来源和后续操作，放在一起。</p></div>
+    <div class="sidebar-footer"><span class="user-avatar">我</span><span>我的工作台<small>个人空间</small></span><span data-icon="chevron"></span></div>
+  </aside>
+  <div class="workspace">
+    <header class="appbar">
+      <button class="icon-button mobile-only" id="back-button" aria-label="返回查询"><span data-icon="back"></span></button>
+      <div class="page-heading"><span class="desktop-only">智能体 / </span><strong id="page-title">企业与招投标</strong></div>
+      <div class="appbar-actions"><button class="icon-button" data-nav="chat" aria-label="查看对话样式"><span data-icon="chat"></span></button><button class="icon-button" data-nav="watch" aria-label="我的关注"><span data-icon="bell"></span><i class="unread-dot"></i></button></div>
+    </header>
+    <main id="main-content"></main>
+  </div>
+  <dialog id="sheet" aria-labelledby="sheet-title"><div class="sheet-head"><h2 id="sheet-title"></h2><button class="icon-button" id="close-sheet" aria-label="关闭"><span data-icon="close"></span></button></div><div id="sheet-content"></div></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script>/* PROTOTYPE_JS */</script>
+</body>
+</html>

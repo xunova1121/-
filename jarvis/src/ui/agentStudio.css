@@ -55,7 +55,9 @@
 
 /* 空对话内部升级；不更改输入栏、模型菜单、任务状态或已产生的消息。 */
 #main:has(.wy-studio-start), #transcript:has(.wy-studio-start) { background: #151c29; }
-#transcript:has(.wy-studio-start) { padding: 0; }
+/* 起始页可铺满，产生消息后恢复全局阅读边距，旧起始页不再挤占对话。 */
+#transcript:has(.wy-studio-start):not(:has(> .msg)) { padding: 0; }
+#transcript:has(> .msg) > .wy-studio-start { display: none; }
 :root[data-theme='light'] #main:has(.wy-studio-start) { background: #fff; }
 :root[data-theme='light'] #transcript:has(.wy-studio-start) { background: #fff; }
 .wy-studio-start { width: 100%; box-sizing: border-box; max-width: 860px; padding: 0 20px 30px; gap: 22px; background: var(--studio-paper); }

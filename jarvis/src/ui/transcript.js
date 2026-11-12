@@ -5,6 +5,8 @@
 import { imageButton, previewWorkspaceImage, showImagePreview } from './imagePreview.js';
 import { PROCESS_FILE } from './workspaceCatalog.js';
 import { createSportsCard } from './sportsCard.js';
+import { createMarketCard } from './marketCard.js';
+import { mergeMarketSnapshots } from '../../shared/marketSnapshot.js';
 import { createSongCard } from './songCard.js';
 import { foldExtraFiles } from './finalFiles.js';
 import './mobileImprovements.css';
@@ -317,6 +319,8 @@ export class Transcript {
    */
   add(role, text = '', ts = Date.now(), { thumbs = [] } = {}) {
     this.clearInterim();
+    // 起始页属于空对话；第一条消息先取消其查询/轮询，再恢复统一的阅读区域。
+    this.root.dispatchEvent?.(new Event('jarvis:before-transcript-message'));
     if (role === 'user') { this.follow = true; document.body.classList.remove('wy-reading-history'); }
     this.root.querySelector('.welcome')?.remove();
     const el = document.createElement('div');
@@ -383,6 +387,8 @@ export class Transcript {
     const stopPaint = () => { if (frame) { cancelFrame(frame); paint(); } tail = null; }; // 还没刷出来的字先刷上，再交给排版
     let files = null; // 生成的文件按钮
     let sports = null;
+    let markets = null;
+    let marketValues = [];
     const self = this;
     // —— 连续的工具步骤收进一个分组（电脑）：执行中只占几行高、自动滚到最新一步；结束后折叠成“执行了 N 步”
     let group = null;
@@ -708,6 +714,22 @@ export class Transcript {
         const next = createSportsCard(value, self.refreshSports);
         if (sports) sports.replaceWith(next); else el.insertBefore(next, cur);
         sports = next;
+        self.#scroll();
+      },
+      market(value) {
+        this.marketCards(mergeMarketSnapshots(marketValues, value));
+      },
+      marketCards(values) {
+        marketValues = mergeMarketSnapshots(values);
+        if (!marketValues.length) return;
+        const next = document.createElement('div');
+        next.className = 'market-cards';
+        for (const value of marketValues) {
+          const card = createMarketCard(value);
+          if (card) next.append(card);
+        }
+        if (markets) markets.replaceWith(next); else el.insertBefore(next, cur);
+        markets = next;
         self.#scroll();
       },
       done(meta, { onFeedback, fold = false } = {}) {

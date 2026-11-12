@@ -13,9 +13,7 @@ import { createArchitecturePackageTool } from './architecturePackage.js';
 import { createArchitectureRevisionTool } from './architectureRevision.js';
 import { communicationPreferenceSupported } from './communicationPreferences.js';
 import { createWorkRecordsTool } from './workLedger.js';
-import { readGovernmentGuide } from './governmentGuide.js';
-import { readPageCandidates, enoughPageContent } from './pageCandidates.js';
-import { formatPageResult } from './pageLinks.js';
+import { createFetchPageRun, normalizeFetchUrlArgs, fetchUrlPlan } from './fetchPageTool.js';
 import { createDocumentTools } from './documentTools.js';
 import { searchRequest, screenSearchHits } from './retrievalQuality.js';
 import { createStockKlineTool } from './stockKline.js';
@@ -26,7 +24,6 @@ import { normalizeToolFormats } from './toolInputFormats.js';
 import { createSportsScoresTool } from './sportsScores.js';
 import { createHoldingTools } from './holdings.js';
 import { queryGuardTool, guardQuery } from './queryGuard.js';
-import { searchAggregateHints, safeFallbackQuery } from './searchFallback.js';
 import { throwControl } from '../core/networkRequest.js';
 import { createVerificationTool, currentTime } from './verifyNumbers.js';
 import { createNumberReconcileTool } from './numberReconcile.js';
@@ -632,40 +629,12 @@ export function createTools(ctx) {
       name: 'fetch_url',
       // 用户 2026-11-02：问未央“读正文是谁家的”，它说工具说明里没写。这里写明当前按什么顺序读（只写服务商名字，不带 Key）
       description: `读取网页或PDF正文，附页面栏目和附件链接；链接指向的内容需继续读取。读取顺序：${pageReaderOrder(ctx)}。`,
-      input_schema: S({ url: str('http(s) 地址'), urls: { type: 'array', maxItems: 2, items: { type: 'string' }, description: '可选：同一问题的另外至多两个备选页面，并发读取、取得正文即停止；用户要求逐页核对时不要使用备选模式' } }, ['url']),
-      run: async ({ url, urls = [] }, { signal, progress, retrieval, sessionId, requestText } = {}) => {
-        if (!/^https?:\/\//i.test(url)) throw new Error('只支持 http(s) 地址');
-        const candidates = [...new Set([url, ...urls])].slice(0, 3);
-        if (candidates.some(address => typeof address !== 'string' || !/^https?:\/\//i.test(address))) throw new Error('候选页面只支持 http(s) 地址');
-        const read = async (address, activeSignal) => {
-          retrieval?.consume('read');
-          return readPage(address, { signal: activeSignal, progress, consume: kind => retrieval?.consume(kind) });
-        };
-        let text;
-        try {
-          if (candidates.length > 1) {
-            const found = await readPageCandidates(candidates, { read, signal, accept: content => enoughPageContent(content, requestText) });
-            if (!found) throw new Error('候选页面没有足够正文，请换来源；导航标题不能当作已核实材料');
-            url = found.url;
-            text = found.text;
-          } else text = await read(url, signal);
-        } catch (error) {
-          throwControl(error, signal);
-          if (error.code === 'PRIVATE_NETWORK_BLOCKED') throw error;
-          const hints = await searchAggregateHints(safeFallbackQuery(url, requestText), {
-            get: ctx.fetchViaGateway ?? ((...args) => fetch(...args)), signal, retrieval
-          });
-          return '原网页读取失败：' + error.message + '\n以下只是聚合搜索线索，未取得原站正文，不能声称已核实：\n' + JSON.stringify(hints);
-        }
-        const guide = await readGovernmentGuide({ text, url, requestText, signal, read: async (address, activeSignal) => {
-          retrieval?.consume('read');
-          return readPage(address, { signal: activeSignal, progress, consume: kind => retrieval?.consume(kind) });
-        } });
-        // 存一份原文片段：之后要细节用 read_evidence 取，不用重新联网
-        const sid = sessionId ?? ctx.currentSessionId?.();
-        const [id] = sid && text ? await evidenceStore.put(sid, { sources: [{ url, title: String(text).split('\n').find((l) => l.trim())?.trim().slice(0, 120), text }, ...(guide ? [{ url: guide.url, title: '政府申请指南', text: guide.text }] : [])] }).catch(() => []) : [];
-        return '【网页读取回执】' + JSON.stringify({ url: guide?.url || url }) + '\n' + (guide ? formatPageResult(guide.text) + '\n\n【最初页面（不作为指南正文证据）】\n' + formatPageResult(text) : formatPageResult(text)) + (id ? `\n\n（已存为证据 ${id}，之后要看原文用 read_evidence）` : '');
-      }
+      input_schema: S({
+        url: str('主要 http(s) 地址；也可仅传 urls'),
+        urls: { type: 'array', maxItems: 3, items: { type: 'string' }, description: '总共最多3个地址。与url一起传默认是备选，取得一个正文即停；仅传多个urls默认逐页全部读取。' },
+        read_mode: { type: 'string', enum: ['fallback', 'all'], description: 'fallback：url与urls为同一问题的备选，取得一个正文即停。all：逐页读取所有地址，分别报告结果和证据。' }
+      }, ['url']),
+      run: createFetchPageRun(ctx, readPage)
     },
     {
       name: 'get_current_time',
@@ -816,7 +785,8 @@ export function normalizeArgs(tool, args) {
     args[k] = v;
     delete args[alt];
   }
-  return normalizeToolFormats(tool, args);
+  normalizeToolFormats(tool, args);
+  return tool.name === 'fetch_url' ? normalizeFetchUrlArgs(args) : args;
 }
 
 export function validateArgs(tool, args) {
@@ -831,6 +801,9 @@ export function validateArgs(tool, args) {
     if (p.type === 'string' && typeof v !== 'string') return `参数 ${k} 应为字符串`;
     if (p.type === 'number' && !Number.isFinite(Number(v))) return `参数 ${k} 应为数字`;
     if (p.enum && !p.enum.includes(v)) return `参数 ${k} 只能是 ${p.enum.join(' / ')}`;
+  }
+  if (tool.name === 'fetch_url' && tool.input_schema?.properties?.url) {
+    try { fetchUrlPlan(args); } catch (error) { return error.message; }
   }
   return null;
 }

@@ -44,6 +44,7 @@ try {
     page.on('pageerror', error => { errors.push(error.message); console.log('页面异常：' + error.stack); });
     await page.goto(entry); await page.waitForFunction(() => window.__jarvisServerClient?.tenders && window.__jarvis?.agents);
     await page.evaluate(async () => { document.querySelector('#app-splash')?.remove(); const app = window.__jarvis; await app.agents.start(await app.agents.profileOf('business-intelligence')); });
+    await page.getByRole('tab', { name: '找招标', exact: true }).click();
     await page.waitForSelector('.wy-tender-card h3');
     check(`${width} 打开即有公告，无需发送对话`, (await page.locator('.wy-tender-card').count()) >= 2 && mode.runner.list().length === 0);
     check(`${width} 显示预算、截止与原文，成员无全局管理按钮`, (await page.locator('.wy-tender-body').textContent()).includes('320万元') && await page.locator('.wy-tender-admin').count() === 0);
@@ -60,6 +61,7 @@ try {
     await page.goto('about:blank'); records = [...records, notice(width)]; await mode.tenders.refresh();
     await page.goto(entry); await page.waitForFunction(() => window.__jarvisServerClient?.tenders && window.__jarvis?.agents);
     await page.evaluate(async () => { document.querySelector('#app-splash')?.remove(); const app = window.__jarvis; await app.agents.start(await app.agents.profileOf('business-intelligence')); });
+    await page.getByRole('tab', { name: '找招标', exact: true }).click();
     await page.getByRole('tab', { name: /^提醒/ }).click();
     await page.waitForFunction(width => document.querySelector('.wy-tender-tabs [aria-selected="true"]')?.textContent.startsWith('提醒') && document.querySelector('.wy-tender-body').textContent.includes(`项目${width}`), width);
     check(`${width} App关闭期间照常匹配，提醒重新打开可见`, (await page.locator('.wy-tender-body').textContent()).includes('未读'));

@@ -21,6 +21,7 @@ import { codeProjectRoutes } from './codeProjectRoutes.mjs';
 import { createCodeBrowser } from './codeBrowser.mjs';
 import { listWorkRecords, removeWorkRecord, renameWorkRecord } from '../src/agent/workLedger.js';
 import { createSearchTest } from './searchTest.mjs';
+import { createCompanyLookup } from './companyLookup.mjs';
 import { createGitHubHost, withoutCodeCredentials } from './gitHosting.mjs';
 import { createCodeRepos } from './codeRepos.mjs';
 import { createCodeRepoRoutes } from './codeRepoRoutes.mjs';
@@ -224,6 +225,8 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
 
   const accessRoutes = createAccessRoutes({ security, runner, sessions, readJson, json, getConfig: loadConfig, appDir });
   const searchTest = createSearchTest({ getConfig: () => withoutCodeCredentials(loadConfig()), readJson, json, ...(searchFetch && { fetchViaGateway: searchFetch }) });
+  const companyLookup = createCompanyLookup({ getConfig: () => withoutCodeCredentials(loadConfig()), readJson, json, ...(searchFetch && { get: searchFetch }),
+    watchAccess: (req, cancel) => { const id = security.authenticate(req)?.id; return security.onRevoke(revoked => { if (revoked === id) cancel(); }); } });
   const codeRoutes = createCodeRepoRoutes({ getConfig: loadConfig, saveConfig, hosting: codeHosting, repos: codeRepos, readJson, json });
 
   const projectRoutes = codeProjectRoutes({ projects, readJson, json });
@@ -309,6 +312,11 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
     }
     if (pathname === '/api/server/search-test' && req.method === 'POST') {
       await searchTest(req, res);
+      return true;
+    }
+    if (pathname === '/api/server/company-query') {
+      if (req.method !== 'POST') { json(res, 405, { error: '企业查询只支持 POST', code: 'COMPANY_QUERY_METHOD' }); return true; }
+      await companyLookup(req, res);
       return true;
     }
     if (pathname === '/api/server/stock-images/probe' && req.method === 'POST') {

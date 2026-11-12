@@ -89,6 +89,7 @@ export function createConversations(app) {
     const root = $('#transcript'),
       range = visibleHistory(end);
     historyViewEnd = range.newer ? range.end : null;
+    app.agents?.dismissStart?.();
     root.replaceChildren();
     transcript.follow = true;
     document.body.classList.remove('wy-reading-history');
@@ -129,6 +130,7 @@ export function createConversations(app) {
           const b = transcript.add('agent', '', m.ts);
           b.append(m.content);
           if (m.sports) b.sports(m.sports);
+          if (m.markets) b.marketCards?.(m.markets);
           for (const f of m.files || []) b.fileLink(f, openInWorkspace);
           b.done(m.tools?.length ? `用了：${m.tools.map(toolLabel).join('、')}` : '', { fold: i !== lastAgent });
         }

@@ -47,6 +47,7 @@ import { withoutCodeCredentials } from './gitHosting.mjs';
  * 这里只负责排队、存对话、记进度。手机上才有的能力（控制电脑、运行代码、语音）在服务器上不提供。
  */
 import dns from 'node:dns/promises';
+import { assertPublicDns } from './publicFetchDns.mjs';
 import { resolveAgentTurn, sanitizeAgentForm } from '../src/agent/agentTurn.js';
 import { runWorkflow } from '../src/agent/workflowRun.js';
 import { ALL_BUILTIN_AGENTS as BUILTIN_AGENTS } from '../src/agent/agentProfileBuiltins.js';
@@ -62,7 +63,7 @@ import { collectRequirements } from '../src/agent/taskRequirements.js';
 import { createAdapter } from '../src/llm/config.js';
 import { generateImage } from '../src/llm/images.js';
 import { generateVideo } from '../src/llm/videos.js';
-import { providerById, isPrivateHost } from '../shared/providers.js';
+import { providerById } from '../shared/providers.js';
 import { routeFor, fallbackRoutes, effortFor, isSmallTalk, visionRoute } from '../src/llm/router.js';
 import { providerLabel, modelNote } from '../src/llm/modelLibrary.js';
 import { INTERRUPTED_MARK, interruptionMark, errorKind } from '../src/core/suggest.js';
@@ -71,6 +72,7 @@ import * as skillPacks from '../src/agent/skillPacks.js';
 import * as ws from '../src/agent/workspace.js';
 import { needsRunner } from '../src/agent/skillDeps.js';
 import { skillRunnerTool } from './skillRunner.mjs';
+import { normalizeMarketSnapshot, mergeMarketSnapshots } from '../shared/marketSnapshot.js';
 
 /** 服务器上不提供的工具：浏览器里的代码沙箱、预览窗口、本机指标（定时任务由服务器自己按时执行，见 serverSchedules.mjs） */
 export const SERVER_BLOCKED = new Set(['run_javascript', 'run_python', 'preview', 'get_local_metrics']);
@@ -112,9 +114,9 @@ export async function publicFetch(url, init = {}, fetchImpl = globalThis.fetch, 
   const requestSignal = init.signal ?? AbortSignal.timeout(20000);
   for (let hop = 0; ; hop++) {
     requestSignal.throwIfAborted();
-    // 域名也要查一下解析到哪：指向 127.0.0.1 这类内网地址的域名同样不许访问
-    const addrs = /^https?:$/.test(u.protocol) && !isPrivateHost(u.hostname) ? await lookup(u.hostname.replace(/^\[|\]$/g, '')).catch(() => []) : null;
-    if (!addrs?.length || addrs.some((a) => isPrivateHost(a.address))) throw Object.assign(new Error('只允许访问公网 http(s) 地址'), { code: 'PRIVATE_NETWORK_BLOCKED', kind: 'api', status: 403 });
+    // DNS 等待也沿用本次请求期限；解析失败与实际私网拦截分开处理。
+    await assertPublicDns(u, lookup, requestSignal);
+    requestSignal.throwIfAborted();
     const res = await fetchImpl(u, { ...init, headers, redirect: 'manual', signal: requestSignal });
     const loc = res.headers.get('location');
     if (!(res.status >= 300 && res.status < 400 && loc)) return res;
@@ -341,6 +343,14 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       documentReviewer: createDocumentReviewer(cfg, (selected) => helper({ ...selected, routing: { enabled: false } }, 'write', task, 'document_review')),
       onFileChanged: (p) => { if (!/^skills\//.test(p)) { task.files.add(p); record(task, { type: 'file', path: p }); } },
       onSportsScores: (value) => { task.sports = value; record(task, { type: 'sports_scores', value }); },
+      onMarketQuote: (value) => {
+        if (task.ctrl.signal.aborted || task.status !== 'running') return;
+        const clean = normalizeMarketSnapshot(value);
+        if (!clean) return;
+        task.markets = mergeMarketSnapshots(task.markets, clean);
+        record(task, { type: 'market_quote', value: clean });
+        saveDraft();
+      },
       // 画图、做视频：用服务器上的模型设置；生成的文件照常存进工作区，手机按文件下载后显示在对话里
       stockImageForSlide: (o) => stockImages.forSlide({ ...o, visionLlm: sight(cfg, task).describeImages }),
       imageGen: (o) => generateImage(cfg, { ...o, fetchImpl: evaluationModelFetch, download: publicFetch }),
@@ -384,10 +394,10 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       if (task.draftTimer) return;
       task.draftTimer = setTimeout(() => {
         task.draftTimer = null;
-        if (task.status !== 'running' || (!shown.trim() && !usedTools.length)) return;
+        if (task.status !== 'running' || (!shown.trim() && !usedTools.length && !task.markets?.length)) return;
         editSession(task.sessionId, async (s) => {
           if (!s || task.status !== 'running') return;
-          const draft = { role: 'assistant', content: `${shown.trim()}\n\n${DRAFT_MARK}`, ts: now(), draftOf: task.id, ...(task.sports && { sports: task.sports }), ...(usedTools.length && { tools: [...new Set(usedTools)] }) };
+          const draft = { role: 'assistant', content: `${shown.trim()}\n\n${DRAFT_MARK}`, ts: now(), draftOf: task.id, ...(task.sports && { sports: task.sports }), ...(task.markets?.length && { markets: task.markets }), ...(usedTools.length && { tools: [...new Set(usedTools)] }) };
           const i = s.messages.findIndex((m) => m.draftOf === task.id);
           if (i >= 0) s.messages[i] = draft; else s.messages.push(draft);
           await sessions.save(s);
@@ -444,7 +454,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   async function finish(task, session, { text = '', error = '', errorType = '', stopped = false, shown = '', usedTools = [], toolCalls = 0 }) {
     clearTimeout(task.codeDeadline);
     const timing = task.timing.finish();
-    const extra = { ...(task.sports && { sports: task.sports }), ...(task.failedSteps?.length && { failures: task.failedSteps }), timing, ...(task.review?.outcome && { review: { outcome: task.review.outcome, issueCount: task.review.warnings?.length || 0 } }), ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(task.files.size && { files: [...task.files].slice(-12) }) };
+    const extra = { ...(task.sports && { sports: task.sports }), ...(task.markets?.length && { markets: task.markets }), ...(task.failedSteps?.length && { failures: task.failedSteps }), timing, ...(task.review?.outcome && { review: { outcome: task.review.outcome, issueCount: task.review.warnings?.length || 0 } }), ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(task.files.size && { files: [...task.files].slice(-12) }) };
     clearTimeout(task.draftTimer);
     clearTimeout(task.checkpointTimer); task.checkpointTimer = null; // 下面一起写最终的检查点
     evidence.flush().catch(() => {});
@@ -454,7 +464,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       if (!fresh) return;
       fresh.messages = fresh.messages.filter((m) => m.draftOf !== task.id);
       if (!error && !stopped) fresh.messages.push({ role: 'assistant', content: text || '（完成）', ts: now(), ...extra });
-      else if (shown.trim() || usedTools.length) fresh.messages.push({ role: 'assistant', content: `${shown.trim()}\n\n${stopped ? '（已打断）' : interruptionMark({ message: error, kind: errorType })}`, ts: now(), ...extra });
+      else if (shown.trim() || usedTools.length || task.markets?.length) fresh.messages.push({ role: 'assistant', content: `${shown.trim()}\n\n${stopped ? '（已打断）' : interruptionMark({ message: error, kind: errorType })}`, ts: now(), ...extra });
       fresh.updatedAt = now();
       task.checkpoint=checkpointEvent(task.checkpoint,{type:'task_state',status:stopped?'stopped':error?'error':'done',error},now());
       fresh.taskCheckpoint={...task.checkpoint,timing};

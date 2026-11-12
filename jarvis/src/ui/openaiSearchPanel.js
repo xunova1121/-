@@ -11,7 +11,7 @@ export function openaiSearchPanel({ cfg, workspace, node, toast }) {
   const enabled = node('input', { type: 'checkbox', checked: cfg.openaiSearchEnabled === true, ariaLabel: '启用自定义联网搜索' });
   const baseURL = node('input', {
     type: 'url', autocomplete: 'off', ariaLabel: '自定义搜索API地址', maxLength: 500,
-    value: cfg.openaiSearchBaseURL || '', placeholder: '例如 https://api.apiget.store/v1'
+    value: cfg.openaiSearchBaseURL || '', placeholder: '例如 https://api.example.com/v1'
   });
   const model = node('input', {
     type: 'text', autocomplete: 'off', ariaLabel: '自定义搜索模型ID', maxLength: 200,

@@ -18,6 +18,8 @@ export function mountTenderCenter(app, target, onFill) {
     });
   const view = createTenderCenterView({ call, onFill, valid });
   target.classList.toggle('wy-tender-connected', Boolean(server));
-  target.querySelector('.wy-studio-subhero').after(view.root);
+  const slot = target.querySelector('[data-business-tenders]');
+  if (typeof slot?.append === 'function') slot.append(view.root);
+  else target.querySelector('.wy-studio-subhero').after(view.root);
   return view;
 }

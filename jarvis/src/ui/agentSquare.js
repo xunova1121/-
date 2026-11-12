@@ -164,7 +164,7 @@ export function createAgentSquare({ listAgents, onPick, onEdit, studio, onClose 
  * @param {object} profile
  * @param {{ values?: Record<string,string>, onFill: (text: string) => void, onForm: (values: Record<string,string>) => void, onUpload?: () => void, onBack?: () => void }} o
  */
-export function agentStartView(profile, { values = {}, onFill, onForm, onUpload, onBack, onTemplates }) {
+export function agentStartView(profile, { values = {}, onFill, onForm, onUpload, onBack, onTemplates, business }) {
   const form = { ...values };
   // 模板字段画成卡片（P4“先选一个喜欢的样子”），其余选项画成下拉框
   const hasTemplate = (profile.form || []).some((f) => f.key === 'template');
@@ -207,6 +207,6 @@ export function agentStartView(profile, { values = {}, onFill, onForm, onUpload,
     upload,
     el('p', { className: 'wy-agent-start-note', textContent: '问题会先填入输入框，由你确认发送。' }));
   root.dataset.agent = profile.id;
-  enhanceAgentStart(root, profile, { onFill });
+  enhanceAgentStart(root, profile, { onFill, business });
   return root;
 }

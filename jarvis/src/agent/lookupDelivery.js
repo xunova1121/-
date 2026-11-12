@@ -8,6 +8,7 @@ import { lookupIntent, newsSubject } from './lookup/intent.js';
 import { marketIndex } from './lookup/plan.js';
 import { weatherFallback, marketFallback } from './lookup/fallback.js';
 import { priceComparisonRequest } from './priceComparison.js';
+import { pageReadSources } from './pageReadReceipt.js';
 const MARKET_TOPIC = /指数|沪指|上证|深成|深证|创业板|科创|A股|大A|两市|股市|成交|涨停|跌停|券商|板块|收盘|开盘|行情|个股/;
 const MARKET_OFF = /金价|黄金|回收|楼盘|小区|学区|房价|二手房/;
 /** 一句话摘要：按句号截断，最多90字，去掉话题标签。 */
@@ -97,6 +98,11 @@ export function createLookupDelivery(request, now = Date.now) {
           if (value.kind === 'public_json' && !value.truncated) add({ url: value.url, title: '公开接口返回数据', summary: JSON.stringify(value.data).slice(0, 350), verification: 'json_read' });
         } catch { /* 解析失败不补数据。 */ }
       } else if (toolName === 'fetch_url' && !todayNewsIntent(request) && !answerConstraints(request).todayNews) {
+        const pages = pageReadSources(output);
+        if (pages) {
+          for (const page of pages.filter(page => page.read)) add({ url: page.url, title: page.title, summary: page.summary, verification: 'page_read' });
+          return;
+        }
         const body = String(output).replace(/^【网页读取回执】[^\n]*\n/, '').split('【页面内链接')[0].trim();
         if (body.length > 50 && args.url) add({ url: args.url, title: body.split('\n')[0].slice(0, 120), summary: body.slice(0, 350), verification: 'page_read' });
       }

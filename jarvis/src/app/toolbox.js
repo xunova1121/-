@@ -5,6 +5,7 @@ import { qweatherConfig } from '../core/qweather.js';
 import { deepseekSearchOptions } from '../agent/deepseekSearch.js';
 import { openaiSearchOptions } from '../agent/openaiSearch.js';
 import { createOpenaiSearchFetch } from '../core/openaiSearchGateway.js';
+import { mergeMarketSnapshots } from '../../shared/marketSnapshot.js';
 /**
  * 智能体能用的工具：基础工具（文件、联网、文档……）+ 桌面版的电脑操作（鼠标键盘）+ MCP 连接的外部工具。
  * 也管桌面版的全局热键（呼出、紧急停止）和“本次都允许”的确认记录。
@@ -127,6 +128,11 @@ export function createToolbox(app) {
           if (!turn) return;
           turn.sports = value;
           turn.bubble?.sports?.(value);
+        },
+        onMarketQuote: (value) => {
+          if (!turn || turn.streamDone || turn.ctrl?.signal.aborted) return;
+          turn.markets = mergeMarketSnapshots(turn.markets, value);
+          turn.bubble?.marketCards?.(turn.markets);
         },
         videoGen: (o) => generateVideo(app.llmConfig, { ...o, gateway: app.gateway }),
         onVideo: (src) => out()?.video?.(src),

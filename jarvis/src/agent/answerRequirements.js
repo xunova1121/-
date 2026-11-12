@@ -1,4 +1,5 @@
 import { priceComparisonRequest } from './priceComparison.js';
+import { pageReadSources } from './pageReadReceipt.js';
 /** 只检查可确定的输出约束；不把关键词匹配冒充事实核验。 */
 export function answerConstraints(request = '') {
   const value = String(request).slice(-8000);
@@ -49,16 +50,12 @@ export function sourceCandidates(request, toolName, output, args = {}) {
   const kind = concreteSourceRequirement(request);
   if (!kind || !/^(?:fetch_url|read_evidence|fact_check)$/.test(toolName)) return [];
   const full = String(output).slice(0, 32000);
-  let fetchedUrl = '';
-  const firstLine = full.split('\n', 1)[0];
-  if (firstLine.startsWith('【网页读取回执】')) {
-    try { fetchedUrl = JSON.parse(firstLine.slice('【网页读取回执】'.length)).url || ''; } catch { /* 无有效回执时仍仅用实际工具入参。 */ }
-  }
   const text = full.split('【最初页面（不作为指南正文证据）】')[0].split('【页面内链接（链接指向的内容尚未读取）】')[0].slice(0, 24000);
-  if (toolName === 'fetch_url' && /^原网页读取失败/.test(text)) return [];
+  const pages = toolName === 'fetch_url' ? pageReadSources(output) : null;
+  if (pages) return [...new Set(pages.filter(page => page.read && (kind !== 'channel' || /(?:^|\.)gov\.cn$/.test(new URL(page.url).hostname) && (page.channels || channelKinds(text)).some(channel => channelKinds(channel).length))).map(page => page.url))];
   if (kind === 'channel' && !channelKinds(text).length) return [];
   const urls = toolName === 'fetch_url' && args.url
-    ? [fetchedUrl || String(args.url)]
+    ? [String(args.url)]
     : [...text.matchAll(/https?:\/\/[^\s<>"'\)）\]，。]+/g)].map(match => match[0]);
   return [...new Set(urls.filter(value => {
     if (value.length > 1200) return false;

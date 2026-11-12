@@ -8,6 +8,7 @@
  */
 import { shortSourceRetry } from './lookup/sourceRetry.js';
 import { httpError, throwControl } from '../core/networkRequest.js';
+import { normalizeMarketSnapshot } from '../../shared/marketSnapshot.js';
 
 const invalid = message => Object.assign(new Error(message), { name: 'ValidationError', code: 'INVALID_QUOTE_INPUT' });
 const num = value => (value === '' || value === null || value === undefined || value === '-' ? NaN : Number(value));
@@ -157,12 +158,12 @@ export function createMarketQuoteTool(ctx = {}) {
         const url = 'https://qt.gtimg.cn/q=' + symbols.join(',');
         const list = parseTencentQuote(await read(url, { signal, retrieval, source: '腾讯行情', gbk: true, onConnected }));
         if (list.length) sources.push('腾讯行情 ' + url);
-        return list;
+        return list.map(row => ({ ...row, source: { name: '腾讯行情', url } }));
       };
       const east = async (secid, extra = {}) => {
         const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${encodeURIComponent(secid)}&fltt=2&invt=2&fields=f43,f44,f45,f46,f58,f60,f86,f169,f170`;
         const row = parseEastQuote(await read(url, { signal, retrieval, source: '东方财富行情', onConnected }), secid);
-        if (row) { rows.push({ ...row, ...extra }); sources.push('东方财富行情 ' + url); }
+        if (row) { rows.push({ ...row, ...extra, source: { name: '东方财富行情', url } }); sources.push('东方财富行情 ' + url); }
         return row;
       };
       const tryStep = async (label, work) => {
@@ -192,7 +193,7 @@ export function createMarketQuoteTool(ctx = {}) {
           const data = JSON.parse(await read(url, { signal, retrieval, source: '参考汇率', onConnected }));
           const rate = Number(data?.rates?.CNY);
           if (data?.result !== 'success' || !(rate > 0)) throw Object.assign(new Error('参考汇率无效'), { code: 'NO_MARKET_DATA' });
-          rows.push({ symbol: code + 'CNY', name: `1 ${code} 兑人民币（每日参考价）`, price: +rate.toFixed(4), prevClose: null, change: null, changePct: null, time: String(data.time_last_update_utc || '').slice(0, 25), unit: '元', reference: true });
+          rows.push({ symbol: code + 'CNY', name: `1 ${code} 兑人民币（每日参考价）`, price: +rate.toFixed(4), prevClose: null, change: null, changePct: null, time: String(data.time_last_update_utc || '').slice(0, 25), unit: '元', reference: true, source: { name: 'ExchangeRate-API', url } });
           sources.push('ExchangeRate-API ' + url);
           note = '每日参考汇率（一天更新一次），不是实时成交价；银行买卖价以银行牌价为准。';
         });
@@ -225,6 +226,13 @@ export function createMarketQuoteTool(ctx = {}) {
         }
       }
       if (!rows.length) throw Object.assign(new Error(`报价来源都没取到数据（${failed.join('；') || '无结果'}）`), { code: 'NO_MARKET_DATA', kind: connected ? 'data' : 'network', connected, sourceFailures });
+      throwControl(null, signal);
+      const snapshot = normalizeMarketSnapshot({
+        version: 1, kind: 'quote', title: parsed.kind === 'gold' ? '黄金行情' : parsed.kind === 'fx' ? '汇率行情' : '市场行情', fetchedAt: nowFn(), note,
+        quotes: rows.map(row => ({ ...row, unit: row.unit || (parsed.kind === 'index' ? '点' : parsed.kind === 'fx' ? `CNH/${parsed.target}` : unitOf(row.symbol)) }))
+      });
+      // 展示层异常不能把成功报价变为失败，更不能触发额外上游请求。
+      if (snapshot) { try { ctx.onMarketQuote?.(snapshot); } catch { /* 原始工具回执仍照常返回 */ } }
       return [
         `报价（取数时间 ${beijingNow(nowFn())} 北京时间）`,
         ...rows.map(row => (row.reference ? `${row.name}：${row.price} 元${row.time ? `（更新于 ${row.time}）` : ''}` : quoteLine(row))),

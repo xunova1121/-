@@ -22,6 +22,32 @@ await new Promise(r => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch();
 const ids = ['ppt-maker', 'gongwen-writer', 'poster-designer', 'health-advisor', 'deep-researcher', 'image-reader', 'travel-weather', 'market-quotes'];
+ids.push('business-intelligence');
+async function checkReadingLayout(page, id, tag, width) {
+  // 走真实发送/消息渲染链路，默认内置演示模型；本测试的所有外网请求已阻断。
+  await page.evaluate(() => window.__jarvis.send('这是一条用于检查阅读边距的示例消息，请简单回答。'));
+  await page.waitForSelector('.msg.agent:not(.streaming)');
+  const metrics = await page.evaluate(() => {
+    const root = document.querySelector('#transcript');
+    const panel = root.getBoundingClientRect();
+    const answer = root.querySelector('.msg.agent .body').getBoundingClientRect();
+    const user = root.querySelector('.msg.user').getBoundingClientRect();
+    const padding = getComputedStyle(root);
+    return {
+      left: parseFloat(padding.paddingLeft), right: parseFloat(padding.paddingRight),
+      answerLeft: answer.left - panel.left, answerRight: panel.right - answer.right,
+      userRight: panel.right - user.right,
+      introHidden: !root.querySelector('.wy-studio-start') || getComputedStyle(root.querySelector('.wy-studio-start')).display === 'none',
+      noOverflow: root.scrollWidth <= root.clientWidth && document.documentElement.scrollWidth <= innerWidth
+    };
+  });
+  const inset = width < 800 ? 20 : 12;
+  check(`${tag} ${id} 发消息后起始页收起`, metrics.introHidden);
+  check(`${tag} ${id} 对话区恢复阅读边距`, metrics.left >= inset && metrics.right >= inset);
+  check(`${tag} ${id} 用户与回答都不贴边`, metrics.answerLeft >= inset && metrics.answerRight >= inset && metrics.userRight >= inset);
+  check(`${tag} ${id} 对话无横向溢出`, metrics.noOverflow);
+  if (id === 'market-quotes') await page.screenshot({ path: `${out}/reading-${tag}.png` });
+}
 try {
   for (const [width, theme, zoom] of [[320, 'day', false], [390, 'day', false], [412, 'night', false], [390, 'day', true], [1280, 'day', false]]) {
     const tag = `${width}-${theme}${zoom ? '-big' : ''}`;
@@ -90,6 +116,7 @@ try {
       }
       await page.evaluate(() => { document.activeElement?.blur(); document.querySelector('#transcript').scrollTop = 0; });
       await page.screenshot({ path: `${out}/${id}-${tag}.png` });
+      await checkReadingLayout(page, id, tag, width);
     }
     // 真实本地注册表保存→重开→修改→删除；不以静态成功提示代替结果。
     await page.evaluate(() => window.__jarvis.agents.openSquare());

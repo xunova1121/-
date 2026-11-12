@@ -2,6 +2,7 @@
  * 服务器模式：接上服务器上正在做的任务（另一台设备发起的、或 App 重新打开时），把服务器生成的文件取回本机。
  */
 import { runRemote } from '../core/serverClient.js';
+import { mergeMarketSnapshots } from '../../shared/marketSnapshot.js';
 import { serverConnectionText, serverObservationActions } from '../core/serverConnection.js';
 import { toolLabel } from '../ui/transcript.js';
 import * as ws from '../agent/workspace.js';
@@ -49,7 +50,10 @@ export function createRemoteTask(app) {
             bubble.status?.(message);
           } else if (e.type === 'text') bubble.append(e.delta);
           else if (e.type === 'sports_scores') bubble.sports?.(e.value);
-          else if (e.type === 'plan') bubble.plan?.(e.steps);
+          else if (e.type === 'market_quote') {
+            turn.markets = mergeMarketSnapshots(turn.markets, e.value);
+            bubble.marketCards?.(turn.markets);
+          } else if (e.type === 'plan') bubble.plan?.(e.steps);
           else if (e.type === 'tool_start' && e.name !== 'update_plan') {
             cards.set(e.id, bubble.toolCard(e.name, e.args));
             turn.steps++;
