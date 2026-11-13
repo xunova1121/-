@@ -309,6 +309,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   let nativeSearchCalls = 0;
   let closingTurns = 0;
   let retrievalStopped = false;
+  let stoppedBatches = 0;
   let answerCompleted = false;
   emit({ type: 'state', value: 'processing' });
   const { ctx: preparedContext, record, requirementContext, archive } = await prepareAgentContext({ userText, priorMessages: history, context, sessionId, summary, light: light || Boolean(questionProfile), requirements, depth, requirementText, emit, buildContext, isolated });
@@ -734,7 +735,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     if (stepText && !/\n$/.test(stepText)) { emit({ type: 'text', delta: '\n\n' }); finalText += '\n\n'; }
     // 执行一次工具调用：开始 / 结束事件照常发出，返回结果，按调用顺序写回对话
     // 模型又用先搜过的词搜一次：直接给上次的结果，不再白搜（也不会被“相同搜索词”拦下报错）
-    const reused = new Map(r.toolCalls.filter((c) => reusesPreSearch(c, preFound)).map((c) => [c, { c, ok: true, output: preFound.output, outImages: [] }]));
+    const reused = new Map(r.toolCalls.filter((c) => !closing && !lookupFinal && reusesPreSearch(c, preFound)).map((c) => [c, { c, ok: true, output: preFound.output, outImages: [] }]));
     const ran = await executeToolCalls(r.toolCalls.filter((c) => !reused.has(c)), { loader, emit, seen, diagramRecovery, executionScope, closing: closing || lookupFinal, retrieval, approve, signal, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch });
     const results = r.toolCalls.map((c) => reused.get(c) ?? ran.find((x) => x.c === c)).filter(Boolean);
     capabilityUpgrade.observe(results);
@@ -767,6 +768,13 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       await see(convo.at(-1), { hint: requirementText, signal, ocr: c.name !== 'read_image_text' });
     }
     const recoveryStop = results.find(result => result.recoveryStop)?.recoveryStop;
+    // 正常收尾不计失败，但仍要阻止模型反复调用已关闭的检索；给一次改为回答/本地产出的机会。
+    stoppedBatches = results.length && results.every(isRetrievalStop) ? stoppedBatches + 1 : 0;
+    if (stoppedBatches >= 2 && !inbox?.length) {
+      retrievalStopped = true;
+      emit({ type: 'diagnostic', phase: 'retrieval_stop_loop', batches: stoppedBatches });
+      break;
+    }
     if (recoveryStop && inbox?.length) { takeInbox(); continue; }
     if (recoveryStop) {
       emit({ type: 'text', delta: '\n' + recoveryStop });

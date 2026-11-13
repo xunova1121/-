@@ -6,6 +6,8 @@ import { createRetrievalBudget } from '../src/agent/retrievalBudget.js';
 import { executeToolCalls } from '../src/agent/agentToolExecution.js';
 import { failedStep } from '../src/agent/failedSteps.js';
 import { createTurnEvents } from '../src/app/turnEvents.js';
+import { runAgent } from '../src/agent/agent.js';
+import { reusesPreSearch } from '../src/agent/preSearch.js';
 
 vi.mock('../src/app/env.js', () => ({ now: () => 0, storage: undefined, toast: vi.fn(), markActivity: vi.fn() }));
 beforeEach(() => { globalThis.indexedDB = new IDBFactory(); });
@@ -24,6 +26,45 @@ function fixture(closing = false) {
   return { events, checkpoints, run, options, retrieval, execute: calls => executeToolCalls(calls, options) };
 }
 const call = id => ({ id: String(id), name: 'web_fetch', args: {} });
+
+it('模型不遵守正常收尾也不能耗尽整个循环；没有新资料时有界停止', async () => {
+  let clockValue = 0;
+  const timeline = [];
+  const result = await runAgent({
+    model: 'fixture', history: [], userText: '查比分', context: { dynamic: '' }, quiet: true,
+    maxSteps: 40, timeBudgetMs: 60_000, now: () => clockValue++ * 20_000,
+    tools: [{ name: 'web_search', description: 'fixture', input_schema: { type: 'object', properties: { q: { type: 'string' } } }, run: async () => '无可核实网页来源' }],
+    adapter: { async stream() { return { text: '', toolCalls: [{ id: String(clockValue), name: 'web_search', args: { q: `第${clockValue}次` } }], stop: 'tool_use' }; } },
+    emit: event => { if (event.type === 'tool_end' && timeline.length < 12) timeline.push({ ok: event.ok, code: event.code, output: event.output.slice(0, 100) }); }
+  });
+  expect(result.toolCalls).toBeLessThan(12);
+  expect(result.steps).toBeLessThan(12);
+  expect(timeline.some(event => event.code === 'RETRIEVAL_BUDGET')).toBe(true);
+  expect(result.text).not.toMatch(/预算|本轮检索已停止|额度用完/);
+  expect(result.text).toContain('还没有确切结果');
+});
+
+it('失败或空查询的预查回执不能伪装成成功缓存，合法相同查询仍复用', () => {
+  const found = { tool: 'web_search', args: { query: '公司' }, query: '公司', output: '候选资料' };
+  expect(reusesPreSearch({ name: 'web_search', args: { query: '公司' } }, found)).toBe(true);
+  for (const state of ['failed', 'input']) expect(reusesPreSearch({ name: 'web_search', args: { query: '公司' } }, { ...found, recovery: { state } })).toBe(false);
+  expect(reusesPreSearch({ name: 'web_search', args: { q: '别的问题' } }, { ...found, query: '' })).toBe(false);
+});
+
+it('已有合法预查结果，到收尾时重复缓存命中也不能绕过停止', async () => {
+  let clockValue = 0, query = '';
+  const run = vi.fn(async args => { query = args.query; return '电影今日票房为1亿元，来源：https://source.example/box-office'; });
+  const result = await runAgent({
+    model: 'fixture', history: [], userText: '今天电影票房多少', context: { dynamic: '' }, quiet: true,
+    maxSteps: 40, timeBudgetMs: 2000, now: () => clockValue * 2000,
+    tools: [{ name: 'web_search', description: 'fixture', input_schema: { type: 'object', properties: { query: { type: 'string' } } }, run }],
+    adapter: { async stream() { clockValue++; return { text: '', toolCalls: [{ id: String(clockValue), name: 'web_search', args: { query: query || '今天电影票房' } }], stop: 'tool_use' }; } },
+    emit: () => {}
+  });
+  expect(run).toHaveBeenCalledOnce();
+  expect(result.steps).toBeLessThan(12);
+  expect(result.toolCalls).toBeLessThan(12);
+});
 
 it('读满8条仍停止后续请求：并行的正常收尾保留类型与诊断，不伪装成功，不把内部原因给模型', async () => {
   const f = fixture();

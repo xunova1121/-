@@ -33,7 +33,8 @@ export async function finishAgentRun({
   const unifiedQuery = query.lookup && query.kind !== 'meta' && (query.sure || retrieval.active || nativeSearchCalls > 0);
   // 模型已经写了回答（哪怕是“没查到”）就不再在后面贴资料堆：用户 2026-11-01 看到模型刚说“那条不可靠”，后面又贴出同一批微博摘要
   if (lookupFallback && (!finalText.trim() || finalText.trim().length < 60 && /^(?:本轮)?(?:没有可靠结果|没有确切结果|未能生成符合|未找到可靠|只找到候选|无法提供|没有查到)/.test(finalText.trim()))) {
-    const delta = (finalText.trim() ? '\n\n' : '') + lookupFallback;
+    const unverified = !finalText.trim() && retrievalStopped && lookupRecovery?.state === 'failed' && !lookupFallback.includes('还没有确切结果') ? '目前还没有确切结果。' : '';
+    const delta = (finalText.trim() ? '\n\n' : '') + unverified + lookupFallback;
     finalText += delta;
     emit({ type: 'text', delta });
   }
@@ -52,7 +53,7 @@ export async function finishAgentRun({
       : quickStop
       ? `\n\n（普通问题我先回答到这里，上面是已经查到的；还没有确切结果、没核实的部分别当结论。${MORE_TIME_ASK}。）`
       : retrieval.reason
-      ? `\n\n（本轮检索已停止：${retrieval.reason}。目前还没有确切结果；已取得的信息见上文，未核实的部分不能当作结论。）`
+      ? finalText.trim() ? '' : '\n\n目前还没有确切结果，未取得可核实的资料，暂时不能据此下结论。'
       : stuck
         ? `\n\n（最近的步骤大多失败，看起来卡住了，先停在这里。上面是目前的进展；换个说法或给我更多信息，我再接着做。）`
         : `\n\n（这个任务已经连续做了 ${step} 步，先停在这里，上面是目前的进展。）`;

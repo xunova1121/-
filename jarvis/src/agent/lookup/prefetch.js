@@ -59,6 +59,8 @@ export { lookupReceiptNote as preSearchNote } from './answer.js';
 const norm = (q) => String(q ?? '').toLowerCase().replace(/[\s，。！？、；：,.!?;:]+/gu, '');
 /** 模型这次的 web_search 调用是不是和先搜的一模一样（同一个搜索词、没有别的词） */
 export function reusesPreSearch(call, found) {
+  // 自救失败/缺参数的回执不是查询结果，不能被包装成成功缓存反复复用。
+  if (!found || ['failed', 'input'].includes(found.recovery?.state)) return false;
   if (['get_weather', 'get_stock_kline'].includes(found?.tool)) {
     if (call?.name !== found.tool) return false;
     const defaults = found.tool === 'get_weather' ? { days: 3 } : { adjustment: 'none', limit: 60 };
@@ -75,7 +77,7 @@ export function reusesPreSearch(call, found) {
     const args = value => ({ categories: [...(value.categories?.length ? value.categories : found.args?.categories || [])].sort(), publishers: [...(value.publishers || [])].sort(), limit: value.limit ?? 12, date_mode: value.date_mode ?? found.args?.date_mode ?? 'today' });
     return JSON.stringify(args(call.args || {})) === JSON.stringify(args(found.args || {}));
   }
-  if (!found || call?.name !== 'web_search') return false;
+  if (call?.name !== 'web_search' || !norm(found.query)) return false;
   const extra = Array.isArray(call.args?.queries) ? call.args.queries.filter((q) => norm(q) && norm(q) !== norm(found.query)) : [];
   return !extra.length && norm(call.args?.query || call.args?.queries?.[0]) === norm(found.query);
 }

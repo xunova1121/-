@@ -1,6 +1,6 @@
 :root body .composer-send-modes{display:flex;gap:6px;padding:5px 4px 9px;flex-wrap:wrap}
 :root body .composer-send-modes[hidden],:root body .composer-message-queue[hidden]{display:none}
-:root body .composer-send-modes button,:root body .composer-message-queue button{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:10px;padding:7px 10px;background:var(--surface);color:var(--text);cursor:pointer}
+:root body .composer-send-modes button,:root body .composer-message-queue button{font:inherit;font-size:12px;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:7px 10px;background:var(--surface);color:var(--text);cursor:pointer}
 :root body .composer-send-modes button[aria-pressed=true]{background:color-mix(in srgb,var(--accent) 12%,var(--surface));border-color:var(--accent);color:var(--accent)}
 :root body .composer-message-queue{margin:0 0 8px;padding:10px 12px;border:1px solid var(--line);border-radius:16px;background:var(--surface);font-size:12px;max-height:190px;overflow:auto}
 :root body .composer-message-queue>div{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--muted)}
