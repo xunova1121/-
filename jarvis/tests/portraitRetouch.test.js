@@ -15,6 +15,7 @@ import { createRetrievalBudget } from '../src/agent/retrievalBudget.js';
 import { editImage } from '../src/llm/imageEdit.js';
 import { BUILTIN_AGENTS } from '../src/agent/agentProfiles.js';
 import { agentFormNote, withAgentRequirement } from '../src/agent/agentTurn.js';
+import { executeToolCalls } from '../src/agent/agentToolExecution.js';
 
 // 几何图形作为可解码的像素夹具；视觉回执为替身，不声称通过真人美化验收。
 const png = (width, height, color) => new Blob([sizedRasterPng(width, height, [1, 3, 5].map(index => Number.parseInt(color.slice(index, index + 2), 16)))], { type: 'image/png' });
@@ -152,6 +153,22 @@ it('复核预算耗尽向上抛控制信号，已付费得到的候选仍保存�
   const saved = JSON.parse(failure.partialEvidence);
   expect(saved).toMatchObject({ saved: true, source: '上传/原片.png', portraitReview: 'not_checked' });
   expect(await ws.exists(saved.path)).toBe(true);
+  expect(f.imageEdit).toHaveBeenCalledOnce(); expect(f.visionLlm).not.toHaveBeenCalled();
+});
+
+it('执行器把已保存但未复核的候选当部分交付，计真实编辑，不误隐藏成未执行的读取', async () => {
+  const f = fixture(), events = [];
+  let requests = 0;
+  const retrieval = { extensive: true, consume() { if (++requests === 2) throw Object.assign(new Error('测试视觉收尾'), { code: 'RETRIEVAL_BUDGET' }); }, close: vi.fn() };
+  const [result] = await executeToolCalls([{ id: 'retouch', name: 'process_image', args: { task: 'portrait_slim', path: '上传/原片.png' } }], {
+    loader: { get: () => f.tool }, emit: event => events.push(event), seen: new Map(), closing: false, retrieval,
+    review: { record() {}, report: () => ({ request: '自然显瘦' }) }, webTools: new Set(), parallelSafe: new Set()
+  });
+  expect(result.ok).toBe(true);
+  expect(JSON.parse(result.output)).toMatchObject({ status: 'partial', readback: 'passed', portraitReview: { state: 'not_checked' } });
+  expect(events.find(event => event.type === 'tool_end')).toMatchObject({ ok: true });
+  expect(events.some(event => event.type === 'diagnostic' && event.code === 'RETRIEVAL_BUDGET')).toBe(true);
+  expect(retrieval.close).toHaveBeenCalled();
   expect(f.imageEdit).toHaveBeenCalledOnce(); expect(f.visionLlm).not.toHaveBeenCalled();
 });
 

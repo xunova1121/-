@@ -1,5 +1,5 @@
 /**
- * 图片处理（智能体专业化第 3、5 批）：抠图去背景、证件照换底色、老照片修复、放大清晰化。
+ * 图片处理：抠图、证件照、老照片修复、清晰化及原片人像美颜/显瘦。
  * 走已配置的“原图编辑”能力（与 generate_image 传参考图同一条线路），每种处理用固定的专业要求；
  * 原图永远保留，结果另存一份；没有编辑能力时明确报错，不拿“重新生成”冒充处理。
  * 本地离线抠图模型（开源分割模型）需要先核实许可证和体积，本批未内置。
@@ -74,7 +74,11 @@ export function createImageTaskTool(ctx = {}) {
         const delivery = await deliverGeneratedImage(r, { path: `images/${base.slice(0, 60)}-${TASK_NAMES[task]}-${uid('retouch')}.${ext}`, signal, onFileChanged: ctx.onFileChanged, onImage: ctx.onImage });
         const receipt = { ...delivery, kind: 'portrait_retouch', task, strength, source: { path, actual: await readImageMetadata(source, { signal }), unchanged: true }, portraitReview: { state: 'not_checked' } };
         try { receipt.portraitReview = await reviewPortrait(ctx, source, r.blob, { signal, retrieval, task, instructions }); }
-        catch (error) { error.partialEvidence = JSON.stringify({ path: receipt.path, source: path, saved: true, portraitReview: 'not_checked', actual: receipt.actual }); throw error; }
+        catch (error) {
+          error.partialEvidence = JSON.stringify({ path: receipt.path, source: path, saved: true, portraitReview: 'not_checked', actual: receipt.actual });
+          error.partialResult = { kind: 'portrait_retouch', status: 'partial', message: '人像修图候选已保存，视觉对照未完成；原片保留，未重新生成', path: receipt.path, source: receipt.source, actual: receipt.actual, readback: 'passed', portraitReview: { state: 'not_checked' } };
+          throw error;
+        }
         receipt.status = receipt.portraitReview.state === 'reviewed' && receipt.sizeMatch !== false && receipt.formatMatch !== false && receipt.actual.dimensions === 'verified' ? 'saved' : 'partial';
         receipt.message = receipt.status === 'saved' ? '人像修图候选已保存，已完成一次模型视觉对照；原片未改动，请结合原图确认效果' : '人像修图候选已保存，复核仍有未完成或需确认项；原片未改动，没有自动付费重生成';
         // 关键结论放在前面；工具输出裁剪后仍能看见候选路径与真实复核状态。

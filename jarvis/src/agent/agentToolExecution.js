@@ -141,6 +141,12 @@ export async function executeToolCalls(
       output = isRetrievalStop(e) ? RETRIEVAL_FINISHED : `错误：${e.message || e}`;
       if (isRetrievalStop(e)) emit({ type: 'diagnostic', phase: 'retrieval_stop', code: e.code, tool: c.name, reason: String(e.message || '').slice(0, 240) });
       if (e.code === 'RETRIEVAL_BUDGET' && e.partialEvidence) output += '\n' + String(e.partialEvidence).slice(0, 1800);
+      // 修图已真实生成并读回，只有后续视觉核验没启动：按部分交付计一次实际操作，不伪装成未执行。
+      if (c.name === 'process_image' && e.code === 'RETRIEVAL_BUDGET' && e.partialResult?.status === 'partial' && e.partialResult.readback === 'passed') {
+        output = JSON.stringify(e.partialResult);
+        ok = true;
+        failure = null;
+      }
       const scope = toolFailureScope(c.name, e);
       if (scope) output += '\n影响范围：' + scope;
       if (['verify_numbers', 'time_calc'].includes(c.name) && (e.name === 'ValidationError' || /^INVALID_/.test(e.code || ''))) output += '\n请按参数说明改写后重试一次。仍无法计算时必须给用户明确答复；能推算的注明“工具没能计算，以下按常识推算”，列基准和算式，不能称工具已核验，不能只说正在处理。';
