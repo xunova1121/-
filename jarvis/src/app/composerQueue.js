@@ -9,7 +9,7 @@ export function createComposerQueue(app, form) {
   const queue = createMessageQueue();
   const scope = () => app.server || `local:${ws.mode()}:${ws.folderName() || ''}`;
   let preparing = null;
-  const current = () => queue.list(scope(), app.session?.id);
+  const current = () => queue.list(scope(), app.session?.id).map((row) => ({ ...row, busy: preparing === row.id }));
   const working = () => Boolean(app.active && !app.active.streamDone);
   const panel = initMessageQueuePanel(form, {
     current,
@@ -19,6 +19,7 @@ export function createComposerQueue(app, form) {
       refresh();
     },
     edit: async (id) => {
+      if (preparing === id) return;
       if (app.prompt.value.trim() || app.attachments.length) return toast('输入框里已有草稿，请先发送或清空');
       const row = current().find((item) => item.id === id);
       if (!row) return;
@@ -37,6 +38,7 @@ export function createComposerQueue(app, form) {
       }
       refresh();
     },
+    guide,
     toggle: () => {
       const rows = current();
       queue.pause(scope(), app.session?.id, working() && !rows.some((row) => row.paused));
@@ -57,6 +59,33 @@ export function createComposerQueue(app, form) {
 
   function refresh() {
     panel.refresh();
+  }
+
+  async function guide(id) {
+    const row = current().find((item) => item.id === id),
+      turn = app.active;
+    if (!row || preparing || !working() || turn.session.id !== row.sessionId || turn.queueScope !== row.scope) return;
+    preparing = id;
+    refresh();
+    try {
+      const files = await restoreFiles(row.files);
+      if (scope() !== row.scope || app.session?.id !== row.sessionId || app.active !== turn || !working()) {
+        queue.pause(row.scope, row.sessionId);
+        return;
+      }
+      if (!current().some((item) => item.id === id)) return;
+      // 原任务在上传或等待确认时可能结束；只有它确认接收后，才从队列移除。
+      const accepted = await app.send(row.text, { mode: 'steer', queuedFiles: files, expectedTurn: turn, echo: row.echo });
+      if (accepted) queue.remove(row.scope, row.sessionId, id);
+      else queue.pause(row.scope, row.sessionId);
+    } catch (error) {
+      queue.pause(row.scope, row.sessionId);
+      if (scope() === row.scope && app.session?.id === row.sessionId) toast(`引导未送达，消息已保留：${error.message}`);
+    } finally {
+      if (preparing === id) preparing = null;
+      refresh();
+      if (!working()) setTimeout(drain, 0);
+    }
   }
 
   async function drain() {
@@ -120,6 +149,7 @@ export function createComposerQueue(app, form) {
     refresh,
     scope,
     drain,
+    guide,
     get mode() {
       return panel.mode;
     },

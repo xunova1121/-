@@ -154,3 +154,17 @@ describe('拉取模型：真实结果、类型和取消', () => {
 });
 
 // 单独回归服务器合并后的目录上限，原有所有单测照常运行。
+
+it('原图编辑协议按本机/云端独立保存，保留其他图片设置和服务商凭据', async () => {
+  let local = { ...structuredClone(base), imageOptions: { editFormat: 'multipart', quality: 'high' } };
+  let remote = { ...structuredClone(base), imageOptions: { editFormat: 'json', quality: 'medium' } };
+  const scopes = createModelScopes({ getLocal: () => local, saveLocal: cfg => { local = cfg; }, getClient: () => ({ getConfig: async () => structuredClone(remote), putConfig: async delta => { remote = mergeConfig(remote, delta); } }) });
+  await scopes.refresh('server');
+  await scopes.patch('server', cfg => ({ ...cfg, imageOptions: { ...cfg.imageOptions, editFormat: 'multipart' } }));
+  expect(remote.imageOptions).toEqual({ editFormat: 'multipart', quality: 'medium' });
+  expect(local.imageOptions).toEqual({ editFormat: 'multipart', quality: 'high' });
+  await scopes.patch('local', cfg => ({ ...cfg, imageOptions: { ...cfg.imageOptions, editFormat: 'json' } }));
+  expect(local.imageOptions).toEqual({ editFormat: 'json', quality: 'high' });
+  expect(remote.imageOptions.editFormat).toBe('multipart');
+  expect(local.keys).toEqual(base.keys); expect(remote.keys).toEqual(base.keys);
+});

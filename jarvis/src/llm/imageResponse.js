@@ -23,7 +23,8 @@ export async function requestImage(url, init, { fetchImpl, download, signal, mod
     const work = Promise.resolve().then(async () => {
       if (controller.signal.aborted) throw controller.signal.reason;
       const response = await fetchImpl(url, { ...init, signal: controller.signal });
-      return readImageResponse(response, { model, parameters, download: typeof download === 'function' ? download : fetchImpl, signal: controller.signal, operation });
+      const authorization = new Headers(init.headers || {}).get('authorization') || '';
+      return readImageResponse(response, { model, parameters, download: typeof download === 'function' ? download : fetchImpl, signal: controller.signal, operation, redact: [authorization, authorization.replace(/^Bearer\s+/i, '')].filter(Boolean) });
     });
     return await Promise.race([work, stopped]);
   } finally {
@@ -33,7 +34,7 @@ export async function requestImage(url, init, { fetchImpl, download, signal, mod
 }
 
 /** 结果下载不携带服务商凭据；正文与图片分别限40MB/20MB。 */
-export async function readImageResponse(response, { model, parameters, download, signal, operation = '画图' }) {
+export async function readImageResponse(response, { model, parameters, download, signal, operation = '画图', redact = [] }) {
   let result;
   const raw = new TextDecoder().decode(await webBody(response, 40000000, signal));
   try {
@@ -41,11 +42,15 @@ export async function readImageResponse(response, { model, parameters, download,
   } catch {
     if (response.ok) throw Object.assign(new Error(operation + '接口未返回有效JSON'), { code: 'IMAGE_RESPONSE', kind: 'api' });
   }
-  if (!response.ok)
+  if (!response.ok) {
+    let detail = String(result?.error?.message || result?.message || '接口拒绝请求');
+    for (const secret of redact) detail = detail.replaceAll(secret, '[密钥已隐藏]');
+    detail = detail.replace(/data:[^\s"')]+/gi, '[图片数据已隐藏]').slice(0, 160);
     throw Object.assign(
-      new Error(`${operation}失败（${model}，HTTP ${response.status}）：${String(result?.error?.message || result?.message || '接口拒绝请求').slice(0, 160)}`),
-      { status: response.status, code: 'IMAGE_API', kind: 'api', rejected: [400, 401, 403, 404, 429].includes(response.status) }
+      new Error(`${operation}失败（${model}，HTTP ${response.status}）：${detail}`),
+      { status: response.status, code: 'IMAGE_API', kind: 'api', rejected: [400, 401, 403, 404, 429].includes(response.status), ...(typeof result?.error?.param === 'string' && /^[a-zA-Z0-9_.\[\]-]{1,64}$/.test(result.error.param) && { parameter: result.error.param }) }
     );
+  }
   const data = result.data?.[0];
   let blob;
   if (data?.b64_json) {

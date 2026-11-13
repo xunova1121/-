@@ -95,6 +95,10 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
       if (phone) { phone.close(); return; }
       const studio = document.querySelector('.wy-library[open]');
       if (studio) { studio.close(); return; }
+      if (document.querySelector('.composer-queue-menu:not([hidden])')) {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        return;
+      }
       if (closeAgentOverlay()) return;
       const b = document.body;
       if (

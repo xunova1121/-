@@ -49,12 +49,12 @@ try {
   const submit = async text => { await page.fill('#prompt', text); await page.click('#btn-send'); };
   await submit('请介绍甲方案');
   await page.waitForSelector('.msg.agent.streaming .body');
-  await page.waitForFunction(() => document.querySelector('.composer-send-modes') && !document.querySelector('.composer-send-modes').hidden);
-  await page.getByRole('button', { name: '排队新问题', exact: true }).click();
+  assert.equal(await page.locator('.composer-send-modes').count(), 0, '发送前没有模式选择，运行中默认排队');
   await submit('请介绍乙方案'); await submit('请介绍丙方案'); await submit('这条请取消');
   const queue = page.getByRole('region', { name: '待发送问题' });
   assert.equal(await queue.locator('li').count(), 3);
-  await queue.locator('li').last().getByRole('button', { name: '移除' }).click();
+  await queue.locator('li').last().getByRole('button', { name: '待发消息操作', exact: true }).click();
+  await page.getByRole('menuitem', { name: '取消消息', exact: true }).click();
   assert.equal(await queue.locator('li').count(), 2);
   assert.equal(requests.length, 1);
   assert.ok(!JSON.stringify(requests[0]).includes('乙方案'));
@@ -70,7 +70,6 @@ try {
   await assertEventually(() => requests.length === 3);
   assert.equal(lastUser(requests[2]), '请介绍丙方案');
   assert.equal(await queue.isVisible(), false);
-  await page.getByRole('button', { name: '排队新问题', exact: true }).click();
   await submit('停止后不自动发送的丁方案');
   await page.click('#btn-stop');
   await page.waitForFunction(() => document.querySelector('.composer-message-queue')?.textContent.includes('已暂停'));
@@ -86,7 +85,6 @@ try {
   const original = await page.evaluate(() => window.__jarvis.sessionId);
   await page.setInputFiles('#file-input', { name: '排队材料.txt', mimeType: 'text/plain', buffer: Buffer.from('只属于排队问题的材料') });
   await page.waitForFunction(() => document.querySelector('#attach-list')?.textContent.includes('排队材料.txt'));
-  await page.getByRole('button', { name: '排队新问题', exact: true }).click();
   await submit('原会话排队的戊方案');
   await page.evaluate(() => window.__jarvis.newSession());
   await page.waitForFunction(original => window.__jarvis.sessionId !== original, original);

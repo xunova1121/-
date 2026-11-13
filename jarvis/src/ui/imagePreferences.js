@@ -2,6 +2,15 @@
 export function imagePreferences({ cfg, workspace, node, run }) {
   const choices = [
     [
+      'editFormat',
+      '原图编辑格式',
+      [
+        ['', '自动（按型号）'],
+        ['json', 'JSON原片（GPT 2.6等）'],
+        ['multipart', '文件上传（兼容旧接口）']
+      ]
+    ],
+    [
       'quality',
       '画图画质',
       [
@@ -49,7 +58,7 @@ export function imagePreferences({ cfg, workspace, node, run }) {
     node('small', {
       className: 'ml-ability-now',
       textContent:
-        'GPT Image可使用以上选项；其他型号请保留默认。高画质可能增加费用和耗时。GPT Image 2可在上方手动填写；服务商是否提供须实际确认。编辑和结果未知的生成不会自动重提。'
+        'GPT Image可使用画质、格式和背景选项；其他型号请保留默认。GPT 2.5/2.6默认用JSON传原片，旧型号保留文件上传；中转要求不同可明确切换。不会额外上传到图床，也不自动换格式重提收费编辑。高画质可能增加费用和耗时；实际能力以服务商为准。'
     })
   );
 }

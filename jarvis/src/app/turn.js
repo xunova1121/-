@@ -131,8 +131,10 @@ export function createTurn(app) {
   // —— 干活时插话、切换对话后台继续
   const backgroundTurns = new Set();
   /** 干活时又发来一句：问进度直接答；说停就停；其他的交给正在干的未央（下一步开始前看到），不打断 */
-  async function interject(text, { thumbs = [], mode = 'auto' } = {}) {
+  async function interject(text, { thumbs = [], mode = 'auto', expectedTurn } = {}) {
     const turn = app.active;
+    if (expectedTurn && (turn !== expectedTurn || turn.streamDone || app.session.id !== turn.session.id || turn.queueScope !== app.messageQueue?.scope()))
+      return false;
     if (!turn || turn.streamDone) return send(text);
     if (mode === 'auto' && separateRequest(text)) return app.messageQueue.enqueue(text);
     app.transcript.add('user', text, Date.now(), { thumbs });
@@ -144,13 +146,13 @@ export function createTurn(app) {
     if (STOP_ASK.test(text)) {
       interrupt();
       reply('好的，已经停下。上面是停下前做到的地方，要接着做跟我说一声。');
-      return;
+      return true;
     }
     if (STATUS_ASK.test(text)) {
       reply(`${turnStatus(turn, now())}。做完会直接给你结果；想停的话点右下角的方块，或者说“停”。`);
-      return;
+      return true;
     }
-    app.rememberTurn('user', text, thumbs.length ? { thumbs } : {}, turn.session);
+    if (!expectedTurn) app.rememberTurn('user', text, thumbs.length ? { thumbs } : {}, turn.session);
     if (!turn.remote) {
       turn.inbox.push(text);
       if (MOBILE) {
@@ -159,22 +161,29 @@ export function createTurn(app) {
       }
     } else if (!turn.remoteId) {
       turn.inbox.push(text);
+      if (expectedTurn) app.rememberTurn('user', text, thumbs.length ? { thumbs } : {}, turn.session);
       reply('收到补充，连接到原任务后会送达。');
-      return;
+      return true;
     } else {
       try {
         await app.server.appendTaskNote(turn.remoteId, text);
       } catch (e) {
-        if (app.session.id !== turn.session.id || turn.queueScope !== app.messageQueue?.scope()) return;
-        if (!app.prompt.value.trim()) {
+        if (app.session.id !== turn.session.id || turn.queueScope !== app.messageQueue?.scope()) return false;
+        if (!expectedTurn && !app.prompt.value.trim()) {
           app.prompt.value = text;
           app.autosize();
         }
-        reply('补充没有送达，已放回输入框。原任务不会重复执行；服务器较旧时请先更新服务器。');
-        return;
+        reply(
+          expectedTurn
+            ? '引导没有确认送达，已保留在待发消息中。原任务不会重复执行。'
+            : '补充没有送达，已放回输入框。原任务不会重复执行；服务器较旧时请先更新服务器。'
+        );
+        return false;
       }
     }
-    reply(`收到，做完手上这一步就看这句话（${turnStatus(turn, now())}）。`);
+    if (expectedTurn) app.rememberTurn('user', text, thumbs.length ? { thumbs } : {}, turn.session);
+    if (!expectedTurn) reply(`收到，做完手上这一步就看这句话（${turnStatus(turn, now())}）。`);
+    return true;
   }
   /** 切到别的对话：正在干的任务转到后台接着做 */
   function toBackground(turn) {
@@ -209,13 +218,14 @@ export function createTurn(app) {
   }
 
   /** 正在干活时又发来一句（可能带附件）：附件先传到服务器，再按插话处理 */
-  async function addToRunningTurn(text, { echo, byVoice, mode }) {
+  async function addToRunningTurn(text, { echo, byVoice, mode, queuedFiles, expectedTurn }) {
     const turn = app.active;
-    if (STOP_ASK.test(text) && !app.attachments.length) return interject(text, { mode: 'steer' });
-    if (mode === 'queue' || (mode !== 'steer' && separateRequest(text))) return app.messageQueue.enqueue(text);
+    const inputFiles = queuedFiles ?? app.attachments;
+    if (STOP_ASK.test(text) && !inputFiles.length) return interject(text, { mode: 'steer' });
+    if (mode === 'queue' || (mode !== 'steer' && separateRequest(text))) return app.messageQueue.enqueue(text, { files: inputFiles });
     const client = app.server;
-    const extra = app.attachments.splice(0);
-    app.renderAttachments();
+    const extra = queuedFiles ? [...queuedFiles] : app.attachments.splice(0);
+    if (!queuedFiles) app.renderAttachments();
     if (client && extra.length) {
       try {
         for (const f of extra) {
@@ -223,6 +233,10 @@ export function createTurn(app) {
           await client.upload(f.path, await ws.readBlob(f.path));
         }
       } catch (e) {
+        if (expectedTurn) {
+          if (app.server === client && app.session.id === turn.session.id) toast('引导附件未送达，待发消息已保留');
+          return false;
+        }
         if (app.server !== client || app.session.id !== turn.session.id) {
           app.messageQueue.enqueue(text, { files: extra, target: turn.session, client: turn.queueScope });
           app.messageQueue.finished(turn, false);
@@ -237,6 +251,7 @@ export function createTurn(app) {
         toast(`附件未送达，已保留：${e.message}`);
         return;
       }
+      if (expectedTurn && (app.active !== turn || turn.streamDone || app.server !== client || app.session.id !== turn.session.id)) return false;
       if (app.server !== client || app.session.id !== turn.session.id || (app.active && app.active !== turn)) {
         app.messageQueue.enqueue(text, { files: extra, target: turn.session, client: turn.queueScope });
         app.messageQueue.finished(turn, false);
@@ -249,19 +264,27 @@ export function createTurn(app) {
       }
     }
     const content = extra.length ? text + '\n\n[已上传到工作区：' + extra.map((f) => f.path).join('、') + ']' : text;
-    return interject(content, { mode: 'steer', thumbs: extra.filter((f) => f.image).map((f) => ({ src: f.image.thumb, path: f.path })) });
+    return interject(content, { mode: 'steer', expectedTurn, thumbs: extra.filter((f) => f.image).map((f) => ({ src: f.image.thumb, path: f.path })) });
   }
 
-  async function send(text, { echo = true, byVoice = false, mode = 'auto', queuedFiles } = {}) {
+  async function send(text, { echo = true, byVoice = false, mode = 'auto', queuedFiles, expectedTurn } = {}) {
+    if (
+      expectedTurn &&
+      (app.active !== expectedTurn ||
+        expectedTurn.streamDone ||
+        app.session.id !== expectedTurn.session.id ||
+        expectedTurn.queueScope !== app.messageQueue?.scope())
+    )
+      return false;
     noteAction(byVoice ? '语音提问' : '发消息');
     app.askNotifyOnce();
     text = String(text || '').trim();
     const inputFiles = queuedFiles ?? app.attachments;
     if (!text && !inputFiles.length) return;
-    if (!inputFiles.length && app.companion?.perform(text)) return;
+    if (!expectedTurn && !inputFiles.length && app.companion?.perform(text)) return;
     if (!text && inputFiles.some((a) => a.image)) text = '请看看这张图片。';
     // 正在干活时又发了一句：不打断，问进度就直接答，别的话交给正在干的未央；说“停”才停
-    if (echo && app.active && !app.active.streamDone) return addToRunningTurn(text, { echo, byVoice, mode });
+    if ((echo || expectedTurn) && app.active && !app.active.streamDone) return addToRunningTurn(text, { echo, byVoice, mode, queuedFiles, expectedTurn });
     if (app.active) {
       app.active.ctrl.abort();
       app.active = null;

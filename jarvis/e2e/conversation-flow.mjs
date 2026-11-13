@@ -35,8 +35,14 @@ try{
  await page.fill('#prompt','补充要求：控制在三页，保留出处');
  check('生成中可以同时使用发送和停止',await page.isVisible('#btn-send')&&await page.isVisible('#btn-stop')&&await page.isEnabled('#btn-send'));
  await page.click('#btn-send');
+ await page.getByRole('region',{name:'待发送问题'}).getByRole('button',{name:'待发消息操作',exact:true}).click();
+ await page.getByRole('menuitem',{name:'改为引导',exact:true}).click();
+ await page.waitForFunction(()=>!document.querySelector('.composer-message-queue')||document.querySelector('.composer-message-queue').hidden);
  await page.setInputFiles('#file-input',{name:'补充说明.txt',mimeType:'text/plain',buffer:Buffer.from('完整附件要求')});
  await page.waitForFunction(()=>document.querySelector('#attach-list').children.length>0);await page.click('#btn-send');
+ await page.getByRole('region',{name:'待发送问题'}).getByRole('button',{name:'待发消息操作',exact:true}).click();
+ await page.getByRole('menuitem',{name:'改为引导',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('.composer-message-queue').hidden);
  check('只有附件也能在生成中补充，不取消当前任务',await page.locator('.msg.agent.streaming').count()===1);
  await fetch(base+'/release');await page.waitForFunction(()=>!document.querySelector('.msg.agent.streaming'),null,{timeout:20000});
  const sent=JSON.stringify(requests);check('补充原话和附件路径实际送到后续模型请求',sent.includes('控制在三页')&&sent.includes('补充说明.txt'));
