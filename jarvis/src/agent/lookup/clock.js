@@ -72,7 +72,11 @@ export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs, cloc
       const remaining = started === null || duration() <= 0 ? Infinity : Math.max(0, duration() - (now() - started));
       return Math.min(remaining, clock?.retrievalRemaining() ?? Infinity);
     },
-    get note() { return `（系统提示：${RETRIEVAL_FINISHED}${extensive ? '可以继续读写文件、生成文档和运行验证。' : '直接回答，不再调用工具。'}没有确切结果就如实说明哪些信息尚未核实，不编造，也不把它说成问题没有答案。用户再次要求查询时可以继续。）`; }
+    get note() {
+      // 真正连续取源失败仍给模型诊断依据；正常到时/次数上限不再混成用户可见的错误原因。
+      const failure = check() === '连续 3 次联网检索没有取得有效资料' ? `${reason}。` : '';
+      return `（系统提示：${failure}${RETRIEVAL_FINISHED}${extensive ? '可以继续读写文件、生成文档和运行验证。' : '直接回答，不要再调用工具。'}没有确切结果就如实说明哪些信息尚未核实，还没有确切结果就直说；不编造，也不把它说成问题没有答案。用户再次要求查询时可以继续。）`;
+    }
   };
   if (clock) clock.retrieval = budget;
   return budget;
