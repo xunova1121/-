@@ -1,0 +1,176 @@
+/* 智能体广场（P2）、起始页（P3）、抽屉入口（P1）。颜色用现有主题令牌；新增的几种底色按设计说明，夜间在前、白天覆盖 */
+:root {
+  --wy-ag-solid: #27283e;
+  --wy-ag-subtle: #303148;
+  --wy-ag-focus: #cfbfff;
+  --wy-ag-on-accent: #21163f;
+  --wy-ag-green: #88cfc1;
+  --wy-ag-green-soft: #293e3d;
+  --wy-ag-blue: #a1bdf3;
+  --wy-ag-blue-soft: #2b3650;
+  --wy-ag-rose: #e3a4bf;
+  --wy-ag-rose-soft: #483243;
+  --wy-ag-gold: #ddbd85;
+  --wy-ag-gold-soft: #413b32;
+  --wy-ag-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+  --wy-ag-page: linear-gradient(165deg, #181c30, #211c33 55%, #19273b);
+}
+:root[data-theme='light'] {
+  --wy-ag-solid: #fafaff;
+  --wy-ag-subtle: #f7f7ff;
+  --wy-ag-focus: #5931c9;
+  --wy-ag-on-accent: #ffffff;
+  --wy-ag-green: #25746c;
+  --wy-ag-green-soft: #e2f2ed;
+  --wy-ag-blue: #3c64a8;
+  --wy-ag-blue-soft: #e5edfb;
+  --wy-ag-rose: #a85577;
+  --wy-ag-rose-soft: #f7e8f0;
+  --wy-ag-gold: #9b6c2d;
+  --wy-ag-gold-soft: #f8eedb;
+  --wy-ag-shadow: 0 8px 30px rgba(76, 61, 128, 0.045);
+  --wy-ag-page: linear-gradient(165deg, #eef0ff, #eeecfc 55%, #e8edfc);
+}
+
+/* ---------- 图标底 ---------- */
+.wy-agent-icon { display: inline-grid; place-items: center; flex: none; border-radius: 14px; color: var(--accent); background: var(--accent-soft); }
+.wy-agent-icon svg { width: 58%; height: 58%; }
+.wy-agent-icon.lg { width: 60px; height: 60px; border-radius: 18px; }
+.wy-agent-icon.md { width: 44px; height: 44px; }
+.wy-agent-icon.sm { width: 40px; height: 40px; border-radius: 12px; }
+.wy-agent-icon.xs { width: 24px; height: 24px; border-radius: 8px; }
+.wy-agent-icon[data-tone='green'] { color: var(--wy-ag-green); background: var(--wy-ag-green-soft); }
+.wy-agent-icon[data-tone='blue'] { color: var(--wy-ag-blue); background: var(--wy-ag-blue-soft); }
+.wy-agent-icon[data-tone='rose'] { color: var(--wy-ag-rose); background: var(--wy-ag-rose-soft); }
+.wy-agent-icon[data-tone='gold'] { color: var(--wy-ag-gold); background: var(--wy-ag-gold-soft); }
+
+/* ---------- 广场：整页浮层（手机满屏，电脑居中大卡） ---------- */
+.wy-agents { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: var(--wy-ag-page); color: var(--text);
+  padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px); }
+.wy-agents[hidden] { display: none; }
+.wy-agents-bar { display: flex; align-items: center; gap: 8px; min-height: 58px; padding: 0 12px; flex: none; }
+.wy-agents-bar h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.wy-agents-back { width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 12px; background: transparent; color: var(--text); cursor: pointer; }
+.wy-agents-back svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.wy-agents-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 4px 20px 24px; display: flex; flex-direction: column; gap: 18px; }
+.wy-agents-search { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); }
+.wy-agents-search-icon { width: 18px; height: 18px; flex: none; border: 1.8px solid var(--muted); border-radius: 50%; position: relative; }
+.wy-agents-search-icon::after { content: ''; position: absolute; width: 6px; height: 1.8px; background: var(--muted); right: -5px; bottom: -3px; transform: rotate(45deg); }
+.wy-agents-search-input { flex: 1; min-width: 0; min-height: 44px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 1rem; outline: none; }
+.wy-agents-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px; border-radius: 20px; border: 1px solid var(--line);
+  background: linear-gradient(120deg, var(--accent-soft), var(--wy-ag-subtle)); color: var(--text); text-align: left; cursor: pointer; font: inherit; }
+.wy-agents-banner[hidden] { display: none; }
+.wy-agents-banner-copy { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.wy-agents-banner-copy small { color: var(--accent); font-size: 12px; }
+.wy-agents-banner-copy b { font-size: 17px; }
+.wy-agents-banner-copy span { color: var(--muted); font-size: 13px; }
+.wy-agents-banner-art { display: flex; align-items: flex-end; gap: 6px; height: 52px; flex: none; }
+.wy-agents-banner-art i { display: block; width: 14px; border-radius: 4px 4px 2px 2px; background: var(--accent); opacity: 0.85; }
+.wy-agents-banner-art i:nth-child(1) { height: 20px; opacity: 0.35; }
+.wy-agents-banner-art i:nth-child(2) { height: 34px; opacity: 0.6; }
+.wy-agents-banner-art i:nth-child(3) { height: 50px; }
+.wy-agents-body > * { flex: none; }
+.wy-agents-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 0 -20px; padding: 0 20px; }
+.wy-agents-chips::-webkit-scrollbar { display: none; }
+.wy-agents-chip { flex: none; min-height: 44px; padding: 0 14px; border: 0; border-radius: 12px; background: transparent; color: var(--muted); font: inherit; font-size: 14px; cursor: pointer; white-space: nowrap; }
+.wy-agents-chip.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.wy-agents-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.wy-agent-card { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; padding: 16px 14px; border-radius: 20px; border: 1px solid var(--line);
+  background: var(--surface); box-shadow: var(--wy-ag-shadow); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.wy-agent-card:active { transform: scale(0.985); }
+.wy-agent-card b { font-size: 16px; }
+.wy-agent-card-top { display: flex; width: 100%; justify-content: space-between; align-items: flex-start; }
+.wy-agent-tag { font-size: 11px; color: var(--muted); padding: 2px 6px; border: 1px solid var(--line); border-radius: 6px; }
+.wy-agent-card-intro { color: var(--muted); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.wy-agent-card.skeleton { min-height: 140px; background: var(--wy-ag-subtle); animation: wy-ag-pulse 1.2s ease-in-out infinite; box-shadow: none; }
+@keyframes wy-ag-pulse { 50% { opacity: 0.55; } }
+.wy-agents-empty { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; padding: 32px 12px; text-align: center; color: var(--muted); }
+.wy-agents-empty b { color: var(--text); font-size: 15px; }
+.wy-agents :focus-visible, .wy-agent-start :focus-visible, .drawer-agents :focus-visible { outline: 2px solid var(--wy-ag-focus); outline-offset: 2px; }
+@media (max-width: 340px) { .wy-agents-body { padding-left: 16px; padding-right: 16px; } .wy-agents-chips { margin: 0 -16px; padding: 0 16px; } }
+@media (min-width: 880px) {
+  .wy-agents { inset: 4vh 8vw; border-radius: 24px; border: 1px solid var(--line); box-shadow: 0 24px 80px rgba(0, 0, 0, 0.25); }
+  .wy-agents-body { padding: 8px 32px 32px; }
+  .wy-agents-chips { margin: 0; padding: 0; }
+  .wy-agents-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) { .wy-agent-card.skeleton { animation: none; } .wy-agent-card:active { transform: none; } }
+
+/* ---------- 起始页（空的智能体对话） ---------- */
+.wy-agent-start { display: flex; flex-direction: column; gap: 16px; max-width: 640px; margin: 0 auto; padding: 16px 20px 24px; color: var(--text); }
+.wy-agent-back-link { align-self: flex-start; min-height: 44px; padding: 0 4px; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
+.wy-agent-start-head { display: flex; align-items: center; gap: 14px; }
+.wy-agent-start-head b { display: block; font-size: 18px; }
+.wy-agent-start-head small { color: var(--muted); font-size: 13px; }
+.wy-agent-start-intro { margin: 0; line-height: 1.7; font-size: 1rem; }
+.wy-agent-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 10px; }
+.wy-agent-field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); min-width: 0; }
+.wy-agent-select { min-height: 44px; min-width: 0; padding: 0 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--wy-ag-solid); color: var(--text); font: inherit; font-size: 14px; }
+.wy-agent-start-label { display: flex; justify-content: space-between; align-items: baseline; }
+.wy-agent-start-label b { font-size: 15px; }
+.wy-agent-start-label small { color: var(--muted); font-size: 12px; }
+.wy-agent-starters { display: flex; flex-direction: column; gap: 10px; }
+.wy-agent-starter { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 60px; padding: 12px 16px; border-radius: 20px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; font-size: 15px; text-align: left; line-height: 1.5; cursor: pointer; }
+.wy-agent-starter::after { content: '›'; color: var(--muted); font-size: 20px; flex: none; }
+.wy-agent-upload { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; padding: 12px 16px; border-radius: 20px;
+  border: 1px dashed var(--line); background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.wy-agent-upload-copy { display: flex; flex-direction: column; gap: 2px; }
+.wy-agent-upload-copy span { color: var(--muted); font-size: 13px; }
+.wy-agent-upload-plus { color: var(--accent); font-size: 22px; }
+.wy-agent-start-note, .wy-agent-missing { margin: 0; color: var(--muted); font-size: 12px; }
+.wy-agent-missing { padding: 24px 20px; text-align: center; font-size: 14px; }
+
+/* ---------- 顶栏智能体名字 ---------- */
+.wy-chat-agent { display: inline-flex; vertical-align: -6px; margin-right: 6px; }
+.wy-chat-agent[hidden] { display: none; }
+
+/* ---------- 抽屉：发现智能体、历史图标 ---------- */
+.drawer-agents { display: flex; flex-direction: column; gap: 10px; }
+.drawer-agents-head { display: flex; justify-content: space-between; align-items: center; min-height: 44px; border: 0; background: transparent; color: var(--text); font: inherit; padding: 0 2px; cursor: pointer; }
+.drawer-agents-head b { font-size: 15px; }
+.drawer-agents-head span { color: var(--muted); font-size: 20px; }
+.drawer-agent-picks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.drawer-agent-pick { display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 76px; padding: 6px 2px; border: 0; border-radius: 14px; background: transparent; color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.drawer-agent-pick span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.drawer-item.with-agent { display: flex; align-items: center; gap: 8px; }
+.drawer-item.with-agent .drawer-item-copy { flex: 1; min-width: 0; }
+
+/* ---------- 电脑工作台顶栏入口（紧挨“对话 / 工作室”） ---------- */
+.wb-agents-entry { order: -1; margin-left: 8px; min-height: 36px; padding: 0 16px; border: 0; border-radius: 20px; background: var(--accent-soft); color: var(--accent); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.wb-agents-entry:focus-visible { outline: 2px solid var(--wy-ag-focus); outline-offset: 2px; }
+
+/* ---------- PPT 模板（P4 选择区、P5 模板库与样张） ---------- */
+.wy-tpl-pick { display: flex; flex-direction: column; gap: 10px; }
+.wy-tpl-more { min-height: 44px; padding: 0 4px; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 13px; cursor: pointer; }
+.wy-tpl-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (min-width: 880px) { .wy-tpl-grid.wide { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.wy-tpl-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; padding: 0 0 6px; border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.wy-tpl-card b { font-size: 14px; }
+.wy-tpl-card small { color: var(--muted); font-size: 12px; }
+.wy-tpl-frame { position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; max-width: 100%; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: var(--wy-ag-subtle); }
+.wy-tpl-card.on .wy-tpl-frame { outline: 2.5px solid var(--accent); outline-offset: 2px; }
+.wy-tpl-card.on b::after { content: ' ✓'; color: var(--accent); }
+.wy-tpl-thumb { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
+.wy-tpl-thumb.missing { display: none; }
+.wy-tpl-fallback { position: absolute; inset: 0; display: grid; place-items: center; padding: 8px; color: var(--muted); font-size: 12px; text-align: center; }
+.wy-tpl-chosen { color: var(--muted); font-size: 12px; }
+.wy-tpl-pages { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; margin: 0 -20px; padding: 0 20px 4px; }
+.wy-tpl-frame.big { flex: 0 0 86%; scroll-snap-align: center; }
+@media (min-width: 880px) { .wy-tpl-pages { margin: 0; padding: 0; } .wy-tpl-frame.big { flex: 1 1 0; } }
+.wy-tpl-outline { display: flex; flex-direction: column; gap: 4px; font-size: 14px; line-height: 1.6; }
+.wy-tpl-outline span { color: var(--muted); }
+.wy-tpl-use { min-height: 48px; border: 0; border-radius: 14px; background: var(--accent); color: var(--wy-ag-on-accent); font: inherit; font-size: 16px; font-weight: 600; cursor: pointer; }
+
+/* ---------- 个人智能体：工作流步骤 ---------- */
+.wy-flow { display: flex; flex-direction: column; gap: 10px; }
+.wy-flow h3, .wy-studio-editor .wy-flow h3 { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.4; }
+.wy-flow-steps { display: flex; flex-direction: column; gap: 10px; margin: 0; padding-left: 22px; }
+.wy-flow-step { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.wy-flow-row { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.wy-flow-row > input, .wy-flow-row > select { flex: 1; min-width: 0; }
+.wy-flow-step textarea { min-height: 64px; resize: vertical; }
+.wy-flow-move { flex: none; width: 44px; height: 44px; border: 1px solid var(--line); border-radius: 12px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+.wy-flow-move:disabled { opacity: 0.35; cursor: default; }
+.wy-flow-add { min-height: 44px; border: 1px dashed var(--line); border-radius: 12px; background: transparent; color: var(--accent); font: inherit; cursor: pointer; }
+.wy-flow-add:disabled { opacity: 0.4; }

@@ -1,0 +1,59 @@
+{
+  "baselineCommit": "4aba07029a069e1ead274f8e9bf554eec67ae39f",
+  "method": "同一OpenAI适配器实际序列化请求体；固定两个读取工具，不含图片/MCP；默认拦截fetch，不联网",
+  "rows": [
+    {
+      "scenario": "未压缩长对话",
+      "before": {
+        "requestBytes": 72156,
+        "indexChars": 7167,
+        "repeatedRequirementChars": 6169
+      },
+      "after": {
+        "requestBytes": 52040,
+        "indexChars": 0,
+        "repeatedRequirementChars": 0
+      },
+      "savedRequestBytes": 20116
+    },
+    {
+      "scenario": "已压缩长对话",
+      "before": {
+        "requestBytes": 41418,
+        "indexChars": 7167,
+        "repeatedRequirementChars": 2483
+      },
+      "after": {
+        "requestBytes": 26678,
+        "indexChars": 2030,
+        "repeatedRequirementChars": 0
+      },
+      "savedRequestBytes": 14740
+    },
+    {
+      "scenario": "已有项目对话中问候",
+      "before": {
+        "requestBytes": 27964,
+        "indexChars": 2394,
+        "repeatedRequirementChars": 1846
+      },
+      "after": {
+        "requestBytes": 21233,
+        "indexChars": 0,
+        "repeatedRequirementChars": 0
+      },
+      "savedRequestBytes": 6731
+    }
+  ],
+  "storage": {
+    "beforeBytes": 2019429,
+    "afterBytes": 1401460,
+    "archivedEntries": 500,
+    "visibleUserMessages": 400,
+    "mergedEntries": 900
+  },
+  "firstVisibleText": {
+    "status": "not_measured",
+    "reason": "默认只测请求体；没有真实服务请求，不报告模拟首字耗时"
+  }
+}

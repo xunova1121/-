@@ -1,0 +1,325 @@
+/**
+ * 桌面版专属工具：直接操作这台电脑（任意文件夹、打开程序、运行命令、截屏、剪贴板）。
+ * 只在 Electron 桌面版里出现；实际操作由主进程执行（desktop/main.cjs），
+ * 写入、移动、删除、打开、运行命令、读剪贴板都会先在对话里征得用户同意。
+ */
+import * as ws from './workspace.js';
+import { parseFile } from './docs.js';
+import { isImageName, prepareImage } from './images.js';
+import { checkCommand } from './commandSafety.js';
+import { applyEdits } from './textEdit.js';
+import { editOffice } from './officeEdit.js';
+
+const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
+const str = (description) => ({ type: 'string', description });
+const clip = (s, n = 20000) => (s.length > n ? `${s.slice(0, n)}\n…（已截断，共 ${s.length} 字）` : s);
+const DOC = /\.(docx|pdf|pptx|xlsx|xls|ods)$/i;
+
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+async function blobToB64(blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+const fmt = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
+/** 改文件前的自动备份（desktop/backups.mjs）：告诉模型，需要时转告用户 */
+const BACKUP_NOTE = {
+  saved: '原来的内容已自动备份，可在“工作区 → 改动记录”里恢复',
+  recorded: '已记入“工作区 → 改动记录”，可以撤销',
+  'too-big': '文件太大，没有自动备份'
+};
+const backupNote = (r) => (BACKUP_NOTE[r?.backup] ? `（${BACKUP_NOTE[r.backup]}）` : '');
+
+/**
+ * @param {{ invoke: (op: string, args?: object) => Promise<any>, platform: string }} desktop
+ * @param {{ onFileChanged?: (path: string) => void }} ctx
+ */
+export function createDesktopTools(desktop, ctx = {}) {
+  const call = (op, args) => desktop.invoke(op, args);
+  const PATH_HINT = '可以用绝对路径，或以 ~、桌面、文档、下载 开头（如“桌面/报告.docx”）';
+  return [
+    {
+      name: 'computer_capabilities',
+      description: '查看当前PC本机的真实工具能力、系统与常用文件夹路径；不代表所有软件都已安装。',
+      input_schema: S({}),
+      run: async () => `当前为PC本机执行（${desktop.platform}）。支持文件搜索/读取/写入/备份、打开程序、运行命令、截屏及鼠标键盘。看屏操作需要支持图片的模型和系统权限。\n常用路径：${JSON.stringify(desktop.paths || await call('paths'))}\n工具存在不等于任务已经完成；应检查返回值或操作后的屏幕。`
+    },
+    {
+      name: 'computer_list_dir',
+      description: `列出电脑上某个文件夹的内容（文件名、大小、修改时间）。${PATH_HINT}。`,
+      input_schema: S({ path: str('文件夹路径') }, ['path']),
+      run: async ({ path }) => {
+        const r = await call('listDir', { path });
+        if (!r.entries.length) return `${r.path} 是空文件夹。`;
+        return `${r.path}（${r.entries.length} 项${r.truncated ? '，只显示前 300 项' : ''}）\n${r.entries.map((e) => `${e.dir ? '[文件夹]' : `[${fmt(e.size)}]`} ${e.name}  ${new Date(e.mtime).toLocaleString('zh-CN', { hour12: false })}`).join('\n')}`;
+      }
+    },
+    {
+      name: 'computer_search',
+      description: '按文件名搜索本机电脑。dir不填时同时查桌面、文档、下载；已知位置可指定文件夹。不等于搜索虚拟工作区，也不代表搜遍全盘。',
+      input_schema: S({ dir: str(`可选，从哪个文件夹开始搜索；不填查桌面、文档、下载。${PATH_HINT}`), keyword: str('文件名里包含的关键词；完整名称找不到时改用关键名称') }, ['keyword']),
+      run: async ({ dir, keyword }) => {
+        if (!String(keyword ?? '').trim()) throw new Error('请输入文件名关键词');
+        const roots = dir ? [dir] : ['桌面', '文档', '下载'];
+        const results = await Promise.allSettled(roots.map(root => call('search', { dir: root, keyword: String(keyword).trim() })));
+        const hits = new Set(), notes = [];
+        results.forEach((result,i) => {
+          if (result.status === 'rejected') { notes.push(`${roots[i]}：搜索失败或不可访问`); return; }
+          const r=result.value;for(const p of r.hits)hits.add(p);
+          notes.push(`${r.dir}：${r.hits.length}个匹配${r.truncated?'，搜索达到范围/数量限制':''}${r.skipped?'，部分目录不可访问':''}`);
+        });
+        if(results.every(r=>r.status==='rejected'))throw new Error(`本机搜索失败：${notes.join('；')}`);
+        return `${hits.size ? `找到 ${hits.size} 个匹配：\n${[...hits].join('\n')}` : `在以下已查位置未找到文件名包含「${keyword}」的文件，不代表整台电脑不存在。`}\n搜索范围：\n${notes.join('\n')}`;
+      }
+    },
+    {
+      name: 'computer_read_file',
+      description: `读取电脑上的文件内容（Word、PDF、PPT、Excel 会提取文字；代码与文本原样返回；图片会直接给你看）。${PATH_HINT}。`,
+      input_schema: S({ path: str('文件路径') }, ['path']),
+      run: async ({ path }) => {
+        const r = await call('readFile', { path });
+        const name = r.path.split(/[\\/]/).pop();
+        if (isImageName(name)) {
+          const img = await prepareImage(new Blob([b64ToBytes(r.base64)]));
+          return { text: `图片 ${r.path}（${img.width}×${img.height}）`, images: [{ mime: img.mime, data: img.data }] };
+        }
+        if (DOC.test(name)) return clip((await parseFile(new Blob([b64ToBytes(r.base64)]), name)).text);
+        return clip(new TextDecoder().decode(b64ToBytes(r.base64)));
+      }
+    },
+    {
+      name: 'computer_write_file',
+      description: `把文本内容写入电脑上的文件（代码、Markdown、CSV、网页等；会覆盖同名文件）。Word / PPT / Excel 请先用 create_document 在工作区生成，再用 computer_save_from_workspace 保存到电脑。${PATH_HINT}。`,
+      input_schema: S({ path: str('目标文件路径'), content: str('文件内容') }, ['path', 'content']),
+      approval: ({ path, content }) => ({ key: 'fs-write', title: `写入文件：${path}`, detail: content.slice(0, 600) }),
+      run: async ({ path, content }) => {
+        // CSV 加 UTF-8 BOM：Excel 双击打开时中文不乱码
+        const r = await call('writeFile', { path, text: /\.csv$/i.test(path) && !content.startsWith('﻿') ? `﻿${content}` : content });
+        return `已写入 ${r.path}（${fmt(r.size)}）${backupNote(r)}。`;
+      }
+    },
+    {
+      name: 'computer_edit_file',
+      description: `按片段修改电脑上的文本文件：给出原文里一字不差的一段 old_text 和替换后的 new_text，只改这一段，其余不动（改之前自动备份）。${PATH_HINT}。`,
+      input_schema: S({
+        path: str('文件路径'),
+        edits: {
+          type: 'array', description: '一处或多处修改，按顺序执行',
+          items: { type: 'object', properties: { old_text: str('原文片段（一字不差）'), new_text: str('替换成'), replace_all: { type: 'boolean' } }, required: ['old_text', 'new_text'], additionalProperties: false }
+        }
+      }, ['path', 'edits']),
+      approval: ({ path, edits }) => ({ key: 'fs-write', title: `修改文件：${path}`, detail: (Array.isArray(edits) ? edits : []).map((e) => `- ${String(e.old_text).slice(0, 120)}\n+ ${String(e.new_text).slice(0, 120)}`).join('\n\n').slice(0, 1200) }),
+      run: async ({ path, edits }) => {
+        const cur = await call('readFile', { path });
+        const r = applyEdits(new TextDecoder().decode(b64ToBytes(cur.base64)), Array.isArray(edits) ? edits : []);
+        const w = await call('writeFile', { path: cur.path, text: r.text });
+        return `已修改 ${w.path}：替换 ${r.count} 处${backupNote(w)}。`;
+      }
+    },
+    {
+      name: 'computer_edit_office_document',
+      description: `修改电脑上已有的 Word（.docx）或 PPT（.pptx），保留原来的排版：替换文字（正文、表格、页眉页脚、幻灯片、备注），Word 还可以在末尾追加段落（改之前自动备份）。${PATH_HINT}。`,
+      input_schema: S({
+        path: str('文件路径'),
+        replacements: { type: 'array', items: { type: 'object', properties: { find: str('原文（一字不差）'), replace: str('替换成') }, required: ['find', 'replace'], additionalProperties: false } },
+        append: { type: 'array', items: { type: 'string' }, description: '追加到 Word 末尾的段落（可选）' }
+      }, ['path']),
+      approval: ({ path, replacements = [], append = [] }) => ({ key: 'fs-write', title: `修改文档：${path}`, detail: [...(Array.isArray(replacements) ? replacements : []).map((r) => `“${r.find}” → “${r.replace}”`), ...(Array.isArray(append) ? append : []).map((t) => `追加：${String(t).slice(0, 80)}`)].join('\n').slice(0, 1200) }),
+      run: async ({ path, replacements = [], append = [] }) => {
+        const kind = (String(path).match(/\.(docx|pptx)$/i)?.[1] ?? '').toLowerCase();
+        if (!kind) throw new Error('只能修改 .docx 或 .pptx 文件；文本文件用 computer_edit_file');
+        const cur = await call('readFile', { path });
+        const r = await editOffice(b64ToBytes(cur.base64), kind, { replacements: Array.isArray(replacements) ? replacements : [], append: Array.isArray(append) ? append : [] });
+        const hit = r.replaced.filter((x) => x.count);
+        const miss = r.replaced.filter((x) => !x.count);
+        if (!hit.length && !r.appended) throw new Error(`文件里没有找到要替换的文字：${miss.map((x) => `“${x.find}”`).join('、') || '（没有给出修改）'}`);
+        const w = await call('writeFile', { path: cur.path, base64: await blobToB64(r.blob) });
+        const parts = [...hit.map((x) => `“${x.find}”替换了 ${x.count} 处`), ...(r.appended ? [`追加了 ${r.appended} 段`] : []), ...(miss.length ? [`没找到：${miss.map((x) => `“${x.find}”`).join('、')}`] : [])];
+        return `已保存 ${w.path}（格式保留）：${parts.join('；')}${backupNote(w)}。`;
+      }
+    },
+    {
+      name: 'computer_save_from_workspace',
+      description: '把工作区里的文件（如刚生成的 docx / pptx / xlsx / 网页）保存到电脑上的指定位置。',
+      input_schema: S({ workspace_path: str('工作区里的文件路径'), dest_path: str(`保存到电脑的路径（含文件名）。${PATH_HINT}`) }, ['workspace_path', 'dest_path']),
+      approval: ({ workspace_path: from, dest_path: to }) => ({ key: 'fs-write', title: `保存到电脑：${to}`, detail: `来源：工作区/${from}` }),
+      run: async ({ workspace_path: from, dest_path: to }) => {
+        const blob = await ws.readBlob(from);
+        const r = await call('writeFile', { path: to, base64: await blobToB64(blob) });
+        return `已保存到 ${r.path}（${fmt(r.size)}）${backupNote(r)}。`;
+      }
+    },
+    {
+      name: 'computer_move',
+      description: '移动或重命名电脑上的文件 / 文件夹。',
+      input_schema: S({ from: str('原路径'), to: str('新路径（含新名称）') }, ['from', 'to']),
+      approval: ({ from, to }) => ({ key: 'fs-move', title: '移动 / 重命名', detail: `${from}\n→ ${to}` }),
+      run: async ({ from, to }) => { const r = await call('move', { from, to }); return `已移动到 ${r.path}${backupNote(r)}。`; }
+    },
+    {
+      name: 'computer_copy',
+      description: '复制电脑上的文件 / 文件夹。',
+      input_schema: S({ from: str('原路径'), to: str('复制到的路径（含名称）') }, ['from', 'to']),
+      approval: ({ from, to }) => ({ key: 'fs-write', title: '复制', detail: `${from}\n→ ${to}` }),
+      run: async ({ from, to }) => { const r = await call('copy', { from, to }); return `已复制到 ${r.path}${backupNote(r)}。`; }
+    },
+    {
+      name: 'computer_trash',
+      description: '把电脑上的文件 / 文件夹移到回收站（可以从回收站恢复）。',
+      input_schema: S({ path: str('路径') }, ['path']),
+      approval: ({ path }) => ({ key: 'fs-trash', title: `移到回收站：${path}` }),
+      run: async ({ path }) => { const r = await call('trash', { path }); return `已把 ${r.path} 移到回收站${backupNote(r)}。`; }
+    },
+    {
+      name: 'computer_open',
+      description: '用系统默认程序打开文件、文件夹或网址；也可以打开程序（填程序名，如“记事本”“计算器”“微信”“Visual Studio Code”）。',
+      input_schema: S({ target: str('文件路径、文件夹路径、网址或程序名') }, ['target']),
+      approval: ({ target }) => ({ key: 'open', title: `打开：${target}` }),
+      run: async ({ target }) => { const r = await call('open', { target }); return r.message; }
+    },
+    {
+      name: 'computer_run',
+      description: `在这台电脑上运行一条命令（${desktop.platform === 'win32' ? 'Windows PowerShell' : 'bash / zsh'}），返回输出。用于查看系统信息、批量处理文件、调用已安装的命令行工具等。不要运行会删除数据或修改系统设置的命令。`,
+      input_schema: S({ command: str('要运行的命令'), cwd: str('工作目录（可选）') }, ['command']),
+      approval: ({ command, cwd }) => {
+        const c = checkCommand(command);
+        if (c.level === 'block') return null; // run() 直接拒绝，不必问
+        const detail = `${cwd ? `[${cwd}] ` : ''}${command}`;
+        // 危险命令：没有 key，不能“本次都允许”，每次单独确认
+        if (c.level === 'danger') return { danger: true, title: `⚠ 危险命令：${c.why}`, detail: `${detail}\n\n这类命令每次都要单独确认；无人值守的定时任务不会执行。` };
+        return { key: 'run', title: '运行命令', detail };
+      },
+      run: async ({ command, cwd }) => {
+        const c = checkCommand(command);
+        if (c.level === 'block') throw new Error(`已拦截（${c.why}）：这类命令未央不会执行。如果确实需要，请让用户自己在终端里操作`);
+        const r = await call('run', { command, cwd });
+        return clip([`退出码：${r.code}${r.timedOut ? '（超时被终止）' : ''}`, r.stdout && `输出：\n${r.stdout}`, r.stderr && `错误输出：\n${r.stderr}`].filter(Boolean).join('\n'), 12000);
+      }
+    },
+    {
+      name: 'computer_screenshot',
+      description: '截取整个屏幕，保存到工作区（截图/）。look=true（默认）时截图会发给你看，可以分析屏幕上的界面、报错、表格等；只想存档时设 look=false。',
+      input_schema: S({ look: { type: 'boolean', description: '是否把截图发给模型查看，默认 true' } }),
+      approval: ({ look }) => (look === false ? null : { key: 'screen-look', title: '查看屏幕截图', detail: '截图会发送给当前使用的大模型服务进行分析。' }),
+      run: async ({ look } = {}) => {
+        const r = await call('screenshot');
+        const path = `截图/屏幕-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.png`;
+        const blob = new Blob([b64ToBytes(r.base64)], { type: 'image/png' });
+        const saved = (await ws.write(path, blob))?.path || path;
+        ctx.onFileChanged?.(saved);
+        const text = `已截屏（${r.width}×${r.height}），保存到工作区 ${saved}。`;
+        if (look === false) return text;
+        const img = await prepareImage(blob);
+        return { text, images: [{ mime: img.mime, data: img.data }] };
+      }
+    },
+    {
+      name: 'clipboard_read',
+      description: '读取剪贴板里的文字。',
+      input_schema: S({}),
+      approval: () => ({ key: 'clipboard-read', title: '读取剪贴板（内容会发给大模型）' }),
+      run: async () => { const r = await call('clipboardRead'); return r.text ? clip(r.text) : '剪贴板里没有文字。'; }
+    },
+    {
+      name: 'clipboard_write',
+      description: '把文字放进剪贴板，方便用户粘贴。',
+      input_schema: S({ text: str('文字') }, ['text']),
+      run: async ({ text }) => { await call('clipboardWrite', { text }); return '已复制到剪贴板。'; }
+    },
+    ...guiTools(call, ctx),
+    {
+      name: 'computer_notify',
+      description: '弹出系统通知（例如长任务完成时提醒用户）。',
+      input_schema: S({ title: str('标题'), body: str('内容') }, ['title']),
+      run: async ({ title, body }) => { await call('notify', { title, body }); return '已通知。'; }
+    }
+  ];
+}
+
+// ---------------------------------------------------------------- 鼠标键盘控制（看屏幕 → 操作 → 再看）
+const num = (description) => ({ type: 'number', description });
+const XY = { x: num('横坐标（以最近一次 computer_look 截图为准，左上角为 0）'), y: num('纵坐标') };
+
+/**
+ * 像人一样用鼠标键盘操作电脑。坐标都以模型看到的截图为准，主进程负责换算成屏幕坐标。
+ * 每个动作做完会自动再截一张图返回，模型可以确认结果、决定下一步。
+ */
+function guiTools(call, ctx) {
+  let shot = null; // 最近一次给模型看的截图尺寸 { w, h }
+  let started = false;
+  const begin = async () => {
+    if (started) return;
+    const r = await call('controlBegin');
+    started = true;
+    ctx.onControlStart?.(r);
+  };
+  const look = async (note = '') => {
+    const r = await call('controlLook');
+    const img = await prepareImage(new Blob([b64ToBytes(r.base64)], { type: 'image/png' }), { maxSide: 1440 });
+    shot = { w: img.width, h: img.height };
+    const cx = Math.round(r.cursor.x * img.width / r.width);
+    const cy = Math.round(r.cursor.y * img.height / r.height);
+    return { text: `${note}当前屏幕截图：${img.width}×${img.height}（坐标以这张图为准），鼠标在 (${cx}, ${cy})。`, images: [{ mime: img.mime, data: img.data }] };
+  };
+  const act = async (a, note) => {
+    await begin();
+    if (!shot) throw new Error('还没看过屏幕：先调用 computer_look 确认当前窗口和焦点，再操作');
+    const n = (v) => (v === undefined ? undefined : Number(v));
+    const before=shot;shot=null; // 失败或返回截图失败时，不能继续使用旧坐标
+    await call('controlAct', { ...a, x: n(a.x), y: n(a.y), toX: n(a.toX), toY: n(a.toY), imgW: before.w, imgH: before.h });
+    return look(`${note}；请核对新截图确认效果。`);
+  };
+  const where = (a) => `(${Math.round(a.x)}, ${Math.round(a.y)})`;
+  const approve = (title, detail) => ({ key: 'gui-control', title, detail: `${detail}\n\n操作期间未央窗口会暂时隐藏。随时可以把鼠标甩到屏幕左上角，或按 Ctrl+Alt+Q（Mac：Cmd+Option+Q）紧急停止。` });
+  return [
+    {
+      name: 'computer_look',
+      description: '看屏幕：截取当前屏幕给你看（未央窗口会先隐藏），用于接下来用鼠标键盘操作其他软件。操作类工具（computer_click / computer_type / computer_key / computer_scroll / computer_drag）的坐标都以这张截图为准；每次操作后会自动返回新的截图。能用命令、文件工具完成的事优先用它们，图形界面没有别的办法时才用鼠标键盘。',
+      input_schema: S({}),
+      approval: () => ({ key: 'screen-look', title: '查看屏幕截图', detail: '截图会发送给当前使用的大模型服务进行分析。' }),
+      run: async () => { await begin(); return look(); }
+    },
+    {
+      name: 'computer_click',
+      description: '在屏幕上点击。先 computer_look，再按截图上目标的中心坐标点击。double=true 双击（打开文件等），button=right 右键菜单。',
+      input_schema: S({ ...XY, button: { type: 'string', enum: ['left', 'right', 'middle'] }, double: { type: 'boolean', description: '双击' } }, ['x', 'y']),
+      approval: (a) => approve(`${a.double ? '双击' : a.button === 'right' ? '右键点击' : '点击'}屏幕 ${where(a)}`, '未央将控制鼠标。'),
+      run: (a) => act({ type: 'click', x: a.x, y: a.y, button: a.button || 'left', count: a.double ? 2 : 1 }, `已${a.double ? '双击' : '点击'} ${where(a)}`)
+    },
+    {
+      name: 'computer_type',
+      description: '在当前输入焦点处输入文字（先点击输入框）。支持中文。enter=true 输入后按回车。',
+      input_schema: S({ text: str('要输入的文字'), enter: { type: 'boolean', description: '输入后按回车' } }, ['text']),
+      approval: (a) => approve('用键盘输入文字', `将输入：${String(a.text).slice(0, 200)}${a.enter ? '（然后按回车）' : ''}`),
+      run: (a) => act({ type: 'type', text: a.text, enter: Boolean(a.enter) }, `已输入 ${String(a.text).length} 个字${a.enter ? '并回车' : ''}`)
+    },
+    {
+      name: 'computer_key',
+      description: '按键或快捷键，如 enter、tab、esc、ctrl+s、ctrl+c、alt+tab、cmd+space（Mac）、win（打开开始菜单）、pagedown、f5。',
+      input_schema: S({ keys: str('按键，多个键用 + 连接') }, ['keys']),
+      approval: (a) => approve(`按键 ${a.keys}`, '未央将模拟键盘按键。'),
+      run: (a) => act({ type: 'key', keys: a.keys }, `已按 ${a.keys}`)
+    },
+    {
+      name: 'computer_scroll',
+      description: '在某个位置滚动鼠标滚轮。',
+      input_schema: S({ ...XY, direction: { type: 'string', enum: ['up', 'down'] }, amount: num('滚动格数，默认 3') }, ['x', 'y', 'direction']),
+      approval: (a) => approve(`在 ${where(a)} 向${a.direction === 'up' ? '上' : '下'}滚动`, '未央将控制鼠标。'),
+      run: (a) => act({ type: 'scroll', x: a.x, y: a.y, direction: a.direction, amount: Math.min(20, Math.max(1, Math.round(a.amount || 3))) }, `已向${a.direction === 'up' ? '上' : '下'}滚动`)
+    },
+    {
+      name: 'computer_drag',
+      description: '按住鼠标左键从一点拖到另一点（拖动文件、滑块、选中文字）。',
+      input_schema: S({ ...XY, to_x: num('终点横坐标'), to_y: num('终点纵坐标') }, ['x', 'y', 'to_x', 'to_y']),
+      approval: (a) => approve(`从 ${where(a)} 拖到 (${Math.round(a.to_x)}, ${Math.round(a.to_y)})`, '未央将控制鼠标。'),
+      run: (a) => act({ type: 'drag', x: a.x, y: a.y, toX: a.to_x, toY: a.to_y }, '已拖动')
+    }
+  ];
+}
+

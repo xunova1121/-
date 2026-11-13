@@ -1,0 +1,46 @@
+/**
+ * 打包服务器版（部署到自己的云服务器，见 deploy/服务器部署说明.md）：
+ *   node scripts/pack-server.mjs <版本号> [输出目录]   → <输出目录>/jarvis-server-<版本号>.tar.gz
+ * 先 npm run build。包里是网页界面（dist）、网关和智能体代码，依赖只列服务器上真正用到的那几个，
+ * 服务器上 npm install 时用锁定文件里的版本、国内镜像安装（见 deploy/install.sh）。
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { SERVER_DEPS, serverImports } from './serverDeps.mjs';
+import { normalizePackPermissions } from './packPermissions.mjs';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const version = process.argv[2] || 'dev';
+const out = path.resolve(process.argv[3] || path.join(ROOT, 'release-server'));
+/** 服务器上用到的依赖见 serverDeps.mjs；打包前再核对一次，少列就不打包（少一个包服务器启动即挂，用户看到 502） */
+const unlisted = [...serverImports(ROOT)].filter(([d]) => !SERVER_DEPS.includes(d));
+if (unlisted.length) { console.error(`服务器代码用到但 SERVER_DEPS 没列：${unlisted.map(([d, f]) => `${d}（${f}）`).join('、')}`); process.exit(1); }
+
+if (!fs.existsSync(path.join(ROOT, 'dist', 'index.html'))) { console.error('请先 npm run build'); process.exit(1); }
+const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+fs.mkdirSync(out, { recursive: true });
+const stage = fs.mkdtempSync(path.join(out, '.stage-'));
+const dir = path.join(stage, 'jarvis-server');
+fs.mkdirSync(dir);
+for (const p of ['dist', 'server', 'shared', 'src', 'deploy', 'evals', 'package-lock.json']) fs.cpSync(path.join(ROOT, p), path.join(dir, p), { recursive: true });
+const missing = SERVER_DEPS.filter((d) => !pkg.dependencies[d]);
+if (missing.length) { console.error(`package.json 里没有：${missing.join('、')}`); process.exit(1); }
+fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
+  name: 'jarvis-server', version, private: true, type: pkg.type,
+  scripts: { start: 'node server/server.mjs', 'eval:agent': 'node evals/runner.mjs', 'eval:check': 'node --test evals/checks.mjs' },
+  dependencies: Object.fromEntries(SERVER_DEPS.map((d) => [d, pkg.dependencies[d]]))
+}, null, 2));
+fs.writeFileSync(path.join(dir, 'VERSION'), `${version}\n`);
+// 1.0.419 事故根治：构建环境 umask 偏严时复制出来的文件是 0600，root 安装后 jarvis 服务账号读不了。
+// 打包前统一成 目录755 / 文件644（可执行保留755），并把归档里的属主记成 root，不带构建账号。
+normalizePackPermissions(dir);
+const file = path.join(out, `jarvis-server-${version}.tar.gz`);
+execFileSync('tar', ['--owner=0', '--group=0', '--numeric-owner', '-czf', file, '-C', stage, 'jarvis-server']);
+fs.rmSync(stage, { recursive: true, force: true });
+// 自动更新用（deploy/update.sh）：最新版本号和安装包的 sha256，随 Release 一起发布，文件名固定
+const sha256 = (await import('node:crypto')).createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+fs.writeFileSync(path.join(out, 'jarvis-server-latest.json'), `${JSON.stringify({ version, file: path.basename(file), sha256 })}\n`);
+console.log(`${file}（${(fs.statSync(file).size / 1048576).toFixed(1)} MB）`);
+

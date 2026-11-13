@@ -1,0 +1,604 @@
+{
+  "mode": "deterministic-public-data-fixtures",
+  "baseline": "626aeac890e308768fdbfc09b6b24b961bb3ee76",
+  "candidate": "4942619ab69935c8daffc7591621b0c31f7d838e",
+  "candidateDirty": false,
+  "sourceDigests": {
+    "src/agent/fetchPageTool.js": "8c0682598446fb52c5a38772c6604bd6896779d0a0f93ca237b948ddebadb705",
+    "src/agent/pageReader.js": "eff96b70bf2acd552c99db177b04faca446a95bcba1847c107a78e555bfbf1ad",
+    "src/agent/publicReadCache.js": "b4307cfa9c6c0ad509d31ba77e2cebe284523d7cf45a55d845d5f8893f499b18",
+    "src/agent/webSearch.js": "2efa14d5ec0b7072bd8aaf2ab964577f2ace91b884a6330ae2129ca6e75ca305",
+    "src/agent/searchPolicy.js": "0970bb82a81b9278c7e8458ca972ab4e2304e3e7c416fba9339b7cd2ddda74fd",
+    "src/agent/requestContext.js": "6fbc9a4da407b5c50438f9b76516c525f3618b594b8bebe563d4cbae5d507fda",
+    "src/agent/turnContext.js": "61fecf7405a5f860154e22f46dbc63fce050441af86b13f585b481631a9a42c0",
+    "shared/modelMetrics.js": "dc8c8166ecbaa7855ab27c43d0305539a2d0a05a3d217790e3b5535aa64c8818",
+    "shared/tokenEstimate.js": "139a94bbcd968f9ac54e2bc2da0d0385c6e6b9551ea871d2530c3693aa772702"
+  },
+  "createdAt": "2026-11-13T12:03:19.726Z",
+  "conditions": {
+    "model": null,
+    "provider": null,
+    "paidRequests": 0,
+    "actualBillableTokens": null,
+    "notes": "同一机器交替顺序，各场景同样正文和来源；延迟来自固定夹具，不能承诺真实联网或真实模型耗时。源码基线仅替换被比较模块，其依赖与候选相同。"
+  },
+  "cases": [
+    {
+      "label": "三页相同正文、保留全部来源",
+      "before": {
+        "samples": 12,
+        "median": 282.5,
+        "p90": 434,
+        "failures": 0,
+        "requests": [
+          3,
+          3,
+          3,
+          3,
+          3,
+          3,
+          3,
+          3,
+          3,
+          3,
+          3,
+          3
+        ],
+        "quality": true,
+        "rows": [
+          {
+            "ms": 285,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 275,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 282,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 276,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 279,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 473,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 434,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 277,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 283,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 274,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 291,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 284,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          }
+        ]
+      },
+      "after": {
+        "samples": 12,
+        "median": 185.5,
+        "p90": 204,
+        "failures": 0,
+        "requests": [
+          3,
+          3,
+          3,
+          3,
+          3,
+          3,
+          3,
+          3,
+          3,
+          3,
+          3,
+          3
+        ],
+        "quality": true,
+        "rows": [
+          {
+            "ms": 185,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 184,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 186,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 193,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 185,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 187,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 183,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 185,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 191,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 182,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 204,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          },
+          {
+            "ms": 207,
+            "requests": 3,
+            "ok": true,
+            "sources": 3
+          }
+        ]
+      }
+    },
+    {
+      "label": "冷启动慢首源、同一100毫秒备用源；2500到1200毫秒错峰",
+      "before": {
+        "samples": 10,
+        "median": 2606,
+        "p90": 2640,
+        "failures": 0,
+        "requests": [
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2
+        ],
+        "quality": true,
+        "rows": [
+          {
+            "ms": 2625,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 2723,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 2640,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 2604,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 2601,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 2606,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 2606,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 2606,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 2602,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 2604,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          }
+        ]
+      },
+      "after": {
+        "samples": 10,
+        "median": 1304.5,
+        "p90": 1316,
+        "failures": 0,
+        "requests": [
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2
+        ],
+        "quality": true,
+        "rows": [
+          {
+            "ms": 1313,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 1303,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 1316,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 1308,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 1370,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 1304,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 1304,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 1305,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 1301,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 1303,
+            "requests": 2,
+            "ok": true,
+            "sources": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "同一账号同一公开地址三项同时读取",
+      "before": {
+        "samples": 12,
+        "median": 28.5,
+        "p90": 37,
+        "failures": 0,
+        "requests": [
+          3,
+          3,
+          3,
+          3,
+          3,
+          3,
+          3,
+          3,
+          3,
+          3,
+          3,
+          3
+        ],
+        "quality": true,
+        "rows": [
+          {
+            "ms": 120,
+            "requests": 3,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 27,
+            "requests": 3,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 28,
+            "requests": 3,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 37,
+            "requests": 3,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 29,
+            "requests": 3,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 26,
+            "requests": 3,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 28,
+            "requests": 3,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 32,
+            "requests": 3,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 29,
+            "requests": 3,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 31,
+            "requests": 3,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 28,
+            "requests": 3,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 26,
+            "requests": 3,
+            "ok": true,
+            "sources": 1
+          }
+        ]
+      },
+      "after": {
+        "samples": 12,
+        "median": 27,
+        "p90": 29,
+        "failures": 0,
+        "requests": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "quality": true,
+        "rows": [
+          {
+            "ms": 31,
+            "requests": 1,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 29,
+            "requests": 1,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 28,
+            "requests": 1,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 26,
+            "requests": 1,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 28,
+            "requests": 1,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 26,
+            "requests": 1,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 27,
+            "requests": 1,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 26,
+            "requests": 1,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 29,
+            "requests": 1,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 27,
+            "requests": 1,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 26,
+            "requests": 1,
+            "ok": true,
+            "sources": 1
+          },
+          {
+            "ms": 26,
+            "requests": 1,
+            "ok": true,
+            "sources": 1
+          }
+        ]
+      }
+    }
+  ],
+  "payload": {
+    "before": {
+      "systemChars": 6,
+      "messageChars": 48082,
+      "toolSchemaChars": 2,
+      "inputTextChars": 48090,
+      "estimatedSystemTokens": 6,
+      "estimatedDialogueTokens": 36057,
+      "estimatedToolResultTokens": 12023,
+      "estimatedSchemaTokens": 1
+    },
+    "after": {
+      "systemChars": 6,
+      "messageChars": 5572,
+      "toolSchemaChars": 2,
+      "inputTextChars": 5580,
+      "estimatedSystemTokens": 6,
+      "estimatedDialogueTokens": 4066,
+      "estimatedToolResultTokens": 1480,
+      "estimatedSchemaTokens": 1
+    },
+    "droppedMessages": 16,
+    "savedChars": 42510,
+    "actualBillableTokens": null,
+    "quality": "当前约束、目标中段和回读编号保留，原历史未改；较早历史未发送"
+  }
+}

@@ -1,0 +1,74 @@
+[
+  {
+    "id": "reference-technical",
+    "name": "清蓝红 · 技术建设方案",
+    "pages": 10,
+    "scene": "技术建设方案",
+    "source": "用户提供版式参考；未央原生重建（不含原文件内容）",
+    "license": "未央重建样板",
+    "editable": true,
+    "filename": "reference-technical.pptx",
+    "bytes": 50147,
+    "sha256": "23eb92743395d06a7949a1ae945d427a180aa00d3e04766393d6d4fcf3f7e611"
+  },
+  {
+    "id": "reference-roadshow",
+    "name": "蓝绿 · 行业路演",
+    "pages": 11,
+    "scene": "行业路演",
+    "source": "用户提供版式参考；未央原生重建（不含原文件内容）",
+    "license": "未央重建样板",
+    "editable": true,
+    "filename": "reference-roadshow.pptx",
+    "bytes": 53233,
+    "sha256": "27c67d6b5d989febb6a05ea5973bc3f3568f515b4dcf60bceebe369275a8a2da"
+  },
+  {
+    "id": "source-teal",
+    "name": "墨青 · 战略咨询",
+    "scene": "战略咨询",
+    "pages": 5,
+    "filename": "source-teal.pptx",
+    "bytes": 33151,
+    "sha256": "7fd112cceff5b57293c215dd339a802101e186f9bd8eaa4a58decc81a8765a0c",
+    "license": "MIT",
+    "source": "https://github.com/hugohe3/ppt-master/tree/f3633771fe699d327f02ae86393831bbcf5169f7/skills/ppt-master/templates",
+    "editable": true
+  },
+  {
+    "id": "source-cobalt",
+    "name": "钴蓝 · 产品发布",
+    "scene": "产品发布",
+    "pages": 5,
+    "filename": "source-cobalt.pptx",
+    "bytes": 33184,
+    "sha256": "575cec810a0489da53815ef5ba216c4ec064e96fc8383199bf4c3cb8fc1c0bc9",
+    "license": "MIT",
+    "source": "https://github.com/hugohe3/ppt-master/tree/f3633771fe699d327f02ae86393831bbcf5169f7/skills/ppt-master/templates",
+    "editable": true
+  },
+  {
+    "id": "source-gold",
+    "name": "曜金 · 项目路演",
+    "scene": "项目路演",
+    "pages": 5,
+    "filename": "source-gold.pptx",
+    "bytes": 33103,
+    "sha256": "d215f6cfd883e4a1f946cd4f02b9dbf414e76efb88423ee0ffca01d004243c94",
+    "license": "MIT",
+    "source": "https://github.com/hugohe3/ppt-master/tree/f3633771fe699d327f02ae86393831bbcf5169f7/skills/ppt-master/templates",
+    "editable": true
+  },
+  {
+    "id": "source-lilac",
+    "name": "雾紫 · 品牌提案",
+    "scene": "品牌提案",
+    "pages": 5,
+    "filename": "source-lilac.pptx",
+    "bytes": 33155,
+    "sha256": "f871c5b5780080c87a7a7a8847d800400ec5bfdbb2e3dde4fb7aa4192faa7122",
+    "license": "MIT",
+    "source": "https://github.com/hugohe3/ppt-master/tree/f3633771fe699d327f02ae86393831bbcf5169f7/skills/ppt-master/templates",
+    "editable": true
+  }
+]

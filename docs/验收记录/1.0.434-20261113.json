@@ -1,0 +1,118 @@
+{
+  "version": "1.0.434",
+  "source": "626aeac890e308768fdbfc09b6b24b961bb3ee76",
+  "runtimeRevision": "46780016258e31ff7461e6dffe9071d93f817006",
+  "publicAssets": 7,
+  "sourcePublicDigestsMatch": true,
+  "downloadedAssets": {
+    "Jarvis-1.0.434-android.apk": "390257b58f26f23cfd10a64e477186e0b582b9561c4753b64c79aa1da1d50a0c",
+    "jarvis-server-1.0.434.tar.gz": "d50bb2300118261ce79e57543328afaa5d0e74395121b5b581a30c1ad7c834ff",
+    "jarvis-server-latest.json": "de5164dc7355f1971ba200aa1c6dce34d8639c6c98095160d8657c60b60935fe",
+    "Jarvis-Setup-1.0.434.exe": "cc6ece9f8b02acb64766910ef54fe1fa15bb17dbd0b00c34f99df25b9f693675",
+    "latest.yml": "54d1e525386532d8dbf434dd89517031789c19ac3909cdaac3f835f997f99ee5"
+  },
+  "server": {
+    "archiveEntries": 1125,
+    "manifestFiles": 949,
+    "runtimeFilesChecked": 948,
+    "sha256": "d50bb2300118261ce79e57543328afaa5d0e74395121b5b581a30c1ad7c834ff",
+    "permissions": "root-owned/readable-by-service-account"
+  },
+  "windows": {
+    "file": "Jarvis-Setup-1.0.434.exe",
+    "bytes": 142104960,
+    "sha256": "cc6ece9f8b02acb64766910ef54fe1fa15bb17dbd0b00c34f99df25b9f693675",
+    "sha512MatchesLatestYml": true
+  },
+  "apk": {
+    "versionCode": 434,
+    "versionName": "1.0.434",
+    "package": "com.xunova.jarvis",
+    "certificateSHA256": "56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6",
+    "sha256": "390257b58f26f23cfd10a64e477186e0b582b9561c4753b64c79aa1da1d50a0c",
+    "messageMenuPresent": true,
+    "gpt26JsonEditPresent": true,
+    "oldPreSendModesRemoved": true
+  },
+  "limits": [
+    "user-server-not-deployed",
+    "no-real-device",
+    "no-paid-model-or-real-portrait-test",
+    "user-upstream-host-and-full-original-error-not-available"
+  ],
+  "tag": "desktop-v1.0.434",
+  "releaseUrl": "https://github.com/xunova1121/weiyang-release/releases/tag/desktop-v1.0.434",
+  "publishedAt": "2026-11-13T09:42:32Z",
+  "workflow": {
+    "id": 43400217882,
+    "url": "https://github.com/xunova1121/-/actions/runs/43400217882",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "name": "清理旧的构建产物",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "同步现有安装包到公开仓库",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "name": "建草稿发布",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "发布前完整验证",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "打包安卓 App",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "打包 (windows-latest)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "发布到 Releases",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "validation": {
+    "ci": {
+      "testFiles": 461,
+      "unitTests": 3956,
+      "fullOriginalGate": "passed",
+      "messageGuide": "42/42",
+      "portraitProtocols": "gpt-image-2 multipart and gpt-image-2.6-sunburst JSON, each mobile and PC, fixture images/model",
+      "smoke": "174/174",
+      "standalone": "14/14",
+      "allAgentMargins": "360/360",
+      "businessFirstFold": 83,
+      "posterComposition": "84/84",
+      "visualDemo": "88/88",
+      "posterGradient": "48/48"
+    },
+    "local": {
+      "targeted": "88/88",
+      "messageGuide": "42/42 including real post-stop HTTP409",
+      "fullGate": "Started full script; 461 files/3956 tests and lint passed; reached mobile suite. Stopped duplicate local process after frozen-source full CI succeeded, not claimed as a completed full local green gate."
+    },
+    "publicIndices": "downloaded independently and byte-identical"
+  },
+  "latestReleaseConfirmed": [
+    "xunova1121/-",
+    "xunova1121/weiyang-release"
+  ],
+  "metadataOnlyAssets": [
+    "Jarvis-1.0.434-win-x64.zip",
+    "Jarvis-Setup-1.0.434.exe.blockmap"
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "tag": "desktop-v1.0.430",
+  "matchingReleaseAssets": 7,
+  "downloadedAssetsChecked": 5,
+  "metadataOnlyAssets": [
+    "Jarvis-1.0.430-win-x64.zip",
+    "Jarvis-Setup-1.0.430.exe.blockmap"
+  ],
+  "apk": {
+    "package": "com.xunova.jarvis",
+    "version": "1.0.430",
+    "versionCode": "430",
+    "certificateSHA256": "56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6",
+    "sha256": "3e490f655d2d70c90b414ffdfc175e4fed36834e728cf275f3f9c4d7adcd53f8"
+  },
+  "server": {
+    "version": "1.0.430",
+    "archiveEntries": 1116,
+    "manifestFiles": 940,
+    "runtimeFilesChecked": 939,
+    "revision": "fa4c72cfe80cc4b2baec2ec935f6aced3599b63a",
+    "sha256": "324a0937d7101e35ff2426697b5a378dcf8e6fab7bad64d8107b187d440ce277",
+    "permissions": "root-owned/readable-by-service-account"
+  },
+  "windows": {
+    "version": "1.0.430",
+    "installer": "Jarvis-Setup-1.0.430.exe",
+    "sha256": "88f5ec608a635921c04a40574fc2e31e71bbee51aa2f58b956c594faa3a86e62",
+    "sha512": "JKzrMKT5EtccyxGzBmfzf26iPwwC/D2h9WBgR6xgnm2Lg9aaN/9IYnwgu9MjcSAp/vYRT5iX+dvHsnq7uCFClw=="
+  },
+  "latestReleaseConfirmed": [
+    "xunova1121/-",
+    "xunova1121/weiyang-release"
+  ]
+}

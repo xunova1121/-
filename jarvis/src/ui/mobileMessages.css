@@ -1,0 +1,176 @@
+/* 正文不再占据大角色头部；每条回答保留小头像和统一的阅读面板。 */
+:root body.compact.companion-edition .transcript {
+  padding-inline: 20px;
+  gap: 14px;
+}
+:root body.compact.companion-edition .transcript:has(> .home-reference) {
+  padding-inline: 0;
+}
+:root body.compact.companion-edition .msg.agent {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--wy-radius);
+  background: var(--surface);
+  font-size: 0.875rem;
+  line-height: 1.65;
+  box-shadow: none;
+  min-width: 0;
+  max-width: 100%;
+}
+:root body.compact.companion-edition .msg.agent > .who,
+:root body.compact.companion-edition .msg.agent:not(:last-child) > .who {
+  display: flex !important;
+  align-items: center;
+  gap: 8px !important;
+  min-height: 32px;
+  height: auto !important;
+  margin: 0 0 6px !important;
+  font-size: 0.8125rem;
+}
+:root body.compact.companion-edition .msg.agent > .who .who-mood,
+:root body.compact.companion-edition .msg.agent:not(:last-child) > .who .who-mood {
+  --mascot-size: 32px !important;
+  position: static !important;
+  width: 32px;
+  height: 32px;
+  margin: 0 !important;
+}
+:root body.compact.companion-edition .msg.agent > .who .wy-reply-greeting {
+  display: none;
+}
+:root body.compact.companion-edition .msg.agent .body {
+  font-size: 0.875rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+:root body.compact.companion-edition .msg.agent .body :is(h1, h2, h3) {
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+:root body.compact.companion-edition .msg.user {
+  width: fit-content;
+  min-width: 0;
+  max-width: 86%;
+  box-sizing: border-box;
+  padding: 7px 11px;
+  background: var(--accent-soft);
+  color: var(--text);
+  border-radius: 18px 18px 5px 18px;
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+:root[data-theme='light'] body.compact.companion-edition .msg.user {
+  background: linear-gradient(135deg, #9284ed, #8061d8);
+  color: #fff;
+}
+:root[data-theme='light'] body.compact.companion-edition .msg.user :is(.who, .who-time, button) {
+  color: rgba(255, 255, 255, 0.94);
+}
+:root body.compact.companion-edition .msg-actions {
+  border-top: 0;
+  padding-top: 0;
+}
+:root body.compact.companion-edition .msg-actions button {
+  color: var(--accent);
+  min-width: 32px;
+  min-height: 32px;
+}
+:root body.compact.companion-edition .progress-card {
+  background: var(--surface-2);
+  border-color: var(--line);
+  border-radius: 16px;
+}
+:root body.compact.companion-edition .msg.agent.streaming > .who::after {
+  content: attr(data-status);
+  color: var(--muted);
+  font-size: 0.75rem;
+  white-space: normal;
+  min-width: 0;
+  flex: 1;
+  max-width: 60%;
+}
+/* 文字、段落与消息操作栏一起收紧，短句不再留出大块气泡空白。 */
+:root body.compact.companion-edition .msg :is(.actions, .msg-actions) {
+  gap: 2px;
+  margin-top: 0;
+}
+:root body.compact.companion-edition .msg :is(.actions, .msg-actions) button {
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 6px;
+}
+:root body.compact.companion-edition .msg.user .who {
+  font-size: 0.625rem;
+  margin-bottom: 3px;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+:root body.compact.companion-edition .msg.agent .body p {
+  margin-block: 0.4em;
+}
+:root body.compact.companion-edition .msg.agent .body li {
+  margin-block: 0.2em;
+}
+/* 用户正文原先单独指定了字号，不能只改气泡父级。 */
+:root body.compact.companion-edition .msg.user .body {
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+:root body.compact.companion-edition .msg.user .meta {
+  margin-top: 3px;
+}
+
+/* 操作栏按真实按钮宽度收缩，不用额外分隔线把一句话撑成卡片。 */
+:root body.compact.companion-edition .msg .meta {
+  gap: 4px 8px;
+  margin-top: 7px;
+  font-family: var(--font-ui);
+  font-size: 0.6875rem;
+  line-height: 1.4;
+}
+:root body.compact.companion-edition .msg.user .meta {
+  margin-top: 3px;
+}
+:root body.compact.companion-edition .msg.user .msg-actions {
+  flex: none;
+  width: max-content;
+  max-width: 100%;
+  gap: 0;
+  padding: 0;
+  margin: 0;
+}
+:root body.compact.companion-edition .msg .msg-act svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 1.7;
+}
+:root body.compact.companion-edition .msg.user .body p {
+  margin: 0;
+}
+:root body.compact.companion-edition .msg.user .body {
+  overflow-wrap: anywhere;
+}
+
+/* 正在回答：角色放大并一直动、状态前加转圈，一眼看出“在回答”；回答完恢复小头像。 */
+:root body.compact.companion-edition .msg.agent.streaming:last-child > .who {
+  min-height: 64px;
+}
+:root body.compact.companion-edition .msg.agent.streaming:last-child > .who .who-mood {
+  --mascot-size: 64px !important;
+  width: 64px;
+  height: 64px;
+  animation-iteration-count: infinite !important;
+}
+:root body.compact.companion-edition .msg.agent.streaming:last-child > .who .who-mood[data-state='idle'],
+:root body.compact.companion-edition .msg.agent.streaming:last-child > .who .who-mood:not([data-state]) {
+  animation: wy-think 2.5s ease-in-out infinite;
+}
+:root body.compact.companion-edition .msg.agent.streaming > .who::after {
+  padding-left: 22px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='9' fill='none' stroke='%236a5cf0' stroke-opacity='.2' stroke-width='3'/%3E%3Cpath d='M12 3a9 9 0 0 1 9 9' fill='none' stroke='%236a5cf0' stroke-width='3' stroke-linecap='round'%3E%3CanimateTransform attributeName='transform' type='rotate' from='0 12 12' to='360 12 12' dur='.8s' repeatCount='indefinite'/%3E%3C/path%3E%3C/svg%3E")
+    left center / 15px 15px no-repeat;
+  line-height: 18px;
+}

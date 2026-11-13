@@ -1,0 +1,166 @@
+{
+  "version": "1.0.437",
+  "source": "4942619ab69935c8daffc7591621b0c31f7d838e",
+  "runtimeRevision": "3afa069152877b09edbf9570e5819177c3919220",
+  "publicAssets": 7,
+  "sourcePublicDigestsMatch": true,
+  "downloadedAssets": {
+    "Jarvis-1.0.437-android.apk": "16f3ba0a2fbbab73bed0a547a011781f82adbfbaef0f6f4cad169d03dc7d23c4",
+    "jarvis-server-1.0.437.tar.gz": "116df95d3eece118d0aebba71eed3345c112ea0c716c940f7e8b4ef28e37667b",
+    "jarvis-server-latest.json": "2a02dcb6122c0a35a9efb63b1e31845ab38bb842529ee1b3c974b8bae96c2a6e",
+    "Jarvis-Setup-1.0.437.exe": "7a67ccfc0ebc16c115985ab681b86131d4bf34cab073080e18fd5fa632984da4",
+    "latest.yml": "a89c9d9f17ff382b5a3ff4ca3ce0131cab3fc1853d4639734532eecb2ec53b13"
+  },
+  "server": {
+    "archiveEntries": 1130,
+    "manifestFiles": 954,
+    "runtimeFilesChecked": 953,
+    "sha256": "116df95d3eece118d0aebba71eed3345c112ea0c716c940f7e8b4ef28e37667b",
+    "permissions": "root-owned/readable-by-service-account"
+  },
+  "windows": {
+    "file": "Jarvis-Setup-1.0.437.exe",
+    "bytes": 142109057,
+    "sha256": "7a67ccfc0ebc16c115985ab681b86131d4bf34cab073080e18fd5fa632984da4",
+    "sha512MatchesLatestYml": true
+  },
+  "apk": {
+    "versionCode": 437,
+    "versionName": "1.0.437",
+    "package": "com.xunova.jarvis",
+    "certificateSHA256": "56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6",
+    "sha256": "16f3ba0a2fbbab73bed0a547a011781f82adbfbaef0f6f4cad169d03dc7d23c4"
+  },
+  "apkBundleChecks": {
+    "lookup_evidence_ready": true,
+    "SEARCH_RACE_DONE": true,
+    "estimatedSystemTokens": true,
+    "最近相关对话": true,
+    "改为引导": true,
+    "portrait_retouch": true,
+    "image_url": true
+  },
+  "limits": [
+    "user-server-not-deployed",
+    "no-real-device",
+    "no-paid-provider-speed-or-billing-test",
+    "fixture-results-not-production-sla"
+  ],
+  "latestIndexesIndependentlyDownloadedAndEqual": true,
+  "sourceAndPublicLatestTag": "desktop-v1.0.437",
+  "sourcePublishedAt": "2026-11-13T12:28:48Z",
+  "publicPublishedAt": "2026-11-13T12:28:57Z",
+  "publicReleaseUrl": "https://github.com/xunova1121/weiyang-release/releases/tag/desktop-v1.0.437",
+  "ci": {
+    "runId": 43421898514,
+    "runNumber": 437,
+    "url": "https://github.com/xunova1121/-/actions/runs/43421898514",
+    "allRequiredJobsPassed": true,
+    "unitTestFiles": 462,
+    "unitTests": 3974,
+    "jobs": [
+      {
+        "id": 131873680659,
+        "name": "清理旧的构建产物",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 131873682996,
+        "name": "同步现有安装包到公开仓库",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 131873735555,
+        "name": "建草稿发布",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 131873783646,
+        "name": "打包 (windows-latest)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 131873783657,
+        "name": "打包安卓 App",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 131873783765,
+        "name": "发布前完整验证",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 131885693980,
+        "name": "发布到 Releases",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "assets": [
+    {
+      "name": "Jarvis-1.0.437-android.apk",
+      "bytes": 18682437,
+      "digest": "sha256:16f3ba0a2fbbab73bed0a547a011781f82adbfbaef0f6f4cad169d03dc7d23c4"
+    },
+    {
+      "name": "Jarvis-1.0.437-win-x64.zip",
+      "bytes": 177885883,
+      "digest": "sha256:e076c6f6070cdb4737a218bc8e0ab7f4928f926db90b77755b6dc944e4117df5"
+    },
+    {
+      "name": "jarvis-server-1.0.437.tar.gz",
+      "bytes": 28474690,
+      "digest": "sha256:116df95d3eece118d0aebba71eed3345c112ea0c716c940f7e8b4ef28e37667b"
+    },
+    {
+      "name": "jarvis-server-latest.json",
+      "bytes": 136,
+      "digest": "sha256:2a02dcb6122c0a35a9efb63b1e31845ab38bb842529ee1b3c974b8bae96c2a6e"
+    },
+    {
+      "name": "Jarvis-Setup-1.0.437.exe",
+      "bytes": 142109057,
+      "digest": "sha256:7a67ccfc0ebc16c115985ab681b86131d4bf34cab073080e18fd5fa632984da4"
+    },
+    {
+      "name": "Jarvis-Setup-1.0.437.exe.blockmap",
+      "bytes": 150083,
+      "digest": "sha256:58ab9cccd4fbcda8ccf9f5a02e5b56b914e3a0b2560ca9c90abfb992db1cedf5"
+    },
+    {
+      "name": "latest.yml",
+      "bytes": 347,
+      "digest": "sha256:a89c9d9f17ff382b5a3ff4ca3ce0131cab3fc1853d4639734532eecb2ec53b13"
+    }
+  ],
+  "localValidation": {
+    "nodeMajor": 24,
+    "fullGate": "stopped-after-same-frozen-source-full-CI-success",
+    "unitTestsPassed": 3973,
+    "unitTestsTimedOut": 1,
+    "timeoutCase": "officeCheck Excel formula repair, original 5000ms threshold",
+    "idleRetest": "same original assertion passed in 3693ms, original threshold unchanged",
+    "formalCI": "Node22 full 3974 unit tests and original complete workflow all passed",
+    "notes": "Local partial script is not claimed as a complete green run."
+  },
+  "performanceFixtureReport": "搜索提速-夹具对照-20261113.json",
+  "supersededCandidates": [
+    {
+      "version": "1.0.435",
+      "runId": 43420594248,
+      "reason": "Ubuntu26 unsupported by existing Playwright; not published"
+    },
+    {
+      "version": "1.0.436",
+      "runId": 43420926450,
+      "reason": "cancelled for search cost-boundary improvement; not published"
+    }
+  ]
+}

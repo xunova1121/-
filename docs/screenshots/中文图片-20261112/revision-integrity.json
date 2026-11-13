@@ -1,0 +1,14 @@
+{
+  "before": {
+    "海报/portrait-bottom-sans.png": "73ca5ad26dab5c77d927d78bde77d7ca1dd34821366b8d2561a014860fbea7b6",
+    "海报/portrait-bottom-sans.svg": "fd010750c6be9d6f5452301de0eb00bd9d91e00f6d0fe09d7fdffca9544818e5",
+    "海报/portrait-bottom-sans.pptx": "4895cad088f7501d0c86abc34cb99c9ebd9c46c41ea948b3564a37c0c1479ad4",
+    "海报/portrait-bottom-sans.poster.json": "52f05a55a4385309919847060d0ee9e1432918247598db5bbf8eddf0a4df5373",
+    "底图/原创秋日汤碗.png": "418c9ec3a8d4978b82c1bb24d544cdd29d1c846a1e3f25a16e5e49d35f7f21f0"
+  },
+  "modelCalls": 0,
+  "pixels": {
+    "backgroundDifferences": 0,
+    "titleDifferences": 55086
+  }
+}

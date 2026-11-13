@@ -1,0 +1,23 @@
+.ml-openai-search .ml-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+.ml-openai-search .ml-field input,
+.ml-openai-search .ml-field select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.ml-openai-search [role='status'] {
+  overflow-wrap: anywhere;
+}
+.ml-openai-search .ml-field select {
+  min-height: 44px;
+  padding: 11px;
+  font: inherit;
+  border: 1px solid var(--ml-line);
+  border-radius: 10px;
+  background: var(--ml-surface);
+  color: var(--ml-ink);
+}

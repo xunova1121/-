@@ -1,0 +1,97 @@
+{
+  "version": "1.0.326",
+  "source": "e675f271261b42d8a37d24788920e3536448a99c",
+  "assets": [
+    {
+      "name": "Jarvis-1.0.326-android.apk",
+      "bytes": 14027139,
+      "sha256": "65e5469171ec514f7e0adc74b197ed41c7ef2b94727ec50375d55a36b615e7a9",
+      "matchesGitHub": true
+    },
+    {
+      "name": "jarvis-server-1.0.326.tar.gz",
+      "bytes": 20722470,
+      "sha256": "c9c87e0a70096b14a8a93be762512e5f107d26c3d988872c3edcf53c29c6d463",
+      "matchesGitHub": true
+    },
+    {
+      "name": "jarvis-server-latest.json",
+      "bytes": 136,
+      "sha256": "e0b709ec2c3b569a614f70be175aaa7abb353db62642a2454e9fba80ee9d39dd",
+      "matchesGitHub": true
+    },
+    {
+      "name": "Jarvis-Setup-1.0.326.exe",
+      "bytes": 137207027,
+      "sha256": "175dec8cfdb586d9aa6780d1b33cfe41d24dbd6b71d85aae160dcdc2d725296a",
+      "matchesGitHub": true
+    },
+    {
+      "name": "latest.yml",
+      "bytes": 347,
+      "sha256": "198215e4ab3acc785b3adc3c71108bc97afa46c4d2e87b61774e3d1856b5fffe",
+      "matchesGitHub": true
+    }
+  ],
+  "windowsUpdateSha512": true,
+  "windowsPeHeader": true,
+  "serverUpdateSha256": true,
+  "serverArchivePaths": true,
+  "apkSignatureVerified": true,
+  "apkMatchesPreviousCertificate": true,
+  "apkManifest": {
+    "versionCode": 326,
+    "versionName": "1.0.326",
+    "package": "com.xunova.jarvis"
+  },
+  "apkNotDebuggable": true,
+  "serverVersion": "1.0.326",
+  "serverCodeEntrypoints": [
+    "server/server.mjs",
+    "server/codeTaskPolicy.mjs",
+    "src/agent/codeDevelopment.js",
+    "evals/code-server.mjs",
+    "package.json",
+    "package-lock.json"
+  ],
+  "installedOnRealDevice": false,
+  "workflow": {
+    "id": 40825224173,
+    "url": "https://github.com/xunova1121/-/actions/runs/40825224173",
+    "status": "completed",
+    "conclusion": "success",
+    "attempt": 1,
+    "jobs": [
+      {
+        "name": "发布前完整验证",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "打包 (windows-latest)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "打包安卓 App",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "发布到 Releases",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "releaseTag": "desktop-v1.0.326",
+  "publishedAt": "2026-10-29T06:00:31Z",
+  "publishedAtBeijing": "2026-10-29 14:00:31",
+  "apkCertificateSha256": "56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6",
+  "limits": [
+    "未在安卓真机或Windows实机安装",
+    "未升级用户服务器",
+    "未验收真实模型自主修错",
+    "未下载校验Windows免安装ZIP或差分blockmap"
+  ]
+}

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 启动与网页首帧统一浅蓝紫，夜间主界面在就绪后按用户设置恢复。 -->
+    <color name="jarvis_bg">#EEF0FF</color>
+    <!-- 启动与网页首帧统一浅蓝紫，夜间主界面在就绪后按用户设置恢复。 -->
+    <color name="splash_bg">#EEF0FF</color>
+</resources>

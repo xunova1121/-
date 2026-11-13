@@ -1,0 +1,11 @@
+node_modules/
+dist/
+public/vendor/
+public/models/face_landmarker.task
+dist-standalone/
+release-server/
+/*.png
+dist-mobile/
+release-android/
+research_notes/
+reports/

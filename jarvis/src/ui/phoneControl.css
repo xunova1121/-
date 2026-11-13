@@ -1,0 +1,17 @@
+.wy-phone { width: min(640px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 1px solid var(--line, #cbd5e1); border-radius: 22px; background: var(--bg, #fff); color: var(--text); overflow: auto; }
+.wy-phone::backdrop { background: #17243e70; }
+.wy-phone header { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 20px; background: var(--bg, #fff); z-index: 1; }
+.wy-phone h2 { font-size: 20px; margin: 0; }
+.wy-phone h3 { font-size: 16px; margin: 8px 0; }
+.wy-phone-body { display: flex; flex-direction: column; gap: 14px; padding: 4px 20px 20px; }
+.wy-phone p { line-height: 1.7; margin: 0; font-size: 14px; }
+.wy-phone button, .wy-phone input:not([type=checkbox]) { min-height: 44px; padding: 10px 14px; border: 1px solid #9db5ec; border-radius: 12px; background: transparent; color: inherit; font: inherit; }
+.wy-phone button { cursor: pointer; }
+.wy-phone button:disabled { opacity: .6; }
+.wy-phone-apps { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; max-height: 240px; overflow: auto; border: 1px solid var(--line,#cbd5e1); border-radius: 12px; padding: 8px; }
+.wy-phone-apps label { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 14px; overflow-wrap: anywhere; }
+.wy-phone-apps input { width: 20px; height: 20px; flex: none; }
+.wy-phone-device { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px; border: 1px solid var(--line,#cbd5e1); border-radius: 14px; }
+.wy-phone-device strong { flex: 1; overflow-wrap: anywhere; }
+.wy-phone-message { padding: 0 20px 20px; }
+.wy-phone-state { padding: 14px; border: 1px solid #8ca9eb; border-radius: 14px; }

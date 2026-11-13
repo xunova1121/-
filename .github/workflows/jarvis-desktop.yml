@@ -1,0 +1,628 @@
+# 未央（原名贾维斯）：打包 Windows 安装包和安卓 App（APK），一起发布到 Releases 页面。（macOS / Linux 版已停止更新）
+# 固定受Playwright 1.56.1支持的Linux环境；ubuntu-latest滚动到26.04会在安装浏览器前失败。
+# 触发：推送了 jarvis/ 下的改动、推送 desktop-v* 标签，或在 Actions 页面手动运行。
+name: 未央安装包
+
+on:
+  push:
+    branches: ['**']
+    # 打正式版：推送 desktop-v* 标签（GitHub 不对标签推送检查 paths）
+    tags: ['desktop-v*']
+    paths:
+      - 'jarvis/src/**'
+      - 'jarvis/server/**'
+      - 'jarvis/shared/**'
+      - 'jarvis/evals/**'
+      - 'jarvis/e2e/**'
+      - 'jarvis/tests/**'
+      - 'jarvis/desktop/**'
+      - 'jarvis/android/**'
+      - 'jarvis/capacitor.config.json'
+      - 'jarvis/vite.config.js'
+      - 'jarvis/index.html'
+      - 'jarvis/package*.json'
+      - '.github/workflows/jarvis-desktop.yml'
+  workflow_dispatch:
+    inputs:
+      mirror_tag:
+        description: '仅同步源码仓库已正式发布的现有版本（如 desktop-v1.0.416）；留空照常构建发布'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+
+env:
+  # 本次发版的标签；正式分支/版本标签才发布
+  RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('desktop-v1.0.{0}', github.run_number) }}
+  RELEASE_TITLE: "未央 ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('1.0.{0}', github.run_number) }}"
+  PUBLISH: ${{ github.ref == 'refs/heads/claude/jolly-darwin-tijh97' || startsWith(github.ref, 'refs/tags/desktop-v') }}
+
+concurrency:
+  group: jarvis-desktop-${{ inputs.mirror_tag || github.ref }}
+  cancel-in-progress: ${{ !inputs.mirror_tag }}
+
+jobs:
+  # 只恢复已发布版本的公开镜像，不创建新版本，也不跳过正常发版的验证链。
+  mirror_published:
+    name: 同步现有安装包到公开仓库
+    if: github.event_name == 'workflow_dispatch' && inputs.mirror_tag != '' && github.ref == 'refs/heads/claude/jolly-darwin-tijh97'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: 核对原包并同步公开发布
+        env:
+          SOURCE_TOKEN: ${{ github.token }}
+          RELEASE_REPO_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          MIRROR_TAG: ${{ inputs.mirror_tag }}
+        run: node .github/scripts/sync-published-release.mjs
+
+  # 用户 2026-11-03：代码仓库改私密后，免费账户的构建产物存储有上限（约500MB），旧产物默认留90天把空间占满，
+  # 1.0.385 所有测试通过却在“上传安装包”报 Artifact storage quota has been hit。发版前先删旧产物，新产物只留1天（正式安装包在 Releases）。
+  cleanup:
+    name: 清理旧的构建产物
+    if: ${{ !inputs.mirror_tag }}
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: 删除以前运行留下的构建产物
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/${{ github.repository }}/actions/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.workflow_run.id != ${{ github.run_id }}) | .id' > old-artifacts.txt || true
+          echo "要删除 $(wc -l < old-artifacts.txt) 个旧产物"
+          while read -r id; do gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" >/dev/null || echo "删除 $id 失败"; done < old-artifacts.txt
+
+  # 用户 2026-11-03：删了旧产物，GitHub 用量也要6～12小时才重算，连续4次发版都卡在上传构建产物。
+  # 正式发版改为：先建草稿发布，各作业把安装包直接传到草稿发布（Releases 资产不占 Actions 构建产物存储），全部通过后再转为正式发布。
+  prepare:
+    name: 建草稿发布
+    needs: cleanup
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 建草稿发布（只在正式分支/版本标签）
+        if: env.PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "草稿 $RELEASE_TAG 已存在，沿用"
+          else
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" --title "$RELEASE_TITLE" --notes "构建中"
+          fi
+
+  build:
+    needs: prepare
+    name: 打包 (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            jarvis/package-lock.json
+            jarvis/desktop/package-lock.json
+      - name: 安装网页依赖
+        run: npm ci --no-audit --no-fund
+      - name: 安装桌面版依赖
+        working-directory: jarvis/desktop
+        run: npm ci --no-audit --no-fund
+      - name: 版本号
+        shell: bash
+        # 正式标签 desktop-v1.2.3 → 1.2.3；平时每次构建 1.0.<序号>（自动更新靠版本号判断新旧）
+        working-directory: jarvis/desktop
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/desktop-v* ]]; then VERSION="${GITHUB_REF_NAME#desktop-v}"; else VERSION="1.0.${GITHUB_RUN_NUMBER}"; fi
+          npm pkg set version="$VERSION"
+          echo "打包版本 $VERSION"
+      - name: 打包
+        working-directory: jarvis/desktop
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        # 下载 Electron 偶尔遇到 GitHub 网络超时（504）：最多重试 3 次
+        run: |
+          for i in 1 2 3; do
+            npm run dist -- --publish never && exit 0
+            echo "::warning::打包失败（第 $i 次），20 秒后重试"
+            sleep 20
+          done
+          exit 1
+      - name: 上传安装包（正式发版：直接传到草稿发布）
+        if: env.PUBLISH == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          shopt -s nullglob
+          files=(jarvis/desktop/release/*.exe jarvis/desktop/release/*.zip jarvis/desktop/release/*.blockmap jarvis/desktop/release/latest*.yml)
+          [ ${#files[@]} -gt 0 ] || { echo "::error::没有找到要上传的文件"; exit 1; }
+          gh release upload "$RELEASE_TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+      - name: 上传安装包（验证分支：构建产物）
+        if: env.PUBLISH != 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          retention-days: 1
+          name: jarvis-desktop-${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            jarvis/desktop/release/*.exe
+            jarvis/desktop/release/*.zip
+            jarvis/desktop/release/*.dmg
+            jarvis/desktop/release/*.AppImage
+            jarvis/desktop/release/latest*.yml
+            jarvis/desktop/release/*.blockmap
+
+  android:
+    needs: prepare
+    name: 打包安卓 App
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+          cache-dependency-path: jarvis/android/**/*.gradle*
+      - name: 安装依赖
+        run: npm ci --no-audit --no-fund
+      - name: 使用Ubuntu官方软件源（仅临时构建机）
+        run: bash scripts/ci-official-apt.sh
+      - name: 安装 ffmpeg 和海报中文字体（单元测试需真实栅格化与字体检查）
+        timeout-minutes: 20
+        run: |
+          for i in 1 2 3; do
+            if timeout 360 sh -c 'sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg fontconfig fonts-noto-cjk'; then exit 0; fi
+            echo "第 $i 次安装没完成，重试"
+          done
+          exit 1
+      - name: 单元测试
+        run: npm test
+      - name: 构建手机版网页并同步到安卓工程
+        run: npm run android
+      - name: 签名密钥
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          # 也可以只设一个 ANDROID_SIGNING，值是“密码.密钥文件的base64”（一次粘贴就好）
+          SIGNING: ${{ secrets.ANDROID_SIGNING }}
+        # 有 GitHub Secrets 里的固定密钥就用它（新版本能直接覆盖安装、手机能自动更新）；
+        # 没有时临时生成一个（能安装，但升级前要先卸载旧版）
+        run: |
+          if [ -z "$KEYSTORE_B64" ] && [ -n "$SIGNING" ]; then
+            SIGNING="$(printf '%s' "$SIGNING" | tr -d ' \r\n')"
+            KEYSTORE_PASSWORD="${SIGNING%%.*}"
+            KEYSTORE_B64="${SIGNING#*.}"
+            echo "::add-mask::$KEYSTORE_PASSWORD"
+          fi
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/jarvis.keystore"
+            echo "JARVIS_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "使用固定签名密钥"
+          else
+            PASS=$(openssl rand -hex 16)
+            echo "::add-mask::$PASS"
+            keytool -genkeypair -keystore "$RUNNER_TEMP/jarvis.keystore" -alias jarvis -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$PASS" -keypass "$PASS" -dname "CN=Jarvis" -noprompt
+            echo "JARVIS_KEYSTORE_PASSWORD=$PASS" >> "$GITHUB_ENV"
+            echo "::warning::没有设置 ANDROID_SIGNING（或 ANDROID_KEYSTORE_B64），这次用临时密钥签名：手机上升级前需要先卸载旧版"
+          fi
+          echo "JARVIS_KEYSTORE=$RUNNER_TEMP/jarvis.keystore" >> "$GITHUB_ENV"
+      - name: 打包 APK
+        working-directory: jarvis/android
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/desktop-v* ]]; then VERSION="${GITHUB_REF_NAME#desktop-v}"; else VERSION="1.0.${GITHUB_RUN_NUMBER}"; fi
+          export JARVIS_VERSION_NAME="$VERSION" JARVIS_VERSION_CODE="$GITHUB_RUN_NUMBER"
+          ./gradlew testReleaseUnitTest assembleRelease --no-daemon --stacktrace
+          mkdir -p ../release-android
+          cp app/build/outputs/apk/release/app-release.apk "../release-android/Jarvis-${VERSION}-android.apk"
+          ls -la ../release-android
+      - name: 上传 APK（正式发版：直接传到草稿发布）
+        if: env.PUBLISH == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          shopt -s nullglob
+          files=(jarvis/release-android/*.apk)
+          [ ${#files[@]} -gt 0 ] || { echo "::error::没有找到要上传的文件"; exit 1; }
+          gh release upload "$RELEASE_TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+      - name: 上传 APK（验证分支：构建产物）
+        if: env.PUBLISH != 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          retention-days: 1
+          name: jarvis-android
+          if-no-files-found: error
+          path: jarvis/release-android/*.apk
+
+  verify:
+    needs: prepare
+    name: 发布前完整验证
+    runs-on: ubuntu-24.04
+    # FFmpeg和Office安装各有20分钟预算；416耗尽45分钟总限额。只给环境准备留足时间，各测试和单步时限不变。
+    timeout-minutes: 75
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - name: 使用Ubuntu官方软件源（仅临时构建机）
+        run: bash scripts/ci-official-apt.sh
+      - name: 安装依赖和测试浏览器
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: 安装 ffmpeg 和海报中文字体（单元测试需真实栅格化与字体检查）
+        timeout-minutes: 20
+        run: |
+          for i in 1 2 3; do
+            if timeout 360 sh -c 'sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg fontconfig fonts-noto-cjk'; then exit 0; fi
+            echo "第 $i 次安装没完成，重试"
+          done
+          exit 1
+      - name: 完整单元测试
+        run: npm test
+      - name: 代码检查（没定义的变量、浏览器同名全局、格式）
+        run: npm run lint
+      - name: 验证评测入口与耗时统计
+        run: npm run eval:check
+      - name: 验证架构实测固定版本、隔离与实际文件验收
+        run: node --test evals/architecture-runtime-checks.mjs evals/architecture-server-checks.mjs evals/architecture-server-acceptance-checks.mjs
+      - name: 验证多文件项目隔离执行与取消
+        run: |
+          docker pull node:22-bookworm-slim
+          JARVIS_CODE_SANDBOX_IMAGE=node:22-bookworm-slim node e2e/project-execution.mjs
+          JARVIS_CODE_SANDBOX_IMAGE=node:22-bookworm-slim node e2e/code-agent-sandbox.mjs "$RUNNER_TEMP/jarvis-e2e/code-agent"
+          docker build --build-arg BASE=node:22-bookworm-slim -t weiyang-code-browser:ci deploy/code-browser
+          JARVIS_CODE_BROWSER_IMAGE=weiyang-code-browser:ci node e2e/code-browser.mjs "$RUNNER_TEMP/jarvis-e2e/code-browser"
+      - name: 验证项目菜单确认与隔离预览
+        run: node e2e/code-projects.mjs "$RUNNER_TEMP/jarvis-e2e/code-projects"
+      - name: 验证Claude协议完成与断流取消
+        run: node e2e/anthropic-stream.mjs
+      - name: 验证代码隔离与取消
+        run: node e2e/sandbox-isolation.mjs
+      - name: 安装Office真实渲染环境
+        # apt 源偶尔卡住不动（#248、#253、#254 都卡在这一步十几分钟）：每次最多等 6 分钟，卡住就重来，最多三次；
+        # 保留文泉驿旧稿字体，同时安装新架构稿使用的 Noto CJK，保证源图和原生PPT采用同一字体
+        timeout-minutes: 20
+        run: |
+          for i in 1 2 3; do
+            if timeout 360 sh -c 'sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress libreoffice-calc fonts-wqy-microhei fonts-noto-cjk xdotool poppler-utils'; then exit 0; fi
+            echo "第 $i 次安装没完成，重试"
+          done
+          exit 1
+      - name: 验证四格式结构编辑与目录连续分页
+        run: node e2e/structured-document-edit.mjs "$RUNNER_TEMP/jarvis-e2e/structured-edit"
+      - name: 验证Word、PPT、Excel真实转PDF
+        run: node e2e/office-render.mjs
+      - name: 验证PPT和Excel字号及Word97转换
+        run: node e2e/office-typography.mjs "$RUNNER_TEMP/jarvis-e2e/office-typography"
+      - name: 验证Word字体字号与有界真实分页
+        run: node e2e/word-typography.mjs "$RUNNER_TEMP/jarvis-e2e/word-typography"
+      - name: 验证四种PPT风格、可编辑元素与真实PDF
+        run: node e2e/presentation-styles.mjs "$RUNNER_TEMP/jarvis-e2e/presentation-styles"
+      - name: 验证政企汇报风格、原生渐变与真实PDF
+        run: node e2e/presentation-report.mjs "$RUNNER_TEMP/jarvis-e2e/presentation-report"
+      - name: 验证六份PPT图片美学版式、真实PDF与逐页截图
+        run: node e2e/ppt-image-layout.mjs "$RUNNER_TEMP/jarvis-e2e/ppt-image-layout"
+      - name: 验证中文图片程序排字、三格式交付与真实浏览器及Office渲染
+        run: node e2e/poster-composition.mjs "$RUNNER_TEMP/jarvis-e2e/poster-composition"
+      - name: 验证4K大屏同设计PNG与离线交互Demo
+        run: node e2e/visual-demo.mjs "$RUNNER_TEMP/jarvis-e2e/visual-demo"
+      - name: 验证沉浸海报连续渐变、中文与可编辑PPTX
+        run: node e2e/poster-gradient.mjs "$RUNNER_TEMP/jarvis-e2e/poster-gradient"
+      - name: 验证分享返回状态、原字节和同账号会话恢复（原生事件模拟）
+        run: node e2e/share-return.mjs "$RUNNER_TEMP/jarvis-e2e/share-return"
+      - name: 验证四种Excel样式、公式筛选与真实PDF
+        run: node e2e/spreadsheet-styles.mjs "$RUNNER_TEMP/jarvis-e2e/spreadsheet-styles"
+      - name: 验证文档场景模板、精确修改及真实PDF逐页检查
+        run: node e2e/document-quality.mjs "$RUNNER_TEMP/jarvis-e2e/documents"
+      - name: 验证只排版正文保留与真实Word、PDF读回
+        run: node e2e/document-preservation.mjs "$RUNNER_TEMP/jarvis-e2e/preservation"
+      - name: 验证上传Word结构、图片和原件保留
+        run: node e2e/document-file-source.mjs "$RUNNER_TEMP/jarvis-e2e/word-source"
+      - name: 验证手机与桌面失败步骤显示实际错误
+        run: node e2e/tool-failure-status.mjs
+      - name: 构建网页版
+        run: npm run build
+      - name: 服务器模式端到端测试，打包服务器版
+        run: |
+          mkdir -p "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/server-mode.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/server-auth.mjs "$RUNNER_TEMP/jarvis-e2e/server-auth"
+          node e2e/qianfan-search.mjs "$RUNNER_TEMP/jarvis-e2e/qianfan-search"
+          node e2e/openai-search-settings.mjs "$RUNNER_TEMP/jarvis-e2e/openai-search-settings"
+          node e2e/runtime-switch.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/code-repos.mjs "$RUNNER_TEMP/jarvis-e2e/code-repos"
+          node e2e/code-work.mjs "$RUNNER_TEMP/jarvis-e2e/code-work"
+          node scripts/pack-server.mjs "${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('1.0.{0}', github.run_number) }}" release-server
+          node e2e/server-package.mjs release-server/jarvis-server-*.tar.gz
+      - name: 上传服务器版（正式发版：直接传到草稿发布）
+        if: env.PUBLISH == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          shopt -s nullglob
+          files=(jarvis/release-server/*.tar.gz jarvis/release-server/jarvis-server-latest.json)
+          [ ${#files[@]} -gt 0 ] || { echo "::error::没有找到要上传的文件"; exit 1; }
+          gh release upload "$RELEASE_TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+      - name: 上传服务器版（验证分支：构建产物）
+        if: env.PUBLISH != 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          retention-days: 1
+          name: jarvis-server
+          path: |
+            jarvis/release-server/*.tar.gz
+            jarvis/release-server/jarvis-server-latest.json
+      - name: 构建并验证手机版界面
+        run: |
+          npm run build:mobile
+          node e2e/conversation-queue.mjs
+          node e2e/conversation-guide.mjs "$RUNNER_TEMP/jarvis-e2e/conversation-guide"
+          node e2e/portrait-retouch.mjs "$RUNNER_TEMP/jarvis-e2e/portrait-retouch"
+          node e2e/multi-user.mjs "$RUNNER_TEMP/jarvis-e2e/multi-user"
+          mkdir -p "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/mobile-ui.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node scripts/make-icons.mjs --check
+          node e2e/client-recovery.mjs "$RUNNER_TEMP/jarvis-e2e/client-recovery"
+          node e2e/phone-control.mjs "$RUNNER_TEMP/jarvis-e2e/phone-control"
+          node e2e/product-refresh.mjs "$RUNNER_TEMP/jarvis-e2e/product-refresh"
+          node e2e/home-history.mjs "$RUNNER_TEMP/jarvis-e2e/home-history"
+          node e2e/native-startup.mjs "$RUNNER_TEMP/jarvis-e2e/native-startup"
+          node e2e/agent-square.mjs "$RUNNER_TEMP/jarvis-e2e/agent-square"
+          node e2e/music-card.mjs "$RUNNER_TEMP/jarvis-e2e/music-card"
+          node e2e/weather-card.mjs "$RUNNER_TEMP/jarvis-e2e/weather-card"
+          node e2e/weather-seamless.mjs "$RUNNER_TEMP/jarvis-e2e/weather-seamless"
+          node e2e/weather-follow.mjs "$RUNNER_TEMP/jarvis-e2e/weather-follow"
+          node e2e/capability-readiness.mjs "$RUNNER_TEMP/jarvis-e2e/capability-readiness"
+          node e2e/weather-server.mjs "$RUNNER_TEMP/jarvis-e2e/weather-server"
+          node e2e/sports-card.mjs "$RUNNER_TEMP/jarvis-e2e/sports-card"
+          node e2e/sports-layout.mjs "$RUNNER_TEMP/jarvis-e2e/sports-layout"
+          node e2e/news-lookup.mjs "$RUNNER_TEMP/jarvis-e2e/news-lookup"
+          node e2e/lookup-step1.mjs "$RUNNER_TEMP/jarvis-e2e/lookup-step1"
+          node e2e/time-calculation.mjs "$RUNNER_TEMP/jarvis-e2e/time-calculation"
+          node e2e/task-cost.mjs "$RUNNER_TEMP/jarvis-e2e/task-cost"
+          node e2e/search-fallback.mjs "$RUNNER_TEMP/jarvis-e2e/search-fallback"
+          node e2e/model-credentials.mjs "$RUNNER_TEMP/jarvis-e2e/model-credentials"
+          node e2e/server-mobile.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/conversation-flow.mjs
+          node e2e/qwen-voices.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/image-inspection.mjs
+          node e2e/diagram-layout.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/diagram-render.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/diagram-recovery.mjs "$RUNNER_TEMP/jarvis-e2e/recovery"
+          node e2e/diagram-export.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/diagram-cards.mjs "$RUNNER_TEMP/jarvis-e2e/cards"
+          node e2e/diagram-platform.mjs "$RUNNER_TEMP/jarvis-e2e/platform"
+          node e2e/diagram-candidates.mjs "$RUNNER_TEMP/jarvis-e2e/candidates"
+          node e2e/architecture-editable.mjs "$RUNNER_TEMP/jarvis-e2e/architecture"
+          node e2e/architecture-resume.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-resume"
+          node e2e/architecture-evidence.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-evidence"
+          node e2e/architecture-evidence.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-indexed" indexed
+          node e2e/architecture-evidence.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-evidence-resume" resume
+          node e2e/architecture-revision.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-revision"
+          node e2e/architecture-auto-layout.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-auto-layout"
+          node e2e/architecture-dense-layout.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-dense-layout"
+          node e2e/architecture-workflow.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-workflow"
+          node e2e/architecture-workflow.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-references" references
+          node e2e/architecture-workflow.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-json-repair" json-repair
+          node e2e/architecture-workflow.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-objects" objects
+          node e2e/architecture-workflow.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-content-repair" content-repair
+          node e2e/architecture-workflow.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-review-recovery" review-recovery
+          node e2e/architecture-director.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-director"
+          node e2e/architecture-integration.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-integration"
+          node e2e/architecture-package.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-package"
+          node e2e/architecture-bends.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-package"
+          node e2e/architecture-package.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-parallel" parallel
+          node e2e/architecture-bends.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-parallel"
+          ARCHITECTURE_VIEW=workflow node e2e/architecture-logic.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-workflow"
+          ARCHITECTURE_VIEW=dataflow node e2e/architecture-logic.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-dataflow"
+          node e2e/workspace-management.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/image-followup.mjs
+          node e2e/settings-layout.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/mobile-theme.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/model-library.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/settings-navigation.mjs "$RUNNER_TEMP/jarvis-e2e/settings-navigation"
+      - name: 验证 Electron 全息桌面互动
+        run: |
+          npm ci --prefix desktop --no-audit --no-fund
+          for i in 1 2 3; do node desktop/node_modules/electron/install.js && break; [ $i = 3 ] && exit 1; echo "Electron 下载失败，$((i*20)) 秒后重试"; sleep $((i*20)); done
+          npm --prefix desktop run prepare-app
+          xvfb-run -a node e2e/hologram-desktop.mjs "$RUNNER_TEMP/jarvis-e2e"
+          xvfb-run -a node e2e/pc-control.mjs "$RUNNER_TEMP/jarvis-e2e"
+      - name: 网页版和单文件版端到端测试
+        shell: bash
+        run: |
+          node server/server.mjs > "$RUNNER_TEMP/jarvis-server.log" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:8787/ > /dev/null; then break; fi
+            sleep 1
+          done
+          mkdir -p "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/smoke.mjs "$RUNNER_TEMP/jarvis-e2e"
+          # 单文件测试先验证“没有网关”，随后会自己启动测试网关；不能复用网页版的服务。
+          kill "$SERVER_PID"
+          wait "$SERVER_PID" 2>/dev/null || true
+          trap - EXIT
+          npm run build:standalone
+          node e2e/standalone.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/ppt-sources.mjs "$RUNNER_TEMP/jarvis-e2e/ppt-sources"
+          node e2e/agent-studio.mjs "$RUNNER_TEMP/jarvis-e2e/agent-studio"
+          node e2e/business-intelligence.mjs "$RUNNER_TEMP/jarvis-e2e/business-intelligence"
+          node e2e/business-company-query.mjs "$RUNNER_TEMP/jarvis-e2e/business-company-query"
+          node e2e/market-card.mjs "$RUNNER_TEMP/jarvis-e2e/market-card"
+          node e2e/tender-center.mjs "$RUNNER_TEMP/jarvis-e2e/tender-center"
+          node e2e/pc-agent-navigation.mjs "$RUNNER_TEMP/jarvis-e2e/pc-agent-navigation"
+          node e2e/agent-resources-cross-origin.mjs "$RUNNER_TEMP/jarvis-e2e/agent-resources-cross-origin"
+          WEIYANG_CHAT_OUTAGE=1 node e2e/pc-cloud-chat.mjs "$RUNNER_TEMP/jarvis-e2e/pc-cloud-chat"
+          WEIYANG_CHAT_OUTAGE=submit node e2e/pc-cloud-chat.mjs "$RUNNER_TEMP/jarvis-e2e/pc-cloud-chat-submit"
+          node e2e/studio-library.mjs "$RUNNER_TEMP/jarvis-e2e/studio-library"
+          node e2e/studio-team.mjs "$RUNNER_TEMP/jarvis-e2e/studio-team"
+      - name: 保存验证截图和日志
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          retention-days: 1
+          name: verification-jarvis
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/jarvis-e2e
+            ${{ runner.temp }}/jarvis-server.log
+
+  release:
+    name: 发布到 Releases
+    # 验证分支只构建/测试；只有正式开发分支或明确的版本标签可以更新用户安装包。
+    if: github.ref == 'refs/heads/claude/jolly-darwin-tijh97' || startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: [build, android, verify]
+    runs-on: ubuntu-24.04
+    steps:
+      # 安装包已由各作业传到草稿发布；这里取回一份（同步到安装包仓库用），写发布说明，再转为正式发布
+      - name: 取回草稿发布里的安装包
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" -D dist
+          ls -la dist
+          for need in '*.exe' '*.apk' 'jarvis-server-*.tar.gz' 'jarvis-server-latest.json' 'latest.yml'; do
+            ls dist/$need >/dev/null 2>&1 || { echo "::error::草稿发布缺少 $need"; exit 1; }
+          done
+      - name: 写发布说明
+        run: |
+          cat > release-notes.md <<'NOTES'
+          ## 本版优化 · 搜索与回答提速
+          - 批量公网直读在预留额度后最多两页并发，保留所有页面的真实来源与状态；带付费代读的路径继续逐页处理。停止后不发排队请求，未用预留会退回。
+          - 搜索备用源按当前账号和配置的近期耗时调整错峰，最多两路在途；先筛选相关性与日期，再决定返回，不为速度选无关结果。
+          - 普通联网查询的模型发送副本只保留近期相关历史，长结果提取原文片段并保留回读编号；完整历史、需求和核验记录保持。文档、识图、复杂核验不套普通查询裁剪。
+          - 已配置日常回答模型时，简单取数和普通搜索可直接整理答案，减少草稿再整篇转写；固定模型、计算和明确核验保持原路线与检查。
+          - 公开正文按来源类型设置短期缓存，并合并相同公开读取；账号、连接、配置改变即隔离，各任务重试预算与取消独立。付费代读不共享请求，敏感链接不缓存。
+          - 新增有效答复、证据就绪和模型输入各部分的估算Token诊断；估算与服务商实际用量分开，保留原流式绘制并补充服务端即时发送响应头。
+          - 夹具对照不是生产耗时承诺；真实模型和用户服务器尚未实测。三端统一构建、原安卓签名和既有更新方式保持。
+
+          ## 保留上一版 · 消息菜单引导与GPT 2.6原片编辑
+          - 回答过程中直接发送，消息默认排队并显示在输入框上方；每条消息用三点菜单提供“编辑消息 / 改为引导 / 取消消息”，移除发送前的模式切换。只有明确改为引导才补充当前任务，附件与未发草稿保持独立。
+          - 引导仅送达同一原任务，任务结束、停止或切换后不转交新任务；未确认送达的消息保留并暂停。关闭消息菜单不会触发停止任务，安卓返回键优先关闭菜单。
+          - GPT Image 2.5/2.6原片编辑补充官方JSON图片引用格式，按原PNG/JPEG/WebP字节发送，不压缩、不上传额外图床；旧型号保留文件上传，模型设置可按服务商要求明确选择格式。不会失败后自动换协议、换模型或用文生图重画，避免重复收费。
+          - 编辑错误保留实际HTTP状态、协议及安全字段说明，移除原片数据和凭据。修图仍保留原片、独立另存与一次双图检查；服务商实际支持情况和真人效果需实际验证。
+
+          ## 保留上一版 · 检索收尾、问题排队与人像修图
+          - 普通查询达到读取上限后直接整理已有资料，不再用一串红叉提示正常收尾；真实的网络、授权和服务费用错误仍明确显示，未读原文不会标成已核实。
+          - 回答中可选择“补充当前任务”或“排队新问题”；独立问题依次执行，可编辑、移除和暂停，停止或连接失联后不会自动重发。队列仅本次运行内保留，关闭不会自动恢复发送。
+          - 图片智能体新增原片人像自然美颜、显瘦；上传原片即可提出要求，无需填写海报参数。走已配置的图片编辑能力，原片保留、结果另存，记录实际像素；有看图能力时最多一次双图检查，未完成或有疑点不会标成保真通过，也不自动再次付费修图。
+          - 修复企业查询空表单在窗口变化时被聊天滚动逻辑带偏、底部输入区自动展开的问题；原手机首屏门禁保持。
+          - 联网搜索配置补充模型ID与接口格式说明。API GET的WebSearch是工具计费名称，公开资料未确认独立搜索型号，需以账号内配置/官方请求示例为准，不能用工具名代替模型ID。
+          - 三端统一构建并保留原签名；真实人像效果、用户服务器和安卓/Windows真机尚未在本环境验收。
+
+          ## 保留上一版 · 海报、大屏与联网安全复审修复
+          - 宣传单、易拉宝、请柬、贺卡、公众号头图、朋友圈配图等，和海报一样由程序排中文字，不再让图片模型直接画字；只要文案的不出图。
+          - 渐变叠图的海报按底图真实像素检查文字是否看得清，不够就只在标题处适度加深遮罩并复测，够用即停；仍不够会明确提示换底图或改实色文字区。
+          - 可视化大屏不再画非标准的国界轮廓（原轮廓缺南海诸岛、国界画法不符合国内标准地图），改为按经纬度标注点位并注明“未绘制国界”；非气象大屏不再出现“雷达”“气象”字样；4K 大屏小字统一放大，远看也能读。
+          - 服务器替你联网时，跳转到别的网站不再带上搜索、图库等服务的 Key；补拦几类内网和保留地址。
+          - 1.0.430 起的企业直查、新闻读取、行情卡等功能保留。真实图片模型效果、用户服务器、安卓和 Windows 真机待你实际试用确认。
+
+          ## 上一版（1.0.430）· 企业直查工作台与新闻读取修复
+          - 企业招投标首屏简化为“查企业 / 找招标”：输入公司名称即可直接查询资料和来源，不必先发送聊天；复杂分析和文件解读保留对话入口，企百科由用户明确选择。
+          - 新闻读取支持模型仅传多个urls时逐页读取，保留每页成功、失败与证据归属；原单网址与备用网址方式继续可用。修复DNS解析失败误报“只允许访问公网地址”，私网限制保持。
+          - 所有智能体开始对话后恢复统一阅读边距；关闭起始页时停止企业查询和公告轮询，切换账号或会话不接收旧页面结果。
+          - 行情工具成功取数后展示报价与历史收盘价卡片，保留实际来源和时间；不额外请求行情，不从模型文字生成报价，不虚构走势点。
+          - 新增企业HTTP权限隔离、批量读取、DNS分类、行情卡及真实浏览器回归；原测试门禁和安卓签名保留。真实API GET WebSearch协议、用户服务器与Android/Windows真机尚未验收。
+
+          ## 保留近期修复
+          - 中文海报、封面与明确要求排字的图片，支持模型生成无字底图后用真实字体排版；工作区底图直接复用，不需要传入代码沙箱。
+          - 同一版式直接交付PNG成品、自包含SVG与可编辑PPTX；支持精确像素尺寸、五种文字位置、黑体/宋体和指定文字区比例。长文不截断，放不下明确报错。
+          - 检查实际字体字形、颜色对比度和PNG尺寸；生成、文件读回和视觉验收分开显示，渲染失败保留源文件，不用PPT代替最终图片冒称完成。
+          - 修复PC智能体、作品与招投标接口跨域遗漏。对话观察断线有界重连并显示状态，恢复原任务，不重复提交；服务器登录错误与模型Key错误分别提示。
+          - 手机、电脑、服务器同批发布，保留固定安卓签名和服务器安装权限保护。用户服务器、真实图像模型与安卓/Windows真机未验收；PC所有连接失败的外部原因未据此确认解决。
+
+          ## 更新与使用
+          先在设置里“立即更新服务器”，再更新电脑和手机。仅安装APK不会替换远端服务器代码。
+          本机与云服务器配置独立：服务器模式下，看图、画图、向量用的是“模型 → 云服务器”里填的 Key。博查、fal、Tavily 的 Key 在“模型 → 服务商与 Key → 其他服务的 Key”。
+          
+          ## 下载
+          - Windows：Jarvis-Setup-*.exe（安装版）或 Jarvis-*-win-x64.zip（免安装版）。
+          - 安卓手机：Jarvis-*-android.apk。
+          - 自有云服务器：jarvis-server-*.tar.gz，步骤见 jarvis/deploy/服务器部署说明.md。
+          
+          ## 多设备使用
+          电脑与手机连接同一台未央云服务器使用服务器端对话和文件；本机配置与数据仍独立。已移除的OSS同步不再作为配置方式。
+          
+          ## 自动更新
+          旧Windows 1.0.382若检查更新仍报404，请从本页下载安装版直接覆盖升级，无需先卸载；升级后使用公开更新源。安卓按提示下载、安装新版本，继续沿用固定签名。
+          
+          构建自 ${{ github.sha }}
+          NOTES
+      - name: 发布
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # 正式发布（不是预发布），“最新版本”才会指向它，自动更新才能找到；标签带版本号，差量更新按它找旧版 .blockmap
+        run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "$RELEASE_TITLE" --notes-file release-notes.md --draft=false --prerelease=false --latest
+      # 用户 2026-11-02：代码仓库以后改私密，安装包另放公开仓库 xunova1121/weiyang-release，三端更新在原仓库读不到时改从这里读。
+      # 需要在代码仓库 Secrets 里放 RELEASE_REPO_TOKEN（只对安装包仓库有 Contents 读写权限的细粒度令牌）；没配就跳过，不影响原发布。
+      - name: 检查安装包仓库令牌
+        id: release_repo
+        env:
+          RELEASE_REPO_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+        run: echo "enabled=$([ -n "$RELEASE_REPO_TOKEN" ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
+      - name: 同步发布到安装包仓库
+        if: steps.release_repo.outputs.enabled == 'yes'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          SOURCE_TOKEN: ${{ github.token }}
+          TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('desktop-v1.0.{0}', github.run_number) }}
+          TITLE: "未央 ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('1.0.{0}', github.run_number) }}"
+        run: |
+          set -euo pipefail
+          # 发布说明沿用上一步写好的 release-notes.md
+          if gh release view "$TAG" --repo xunova1121/weiyang-release >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --repo xunova1121/weiyang-release --clobber
+          else
+            gh release create "$TAG" dist/* --repo xunova1121/weiyang-release --title "$TITLE" --notes-file release-notes.md --latest
+          fi
+          echo "已同步到 xunova1121/weiyang-release：$TAG"

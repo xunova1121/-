@@ -1,0 +1,3288 @@
+{
+  "version": 1,
+  "scope": "仅虚构工具UI夹具的性能数据，无客户材料或配置。包含失败记录；不是全部临时实验的日志归档。",
+  "baseline": {
+    "source": "f25c851",
+    "environment": "原smoke完整前置，2核配额/可见3核，临时计时插件，仅本地",
+    "records": [
+      {
+        "round": 1,
+        "total": 1303,
+        "app": 140,
+        "recovery": {
+          "parallel": false,
+          "compile": 0,
+          "event": 1244,
+          "draws": [
+            39,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false
+        }
+      },
+      {
+        "round": 2,
+        "total": 1321,
+        "app": 127,
+        "recovery": {
+          "parallel": false,
+          "compile": 1,
+          "event": 1278,
+          "draws": [
+            35,
+            1,
+            2
+          ],
+          "simple": true,
+          "aa": false
+        }
+      },
+      {
+        "round": 3,
+        "total": 828,
+        "app": 97,
+        "recovery": {
+          "parallel": false,
+          "compile": 8,
+          "event": 804,
+          "draws": [
+            49,
+            0,
+            2
+          ],
+          "simple": true,
+          "aa": false
+        }
+      },
+      {
+        "round": 4,
+        "total": 1515,
+        "app": 146,
+        "recovery": {
+          "parallel": false,
+          "compile": 4,
+          "event": 1448,
+          "draws": [
+            31,
+            30,
+            0
+          ],
+          "simple": true,
+          "aa": false
+        }
+      },
+      {
+        "round": 5,
+        "total": 1122,
+        "app": 100,
+        "recovery": {
+          "parallel": false,
+          "compile": 3,
+          "event": 1097,
+          "draws": [
+            27,
+            0,
+            2
+          ],
+          "simple": true,
+          "aa": false
+        }
+      },
+      {
+        "round": 6,
+        "total": 1427,
+        "app": 99,
+        "recovery": {
+          "parallel": false,
+          "compile": 0,
+          "event": 1402,
+          "draws": [
+            51,
+            0,
+            1
+          ],
+          "simple": true,
+          "aa": false
+        }
+      },
+      {
+        "round": 7,
+        "total": 1142,
+        "app": 381,
+        "recovery": {
+          "parallel": false,
+          "compile": 2,
+          "event": 800,
+          "draws": [
+            82,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false
+        }
+      },
+      {
+        "round": 8,
+        "total": 1090,
+        "app": 79,
+        "recovery": {
+          "parallel": false,
+          "compile": 7,
+          "event": 1087,
+          "draws": [
+            54,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false
+        }
+      },
+      {
+        "round": 9,
+        "total": 1404,
+        "app": 185,
+        "recovery": {
+          "parallel": false,
+          "compile": 2,
+          "event": 1304,
+          "draws": [
+            101,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false
+        }
+      },
+      {
+        "round": 10,
+        "total": 840,
+        "app": 143,
+        "recovery": {
+          "parallel": false,
+          "compile": 2,
+          "event": 776,
+          "draws": [
+            96,
+            1,
+            0
+          ],
+          "simple": true,
+          "aa": false
+        }
+      },
+      {
+        "round": 11,
+        "total": 806,
+        "app": 60,
+        "recovery": {
+          "parallel": false,
+          "compile": 2,
+          "event": 782,
+          "draws": [
+            17,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false
+        }
+      },
+      {
+        "round": 12,
+        "total": 895,
+        "app": 102,
+        "recovery": {
+          "parallel": false,
+          "compile": 2,
+          "event": 834,
+          "draws": [
+            54,
+            0,
+            1
+          ],
+          "simple": true,
+          "aa": false
+        }
+      },
+      {
+        "round": 13,
+        "total": 941,
+        "app": 208,
+        "recovery": {
+          "parallel": false,
+          "compile": 7,
+          "event": 797,
+          "draws": [
+            91,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false
+        }
+      },
+      {
+        "round": 14,
+        "total": 1299,
+        "app": 95,
+        "recovery": {
+          "parallel": false,
+          "compile": 0,
+          "event": 1244,
+          "draws": [
+            55,
+            1,
+            0
+          ],
+          "simple": true,
+          "aa": false
+        }
+      },
+      {
+        "round": 15,
+        "total": 1835,
+        "app": 532,
+        "recovery": {
+          "parallel": false,
+          "compile": 0,
+          "event": 1390,
+          "draws": [
+            21,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false
+        }
+      },
+      {
+        "round": 16,
+        "total": 1344,
+        "app": 98,
+        "recovery": {
+          "parallel": false,
+          "compile": 5,
+          "event": 1320,
+          "draws": [
+            58,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false
+        }
+      },
+      {
+        "round": 17,
+        "total": 1473,
+        "app": 100,
+        "recovery": {
+          "parallel": false,
+          "compile": 0,
+          "event": 1464,
+          "draws": [
+            21,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false
+        }
+      },
+      {
+        "round": 18,
+        "total": 1164,
+        "app": 112,
+        "recovery": {
+          "parallel": false,
+          "compile": 2,
+          "event": 1159,
+          "draws": [
+            63,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false
+        }
+      },
+      {
+        "round": 19,
+        "total": 1304,
+        "app": 98,
+        "recovery": {
+          "parallel": false,
+          "compile": 4,
+          "event": 1245,
+          "draws": [
+            53,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false
+        }
+      },
+      {
+        "round": 20,
+        "total": 1316,
+        "app": 123,
+        "recovery": {
+          "parallel": false,
+          "compile": 0,
+          "event": 1278,
+          "draws": [
+            59,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false
+        }
+      }
+    ]
+  },
+  "finalLocal": {
+    "source": "8d4c724fa91d74b8b5d4f83c4fa7c73e675e9c20",
+    "environment": "npm run build正式构建，无计时插件；taskset 0,1匹配原有两核配额，无扩容；8工具前置，保留原阈值",
+    "summary": {
+      "rounds": 20,
+      "passed": 19,
+      "app": {
+        "median": 28,
+        "p95": 61,
+        "max": 78
+      },
+      "captureApp": {
+        "median": 123,
+        "p95": 196,
+        "max": 207
+      },
+      "total": {
+        "median": 796,
+        "p95": 1093,
+        "max": 1600
+      }
+    },
+    "records": [
+      {
+        "round": 1,
+        "ok": true,
+        "total": 979,
+        "app": 61,
+        "captureApp": 126,
+        "frames": 4,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 1,
+        "event": 895,
+        "draws": [
+          30,
+          0,
+          12
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      },
+      {
+        "round": 2,
+        "ok": false,
+        "total": 1600,
+        "app": 29,
+        "captureApp": 164,
+        "frames": 3,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 0,
+        "event": 1623,
+        "draws": [
+          31,
+          0,
+          0
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      },
+      {
+        "round": 3,
+        "ok": true,
+        "total": 921,
+        "app": 22,
+        "captureApp": 124,
+        "frames": 3,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 1,
+        "event": 1005,
+        "draws": [
+          16,
+          0,
+          5
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      },
+      {
+        "round": 4,
+        "ok": true,
+        "total": 534,
+        "app": 32,
+        "captureApp": 123,
+        "frames": 4,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 1,
+        "event": 544,
+        "draws": [
+          24,
+          0,
+          0
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      },
+      {
+        "round": 5,
+        "ok": true,
+        "total": 843,
+        "app": 17,
+        "captureApp": 97,
+        "frames": 3,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 0,
+        "event": 893,
+        "draws": [
+          27,
+          0,
+          0
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      },
+      {
+        "round": 6,
+        "ok": true,
+        "total": 645,
+        "app": 33,
+        "captureApp": 109,
+        "frames": 4,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 0,
+        "event": 656,
+        "draws": [
+          20,
+          2,
+          0
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      },
+      {
+        "round": 7,
+        "ok": true,
+        "total": 592,
+        "app": 17,
+        "captureApp": 76,
+        "frames": 3,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 1,
+        "event": 625,
+        "draws": [
+          22,
+          0,
+          0
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      },
+      {
+        "round": 8,
+        "ok": true,
+        "total": 785,
+        "app": 46,
+        "captureApp": 134,
+        "frames": 4,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 0,
+        "event": 800,
+        "draws": [
+          30,
+          0,
+          0
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      },
+      {
+        "round": 9,
+        "ok": true,
+        "total": 615,
+        "app": 31,
+        "captureApp": 207,
+        "frames": 4,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 0,
+        "event": 609,
+        "draws": [
+          66,
+          0,
+          0
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      },
+      {
+        "round": 10,
+        "ok": true,
+        "total": 814,
+        "app": 34,
+        "captureApp": 162,
+        "frames": 4,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 1,
+        "event": 834,
+        "draws": [
+          22,
+          0,
+          0
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      },
+      {
+        "round": 11,
+        "ok": true,
+        "total": 839,
+        "app": 31,
+        "captureApp": 137,
+        "frames": 3,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 1,
+        "event": 864,
+        "draws": [
+          29,
+          6,
+          5
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      },
+      {
+        "round": 12,
+        "ok": true,
+        "total": 825,
+        "app": 24,
+        "captureApp": 88,
+        "frames": 4,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 0,
+        "event": 873,
+        "draws": [
+          22,
+          0,
+          0
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      },
+      {
+        "round": 13,
+        "ok": true,
+        "total": 1093,
+        "app": 78,
+        "captureApp": 136,
+        "frames": 3,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 0,
+        "event": 1063,
+        "draws": [
+          23,
+          0,
+          0
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      },
+      {
+        "round": 14,
+        "ok": true,
+        "total": 793,
+        "app": 32,
+        "captureApp": 130,
+        "frames": 3,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 0,
+        "event": 804,
+        "draws": [
+          35,
+          0,
+          0
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      },
+      {
+        "round": 15,
+        "ok": true,
+        "total": 830,
+        "app": 28,
+        "captureApp": 104,
+        "frames": 3,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 0,
+        "event": 854,
+        "draws": [
+          27,
+          0,
+          0
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      },
+      {
+        "round": 16,
+        "ok": true,
+        "total": 753,
+        "app": 23,
+        "captureApp": 88,
+        "frames": 3,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 0,
+        "event": 793,
+        "draws": [
+          25,
+          0,
+          0
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      },
+      {
+        "round": 17,
+        "ok": true,
+        "total": 796,
+        "app": 16,
+        "captureApp": 106,
+        "frames": 3,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 0,
+        "event": 849,
+        "draws": [
+          19,
+          0,
+          0
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      },
+      {
+        "round": 18,
+        "ok": true,
+        "total": 786,
+        "app": 23,
+        "captureApp": 98,
+        "frames": 3,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 0,
+        "event": 824,
+        "draws": [
+          20,
+          0,
+          0
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      },
+      {
+        "round": 19,
+        "ok": true,
+        "total": 565,
+        "app": 18,
+        "captureApp": 102,
+        "frames": 3,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 0,
+        "event": 605,
+        "draws": [
+          21,
+          0,
+          0
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      },
+      {
+        "round": 20,
+        "ok": true,
+        "total": 998,
+        "app": 16,
+        "captureApp": 196,
+        "frames": 3,
+        "decorationsPaused": true,
+        "decorationsResumed": true,
+        "hidden": false,
+        "focused": true,
+        "parallel": false,
+        "compile": 0,
+        "event": 1030,
+        "draws": [
+          48,
+          0,
+          0
+        ],
+        "simple": true,
+        "aa": false,
+        "form": "core",
+        "size": [
+          540,
+          188
+        ],
+        "particles": 6000,
+        "calls": 2,
+        "software": true,
+        "quality": {
+          "tier": "standard",
+          "bloom": false,
+          "stars": true,
+          "fps": 60
+        }
+      }
+    ],
+    "errors": [],
+    "cap": {
+      "frames": 2,
+      "ms": 600.3000000119209,
+      "fps": 24
+    },
+    "hidden": {
+      "before": 142,
+      "during": 142
+    }
+  },
+  "ci": [
+    {
+      "run": "40820926824",
+      "url": "https://github.com/xunova1121/-/actions/runs/40820926824",
+      "source": "8d4c724fa91d74b8b5d4f83c4fa7c73e675e9c20",
+      "originalSmoke": "174/174",
+      "summary": {
+        "rounds": 20,
+        "passed": 20,
+        "app": {
+          "median": 20,
+          "p95": 27,
+          "max": 28
+        },
+        "captureApp": {
+          "median": 62,
+          "p95": 95,
+          "max": 207
+        },
+        "total": {
+          "median": 418,
+          "p95": 466,
+          "max": 489
+        }
+      },
+      "records": [
+        {
+          "round": 1,
+          "total": 466,
+          "app": 18,
+          "captureApp": 46,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 517,
+          "draws": [
+            20,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 2,
+          "total": 489,
+          "app": 27,
+          "captureApp": 70,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 545,
+          "draws": [
+            11,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 3,
+          "total": 316,
+          "app": 27,
+          "captureApp": 78,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 359,
+          "draws": [
+            15,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 4,
+          "total": 441,
+          "app": 18,
+          "captureApp": 207,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 507,
+          "draws": [
+            11,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 5,
+          "total": 400,
+          "app": 15,
+          "captureApp": 49,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 467,
+          "draws": [
+            14,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 6,
+          "total": 414,
+          "app": 21,
+          "captureApp": 72,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 471,
+          "draws": [
+            17,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 7,
+          "total": 419,
+          "app": 19,
+          "captureApp": 47,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 477,
+          "draws": [
+            17,
+            1,
+            2
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 8,
+          "total": 408,
+          "app": 20,
+          "captureApp": 60,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 472,
+          "draws": [
+            11,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 9,
+          "total": 418,
+          "app": 21,
+          "captureApp": 62,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 480,
+          "draws": [
+            9,
+            0,
+            3
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 10,
+          "total": 416,
+          "app": 20,
+          "captureApp": 48,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 472,
+          "draws": [
+            20,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 11,
+          "total": 416,
+          "app": 19,
+          "captureApp": 46,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 483,
+          "draws": [
+            9,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 12,
+          "total": 409,
+          "app": 20,
+          "captureApp": 62,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 470,
+          "draws": [
+            13,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 13,
+          "total": 449,
+          "app": 19,
+          "captureApp": 66,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 515,
+          "draws": [
+            10,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 14,
+          "total": 428,
+          "app": 23,
+          "captureApp": 51,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 488,
+          "draws": [
+            12,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 15,
+          "total": 419,
+          "app": 28,
+          "captureApp": 70,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 475,
+          "draws": [
+            12,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 16,
+          "total": 403,
+          "app": 21,
+          "captureApp": 38,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 467,
+          "draws": [
+            9,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 17,
+          "total": 402,
+          "app": 18,
+          "captureApp": 36,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 469,
+          "draws": [
+            9,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 18,
+          "total": 444,
+          "app": 18,
+          "captureApp": 95,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 502,
+          "draws": [
+            19,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 19,
+          "total": 453,
+          "app": 18,
+          "captureApp": 68,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 516,
+          "draws": [
+            11,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 20,
+          "total": 463,
+          "app": 23,
+          "captureApp": 79,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 516,
+          "draws": [
+            18,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        }
+      ]
+    },
+    {
+      "run": "40820951149",
+      "url": "https://github.com/xunova1121/-/actions/runs/40820951149",
+      "source": "8d4c724fa91d74b8b5d4f83c4fa7c73e675e9c20",
+      "originalSmoke": "174/174",
+      "summary": {
+        "rounds": 20,
+        "passed": 20,
+        "app": {
+          "median": 18,
+          "p95": 23,
+          "max": 36
+        },
+        "captureApp": {
+          "median": 59,
+          "p95": 79,
+          "max": 94
+        },
+        "total": {
+          "median": 413,
+          "p95": 458,
+          "max": 554
+        }
+      },
+      "records": [
+        {
+          "round": 1,
+          "total": 338,
+          "app": 17,
+          "captureApp": 62,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 388,
+          "draws": [
+            18,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 2,
+          "total": 322,
+          "app": 16,
+          "captureApp": 70,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 383,
+          "draws": [
+            16,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 3,
+          "total": 458,
+          "app": 36,
+          "captureApp": 94,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 494,
+          "draws": [
+            20,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 4,
+          "total": 418,
+          "app": 23,
+          "captureApp": 69,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 474,
+          "draws": [
+            18,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 5,
+          "total": 411,
+          "app": 14,
+          "captureApp": 42,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 476,
+          "draws": [
+            14,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 6,
+          "total": 405,
+          "app": 19,
+          "captureApp": 59,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 468,
+          "draws": [
+            12,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 7,
+          "total": 418,
+          "app": 22,
+          "captureApp": 48,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 474,
+          "draws": [
+            11,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 8,
+          "total": 455,
+          "app": 19,
+          "captureApp": 78,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 519,
+          "draws": [
+            12,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 9,
+          "total": 411,
+          "app": 16,
+          "captureApp": 68,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 473,
+          "draws": [
+            15,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 10,
+          "total": 421,
+          "app": 20,
+          "captureApp": 69,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 481,
+          "draws": [
+            12,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 11,
+          "total": 411,
+          "app": 19,
+          "captureApp": 44,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 474,
+          "draws": [
+            12,
+            0,
+            3
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 12,
+          "total": 414,
+          "app": 14,
+          "captureApp": 45,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 478,
+          "draws": [
+            18,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 13,
+          "total": 456,
+          "app": 18,
+          "captureApp": 79,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 520,
+          "draws": [
+            13,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 14,
+          "total": 413,
+          "app": 15,
+          "captureApp": 39,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 478,
+          "draws": [
+            17,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 15,
+          "total": 400,
+          "app": 21,
+          "captureApp": 55,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 461,
+          "draws": [
+            12,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 16,
+          "total": 419,
+          "app": 17,
+          "captureApp": 50,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 475,
+          "draws": [
+            18,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 17,
+          "total": 416,
+          "app": 19,
+          "captureApp": 39,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 482,
+          "draws": [
+            10,
+            1,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 18,
+          "total": 411,
+          "app": 17,
+          "captureApp": 44,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 477,
+          "draws": [
+            9,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 19,
+          "total": 412,
+          "app": 17,
+          "captureApp": 63,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 476,
+          "draws": [
+            11,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 20,
+          "total": 554,
+          "app": 20,
+          "captureApp": 73,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 613,
+          "draws": [
+            14,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        }
+      ]
+    },
+    {
+      "run": "40820954488",
+      "url": "https://github.com/xunova1121/-/actions/runs/40820954488",
+      "source": "8d4c724fa91d74b8b5d4f83c4fa7c73e675e9c20",
+      "originalSmoke": "174/174",
+      "summary": {
+        "rounds": 20,
+        "passed": 20,
+        "app": {
+          "median": 20,
+          "p95": 24,
+          "max": 30
+        },
+        "captureApp": {
+          "median": 66,
+          "p95": 89,
+          "max": 107
+        },
+        "total": {
+          "median": 548,
+          "p95": 590,
+          "max": 600
+        }
+      },
+      "records": [
+        {
+          "round": 1,
+          "total": 499,
+          "app": 15,
+          "captureApp": 77,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 1,
+          "event": 560,
+          "draws": [
+            14,
+            1,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 2,
+          "total": 569,
+          "app": 30,
+          "captureApp": 58,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 618,
+          "draws": [
+            15,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 3,
+          "total": 532,
+          "app": 17,
+          "captureApp": 43,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 593,
+          "draws": [
+            14,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 4,
+          "total": 433,
+          "app": 21,
+          "captureApp": 107,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 492,
+          "draws": [
+            15,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 5,
+          "total": 540,
+          "app": 16,
+          "captureApp": 80,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 596,
+          "draws": [
+            21,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 6,
+          "total": 556,
+          "app": 24,
+          "captureApp": 64,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 613,
+          "draws": [
+            14,
+            1,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 7,
+          "total": 550,
+          "app": 17,
+          "captureApp": 74,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 613,
+          "draws": [
+            16,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 8,
+          "total": 588,
+          "app": 20,
+          "captureApp": 83,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 645,
+          "draws": [
+            14,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 9,
+          "total": 547,
+          "app": 22,
+          "captureApp": 82,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 1,
+          "event": 606,
+          "draws": [
+            14,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 10,
+          "total": 559,
+          "app": 24,
+          "captureApp": 89,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 611,
+          "draws": [
+            17,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 11,
+          "total": 546,
+          "app": 17,
+          "captureApp": 36,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 610,
+          "draws": [
+            11,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 12,
+          "total": 397,
+          "app": 18,
+          "captureApp": 40,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 460,
+          "draws": [
+            12,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 13,
+          "total": 590,
+          "app": 22,
+          "captureApp": 81,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 649,
+          "draws": [
+            12,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 14,
+          "total": 546,
+          "app": 21,
+          "captureApp": 50,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 604,
+          "draws": [
+            17,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 15,
+          "total": 548,
+          "app": 24,
+          "captureApp": 72,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 606,
+          "draws": [
+            13,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 16,
+          "total": 550,
+          "app": 20,
+          "captureApp": 53,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 606,
+          "draws": [
+            18,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 17,
+          "total": 600,
+          "app": 23,
+          "captureApp": 89,
+          "frames": 4,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 658,
+          "draws": [
+            14,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 18,
+          "total": 549,
+          "app": 18,
+          "captureApp": 44,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 609,
+          "draws": [
+            15,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 19,
+          "total": 550,
+          "app": 20,
+          "captureApp": 54,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 608,
+          "draws": [
+            17,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        },
+        {
+          "round": 20,
+          "total": 537,
+          "app": 18,
+          "captureApp": 66,
+          "frames": 3,
+          "decorationsPaused": true,
+          "decorationsResumed": true,
+          "hidden": false,
+          "focused": true,
+          "parallel": false,
+          "compile": 0,
+          "event": 596,
+          "draws": [
+            13,
+            0,
+            0
+          ],
+          "simple": true,
+          "aa": false,
+          "form": "core",
+          "size": [
+            540,
+            188
+          ],
+          "particles": 6000,
+          "calls": 2,
+          "software": true,
+          "quality": {
+            "tier": "standard",
+            "bloom": false,
+            "stars": true,
+            "fps": 60
+          }
+        }
+      ]
+    }
+  ]
+}
