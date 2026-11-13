@@ -1,4 +1,5 @@
 # 未央（原名贾维斯）：打包 Windows 安装包和安卓 App（APK），一起发布到 Releases 页面。（macOS / Linux 版已停止更新）
+# 固定受Playwright 1.56.1支持的Linux环境；ubuntu-latest滚动到26.04会在安装浏览器前失败。
 # 触发：推送了 jarvis/ 下的改动、推送 desktop-v* 标签，或在 Actions 页面手动运行。
 name: 未央安装包
 
@@ -47,7 +48,7 @@ jobs:
   mirror_published:
     name: 同步现有安装包到公开仓库
     if: github.event_name == 'workflow_dispatch' && inputs.mirror_tag != '' && github.ref == 'refs/heads/claude/jolly-darwin-tijh97'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -67,7 +68,7 @@ jobs:
   cleanup:
     name: 清理旧的构建产物
     if: ${{ !inputs.mirror_tag }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       actions: write
     steps:
@@ -86,7 +87,7 @@ jobs:
   prepare:
     name: 建草稿发布
     needs: cleanup
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: 建草稿发布（只在正式分支/版本标签）
         if: env.PUBLISH == 'true'
@@ -176,7 +177,7 @@ jobs:
   android:
     needs: prepare
     name: 打包安卓 App
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     defaults:
       run:
@@ -273,7 +274,7 @@ jobs:
   verify:
     needs: prepare
     name: 发布前完整验证
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # FFmpeg和Office安装各有20分钟预算；416耗尽45分钟总限额。只给环境准备留足时间，各测试和单步时限不变。
     timeout-minutes: 75
     defaults:
@@ -521,7 +522,7 @@ jobs:
     # 验证分支只构建/测试；只有正式开发分支或明确的版本标签可以更新用户安装包。
     if: github.ref == 'refs/heads/claude/jolly-darwin-tijh97' || startsWith(github.ref, 'refs/tags/desktop-v')
     needs: [build, android, verify]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # 安装包已由各作业传到草稿发布；这里取回一份（同步到安装包仓库用），写发布说明，再转为正式发布
       - name: 取回草稿发布里的安装包
