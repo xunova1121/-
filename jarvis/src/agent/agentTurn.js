@@ -8,6 +8,7 @@ import { getAgent } from './agentProfiles.js';
 import { profileId } from './agentProfileValidation.js';
 import { templateNote } from './pptTemplates.js';
 import { agentSkill } from './agentSkills.js';
+import { isStandalonePortraitRetouch } from '../core/portraitIntent.js';
 
 /** 只管流程、不授予能力的工具：收窄后也保留，否则模型连“看要求 / 列计划 / 要更多时间”都做不了 */
 export const AGENT_FLOW_TOOLS = new Set(['read_task_requirements', 'read_tool_result', 'need_more_time', 'update_plan', 'review_task', 'execution_capabilities', 'tool_search']);
@@ -17,8 +18,10 @@ const clean = (value) => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, '
 /** 表单值 → 一句“用户选择：页数 6-10；场景 政企汇报”。不在选项里的、超长的、配置没有的键一律丢掉 */
 export function agentFormNote(profile, values = {}) {
   if (!profile?.form?.length || !values || typeof values !== 'object' || Array.isArray(values)) return '';
+  const portrait = profile.id === 'poster-designer' && profile.source === 'builtin' && ['人像优化', '人像显瘦'].includes(values.operation);
   const parts = [];
   for (const field of profile.form) {
+    if (portrait && field.key !== 'operation') continue;
     if (!Object.prototype.hasOwnProperty.call(values, field.key)) continue;
     const value = clean(values[field.key]);
     if (!value) continue;
@@ -59,7 +62,11 @@ export async function resolveAgentTurn({ agentId = null, form = null } = {}, { l
 }
 
 /** 本轮要求：原话 + 用户选择（用于任务契约、页数 / 风格判断等），原话本身不改 */
-export const withAgentRequirement = (text, agent) => (agent?.note ? `${text}\n\n（${agent.note}）` : text);
+export const withAgentRequirement = (text, agent) => {
+  // 明确的原片修图不受上一次海报比例/风格的预设干扰；用户原话仍完整保留。
+  if (agent?.profile?.id === 'poster-designer' && agent.profile.source === 'builtin' && isStandalonePortraitRetouch(text)) return text;
+  return agent?.note ? `${text}\n\n（${agent.note}）` : text;
+};
 
 /** 客户端传来的表单值只留“短键 → 文字”，最多 12 项；真正是否有效由 agentFormNote 按配置再判断 */
 export function sanitizeAgentForm(value) {

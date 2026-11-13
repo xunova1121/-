@@ -104,13 +104,17 @@ function posterWorkspace(root, onFill, heroNode) {
   const tabs = el('div', { className: 'wy-studio-tabs', role: 'tablist', ariaLabel: '海报工作区' });
   const form = root.querySelector('.wy-agent-form');
   const upload = root.querySelector('.wy-agent-upload');
+  const portraitHint = el('p', { className: 'wy-agent-start-note', textContent: '选好效果，上传原片即可发送；也可补充想调整的部位。默认自然修图，原片保留，结果另存。', hidden: true });
+  form.after(portraitHint);
   let inspiration;
   const choose = mode => {
     root.dataset.studioPanel = mode;
     inspiration.hidden = mode !== 'inspiration';
     form.hidden = mode === 'inspiration';
     upload.hidden = mode === 'inspiration';
-    for (const field of form.children) field.hidden = mode === 'tools' ? !['size', 'ratio', 'operation'].includes(field.dataset.field) : field.dataset.field === 'operation';
+    const portrait = ['人像优化', '人像显瘦'].includes(form.querySelector('[data-field="operation"] select')?.value);
+    portraitHint.hidden = mode !== 'tools' || !portrait;
+    for (const field of form.children) field.hidden = mode === 'tools' ? !(portrait ? ['operation'] : ['size', 'ratio', 'operation']).includes(field.dataset.field) : field.dataset.field === 'operation';
     for (const button of tabs.children) {
       button.classList.toggle('on', button.dataset.studioTab === mode);
       button.setAttribute('aria-selected', String(button.dataset.studioTab === mode));
@@ -125,6 +129,7 @@ function posterWorkspace(root, onFill, heroNode) {
   }
   heroNode.after(tabs);
   form.after(upload);
+  form.addEventListener('change', () => { if (root.dataset.studioPanel === 'tools') choose('tools'); });
   choose('inspiration');
 }
 

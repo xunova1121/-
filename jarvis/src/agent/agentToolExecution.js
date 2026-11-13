@@ -12,7 +12,7 @@ import { recordImageInputRecovery } from './imageInputRecovery.js';
 import { isRetrievalStop, RETRIEVAL_FINISHED } from '../../shared/retrievalStop.js';
 
 /** 产出文件、核对数字的本地工具：联网到点后照常可用 */
-export const OUTPUT_TOOLS = /^(?:create_document|write_long_document|edit_office_document|check_document|write_file|edit_file|preview|create_diagram|export_diagram|make_poster|create_visual_demo|reconcile_numbers|verify_numbers|time_calc)$/;
+export const OUTPUT_TOOLS = /^(?:process_image|create_document|write_long_document|edit_office_document|check_document|write_file|edit_file|preview|create_diagram|export_diagram|make_poster|create_visual_demo|reconcile_numbers|verify_numbers|time_calc)$/;
 
 /** 原顺序执行副作用，仅将连续的只读调用并行；检查点先于操作落盘。 */
 export async function executeToolCalls(
@@ -140,7 +140,7 @@ export async function executeToolCalls(
       if (e.code === 'RETRIEVAL_BUDGET') retrieval.close(e.message);
       output = isRetrievalStop(e) ? RETRIEVAL_FINISHED : `错误：${e.message || e}`;
       if (isRetrievalStop(e)) emit({ type: 'diagnostic', phase: 'retrieval_stop', code: e.code, tool: c.name, reason: String(e.message || '').slice(0, 240) });
-      if (c.name === 'deep_research' && e.code === 'RETRIEVAL_BUDGET' && e.partialEvidence) output += '\n' + String(e.partialEvidence).slice(0, 1800);
+      if (e.code === 'RETRIEVAL_BUDGET' && e.partialEvidence) output += '\n' + String(e.partialEvidence).slice(0, 1800);
       const scope = toolFailureScope(c.name, e);
       if (scope) output += '\n影响范围：' + scope;
       if (['verify_numbers', 'time_calc'].includes(c.name) && (e.name === 'ValidationError' || /^INVALID_/.test(e.code || ''))) output += '\n请按参数说明改写后重试一次。仍无法计算时必须给用户明确答复；能推算的注明“工具没能计算，以下按常识推算”，列基准和算式，不能称工具已核验，不能只说正在处理。';
