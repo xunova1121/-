@@ -8,7 +8,7 @@ import { toast } from './env.js';
 export function createComposerQueue(app, form) {
   const queue = createMessageQueue();
   const scope = () => app.server || `local:${ws.mode()}:${ws.folderName() || ''}`;
-  let preparing = false;
+  let preparing = null;
   const current = () => queue.list(scope(), app.session?.id);
   const working = () => Boolean(app.active && !app.active.streamDone);
   const panel = initMessageQueuePanel(form, {
@@ -26,7 +26,7 @@ export function createComposerQueue(app, form) {
         const files = await restoreFiles(row.files);
         if (row.scope !== scope() || row.sessionId !== app.session?.id) return;
         if (app.prompt.value.trim() || app.attachments.length) return toast('已有新草稿，排队问题保持原样');
-        queue.remove(row.scope, row.sessionId, id);
+        if (!queue.remove(row.scope, row.sessionId, id)) return;
         app.prompt.value = row.text;
         app.attachments.push(...files);
         app.renderAttachments();
@@ -63,22 +63,24 @@ export function createComposerQueue(app, form) {
     if (preparing || working()) return;
     const row = current()[0];
     if (!row || row.paused) return;
-    preparing = true;
+    preparing = row.id;
     try {
       const files = await restoreFiles(row.files);
       // 读取附件期间可能切换用户、会话或发起了别的任务；不能把排队内容送进新任务。
       if (row.scope !== scope() || row.sessionId !== app.session?.id || working()) return;
       if (current()[0]?.id !== row.id || current()[0]?.paused) return;
       queue.take(row.scope, row.sessionId);
-      preparing = false;
+      preparing = null;
       refresh();
       // send同步建立active；每轮只取一条，其余等完成事件，不拼接问题。
       await app.send(row.text, { queuedFiles: files, echo: row.echo });
+      // 本机动作等入口可能直接完成而不建立模型任务；仍按原顺序接着处理。
+      if (!working()) setTimeout(drain, 0);
     } catch (error) {
       queue.pause(row.scope, row.sessionId);
       toast(`队列已暂停：${error.message}`);
     } finally {
-      preparing = false;
+      if (preparing === row.id) preparing = null;
       refresh();
     }
   }
