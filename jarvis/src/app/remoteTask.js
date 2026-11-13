@@ -64,9 +64,12 @@ export function createRemoteTask(app) {
           } else if (e.type === 'tool_progress') cards.get(e.id)?.progress(e.text);
           else if (e.type === 'tool_end') {
             if (isRetrievalStop(e)) {
-              cards.get(e.id)?.omit?.();
-              cards.delete(e.id);
-              turn.steps = Math.max(0, turn.steps - 1);
+              const card = cards.get(e.id);
+              if (card) {
+                card.omit?.();
+                cards.delete(e.id);
+                turn.steps = Math.max(0, turn.steps - 1);
+              }
             } else cards.get(e.id)?.done(e.ok, e.output, e.ms);
           }
         }

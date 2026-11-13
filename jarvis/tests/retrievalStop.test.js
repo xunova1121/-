@@ -66,6 +66,11 @@ it.each([false, true])('当前/后台任务(%s)移除正常收尾卡片，不记
   expect(card.omit).toHaveBeenCalledOnce(); expect(card.done).not.toHaveBeenCalled();
   expect(turn.steps).toBe(1); expect(turn.failedSteps).toBeUndefined();
   expect(state.usedTools).toEqual(['web_search']);
+  handler({ type: 'tool_end', id: 'one', name: 'web_fetch', ok: false, code: 'RETRIEVAL_BUDGET' });
+  handler({ type: 'tool_end', id: 'plan', name: 'update_plan', ok: false, code: 'RETRIEVAL_BUDGET' });
+  expect(turn.steps).toBe(1);
+  expect(state.usedTools).toEqual(['web_search']);
+  expect(card.omit).toHaveBeenCalledOnce();
   cards.set('two', card);
   handler({ type: 'tool_end', id: 'two', name: 'web_search', ok: false, code: 'NETWORK', output: '连接失败' });
   expect(card.done).toHaveBeenCalledWith(false, '连接失败', undefined);

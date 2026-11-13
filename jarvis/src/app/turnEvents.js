@@ -32,11 +32,14 @@ export function createTurnEvents(app) {
         return;
       }
       if (e.type === 'tool_end' && isRetrievalStop(e)) {
-        cards.get(e.id)?.omit?.();
-        cards.delete(e.id);
-        turn.steps = Math.max(0, turn.steps - 1);
-        const at = st.usedTools.lastIndexOf(e.name);
-        if (at >= 0) st.usedTools.splice(at, 1);
+        const card = cards.get(e.id);
+        if (card) {
+          card.omit?.();
+          cards.delete(e.id);
+          turn.steps = Math.max(0, turn.steps - 1);
+          const at = st.usedTools.lastIndexOf(e.name);
+          if (at >= 0) st.usedTools.splice(at, 1);
+        }
         if (!turn.background && app.active === turn) {
           app.hud.toolOmit?.(e.id);
           bubble.status?.('正在整理资料…');
