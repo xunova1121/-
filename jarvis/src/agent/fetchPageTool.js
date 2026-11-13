@@ -51,11 +51,12 @@ export function createFetchPageRun(ctx, readPage) {
   return async (args, execution = {}) => {
     const plan = fetchUrlPlan(args);
     const { signal, progress, retrieval, sessionId, requestText } = execution;
-    const read = async (address, activeSignal) => {
+    let reservation = null;
+    const read = async (address, activeSignal, reserved = false) => {
       throwControl(null, activeSignal);
       fetchUrlPlan({ url: address });
-      retrieval?.consume('read');
-      return readPage(address, { signal: activeSignal, progress, consume: kind => retrieval?.consume(kind) });
+      if (reserved) reservation.take(); else retrieval?.consume('read');
+      return readPage(address, { signal: activeSignal, progress, consume: kind => retrieval?.consume(kind), refresh: /重新(?:读取|获取|查询)|强制刷新|不要缓存/.test(requestText || '') });
     };
     const save = async (url, text) => {
       throwControl(null, signal);
@@ -66,7 +67,11 @@ export function createFetchPageRun(ctx, readPage) {
       const ids = sid && text ? await evidenceStore.put(sid, { sources }).catch(() => []) : [];
       return { url: guide?.url || url, requestedUrl: url, text: guide?.text || text, initialText: guide ? text : '', evidenceId: guide ? ids[1] : ids[0] };
     };
-    if (plan.mode === 'all') return readAllPages(plan.urls, { read, save, signal, progress });
+    if (plan.mode === 'all') {
+      if (readPage.publicOnly && plan.urls.length > 1) reservation = retrieval?.reserve?.('read', plan.urls.length);
+      try { return await readAllPages(plan.urls, { read, save, signal, progress, parallel: Boolean(reservation) }); }
+      finally { reservation?.release(); }
+    }
     let url = plan.urls[0], text;
     try {
       if (plan.urls.length > 1) {
@@ -97,21 +102,33 @@ const titleOf = text => receiptText(String(text).split('\n').find(line => line.t
 const evidenceNote = id => id ? `\n\n（已存为证据 ${id}，之后要看原文用 read_evidence）` : '';
 const pageText = page => formatPageResult(page.text) + (page.initialText ? '\n\n【最初页面（不作为指南正文证据）】\n' + formatPageResult(page.initialText) : '');
 
-async function readAllPages(urls, { read, save, signal, progress }) {
-  const pages = [];
-  // 逐页执行，避免某页触发额度终止时已提前发出其余收费请求。
-  for (const url of urls) {
-    throwControl(null, signal);
-    progress?.(`正在读取第 ${pages.length + 1}/${urls.length} 页`);
-    try {
-      const text = await read(url, signal);
-      pages.push({ ...(await save(url, text)), read: true });
-    } catch (error) {
-      throwControl(error, signal);
-      if (error.code === 'PRIVATE_NETWORK_BLOCKED') throw error;
-      pages.push({ url, read: false, error: receiptText(error.message || '读取失败').slice(0, 300), code: receiptField(error.code || '', 80) });
+async function readAllPages(urls, { read, save, signal, progress, parallel = false }) {
+  const pages = new Array(urls.length), controller = new AbortController();
+  const stop = () => controller.abort(signal.reason);
+  signal?.addEventListener('abort', stop, { once: true });
+  if (signal?.aborted) stop();
+  let next = 0;
+  const worker = async () => {
+    while (next < urls.length) {
+      throwControl(null, controller.signal);
+      const index = next++, url = urls[index];
+      progress?.(`正在读取第 ${index + 1}/${urls.length} 页`);
+      try {
+        const text = await read(url, controller.signal, parallel);
+        throwControl(null, controller.signal);
+        pages[index] = { ...(await save(url, text)), read: true };
+      } catch (error) {
+        try { throwControl(error, controller.signal); }
+        catch (control) { controller.abort(control); throw control; }
+        if (error.code === 'PRIVATE_NETWORK_BLOCKED') { controller.abort(error); throw error; }
+        pages[index] = { url, read: false, error: receiptText(error.message || '读取失败').slice(0, 300), code: receiptField(error.code || '', 80) };
+      }
     }
-  }
+  };
+  // 仅纯公网直读且已预留预算才并发；带付费代读/未知预算仍沿用逐页行为。
+  try { await Promise.all(Array.from({ length: parallel ? Math.min(2, urls.length) : 1 }, worker)); }
+  catch (error) { controller.abort(error); throw error; }
+  finally { signal?.removeEventListener('abort', stop); }
   if (!pages.some(page => page.read)) throw Object.assign(new Error('多页读取均未取得正文：\n' + pages.map(page => `${page.url}：${page.error}`).join('\n')), { code: 'FETCH_PAGES_FAILED', kind: 'api' });
   const receipts = pages.map(page => ({
     url: page.url, ...(page.requestedUrl && page.requestedUrl !== page.url && { requestedUrl: page.requestedUrl }), read: page.read,

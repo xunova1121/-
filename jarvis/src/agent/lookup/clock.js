@@ -24,6 +24,10 @@ export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs, cloc
   let extensive = extensiveRetrieval(text), started = null, calls = 0, failed = 0, reason = '', override = null;
   let researchLimits = null;
   const duration = () => override ?? timeBudgetMs ?? (strict ? VERIFICATION_MS : extensive ? DEEP_RETRIEVAL_MS : QUICK_RETRIEVAL_MS);
+  const limitFor = kind => {
+    const base = (strict ? { search: 20, read: 16 } : !extensive ? limits : {})[kind];
+    return researchLimits ? Math.min(researchLimits[kind] ?? Infinity, strict ? base ?? Infinity : Infinity) : base ?? Infinity;
+  };
   const check = () => {
     if (!reason && started !== null) {
       if ((clock && clock.retrievalRemaining() <= 0 || duration() > 0 && now() - started >= duration())) reason = '本轮联网检索已达到时间预算';
@@ -38,11 +42,25 @@ export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs, cloc
     consume(kind) {
       // 整轮已收尾时，写清是哪一类先用完、这次哪一步没执行（用户 2026-10-29：读网页却报“search 调用已达到预算”，看不懂）
       if (reason || started !== null && (clock && clock.retrievalRemaining() <= 0 || duration()>0 && now()-started>=duration())) throw Object.assign(new Error(`${reason || '本轮联网检索已达到时间预算'}，这次${KIND_LABEL[kind] || kind}没有执行`), {code:'RETRIEVAL_BUDGET'});
-      const baseLimit = (strict ? { search:20, read:16 } : !extensive ? limits : {})[kind];
-      const limit = researchLimits ? Math.min(researchLimits[kind] ?? Infinity, strict ? baseLimit ?? Infinity : Infinity) : baseLimit;
+      const limit = limitFor(kind);
       // 某一类用完：整轮检索就此收尾（主循环下一步会让模型直接用已有资料回答，而不是换个工具接着查）
       if (limit && resources[kind] >= limit) { reason ||= `${researchLimits ? '本轮调研' : strict ? '逐项核验' : '普通查询'}的${KIND_LABEL[kind] || kind}（${kind}）预算已用完（${limit}次）`; throw Object.assign(new Error(reason), { code:'RETRIEVAL_BUDGET' }); }
       if (kind in resources) resources[kind]++;
+    },
+    /** 先原子预留整个批次才准许并发。额度不够返回null，调用方沿用逐页路径。 */
+    reserve(kind, count) {
+      if (!(kind in resources) || !Number.isInteger(count) || count < 1 || count > 3) return null;
+      if (check() || resources[kind] + count > limitFor(kind)) return null;
+      resources[kind] += count;
+      let unused = count;
+      return {
+        take() {
+          if (check()) throw Object.assign(new Error(reason), { code: 'RETRIEVAL_BUDGET' });
+          if (!unused) throw new Error('读取预留额度已用完');
+          unused--;
+        },
+        release() { resources[kind] -= unused; unused = 0; }
+      };
     },
     get active() { return started !== null; },
     get resources() { return {...resources}; },

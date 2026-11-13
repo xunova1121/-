@@ -2,6 +2,7 @@ import { PHONE_GUIDANCE } from '../../shared/phoneControl.js';
 import { isRetrievalStop } from '../../shared/retrievalStop.js';
 import { DOCUMENT_TASK_CORE, documentRouteNote } from './documentToolProfile.js';
 import { taskToolCore } from './taskToolProfile.js';
+import { projectLookupMessages, compactLookupReceipt } from './requestContext.js';
 import { resolveTaskIntent } from '../core/taskIntent.js';
 import { estimateTokens, contextBudget } from './contextBudget.js';
 import { createCapabilityUpgrade, UPGRADE_CALLS } from './capabilityUpgrade.js';
@@ -42,7 +43,7 @@ import { reusesPreSearch } from './preSearch.js';
 import { reviewPeriod, periodBlock } from './periodReview.js';
 import { runHedged } from './hedgedRequest.js';
 import { finishAgentRun } from './agentCompletion.js';
-import { measureModelInput } from '../../shared/modelMetrics.js';
+import { measureModelInput, measureModelTokens } from '../../shared/modelMetrics.js';
 import { QUICK_MODEL_ATTEMPTS } from './lookupWindow.js';
 import { createExecutionReview } from './executionReview.js';
 import { conciseTool } from './toolDescriptions.js';
@@ -65,7 +66,7 @@ import { capabilityBlock, dialoguePolicy, needsActionTools } from './dialoguePol
  */
 import { EmotionTagStripper } from '../../shared/emotionTag.js';
 import { withLookupDeadline, isQuickLookup, COMPLEX } from './lookupDeadline.js';
-import { createRetrievalBudget } from './retrievalBudget.js';
+import { createRetrievalBudget, extensiveRetrieval } from './retrievalBudget.js';
 import * as sessions from './sessions.js';
 import * as memory from './memory.js';
 import * as kb from './knowledge.js';
@@ -266,7 +267,7 @@ export function trimComputerScreenshots(messages,keep=2) {
   for(const m of screens.slice(0,-2)) { try { const receipt=JSON.parse(m.content); delete receipt.screen; m.content=JSON.stringify({...receipt,note:'旧手机屏幕已移除，请用最新屏幕编号操作'}); } catch { /* 非结构化报错保持原文 */ } }
 }
 
-async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, maxTotalSteps = null, codeWork = null, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, isolated = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false, describeImages = null, visionLabel = '看图模型', readImageText = null, modelNote = '', hedgeMs = 0, lookupModel = null, retrievalText = null, lookupPreferences = null, lookupClassifier = null, taskIntent = null, capabilityRoutes = [], agent = null }) {
+async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, maxTotalSteps = null, codeWork = null, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, isolated = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false, describeImages = null, visionLabel = '看图模型', readImageText = null, modelNote = '', hedgeMs = 0, lookupModel = null, lookupAnswerModel = null, retrievalText = null, lookupPreferences = null, lookupClassifier = null, taskIntent = null, capabilityRoutes = [], agent = null }) {
   // 智能体对话：工具只在原有范围里收窄，用户选择附加到本轮要求（见 agentTurn.js）
   if (agent?.profile) { tools = narrowAgentTools(tools, agent.profile); requirementText = withAgentRequirement(requirementText, agent); }
   const agentNote = [agentPromptNote(agent?.profile), agent?.profile && agent.note && `本轮${agent.note}（来自智能体页面上的选择，和用户原话同样要遵守）`].filter(Boolean).join('\n');
@@ -412,19 +413,19 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     complaint = !images.length && lookupComplaint(said.at(-1));
     if (!singleDocumentTask(said.join('\n')) && !own.some(tool => tool.name === plan.tool.name)) {
       own.push(plan.tool);
-      loader = createToolLoader([...tools, ...own]);
+      loader = createToolLoader([...tools, ...own], { core: taskToolCore(taskIntent, currentRequest, { images, computerTask, strict: pipelineContext }) });
       toolHint = loader.hint();
     }
     // 常识期间追加动作也必须恢复原能力，不能把文件、记忆或电脑任务裁掉。
-    if (questionProfile) { questionProfile = null; tools = availableTools; loader = createToolLoader([...tools, ...own]); toolHint = loader.hint(); }
+    if (questionProfile) { questionProfile = null; tools = availableTools; loader = createToolLoader([...tools, ...own], { core: taskToolCore(taskIntent, currentRequest, { images, computerTask, strict: pipelineContext }) }); toolHint = loader.hint(); }
     onTaskUpdate?.(said.join("\n"));
     if (COMPLEX.test(said.join("\n")) || creativeWithoutLookup(currentRequest) || computerNote) { infoPrompt = false; lookupDeadline = false; }
-    if (light) { light=false; tools=availableTools; loader=createToolLoader([...tools,...own]); toolHint=loader.hint(); }
+    if (light) { light=false; tools=availableTools; loader=createToolLoader([...tools,...own], { core: taskToolCore(taskIntent, currentRequest, { images, computerTask, strict: pipelineContext }) }); toolHint=loader.hint(); }
     const nextSportsNews = !images.length && !codeWork?.enabled && sportsNewsIntent(currentRequest, { history });
     if (sportsNewsOnly || nextSportsNews) {
       sportsNewsOnly = nextSportsNews;
       tools = availableTools.filter(tool => !sportsNewsOnly || tool.name !== 'get_sports_scores' && (tool.name !== 'get_today_news' || supportsSportsNews(tool)));
-      loader = createToolLoader([...tools, ...own]); toolHint = loader.hint();
+      loader = createToolLoader([...tools, ...own], { core: taskToolCore(taskIntent, currentRequest, { images, computerTask, strict: pipelineContext }) }); toolHint = loader.hint();
     }
     if(said.some(s=>computerTaskKind(s)==='gui')){loadGUI();toolHint=loader.hint();}
     retrieval.upgrade(said.join("\n"));
@@ -490,7 +491,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     if (found && !['failed', 'input'].includes(found.recovery?.state) && offSubject(found.output, intent.params?.subject)) {
       found = { ...found, recovery: { state: 'failed', attempts: [...(found.recovery?.attempts || []), { label: `${found.tool === 'get_today_news' ? '今日新闻汇总' : '首次查询'}（结果里没有“${intent.params.subject}”相关内容）`, failure: 'empty' }] } };
     }
-    if (found) { if (found.recovery && found.recovery.state !== 'fresh') lookupDelivery.record({ name: found.tool, args: found.args, ok: !['failed', 'input'].includes(found.recovery.state), output: found.output, lookupRecovery: found.recovery }); preFound = found; convo.at(-1).content = `${convo.at(-1).content}\n\n${found.recovery?.state === 'failed' && !signal?.aborted ? selfDrive(found.recovery) : lookupReceiptData(found)}`; }
+    if (found) { if (found.recovery && found.recovery.state !== 'fresh') lookupDelivery.record({ name: found.tool, args: found.args, ok: !['failed', 'input'].includes(found.recovery.state), output: found.output, lookupRecovery: found.recovery }); preFound = found; emit({ type: 'diagnostic', phase: 'lookup_evidence_ready', kind: intent.kind, useful: !['failed', 'input'].includes(found.recovery?.state) && Boolean(found.output) }); convo.at(-1).content = `${convo.at(-1).content}\n\n${found.recovery?.state === 'failed' && !signal?.aborted ? selfDrive(found.recovery) : lookupReceiptData(extensiveRetrieval(requirementText) ? found : compactLookupReceipt(found, archive))}`; }
     toolHint = loader.hint();
   }
 
@@ -529,7 +530,10 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     const lookupEnabled = Boolean(lookupModel) && (infoPrompt || todayNewsIntent(requirementText)) && !light && !images.length && !codeWork?.enabled;
     const phase = lookupPhase({ enabled: lookupEnabled, step, closing, preFound, messages: convo, final: lookupFinal });
     const holding = makingFile || Boolean(checkedText) || guardedAnswer || lookupEnabled && !phase && !lookupJudged;
-    const requestCurrent = phase ? lookupModel : cur;
+    const latestData = convo.at(-1);
+    const fastData = step === 0 && !['failed', 'input', 'cached'].includes(preFound?.recovery?.state) && ['get_weather', 'get_market_quote', 'get_stock_kline'].includes(preFound?.tool) || lookupDelivery.hasResults && latestData?.role === 'tool' && !latestData.isError && ['web_search', 'fetch_url', 'fetch_json', 'get_weather', 'get_market_quote', 'get_stock_kline'].includes(latestData.name);
+    const fastAnswer = lookupAnswerModel && fastData && !upgraded && !images.length && !computerTask && !makingFile && !codeWork?.enabled && !review.report().contract.calculation && !review.report().sourceRequirement && !extensiveRetrieval(currentRequest) && !/计算|核[实验对]|查证|分析|对比|比较/.test(currentRequest);
+    const requestCurrent = fastAnswer ? lookupAnswerModel : phase ? lookupModel : cur;
     const showText = (text) => {
       request.clearSearchTimer();
       stepText += text;
@@ -565,17 +569,19 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     // 测量实际发送的提示与工具说明，动态规则和短说明均计入字符数。
     // 用的哪个模型：中途换了备用的，也照实写
     const responseNote = [responseGuidance(currentRequest, history, { light, compact: Boolean(questionProfile), model: requestCurrent?.model || model, hasImages: images.length > 0, visibleText: String(convo.filter(m => m.role === 'user').at(-1)?.content || '').slice(0, 1800) })].filter(Boolean).join('\n');
-    const usingNote = phase ? `本次${phase === 'lookup_plan' ? '检索规划' : '资料取舍与回答'}使用已配置推理模型 ${requestCurrent.model}。` : upgraded ? `当前由用户配置的能力模型 ${cur.model} 继续完成原任务；最多${UPGRADE_CALLS}次请求，原任务预算不增加。` : modelNote && (cur.model !== model ? `${modelNote}\n（原定的 ${model} 出错了，这一轮实际换成了 ${cur.model}。）` : modelNote);
+    const usingNote = fastAnswer ? `本次公开数据已取得，使用用户配置的日常回答模型 ${requestCurrent.model} 整理；仍须保留来源、日期和数值口径。` : phase ? `本次${phase === 'lookup_plan' ? '检索规划' : '资料取舍与回答'}使用已配置推理模型 ${requestCurrent.model}。` : upgraded ? `当前由用户配置的能力模型 ${cur.model} 继续完成原任务；最多${UPGRADE_CALLS}次请求，原任务预算不增加。` : modelNote && (cur.model !== model ? `${modelNote}\n（原定的 ${model} 出错了，这一轮实际换成了 ${cur.model}。）` : modelNote);
     const measuredSystem = questionProfile ? [BASIC_ANSWER_PROMPT, [ctx.dynamic, agentNote, usingNote, responseNote, imagePreferenceNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : light ? [LIGHT_PROMPT, [ctx.dynamic, agentNote, usingNote, responseNote, imagePreferenceNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, agentNote, usingNote, dialoguePolicy(review.report().request), responseNote, imagePreferenceNote, capabilities, computerNote, requirementContext, toolHint, singleDocumentTask(review.report().request) && '单份文档由文档引擎内部规划和检查；如需外层计划只列一次，不用update_plan逐节重复同步。有效产物回执可直接交付，不重复查找、读回或重做。', review.contractNote(), documentRouteNote(review.report().request), creativeWithoutLookup(currentRequest) && CREATIVE_NOTE, voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
     const measuredTools = lookupFinal ? [] : closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list();
     const requestTools = measuredTools.filter((tool) => allowWebSearch || !WEB_TOOLS.has(tool.name) && tool.name !== 'delegate_task').map(conciseTool);
-    emit({ type: 'diagnostic', phase: 'model_start', model: requestCurrent.model, protocol: requestCurrent.adapter.kind, closing, purpose: phase || callPurpose(convo, closing), ...measureModelInput({ system: measuredSystem, messages: convo, tools: requestTools }), inputChars: convo.reduce((sum, item) => sum + String(item.content || '').length, 0) });
+    const projection = projectLookupMessages(convo, { historyLength: history.length, archive, query: currentRequest, enabled: retrieval.intent?.lookup === true && !light && !images.length && !history.some(message => message.images?.length) && !computerTask && !makingFile && !codeWork?.enabled && !pipelineContext && infoPrompt && !extensiveRetrieval(currentRequest) });
+    if (projection.savedChars || projection.droppedMessages) emit({ type: 'diagnostic', phase: 'request_context', savedChars: projection.savedChars, droppedMessages: projection.droppedMessages });
+    emit({ type: 'diagnostic', phase: 'model_start', model: requestCurrent.model, protocol: requestCurrent.adapter.kind, closing, purpose: phase || callPurpose(convo, closing), ...measureModelInput({ system: measuredSystem, messages: projection.messages, tools: requestTools }), ...measureModelTokens({ system: measuredSystem, messages: projection.messages, tools: requestTools }), inputChars: projection.messages.reduce((sum, item) => sum + String(item.content || '').length, 0) });
     try {
     if (upgraded && ++upgradeCalls > UPGRADE_CALLS) throw Object.assign(new Error('本轮能力模型调用预算已用完，保留已完成的工作；未完成部分不能称已交付'), { code: 'CAPABILITY_BUDGET' });
     modelAttempts++;
-    const input = { system: measuredSystem, messages: convo, tools: requestTools };
+    const input = { system: measuredSystem, messages: projection.messages, tools: requestTools };
     // 主模型 hedgeMs 内没反应：同时问备用模型，谁先有反应用谁（写文件的任务前面本来就要等很久，不这样做）
-    if (!phase && hedgeMs > 0 && backups.length && !holding && !makingFile) {
+    if (!phase && !fastAnswer && hedgeMs > 0 && backups.length && !holding && !makingFile) {
       const next = backups[0];
       // 备用模型的系统说明里写它自己的名字：原先两边共用主模型那份，备用模型答完却自称是另一个模型
       const backupNote = modelNote ? `${modelNote}\n（原定的 ${model} 出错或太慢，这一轮实际由 ${next.model} 回答。）` : '';
@@ -629,6 +635,12 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         continue; // 本次不完整的原生搜索协议不再续传；下一轮关闭搜索、仅整理已有资料
       }
       // 自动重试也没救回来：这一步还没输出文字的话换备用模型接着做（已经输出了一半就不换，免得前后两截）
+      if (fastAnswer && !stepText.trim() && canFallback(e)) {
+        lookupAnswerModel = null;
+        emit({ type: 'fallback', from: requestCurrent.model, to: phase ? lookupModel.model : cur.model, reason: '日常回答线路不可用，恢复原模型' });
+        step--;
+        continue;
+      }
       if (phase && !stepText.trim() && canFallback(e)) {
         lookupModel = null;
         emit({ type: 'fallback', from: requestCurrent.model, to: cur.model, reason: '推理线路不可用，恢复主模型' });
@@ -653,7 +665,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       if (rest.text) { if (holding) held += rest.text; else { const visible = repositoryStream.push(rest.text); if (visible) showText(visible); } }
     }
     if (!holding) { const tail = repositoryStream.push('', true); if (tail) showText(tail); }
-    if (lookupEnabled && !phase && !lookupJudged && !r.toolCalls.length && r.stop !== 'pause_turn' && lookupDelivery.hasResults && (!review.report().sourceRequirement || review.report().candidateSources.length) && !review.report().contract.calculation && held.trim()) {
+    if (lookupEnabled && !fastAnswer && !phase && !lookupJudged && !r.toolCalls.length && r.stop !== 'pause_turn' && lookupDelivery.hasResults && (!review.report().sourceRequirement || review.report().candidateSources.length) && !review.report().contract.calculation && held.trim()) {
       // 中间主模型若直接写了答案，最多转交推理档一次作最终取舍；不额外做一次规划，也不先展示未审的两份答案。
       convo.push({ role: 'assistant', content: held, toolCalls: [], raw: r.raw });
       convo.push({ role: 'user', content: '（系统最终取舍：依据本轮真实工具资料核对上段候选回答，给用户一份最终答复，不回应检查。保留具体内容和真实来源，冲突与未核实部分说明，不再搜索或调用工具。）' });
@@ -723,7 +735,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       const maxChecks = wroteCode || review.report().contract.coding ? 2 : 1;
       const calcPending = !guardedAnswer && canReview && review.report().contract?.calculation && review.report().calculation === 'not_checked';
       const note = (!closing || retrieval.extensive) && checks < maxChecks && (review.required() || calcPending || unfinished(plan.steps).length > 0) && !light && cur.adapter.kind !== 'mock' ? [finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }), (review.required() && canReview && !lookupDeadline) || calcPending ? review.guidance() : ''].filter(Boolean).join('\n') : '';
-      if (!note) { answerCompleted = Boolean(stepText.trim()); break; }
+      if (!note) { answerCompleted = Boolean(stepText.trim()); if (answerCompleted) emit({ type: 'diagnostic', phase: 'answer_committed' }); break; }
       checks++;
       // 以用户身份发给模型，但必须说清是系统核对：以前模型会回“你说得对，我来逐项核实”，再写一大段复盘
       convo.push({ role: 'user', content: `（以下是系统自动核对，不是用户说的话：不要回应它、不要道歉或复盘，也不要把已经给用户的回答再写一遍；需要补做的直接补，补完只写有变化的地方；没有要补的就直接结束，不要再写任何字。）\n${note}` });

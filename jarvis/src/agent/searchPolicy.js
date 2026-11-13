@@ -18,12 +18,19 @@ export function searchBackoff(error) {
   return 0;
 }
 
-export function guardedSearchRoute(engine, id, now = Date.now) {
+export function guardedSearchRoute(engine, id, now = Date.now, profiles = null) {
   if (!engine) return null;
   let until = 0;
   let failures = 0;
+  const latencies = profiles?.get(id) || []; // 每个账号/来源实例最多8个耗时样本，不保存查询内容。
+  if (profiles && profiles.size < 8) profiles.set(id, latencies);
   return {
     ...engine,
+    get staggerMs() {
+      if (!latencies.length) return 1200;
+      const sorted = [...latencies].sort((a, b) => a - b);
+      return Math.max(500, Math.min(2500, Math.round(sorted[Math.ceil(sorted.length * 0.8) - 1] * 0.8)));
+    },
     async search(query, count, options = {}) {
       if (options.signal?.aborted) throw options.signal.reason;
       const context = options.routeContext;
@@ -35,9 +42,14 @@ export function guardedSearchRoute(engine, id, now = Date.now) {
       if (until > now() || failed?.has(id)) {
         throw Object.assign(new Error(`${engine.name}本轮暂停，继续其他搜索来源`), { code: 'SEARCH_ROUTE_PAUSED', skipped: true });
       }
+      const started = now();
       try {
         const result = await engine.search(query, count, options);
         failures = 0;
+        if (!options.signal?.aborted) {
+          latencies.push(Math.max(0, now() - started));
+          if (latencies.length > 8) latencies.shift();
+        }
         return result;
       } catch (error) {
         // 用户停止、总预算到期和换源取消不属于服务商故障。

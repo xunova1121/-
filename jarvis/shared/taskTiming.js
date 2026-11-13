@@ -11,6 +11,10 @@ export function createTaskTiming(createdAt, now = Date.now) {
   let inputTextChars = 0, inputTextSamples = 0, systemChars = 0, toolSchemaChars = 0;
   let delegateTasks = 0;
   let lookupBudget = null;
+  let evidenceReadyAt = null, answerCandidateAt = null, meaningfulAnswerAt = null;
+  let requestSavedChars = 0, droppedMessages = 0;
+  const estimatedInputTokens = { system: 0, dialogue: 0, toolResults: 0, schemas: 0 };
+  let estimatedSamples = 0;
   const activeTools = new Set();
   // 每次模型调用的明细（只记用途、型号、耗时、Token，不记内容）：评测看哪一步多、哪一步慢
   const calls = [], openCalls = new Map(), rewrites = {};
@@ -35,6 +39,19 @@ export function createTaskTiming(createdAt, now = Date.now) {
       if (endedAt != null) return;
       const t = now();
       phases.event(e, t);
+      if (e.type === 'diagnostic' && e.phase === 'lookup_evidence_ready' && e.useful && evidenceReadyAt == null) evidenceReadyAt = t;
+      if (e.type === 'diagnostic' && e.phase === 'model_start') answerCandidateAt = null;
+      if (e.type === 'tool_start') answerCandidateAt = null;
+      if (e.type === 'text' && String(e.delta ?? '').trim() && answerCandidateAt == null) answerCandidateAt = t;
+      if (e.type === 'diagnostic' && e.phase === 'answer_committed' && meaningfulAnswerAt == null) meaningfulAnswerAt = answerCandidateAt;
+      if (e.type === 'diagnostic' && e.phase === 'request_context') {
+        requestSavedChars += Math.max(0, e.savedChars || 0);
+        droppedMessages += Math.max(0, e.droppedMessages || 0);
+      }
+      if (e.type === 'diagnostic' && ['model_start', 'helper_start'].includes(e.phase) && Number.isFinite(e.estimatedSystemTokens)) {
+        estimatedSamples++;
+        for (const [key, field] of Object.entries({ system: 'estimatedSystemTokens', dialogue: 'estimatedDialogueTokens', toolResults: 'estimatedToolResultTokens', schemas: 'estimatedSchemaTokens' })) estimatedInputTokens[key] += Math.max(0, e[field] || 0);
+      }
       if (e.type === 'diagnostic' && e.phase === 'lookup_budget' && Number.isFinite(e.targetMs) && Number.isFinite(e.hardLimitMs)) {
         lookupBudget = { kind: String(e.kind).slice(0, 24), targetMs: e.targetMs, hardLimitMs: e.hardLimitMs };
       }
@@ -105,6 +122,8 @@ export function createTaskTiming(createdAt, now = Date.now) {
         queueMs: elapsed(createdAt, startedAt ?? t),
         executionMs: elapsed(startedAt, t), totalMs: elapsed(createdAt, t),
         firstTextMs: elapsed(createdAt, firstTextAt), contextMs,
+        meaningfulAnswerMs: elapsed(createdAt, meaningfulAnswerAt), evidenceReadyMs: elapsed(createdAt, evidenceReadyAt),
+        requestSavedChars, droppedMessages, estimatedInputTokens: { ...estimatedInputTokens }, estimatedSamples,
         modelMs: modelMs + (modelOpen == null ? 0 : elapsed(modelOpen, t)),
         toolMs: toolMs + (toolOpen == null ? 0 : elapsed(toolOpen, t)),
         inputChars: inputCharSamples === modelCalls && modelCalls > 0 ? inputChars : null,

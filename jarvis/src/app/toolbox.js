@@ -1,4 +1,6 @@
 import { createPhoneTools } from '../agent/phoneTools.js';
+import { createLookupRuntime } from '../agent/lookupRuntime.js';
+import * as workspace from '../agent/workspace.js';
 import { editImage } from '../llm/imageEdit.js';
 import { localLookup } from './lookup.js';
 import { qweatherConfig } from '../core/qweather.js';
@@ -22,6 +24,7 @@ import { $, body, DESKTOP, COMPACT, toast, storage } from './env.js';
 import { ocrLine, recognizeText } from '../llm/ocr.js';
 
 export function createToolbox(app) {
+  const lookupRuntime = createLookupRuntime();
   /** 本次会话里用户选了“本次都允许”的操作类别 */
   const sessionApprovals = new Set();
   /** 电脑操作（鼠标键盘）进行中：一轮结束或被打断时把未央窗口放回来 */
@@ -81,6 +84,7 @@ export function createToolbox(app) {
     };
     return [
       ...createTools({
+        ...(await lookupRuntime(app.server || `local:${workspace.mode()}:${workspace.folderName() || ''}`, app.llmConfig)),
         metrics: app.metrics,
         ...deepseekSearchOptions(app.llmConfig),
         ...openaiSearchOptions(app.llmConfig),

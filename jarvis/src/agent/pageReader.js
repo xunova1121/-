@@ -11,6 +11,7 @@ import { htmlToText, parseFile } from './docs.js';
 import { pageLinks, appendPageLinks, LINK_MARKER } from './pageLinks.js';
 import { webBody } from './webBody.js';
 import { withWebDeadline } from './retrievalBudget.js';
+import { createPublicReadCache, publicPageTtl } from './publicReadCache.js';
 
 const CACHE_MS = 15 * 60e3;
 const PAGE_LIMIT = 60000; // 每页上限配合60条缓存，避免长期保留整站巨大正文。
@@ -41,6 +42,7 @@ export function createPageReader(options = {}) {
   const deepseek = createDeepseekSearch(options);
   const get = (url, init) => (fetchViaGateway ? fetchViaGateway(url, init) : fetchImpl(url, init));
   const cache = new Map();
+  const publicCache = options.publicReadCache || createPublicReadCache({ now, maxChars: PAGE_LIMIT + 4000 });
   const failures = new Map();
   const blocked = new Map(); // 两次明确拒绝后暂不直抓该站；有代读服务仍可尝试代读
 
@@ -77,12 +79,15 @@ export function createPageReader(options = {}) {
     return boundedPage(text);
   }
 
-  return (url, options = {}) => withWebDeadline(signal => read(url, { ...options, signal }), { signal: options.signal, timeoutMs: 8000 });
+  const reader = (url, options = {}) => withWebDeadline(signal => read(url, { ...options, signal }), { signal: options.signal, timeoutMs: 8000 });
+  reader.publicOnly = !deepseek && !tavilyKey;
+  return reader;
 
-  async function read(url, { signal, progress, consume } = {}) {
+  async function read(url, { signal, progress, consume, refresh = false } = {}) {
     if (signal?.aborted) throw Object.assign(new Error('已停止读取网页'), { name: 'AbortError' });
     const hit = cache.get(url);
-    if (hit && now() - hit.at < CACHE_MS) return hit.text;
+    const ttl = Math.min(CACHE_MS, publicPageTtl(url));
+    if (!refresh && hit && now() >= hit.at && now() - hit.at < ttl) return hit.text;
     const failure = failures.get(url);
     if (failure && now() - failure.at < 60_000) throw Object.assign(new Error('该链接刚刚读取失败，暂不重复访问：' + failure.message), failure.type);
     let text = '';
@@ -108,7 +113,12 @@ export function createPageReader(options = {}) {
       if (!text) {
         if (triedDeepseek) consume?.('read');
         const directMs = tavilyKey ? 4000 : 8000;
-        text = await withWebDeadline((readSignal) => retryRead((activeSignal) => direct(url, activeSignal), { signal: readSignal, timeoutMs: directMs, beforeAttempt: attempt => { if (attempt) consume?.('read'); } }), { signal, timeoutMs: directMs });
+        const directRead = activeSignal => {
+          // 只共享无任务副作用的单次直读。重试、额度、失败记录仍归各订阅任务，不能借用首个任务的consume。
+          const load = sharedSignal => direct(url, sharedSignal);
+          return !deepseek && !tavilyKey && !refresh ? publicCache.read(url, load, { signal: activeSignal }) : load(activeSignal);
+        };
+        text = await withWebDeadline((readSignal) => retryRead(directRead, { signal: readSignal, timeoutMs: directMs, beforeAttempt: attempt => { if (attempt) consume?.('read'); } }), { signal, timeoutMs: directMs });
       }
     } catch (e) {
       throwControl(e, signal);

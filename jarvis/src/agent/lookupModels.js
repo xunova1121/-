@@ -6,6 +6,16 @@ export function createLookupModel(cfg, makeAdapter) {
   const selected = makeAdapter(route.cfg);
   return selected.problem || !selected.adapter || !selected.model ? null : { adapter: selected.adapter, model: selected.model };
 }
+/** 仅采用用户亲手配置的日常回答分工，不猜模型名、不改固定模型。 */
+export function createLookupAnswerModel(cfg, makeAdapter) {
+  if (cfg.pinModel) return null;
+  const route = routeFor(cfg, 'chat');
+  const own = cfg.abilities?.chat?.main;
+  const selectedDefault = own?.provider === cfg.provider && own?.model && own.model === cfg.models?.[cfg.provider];
+  if (!route.routed && !selectedDefault) return null;
+  const selected = makeAdapter(route.cfg);
+  return selected.problem || !selected.adapter || !selected.model ? null : { adapter: selected.adapter, model: selected.model };
+}
 export function lookupPhase({ enabled, step, closing, preFound, messages, final = false }) {
   if (!enabled) return '';
   if (final || closing || preFound?.tool === 'get_today_news') return 'lookup_judgment';

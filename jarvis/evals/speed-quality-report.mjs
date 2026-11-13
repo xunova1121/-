@@ -9,16 +9,17 @@ export function distribution(values) {
 export function speedQualityReport(report) {
   const turns = (report.results || []).flatMap(item => (item.runs || []).flatMap(run => (run.turns || []).map((turn, index) => {
     const timing = turn.timing || {};
-    const phases = ['contextMs', 'modelWaitMs', 'modelOutputMs', 'searchMs', 'readMs', 'otherToolMs'].filter(key => valid(timing[key])).map(key => ({ phase: key, ms: timing[key] })).sort((a, b) => b.ms - a.ms);
+    const phases = ['queueMs', 'contextMs', 'modelWaitMs', 'modelOutputMs', 'searchMs', 'readMs', 'otherToolMs'].filter(key => valid(timing[key])).map(key => ({ phase: key, ms: timing[key] })).sort((a, b) => b.ms - a.ms);
     return { id: item.id, group: item.group, attempt: run.attempt, turn: index + 1, status: turn.status, totalMs: valid(turn.clientTotalMs) ? turn.clientTotalMs : null, firstTextMs: valid(timing.firstTextMs) ? timing.firstTextMs : null,
-      firstUsefulAnswerMs: null, usefulAnswerReview: '需逐轮核对流式内容；首字可能只是过程说明，不能替代有效答案时间',
+      firstUsefulAnswerMs: valid(timing.meaningfulAnswerMs) ? timing.meaningfulAnswerMs : null, usefulAnswerReview: '以应用提交的最终答复片段首字计时，过程说明不计；语义质量仍须独立复核',
+      evidenceReadyMs: valid(timing.evidenceReadyMs) ? timing.evidenceReadyMs : null, estimatedInputTokens: timing.estimatedSamples ? timing.estimatedInputTokens : null, actualTokens: timing.tokens ?? null,
       modelCalls: timing.modelCalls ?? null, failedTools: timing.failedTools ?? null, inputTextChars: timing.inputTextChars ?? null, toolSchemaChars: timing.toolSchemaChars ?? null,
       phases, tools: timing.tools || {}, rewrites: timing.rewrites || {}, semantic: run.judgement ? { pass: run.judgement.pass ?? null, error: Boolean(run.judgement.error) } : null };
   })));
   const done = turns.filter(turn => turn.status === 'done');
   return { suiteVersion: report.suiteVersion, conditions: report.conditions, note: '按轮统计；完成样本耗时与失败数量分开。阶段可能重叠，不相加归因；样本少时P90仅作描述。无评审不算质量通过。',
     totals: { turns: turns.length, completed: done.length, other: turns.length - done.length },
-    groups: [...new Set(turns.map(t => t.group))].map(group => { const rows = done.filter(t => t.group === group); return { group, completed: rows.length, totalMs: distribution(rows.map(t => t.totalMs)), firstTextMs: distribution(rows.map(t => t.firstTextMs)), firstUsefulAnswerMs: null }; }),
+    groups: [...new Set(turns.map(t => t.group))].map(group => { const rows = done.filter(t => t.group === group); return { group, completed: rows.length, totalMs: distribution(rows.map(t => t.totalMs)), firstTextMs: distribution(rows.map(t => t.firstTextMs)), firstUsefulAnswerMs: rows.some(row => valid(row.firstUsefulAnswerMs)) ? distribution(rows.map(t => t.firstUsefulAnswerMs)) : null }; }),
     slowest: [...turns].filter(t => valid(t.totalMs)).sort((a, b) => b.totalMs - a.totalMs).slice(0, 12), turns };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -213,7 +213,7 @@ export function searchEngines(options = {}) {
 
 export function createSearch(options = {}) {
   const { bochaKey, tavilyKey, fetchViaGateway, searchRegion = 'auto' } = options;
-  const guard = (engine, id) => guardedSearchRoute(engine, id, options.now);
+  const guard = (engine, id) => guardedSearchRoute(engine, id, options.now, options.searchTimings);
   const custom = guard(createOpenaiSearch(options), 'openai-compatible');
   const qianfan = guard(createQianfanSearch(options), 'qianfan');
   const deepseek = guard(createDeepseekSearch(options), 'deepseek');
@@ -230,7 +230,7 @@ export function createSearch(options = {}) {
       if (opts.signal?.aborted) throw opts.signal.reason;
       const zh = /[\u4e00-\u9fff]/.test(query);
       const order = (zh ? [custom, qianfan, deepseek, bocha, keyless, tavily] : [custom, deepseek, qianfan, tavily, bocha, keyless]).filter(Boolean);
-      return staggeredSearch(order, query, n, opts, [custom, qianfan, deepseek].filter(Boolean));
+      return staggeredSearch(order, query, n, opts, [custom, qianfan, deepseek].filter(Boolean), engine => engine.staggerMs);
     }
   };
 }
@@ -251,6 +251,7 @@ export function staggeredSearch(order, query, n, opts = {}, preferred = null, st
       done = true;
       clearTimeout(timer);
       outer?.removeEventListener('abort', stop);
+      outer?.removeEventListener('abort', finish);
       ctrl.abort();
       if (outer?.aborted) reject(outer.reason ?? Object.assign(new Error('aborted'), { name: 'AbortError' }));
       else if (controlFailure) reject(controlFailure);
@@ -261,7 +262,8 @@ export function staggeredSearch(order, query, n, opts = {}, preferred = null, st
     if (outer?.aborted) return finish();
     outer?.addEventListener('abort', finish, { once: true });
     const launch = () => {
-      if (done || started >= order.length) return;
+      // 含收费来源的投机请求也最多同时2个，不能因慢源无限增加在途收费调用。
+      if (done || started >= order.length || started - settled >= 2) return;
       const e = order[started++];
       opts.progress?.('正在尝试' + e.name);
       // 同词换源不重复扣逻辑搜索预算。
@@ -296,10 +298,14 @@ export function staggeredSearch(order, query, n, opts = {}, preferred = null, st
             // 已开始的都回来了还不够：马上问下一个，没有下一个就收尾
             if (started < order.length) launch();
             else finish();
-          }
+          } else if (started < order.length && started - settled < 2 && !timer) launch();
         });
       clearTimeout(timer);
-      if (started < order.length) timer = setTimeout(launch, staggerMs);
+      timer = null;
+      if (started < order.length) {
+        const delay = typeof staggerMs === 'function' ? staggerMs(e) : staggerMs;
+        timer = setTimeout(() => { timer = null; launch(); }, Math.max(0, Number(delay) || 0));
+      }
     };
     launch();
   });

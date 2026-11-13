@@ -3,8 +3,9 @@ import { serverModelConfig } from './modelCredentials.mjs';
 import { chargeSearchRequest, chargeEvaluation, evaluationAdapter, evaluationModelFetch } from './evaluationAccess.mjs';
 import { presentationOverview } from './presentationOverview.mjs';
 import { createStockImages } from './stockImages.mjs';
-import { createLookupModel } from '../src/agent/lookupModels.js';
+import { createLookupModel, createLookupAnswerModel } from '../src/agent/lookupModels.js';
 import { createLookupService, memoryLookupStorage } from '../src/agent/lookup/service.js';
+import { createLookupRuntime } from '../src/agent/lookupRuntime.js';
 import { convertLegacyDoc } from './officeRender.mjs';
 import { codeProjectTools } from './codeProjectTools.mjs';
 import { codeFollowup, codeTaskPolicy, CODE_TASK_MS } from './codeTaskPolicy.mjs';
@@ -19,7 +20,7 @@ import { qweatherConfig } from '../src/core/qweather.js';
 import { deepseekSearchOptions } from '../src/agent/deepseekSearch.js';
 import { openaiSearchOptions } from '../src/agent/openaiSearch.js';
 import { evaluationTools, bindEvaluation } from './evaluation.mjs';
-import { measureModelInput } from '../shared/modelMetrics.js';
+import { measureModelInput, measureModelTokens } from '../shared/modelMetrics.js';
 import { createHelperLlm } from '../src/llm/helper.js';
 import { createEmbedder } from '../src/llm/embeddings.js';
 import { ocrLine, recognizeText } from '../src/llm/ocr.js';
@@ -146,6 +147,7 @@ export function serverApproves(ask, text) {
 }
 
 export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now, skillRunner = null, codeRepos = null, codeProjects = null, projectBaseDir, codeMaxSteps = 80, codeTaskMs = CODE_TASK_MS, lookupService = createLookupService({ get: publicFetch }), evaluationAccess = null, userAccess = null, phoneBroker = null }) {
+  const lookupRuntime = createLookupRuntime({ now });
   const stockByUser = new Map(); // 最多50个已绑定用户；缓存不能跨用户复用。
   const stockForUser = () => {
     const id = userAccess?.current() || 'owner';
@@ -213,6 +215,9 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
 
   function record(task, e) {
     task.timing?.event(e);
+    if (e.type === 'diagnostic' && e.phase === 'model_start') {
+      console.log(`[模型输入估算] ${task.id} ${JSON.stringify({ estimatedSystemTokens: e.estimatedSystemTokens ?? null, estimatedDialogueTokens: e.estimatedDialogueTokens ?? null, estimatedToolResultTokens: e.estimatedToolResultTokens ?? null, estimatedSchemaTokens: e.estimatedSchemaTokens ?? null, systemChars: e.systemChars ?? null, messageChars: e.messageChars ?? null, toolSchemaChars: e.toolSchemaChars ?? null })}`);
+    }
     if (['file','plan','task_state'].includes(e.type)) task.checkpoint=checkpointEvent(task.checkpoint,e,now());
     const ev = { ...e, seq: ++task.seq, at: now() };
     if (ev.type === 'tool_end') ev.output = clip(ev.output, 4000);
@@ -259,7 +264,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       async stream(options) {
         const id = 'h' + ++seq + '-' + purpose;
         const background = purpose === 'memory';
-        task.timing.event({ type: 'diagnostic', phase: background ? 'background_start' : 'helper_start', id, purpose, model, ...measureModelInput(options), inputChars: (options.messages || []).reduce((total, message) => total + String(message.content || '').length, 0) });
+        task.timing.event({ type: 'diagnostic', phase: background ? 'background_start' : 'helper_start', id, purpose, model, ...measureModelInput(options), ...measureModelTokens(options), inputChars: (options.messages || []).reduce((total, message) => total + String(message.content || '').length, 0) });
         let result = null;
         try {
           result = await adapter.stream(options);
@@ -328,6 +333,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const history = session.messages.slice(0, -1); // 最后一条是这次的用户原话，单独作为 userText
     const taskLookup = task.evaluationId ? createLookupService({ storage: memoryLookupStorage(), get: publicFetch }) : lookupService;
     const tools = evaluationTools(makeTools({
+      ...(!task.evaluationId && await lookupRuntime(task.userId || 'owner', cfg)),
       ...deepseekSearchOptions(cfg), qianfanSearchKey: cfg.qianfanSearchKey, qianfanSearchTopK: cfg.qianfanSearchTopK,
       ...openaiSearchOptions(cfg),
       openaiSearchFetch: (url, init) => {
@@ -414,7 +420,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     try {
       // 智能体配置里写了步骤：按工作流逐步执行（每步仍走 runAgent，见 workflowRun.js）
       const r = await (agent?.profile?.steps?.length ? runWorkflow : runAgent)({
-        adapter, model, fallbacks, lookupPreferences: () => taskLookup.preferences(), lookupModel: createLookupModel(cfg, value => { const picked = makeAdapter(value); return { ...picked, adapter: evaluationAdapter(picked.adapter) }; }), maxSteps: policy.maxSteps, maxTotalSteps: policy.maxTotalSteps, codeWork, ...sight(cfg, task), hedgeMs: cfg.hedgeBackup === false ? 0 : HEDGE_MS, modelNote: modelNote(cfg, { provider: route.cfg.provider, model }),
+        adapter, model, fallbacks, lookupPreferences: () => taskLookup.preferences(), lookupModel: createLookupModel(cfg, value => { const picked = makeAdapter(value); return { ...picked, adapter: evaluationAdapter(picked.adapter) }; }), lookupAnswerModel: createLookupAnswerModel(cfg, value => { const picked = makeAdapter(value); return { ...picked, adapter: evaluationAdapter(picked.adapter) }; }), maxSteps: policy.maxSteps, maxTotalSteps: policy.maxTotalSteps, codeWork, ...sight(cfg, task), hedgeMs: cfg.hedgeBackup === false ? 0 : HEDGE_MS, modelNote: modelNote(cfg, { provider: route.cfg.provider, model }),
         history: unsummarized(history, session.summary).map(({ role, content }) => ({ role, content })),
         userText: task.resumeFrom ? task.text+'\n\n'+checkpointRecoveryText(task.resumeFrom) : task.text, requirementText: taskIntent.requirementText, taskIntent, capabilityRoutes, images: task.images, agent,
         // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省

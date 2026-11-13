@@ -638,12 +638,19 @@ function searchBackoff(error) {
   if (error.status >= 500 || ["network", "timeout"].includes(error.kind) || ["TypeError", "TimeoutError", "NetworkError"].includes(error.name)) return 3e4;
   return 0;
 }
-function guardedSearchRoute(engine, id, now = Date.now) {
+function guardedSearchRoute(engine, id, now = Date.now, profiles = null) {
   if (!engine) return null;
   let until = 0;
   let failures = 0;
+  const latencies = profiles?.get(id) || [];
+  if (profiles && profiles.size < 8) profiles.set(id, latencies);
   return {
     ...engine,
+    get staggerMs() {
+      if (!latencies.length) return 1200;
+      const sorted = [...latencies].sort((a, b) => a - b);
+      return Math.max(500, Math.min(2500, Math.round(sorted[Math.ceil(sorted.length * 0.8) - 1] * 0.8)));
+    },
     async search(query, count, options = {}) {
       if (options.signal?.aborted) throw options.signal.reason;
       const context = options.routeContext;
@@ -655,9 +662,14 @@ function guardedSearchRoute(engine, id, now = Date.now) {
       if (until > now() || failed?.has(id)) {
         throw Object.assign(new Error(`${engine.name}\u672C\u8F6E\u6682\u505C\uFF0C\u7EE7\u7EED\u5176\u4ED6\u641C\u7D22\u6765\u6E90`), { code: "SEARCH_ROUTE_PAUSED", skipped: true });
       }
+      const started = now();
       try {
         const result = await engine.search(query, count, options);
         failures = 0;
+        if (!options.signal?.aborted) {
+          latencies.push(Math.max(0, now() - started));
+          if (latencies.length > 8) latencies.shift();
+        }
         return result;
       } catch (error) {
         if (options.signal?.aborted || error.name === "AbortError" || ["RETRIEVAL_BUDGET", "EVAL_QUOTA", "EVAL_EXPIRED"].includes(error.code)) throw error;
@@ -858,6 +870,10 @@ function createRetrievalBudget(text2, { now = Date.now, timeBudgetMs, clock = nu
   let extensive = extensiveRetrieval(text2), started = null, calls = 0, failed = 0, reason = "", override = null;
   let researchLimits = null;
   const duration = () => override ?? timeBudgetMs ?? (strict ? VERIFICATION_MS : extensive ? DEEP_RETRIEVAL_MS : QUICK_RETRIEVAL_MS);
+  const limitFor = (kind) => {
+    const base = (strict ? { search: 20, read: 16 } : !extensive ? limits : {})[kind];
+    return researchLimits ? Math.min(researchLimits[kind] ?? Infinity, strict ? base ?? Infinity : Infinity) : base ?? Infinity;
+  };
   const check = () => {
     if (!reason && started !== null) {
       if (clock && clock.retrievalRemaining() <= 0 || duration() > 0 && now() - started >= duration()) reason = "\u672C\u8F6E\u8054\u7F51\u68C0\u7D22\u5DF2\u8FBE\u5230\u65F6\u95F4\u9884\u7B97";
@@ -879,13 +895,30 @@ function createRetrievalBudget(text2, { now = Date.now, timeBudgetMs, clock = nu
     },
     consume(kind) {
       if (reason || started !== null && (clock && clock.retrievalRemaining() <= 0 || duration() > 0 && now() - started >= duration())) throw Object.assign(new Error(`${reason || "\u672C\u8F6E\u8054\u7F51\u68C0\u7D22\u5DF2\u8FBE\u5230\u65F6\u95F4\u9884\u7B97"}\uFF0C\u8FD9\u6B21${KIND_LABEL[kind] || kind}\u6CA1\u6709\u6267\u884C`), { code: "RETRIEVAL_BUDGET" });
-      const baseLimit = (strict ? { search: 20, read: 16 } : !extensive ? limits : {})[kind];
-      const limit = researchLimits ? Math.min(researchLimits[kind] ?? Infinity, strict ? baseLimit ?? Infinity : Infinity) : baseLimit;
+      const limit = limitFor(kind);
       if (limit && resources[kind] >= limit) {
         reason ||= `${researchLimits ? "\u672C\u8F6E\u8C03\u7814" : strict ? "\u9010\u9879\u6838\u9A8C" : "\u666E\u901A\u67E5\u8BE2"}\u7684${KIND_LABEL[kind] || kind}\uFF08${kind}\uFF09\u9884\u7B97\u5DF2\u7528\u5B8C\uFF08${limit}\u6B21\uFF09`;
         throw Object.assign(new Error(reason), { code: "RETRIEVAL_BUDGET" });
       }
       if (kind in resources) resources[kind]++;
+    },
+    /** 先原子预留整个批次才准许并发。额度不够返回null，调用方沿用逐页路径。 */
+    reserve(kind, count) {
+      if (!(kind in resources) || !Number.isInteger(count) || count < 1 || count > 3) return null;
+      if (check() || resources[kind] + count > limitFor(kind)) return null;
+      resources[kind] += count;
+      let unused = count;
+      return {
+        take() {
+          if (check()) throw Object.assign(new Error(reason), { code: "RETRIEVAL_BUDGET" });
+          if (!unused) throw new Error("\u8BFB\u53D6\u9884\u7559\u989D\u5EA6\u5DF2\u7528\u5B8C");
+          unused--;
+        },
+        release() {
+          resources[kind] -= unused;
+          unused = 0;
+        }
+      };
     },
     get active() {
       return started !== null;
@@ -2298,7 +2331,7 @@ function searchPlan(query, region, freshness = "", now = Date.now()) {
 }
 function createSearch(options = {}) {
   const { bochaKey, tavilyKey, fetchViaGateway, searchRegion = "auto" } = options;
-  const guard = (engine, id) => guardedSearchRoute(engine, id, options.now);
+  const guard = (engine, id) => guardedSearchRoute(engine, id, options.now, options.searchTimings);
   const custom = guard(createOpenaiSearch(options), "openai-compatible");
   const qianfan = guard(createQianfanSearch(options), "qianfan");
   const deepseek = guard(createDeepseekSearch(options), "deepseek");
@@ -2316,7 +2349,7 @@ function createSearch(options = {}) {
       if (opts.signal?.aborted) throw opts.signal.reason;
       const zh = /[\u4e00-\u9fff]/.test(query);
       const order = (zh ? [custom, qianfan, deepseek, bocha, keyless, tavily] : [custom, deepseek, qianfan, tavily, bocha, keyless]).filter(Boolean);
-      return staggeredSearch(order, query, n, opts, [custom, qianfan, deepseek].filter(Boolean));
+      return staggeredSearch(order, query, n, opts, [custom, qianfan, deepseek].filter(Boolean), (engine) => engine.staggerMs);
     }
   };
 }
@@ -2335,6 +2368,7 @@ function staggeredSearch(order, query, n, opts = {}, preferred = null, staggerMs
       done = true;
       clearTimeout(timer);
       outer?.removeEventListener("abort", stop);
+      outer?.removeEventListener("abort", finish);
       ctrl.abort();
       if (outer?.aborted) reject(outer.reason ?? Object.assign(new Error("aborted"), { name: "AbortError" }));
       else if (controlFailure) reject(controlFailure);
@@ -2345,7 +2379,7 @@ function staggeredSearch(order, query, n, opts = {}, preferred = null, staggerMs
     if (outer?.aborted) return finish();
     outer?.addEventListener("abort", finish, { once: true });
     const launch = () => {
-      if (done || started >= order.length) return;
+      if (done || started >= order.length || started - settled >= 2) return;
       const e = order[started++];
       opts.progress?.("\u6B63\u5728\u5C1D\u8BD5" + e.name);
       Promise.resolve().then(() => e.search(query, n, { ...opts, signal: ctrl.signal })).then((raw) => {
@@ -2371,10 +2405,17 @@ function staggeredSearch(order, query, n, opts = {}, preferred = null, staggerMs
         if (settled === started) {
           if (started < order.length) launch();
           else finish();
-        }
+        } else if (started < order.length && started - settled < 2 && !timer) launch();
       });
       clearTimeout(timer);
-      if (started < order.length) timer = setTimeout(launch, staggerMs);
+      timer = null;
+      if (started < order.length) {
+        const delay = typeof staggerMs === "function" ? staggerMs(e) : staggerMs;
+        timer = setTimeout(() => {
+          timer = null;
+          launch();
+        }, Math.max(0, Number(delay) || 0));
+      }
     };
     launch();
   });

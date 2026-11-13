@@ -1,9 +1,5 @@
 /** 本地保守估算，不冒充服务商计费 token；未提供容量时用 32K 软预算。 */
-export function estimateTokens(value) {
-  const text = typeof value === 'string' ? value : JSON.stringify(value ?? '');
-  const wide = (text.match(/[^\x00-\x7f]/g) || []).length;
-  return Math.ceil(wide + (text.length - wide) / 3);
-}
+export { estimateTokens } from '../../shared/tokenEstimate.js';
 
 export function contextBudget({ contextWindow = 32768, outputReserve = 8192, fixedTokens = 4096 } = {}) {
   const window = Math.max(8192, Math.min(1000000, Number(contextWindow) || 32768));

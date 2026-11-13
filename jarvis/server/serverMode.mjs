@@ -238,7 +238,9 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
   function streamEvents(req, res, id, after) {
     const backlog = runner.events(id, after);
     if (!backlog) return json(res, 404, { error: '找不到这个任务（可能已经做完很久了，结果在对话记录里）' });
-    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' });
+    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store, no-transform', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' });
+    res.socket?.setNoDelay?.(true);
+    res.flushHeaders?.();
     const send = (ev) => res.write(`id: ${ev.seq}\ndata: ${JSON.stringify(ev)}\n\n`);
     for (const ev of backlog) send(ev);
     const last = backlog.at(-1);

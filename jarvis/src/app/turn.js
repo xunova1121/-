@@ -1,5 +1,5 @@
 import { localLookup } from './lookup.js';
-import { createLookupModel } from '../agent/lookupModels.js';
+import { createLookupModel, createLookupAnswerModel } from '../agent/lookupModels.js';
 import { createAdapter as lookupAdapter } from '../llm/config.js';
 /**
  * 一轮对话：发消息（本机做 / 交给服务器做 / 团队分工）、显示进度和工具卡片、朗读、出错恢复；
@@ -420,6 +420,7 @@ export function createTurn(app) {
         model,
         lookupPreferences: remotePC ? null : () => localLookup(app).preferences(),
         lookupModel: remotePC ? null : createLookupModel(app.llmConfig, (cfg) => lookupAdapter(cfg, { gateway: app.gateway })),
+        lookupAnswerModel: remotePC ? null : createLookupAnswerModel(app.llmConfig, (cfg) => lookupAdapter(cfg, { gateway: app.gateway })),
         history: llmHistory,
         userText: team ? userText : await app.expandSlash(userText),
         signal: ctrl.signal,
