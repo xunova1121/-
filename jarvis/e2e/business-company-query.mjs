@@ -44,10 +44,13 @@ try {
     });
     await page.goto(base);
     await page.waitForFunction(() => window.__jarvis?.agents && window.__jarvisServerClient);
+    if (width === 390) await page.setViewportSize({ width, height: 900 });
     await page.evaluate(async () => {
       document.querySelector('#app-splash')?.remove();
       const app = window.__jarvis; await app.agents.start(await app.agents.profileOf('business-intelligence'));
     });
+    // 浏览器工具栏/键盘关闭会改变可视高度；起始表单应留在顶部，不跟随聊天滚动。
+    if (width === 390) await page.setViewportSize({ width, height: 844 });
     if (zoom) await page.addStyleTag({ content: 'html{font-size:130% !important}' });
     const start = page.locator('.wy-agent-start[data-agent="business-intelligence"]');
     await start.getByRole('tab', { name: '查企业', exact: true }).waitFor();
@@ -65,12 +68,16 @@ try {
         const label = field.querySelector('span').getBoundingClientRect();
         const select = field.querySelector('select').getBoundingClientRect();
         const corners = [[rect.left + 12, rect.top + 12], [rect.right - 12, rect.bottom - 12]];
-        return { height: innerHeight, scrollTop: document.querySelector('#transcript').scrollTop, buttonTop: rect.top, buttonBottom: rect.bottom, composerTop: composer.top,
+        return { height: innerHeight, scrollTop: document.querySelector('#transcript').scrollTop, buttonTop: rect.top, buttonBottom: rect.bottom, composerTop: composer.top, composerExpanded: document.querySelector('#inputbar').classList.contains('composer-editing'), focused: document.activeElement?.id,
           visible: rect.top >= transcript.top && rect.bottom <= Math.min(transcript.bottom, composer.top, innerHeight)
             && corners.every(([x, y]) => button.contains(document.elementFromPoint(x, y))),
           sourceInline: label.right <= select.left && Math.max(label.top, select.top) < Math.min(label.bottom, select.bottom) };
       });
+      console.log('390首屏布局', JSON.stringify(firstScreen));
+      await writeFile(out + '/company-390x844-layout-check.json', JSON.stringify(firstScreen, null, 2));
+      await page.screenshot({ path: `${out}/company-390x844-layout-check.png` });
       check('390×844 默认首页无需滚动即可完整点击查询按钮，底部输入栏不遮挡', firstScreen.height === 844 && firstScreen.scrollTop === 0 && firstScreen.visible);
+      check('企业起始页不自动聚焦或展开底部聊天输入区', !firstScreen.composerExpanded && firstScreen.focused !== 'prompt');
       check('390×844 来源标签和选择框同一行，保留费用说明', firstScreen.sourceInline && await start.locator('.wy-business-source-note').isVisible());
       await writeFile(out + '/company-390x844-first-screen.json', JSON.stringify(firstScreen, null, 2));
       await page.screenshot({ path: `${out}/company-390x844-first-screen.png` });

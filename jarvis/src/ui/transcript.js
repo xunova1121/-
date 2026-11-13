@@ -307,7 +307,8 @@ export class Transcript {
       let lastH = root.clientHeight;
       new ResizeObserver(() => {
         const h = root.clientHeight;
-        if (h < lastH && this.follow && !root.querySelector('.welcome')) root.scrollTop += lastH - h;
+        // 智能体起始页是表单，不跟随聊天底部；键盘/工具栏变化不能把查询入口带离首屏。
+        if (h < lastH && this.follow && !root.querySelector('.welcome,.wy-agent-start')) root.scrollTop += lastH - h;
         lastH = h;
       }).observe(root);
     }

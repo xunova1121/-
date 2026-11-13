@@ -177,7 +177,9 @@ export function createAgents(app) {
     token.check();
     const form = Object.fromEntries((profile.form || []).filter((f) => f.default).map((f) => [f.key, f.default]));
     await app.switchTo(sessionsApi.create({ agentId: profile.id, ...(Object.keys(form).length && { agentForm: form }) }));
-    $('#prompt')?.focus();
+    // 企业页有自己的查询表单；自动聚焦聊天输入框会展开底栏并顶动首屏。
+    if (profile.id === 'business-intelligence') $('#prompt')?.blur();
+    else $('#prompt')?.focus();
   }
 
   function fill(text) {
