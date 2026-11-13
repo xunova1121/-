@@ -798,6 +798,13 @@ function createQianfanSearch({ qianfanSearchKey, qianfanSearchTopK = 10, fetchVi
   };
 }
 
+// src/core/portraitIntent.js
+function isPortraitRetouch(text2 = "") {
+  const value = String(text2).split("\n\n[\u5DF2\u4E0A\u4F20\u5230\u5DE5\u4F5C\u533A\uFF1A")[0];
+  if (/什么是|是什么|(?:怎么|如何|怎样).{0,8}(?:实现|开发|接入|调用|收费|计费)|(?:软件|相机|工具|功能).{0,8}(?:推荐|对比|比较|原理|价格)|(?:推荐|对比|比较).{0,8}(?:软件|相机|工具)/i.test(value)) return false;
+  return /人像(?:美化|优化|修图|精修)|美颜|美肤|磨皮|祛痘|去痘|去斑|淡斑|瘦脸|瘦身|显瘦|[pPＰｐ] ?(?:瘦|白|美)|修瘦|瘦一点|瘦一?点儿|自然修图|照片精修/.test(value);
+}
+
 // src/agent/retrievalQuality.js
 var newsToday = (text2) => /今天|今日/.test(text2) && /新闻|资讯|时事/.test(text2);
 function screenSearchHits(hits, requestText = "") {
@@ -838,7 +845,7 @@ var DEEP_RETRIEVAL_MS = 8 * 6e4;
 var VERIFICATION_MS = 3 * 6e4;
 var strictVerification = (text2) => /逐[项一条].{0,12}(?:核[实验对]|查证|查原文)|(?:核[实验对]|查证).{0,12}逐[项一条]|查原文|核实原文|核对原文|原文核实|打开.{0,8}原文.{0,8}(?:核实|核对)/.test(String(text2));
 function extensiveRetrieval(text2 = "") {
-  return strictVerification(text2) || /深度|深入|全面|调研|研究报告|逐项|逐一|多来源|交叉核[验对]|报告|方案|文档|论文|PPT|Word|Excel|代码|编程|开发|文件|保存|对比|比较|这几|这些|每场|多场|清单|架构图|流程图|示意图|拓扑图|画图|海报|research|report|document|code|diagram/i.test(String(text2));
+  return isPortraitRetouch(text2) || strictVerification(text2) || /深度|深入|全面|调研|研究报告|逐项|逐一|多来源|交叉核[验对]|报告|方案|文档|论文|PPT|Word|Excel|代码|编程|开发|文件|保存|对比|比较|这几|这些|每场|多场|清单|架构图|流程图|示意图|拓扑图|画图|海报|research|report|document|code|diagram/i.test(String(text2));
 }
 var KIND_LABEL = { search: "\u641C\u7D22", read: "\u8BFB\u7F51\u9875", model: "\u6A21\u578B\u8C03\u7528" };
 function createRetrievalBudget(text2, { now = Date.now, timeBudgetMs, clock = null } = {}) {

@@ -37,15 +37,15 @@ const profiles = [
   },
   {
     id: 'poster-designer', name: '海报设计', icon: 'poster', category: 'image',
-    intro: '告诉我主题、文字和用途，一起把海报做好。',
+    intro: '海报创作、原片修图、人像美颜与显瘦，原图保留。',
     starters: ['做一张活动宣传海报，突出时间和地点', '给这个产品设计一张方形海报', '按这些文案做一张简洁的竖版海报'],
-    prompt: '你帮助用户设计海报。先确定用途、尺寸、标题与要点，保护用户提供的品牌与原文要求。调用已配置的图像能力，检查文字可读性和布局；没有可用接口时明确说明，不虚构生成成功或下载链接。',
+    prompt: '你帮助用户创作海报和按原片修图。人像美颜、P瘦、显瘦等请求直接使用原片编辑，不索要海报标题或文案，不用清晰化冒充美颜；保留长相与年龄特征，按实际结果说明。制作新海报时再确定用途、尺寸、标题与要点，保护品牌与原文，检查文字可读性和布局。调用已配置的图像能力，接口失败按实际回执说明，不虚构生成成功或下载链接。',
     tools: ['generate_image', 'make_poster', 'create_visual_demo', 'process_image', 'inspect_image', 'read_image_text', 'read_file', 'list_files', 'preview', 'review_task'],
     form: [select('size', '尺寸', ['竖版', '横版', '方形', '朋友圈封面']),
       select('style', '画面风格', ['简约设计', '质感摄影', '立体视觉', '国风美学', '手绘插画', '复古拼贴', '水彩肌理', '未来科技']),
       select('ratio', '画面比例', ['9:16', '16:9', '3:4', '1:1']),
       { key: 'caption', label: '需要出现的文字', type: 'textarea' },
-      select('operation', '图片处理', ['创作新海报', '抠图（透明背景）', '画面扩展', '照片修复', '人像优化'])], output: 'image', source: 'builtin'
+      select('operation', '图片处理', ['创作新海报', '抠图（透明背景）', '画面扩展', '照片修复', '人像优化', '人像显瘦'])], output: 'image', source: 'builtin'
   },
   {
     id: 'image-reader', name: '图片转文字', icon: 'ocr', category: 'image',

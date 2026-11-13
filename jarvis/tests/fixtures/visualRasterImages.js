@@ -29,3 +29,16 @@ export function visualRasterPng({ badCrc = false, badData = false } = {}) {
 }
 
 export const visualRasterImageTag = bytes => `<image width="640" height="360" href="data:image/png;base64,${bytes.toString('base64')}"/>`;
+
+/** 尺寸可控、带真实压缩像素和CRC的人像流程夹具；不伪造大尺寸IHDR。 */
+export function sizedRasterPng(width, height, color = [230, 210, 193]) {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 4096 || height > 4096) throw new Error('测试图片尺寸无效');
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4);
+  header[8] = 8; header[9] = 2;
+  const row = Buffer.alloc(1 + width * 3);
+  for (let index = 1; index < row.length; index += 3) { row[index] = color[0]; row[index + 1] = color[1]; row[index + 2] = color[2]; }
+  const pixels = Buffer.alloc(row.length * height);
+  for (let index = 0; index < height; index++) row.copy(pixels, row.length * index);
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', header), chunk('IDAT', deflateSync(pixels)), chunk('IEND', Buffer.alloc(0))]);
+}
