@@ -2,6 +2,7 @@
 import { MOBILE } from '../config.js';
 import { savePending } from '../core/pendingTask.js';
 import { failedStep } from '../agent/failedSteps.js';
+import { isRetrievalStop } from '../../shared/retrievalStop.js';
 import { serverConnectionText } from '../core/serverConnection.js';
 import { mergeMarketSnapshots } from '../../shared/marketSnapshot.js';
 import { toolLabel, summarizeArgs, searchBrand } from '../ui/transcript.js';
@@ -28,6 +29,18 @@ export function createTurnEvents(app) {
       if (e.type === 'sports_scores') {
         turn.sports = e.value;
         bubble.sports?.(e.value);
+        return;
+      }
+      if (e.type === 'tool_end' && isRetrievalStop(e)) {
+        cards.get(e.id)?.omit?.();
+        cards.delete(e.id);
+        turn.steps = Math.max(0, turn.steps - 1);
+        const at = st.usedTools.lastIndexOf(e.name);
+        if (at >= 0) st.usedTools.splice(at, 1);
+        if (!turn.background && app.active === turn) {
+          app.hud.toolOmit?.(e.id);
+          bubble.status?.('正在整理资料…');
+        }
         return;
       }
       if (e.type === 'tool_start' && e.name !== 'update_plan') {
@@ -132,7 +145,8 @@ export function createTurnEvents(app) {
         if (!e.ok) {
           app.hud.think(`✕ ${toolLabel(e.name)} 失败`, 'bad');
           // 报错原话随这条回答保存，下一句问“为啥失败”时还看得到（见 failedSteps.js）
-          turn.failedSteps = [...(turn.failedSteps || []), failedStep(e)].slice(-6);
+          const failure = failedStep(e);
+          if (failure) turn.failedSteps = [...(turn.failedSteps || []), failure].slice(-6);
         }
         if (/remember|forget|save_skill/.test(e.name)) app.panels.refreshMind();
       } else if (e.type === 'server_tool') {

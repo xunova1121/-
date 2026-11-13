@@ -1,4 +1,5 @@
 import { createTaskPhases } from './taskPhases.js';
+import { isRetrievalStop } from './retrievalStop.js';
 /** 只累计数字，不保存问题、网址、密钥、模型正文。工具并行时间取区间并集。 */
 export function createTaskTiming(createdAt, now = Date.now) {
   const phases = createTaskPhases();
@@ -75,12 +76,16 @@ export function createTaskTiming(createdAt, now = Date.now) {
         if (e.name && Object.keys(byTool).length < 60) toolStarted.set(e.id, { name: String(e.name).slice(0, 60), at: t });
       }
       if (e.type === 'tool_end' && activeTools.delete(e.id)) {
-        if (e.ok === false) failedTools++;
+        const stopped = isRetrievalStop(e);
+        if (stopped) toolCalls--;
+        if (e.ok === false && !stopped) failedTools++;
         const began = toolStarted.get(e.id);
         if (began) {
           toolStarted.delete(e.id);
-          const row = (byTool[began.name] ??= { calls: 0, ms: 0, failed: 0 });
-          row.calls++; row.ms += elapsed(began.at, t); if (e.ok === false) row.failed++;
+          if (!stopped) {
+            const row = (byTool[began.name] ??= { calls: 0, ms: 0, failed: 0 });
+            row.calls++; row.ms += elapsed(began.at, t); if (e.ok === false) row.failed++;
+          }
         }
         if (!activeTools.size) { toolMs += elapsed(toolOpen, t); toolOpen = null; }
       }

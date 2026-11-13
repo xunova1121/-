@@ -5,6 +5,7 @@ import { runRemote } from '../core/serverClient.js';
 import { mergeMarketSnapshots } from '../../shared/marketSnapshot.js';
 import { serverConnectionText, serverObservationActions } from '../core/serverConnection.js';
 import { toolLabel } from '../ui/transcript.js';
+import { isRetrievalStop } from '../../shared/retrievalStop.js';
 import * as ws from '../agent/workspace.js';
 import * as sessionsApi from '../agent/sessions.js';
 import { now, toast } from './env.js';
@@ -20,6 +21,7 @@ export function createRemoteTask(app) {
       streamDone: false,
       bubble,
       session: s,
+      queueScope: app.messageQueue?.scope(),
       files: new Set(),
       inbox: [],
       t0: now(),
@@ -60,7 +62,13 @@ export function createRemoteTask(app) {
             turn.status = toolLabel(e.name);
             if (app.active === turn) app.setTask('processing', turn.status);
           } else if (e.type === 'tool_progress') cards.get(e.id)?.progress(e.text);
-          else if (e.type === 'tool_end') cards.get(e.id)?.done(e.ok, e.output, e.ms);
+          else if (e.type === 'tool_end') {
+            if (isRetrievalStop(e)) {
+              cards.get(e.id)?.omit?.();
+              cards.delete(e.id);
+              turn.steps = Math.max(0, turn.steps - 1);
+            } else cards.get(e.id)?.done(e.ok, e.output, e.ms);
+          }
         }
       });
     } catch (e) {
@@ -83,13 +91,17 @@ export function createRemoteTask(app) {
       }
     }
     // 观察失败不代表任务结束；保留提示和已收到的内容，避免旧历史覆盖它。
-    if (failed) return;
+    if (failed) {
+      app.messageQueue?.finished(turn, false);
+      return;
+    }
     // 换成服务器上记下的完整对话（回答、用到的工具、生成的文件）
     const fresh = await sessionsApi.get(s.id).catch(() => null);
     if (fresh && app.session.id === s.id && !app.active) {
       app.session = fresh;
       app.replayTranscript();
     }
+    app.messageQueue?.finished(turn, !ctrl.signal.aborted);
   }
 
   /** 服务器模式：服务器上生成了文件，下载到本机工作区，照常预览、保存 */

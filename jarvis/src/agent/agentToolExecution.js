@@ -9,6 +9,7 @@ import { errorKind } from '../core/suggest.js';
 import { assertArchitectureToolCall } from './architectureStateProtection.js';
 import { toolFailureScope } from './toolFailureScope.js';
 import { recordImageInputRecovery } from './imageInputRecovery.js';
+import { isRetrievalStop, RETRIEVAL_FINISHED } from '../../shared/retrievalStop.js';
 
 /** 产出文件、核对数字的本地工具：联网到点后照常可用 */
 export const OUTPUT_TOOLS = /^(?:create_document|write_long_document|edit_office_document|check_document|write_file|edit_file|preview|create_diagram|export_diagram|make_poster|create_visual_demo|reconcile_numbers|verify_numbers|time_calc)$/;
@@ -58,7 +59,7 @@ export async function executeToolCalls(
     try {
       // 联网到点只停联网；要出文件（PPT、Word、图）就是文档任务，按深度任务继续，不能连生成也挡掉（用户 2026-11-05：三页 PPT 连试三次都被“联网预算”挡住）
       if (closing && !retrieval.extensive && !webTools.has(c.name) && OUTPUT_TOOLS.test(c.name)) retrieval.upgrade?.('文档');
-      if (closing && (!retrieval.extensive || webTools.has(c.name))) throw new Error('联网检索已经结束，请直接整理已有资料回答，不要继续调用工具');
+      if (closing && (!retrieval.extensive || webTools.has(c.name))) throw Object.assign(new Error('联网检索已经结束，请直接整理已有资料回答，不要继续调用工具'), { code: 'RETRIEVAL_BUDGET' });
       if (!tool) throw new Error(`没有名为 ${c.name} 的工具`);
       const cooldownUntil = loader.cooldownUntil?.(c.name);
       if (cooldownUntil) throw Object.assign(new Error(`此工具冷却至北京时间${new Date(cooldownUntil).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}，本次未执行。不要重复调用或换参数重试，改用其他可用工具。`), { code: 'LOOKUP_SOURCE_COOLING', cooldownUntil, tool: c.name });
@@ -97,9 +98,11 @@ export async function executeToolCalls(
       const web = webTools.has(c.name);
       // 必须先协调预算再创建工具截止时间，避免深度流程仍被普通查询的3次/60秒限制截断。
       if (c.name === 'deep_research') retrieval.beginResearch?.(c.args?.depth);
-      if (web && !retrieval.begin()) throw new Error(retrieval.note);
-      const run = (s) =>
-        tool.run(c.args, {
+      if (web && !retrieval.begin()) throw Object.assign(new Error(retrieval.reason || '联网检索已结束'), { code: 'RETRIEVAL_BUDGET' });
+      const run = (s) => {
+        // 并行批次等待截止时间包装期间，其它读取可能已触发收尾；执行前再检查一次。
+        if (web && retrieval.reason) throw Object.assign(new Error(retrieval.reason), { code: 'RETRIEVAL_BUDGET' });
+        return tool.run(c.args, {
           signal: s,
           progress,
           retrieval,
@@ -116,6 +119,7 @@ export async function executeToolCalls(
             return checkpoint?.(event);
           }
         });
+      };
       const r =
         web && Number.isFinite(retrieval.remaining)
           ? await withWebDeadline(run, {
@@ -134,7 +138,8 @@ export async function executeToolCalls(
       failure = e;
       lookupRecovery = e.lookupRecovery;
       if (e.code === 'RETRIEVAL_BUDGET') retrieval.close(e.message);
-      output = `错误：${e.message || e}`;
+      output = isRetrievalStop(e) ? RETRIEVAL_FINISHED : `错误：${e.message || e}`;
+      if (isRetrievalStop(e)) emit({ type: 'diagnostic', phase: 'retrieval_stop', code: e.code, tool: c.name, reason: String(e.message || '').slice(0, 240) });
       if (c.name === 'deep_research' && e.code === 'RETRIEVAL_BUDGET' && e.partialEvidence) output += '\n' + String(e.partialEvidence).slice(0, 1800);
       const scope = toolFailureScope(c.name, e);
       if (scope) output += '\n影响范围：' + scope;
@@ -154,7 +159,7 @@ export async function executeToolCalls(
     } catch {
       output += '\n成果记录保存失败；已有文件不受影响，统计可能不完整，不要重新提交生成请求。';
     }
-    await checkpoint?.({ type: 'tool_end', id: c.id, name: c.name, ok, output });
+    await checkpoint?.({ type: 'tool_end', id: c.id, name: c.name, ok, output, ...(failure?.code && { code: failure.code }) });
     emit({ type: 'tool_end', id: c.id, name: c.name, ok, output: c.name === 'phone_action' && ok ? '手机已返回操作回执；页面文字和截图仅供本轮核对，不写入进度记录。' : output, ...(failure && { errorKind: errorKind(failure), code: failure.code }), ms: Date.now() - t0 });
     if (failure?.code !== 'RETRIEVAL_BUDGET') throwControl(failure, signal);
     const receipt = review.record({ name: c.name, args: c.args, ok, output, code: failure?.code, lookupRecovery });

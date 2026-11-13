@@ -11,6 +11,18 @@ const configuration = () => ({
   openaiSearchBaseURL: 'https://search.example.com/v1', openaiSearchModel: 'web-model',
   openaiSearchProtocol: 'responses', openaiSearchKey: 'search-key-stays-private'
 });
+
+it('Responses型号与WebSearch工具名分开解释，API GET未知协议不编造独立搜索ID', () => {
+  const panel = mount();
+  expect(JSON.stringify(panel.tree)).toContain('调用示例中的 model');
+  expect(JSON.stringify(panel.tree)).toContain('不是 WebSearch 工具名称');
+  expect(JSON.stringify(panel.tree)).toContain('公开价格页不足以确认本面板可用');
+  const protocol = panel.field('自定义搜索接口格式');
+  protocol.value = 'chat-completions'; protocol.events.change();
+  expect(JSON.stringify(panel.tree)).toContain('普通聊天型号不会自动获得搜索能力');
+  expect(panel.workspace.testOpenaiSearch).not.toHaveBeenCalled();
+  expect(panel.workspace.patch).not.toHaveBeenCalled();
+});
 function mount(cfg = configuration()) {
   const saved = { server: { ...cfg }, local: { provider: 'local-chat', openaiSearchKey: 'local-secret' } };
   const workspace = {

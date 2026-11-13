@@ -464,6 +464,13 @@ export class Transcript {
       self.#scroll();
       let log = '';
       return {
+        omit() {
+          if (!li.parentNode) return;
+          li.remove();
+          p.n--;
+          p.count.textContent = `第 ${p.n} 步`;
+          if (!p.n) { clearInterval(p.timer); p.box.remove(); prog = null; }
+        },
         progress(text) {
           log += `${log ? '\n' : ''}· ${text}`;
           pre.textContent = log;
@@ -563,6 +570,14 @@ export class Transcript {
         self.#scroll();
         let log = '';
         return {
+          omit() {
+            if (!card.parentNode) return;
+            card.remove();
+            g.n--;
+            g.count.textContent = `第 ${g.n} 步`;
+            g.last.textContent = '';
+            if (!g.n) { g.box.remove(); if (group === g) group = null; }
+          },
           progress(text) {
             card.classList.add('live');
             log += `${log ? '\n' : ''}· ${text}`;

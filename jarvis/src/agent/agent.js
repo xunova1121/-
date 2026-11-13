@@ -1,4 +1,5 @@
 import { PHONE_GUIDANCE } from '../../shared/phoneControl.js';
+import { isRetrievalStop } from '../../shared/retrievalStop.js';
 import { DOCUMENT_TASK_CORE, documentRouteNote } from './documentToolProfile.js';
 import { taskToolCore } from './taskToolProfile.js';
 import { resolveTaskIntent } from '../core/taskIntent.js';
@@ -747,20 +748,22 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       lookupModel = null;
       emit({ type: 'fallback', from, to: cur.model, reason: '任务能力升级（最多一次）', capability: true });
     }
-    for (const { c, ok, output, outImages, dataRetrieved } of results) {
-      toolCount++;
-      if (WEB_TOOLS.has(c.name)) {
+    for (const result of results) {
+      const { c, ok, output, outImages, dataRetrieved } = result;
+      const stopped = isRetrievalStop(result);
+      if (!stopped) toolCount++;
+      if (!stopped && WEB_TOOLS.has(c.name)) {
         const retrieved = ok && dataRetrieved !== false;
         retrieval.end(retrieved);
         triedCalls.push({ name: c.name, args: c.args, ok: retrieved, output: retrieved ? '' : String(output).slice(0, 300) });
       }
       if (ok && /^(write_file|edit_file|code_write|code_edit)$/.test(c.name) && CODE_FILE.test(String(c.args?.path ?? ''))) wroteCode = true;
       if (ok && (/^(run_javascript|run_python|computer_run|run_project_tests)$/.test(c.name) || c.name === 'code_run' && c.args?.command === 'test')) ranCode = true;
-      if (!ok) failCount++;
-      lastToolOk = ok;
-      recent.push(ok);
+      if (!ok && !stopped) failCount++;
+      if (!stopped) lastToolOk = ok;
+      if (!stopped) recent.push(ok);
       if (recent.length > 12) recent.shift();
-      convo.push({ role: 'tool', toolCallId: c.id, name: c.name, content: output, isError: !ok, ...(outImages.length && { images: outImages }) });
+      convo.push({ role: 'tool', toolCallId: c.id, name: c.name, content: output, isError: !ok && !stopped, ...(outImages.length && { images: outImages }) });
       await see(convo.at(-1), { hint: requirementText, signal, ocr: c.name !== 'read_image_text' });
     }
     const recoveryStop = results.find(result => result.recoveryStop)?.recoveryStop;

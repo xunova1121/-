@@ -14,12 +14,12 @@ import { $, DESKTOP, COMPACT } from './env.js';
 export function createTurnInputs(app) {
   const recentImages = new Map(); // 消息时间 → 最近两条带图消息，仅内存。
   /** 整理这一轮的输入：取走附件、显示并记下这句话、挑出要带给模型的历史和图片 */
-  function takeInput(text, echo) {
+  function takeInput(text, echo, queuedFiles) {
     app.cancelCompression?.();
     // 持续聊天也保持有界；先重画已完成的历史，再追加本轮，避免重复消息。
     if (MOBILE && (app.historyViewEnd !== null || $('#transcript').querySelectorAll('.msg').length >= app.visibleHistory().limit)) app.replayTranscript();
-    const files = app.attachments.splice(0);
-    app.renderAttachments();
+    const files = queuedFiles ?? app.attachments.splice(0);
+    if (!queuedFiles) app.renderAttachments();
     const userText = files.length ? `${text}\n\n[已上传到工作区：${files.map((f) => f.path).join('、')}]` : text;
     const imgs = files.filter((f) => f.image).map((f) => f.image);
     const thumbs = files.filter((f) => f.image).map((f) => ({ src: f.image.thumb, path: f.path }));

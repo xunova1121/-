@@ -47,6 +47,35 @@ try {
     assert.ok(result.detail.includes('正在整理业务职责'));
   }
   console.log('通过：手机与桌面失败步骤显示错误摘要，完整进度和修复字段仍可查看。');
+  for (const progress of [true, false]) {
+    const result = await page.evaluate(async progress => {
+      const { Transcript } = await import('/src/ui/transcript.js');
+      const root = document.querySelector('#fixture'); root.replaceChildren();
+      const transcript = new Transcript(root, { progress });
+      const empty = transcript.add('agent');
+      const only = empty.toolCard('web_fetch', {}); only.omit(); only.omit(); empty.done();
+      const emptyCards = root.querySelectorAll('.progress-card,.tool-group').length;
+      const bubble = transcript.add('agent');
+      bubble.toolCard('web_search', {}).done(true, '取得来源', 20);
+      const skipped = bubble.toolCard('web_fetch', {});
+      skipped.progress('正在读取'); skipped.omit();
+      bubble.toolCard('web_fetch', {}).done(false, '错误：真实连接超时', 30);
+      bubble.done();
+      return {
+        emptyCards,
+        rows: root.querySelectorAll(progress ? '.pc-steps>li' : '.tool-card').length,
+        failures: root.querySelectorAll(progress ? 'li[data-st="fail"]' : '.tool-card.fail').length,
+        text: root.textContent
+      };
+    }, progress);
+    assert.equal(result.emptyCards, 0);
+    assert.equal(result.rows, 2);
+    assert.equal(result.failures, 1);
+    assert.ok(result.text.includes(progress ? '用了 2 步' : '执行了 2 步（1 步出错）'));
+    assert.ok(result.text.includes('真实连接超时'));
+    assert.ok(!result.text.includes('正在读取'));
+  }
+  console.log('通过：正常收尾不留下空卡片、红叉或虚增步骤，真实连接故障仍可查看。');
 } finally {
   await browser?.close();
   await server.close();

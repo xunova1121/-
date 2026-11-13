@@ -13,6 +13,7 @@ import { toPlainText, toSpeech } from '../core/markdown.js';
 import { prepareImage, isImageName } from '../agent/images.js';
 import * as ws from '../agent/workspace.js';
 import { $, toast } from './env.js';
+import { createComposerQueue } from './composerQueue.js';
 
 export function createComposer(app) {
   /** 下一条消息要带的附件（已经存进工作区“上传/”） */
@@ -20,6 +21,7 @@ export function createComposer(app) {
 
   // —— 输入框：Enter 发送，Shift+Enter 换行；随内容自动增高
   const prompt = $('#prompt');
+  const messageQueue = createComposerQueue(app, $('#inputbar'));
   function autosize() {
     prompt.style.height = 'auto';
     prompt.style.height = `${Math.min(prompt.scrollHeight, 160)}px`;
@@ -30,7 +32,7 @@ export function createComposer(app) {
     const v = prompt.value;
     prompt.value = '';
     autosize();
-    app.send(v);
+    app.send(v, { mode: messageQueue.mode });
   });
   // 手机（触屏）键盘没有 Shift：回车就是换行，点发送按钮才发送；电脑上回车发送、Shift+回车换行
   const enterSends = () => !MOBILE && !globalThis.matchMedia?.('(pointer: coarse)').matches;
@@ -210,5 +212,5 @@ export function createComposer(app) {
     }
   };
 
-  return { prompt, autosize, attachments, addFiles, renderAttachments };
+  return { prompt, autosize, attachments, addFiles, renderAttachments, messageQueue };
 }

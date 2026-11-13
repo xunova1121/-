@@ -441,7 +441,10 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
           if (e.type === 'text') { if (task.firstTextAt == null && String(e.delta ?? '').trim()) task.firstTextAt = now(); shown += e.delta; }
           if (e.type === 'tool_start' && e.name !== 'update_plan') usedTools.push(e.name);
           // 失败的步骤连同报错原话记下来存进这条回答：用户下一句问“为啥失败”时还能看到（见 agent.js 的“上一轮失败的步骤”）
-          if (e.type === 'tool_end' && e.ok === false) task.failedSteps = [...(task.failedSteps || []), failedStep(e)].slice(-6);
+          if (e.type === 'tool_end' && e.ok === false) {
+            const failure = failedStep(e);
+            if (failure) task.failedSteps = [...(task.failedSteps || []), failure].slice(-6);
+          }
           if (e.type === 'text' || e.type === 'tool_end') saveDraft();
           record(task, e);
         }

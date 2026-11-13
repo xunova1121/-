@@ -195,6 +195,9 @@ export function initOrbitHud({ root, getAnchor, reducedMotion = () => false }) {
     toolEnd(id, ok) {
       satellites = satellites.map((s) => (s.id === id ? { ...s, state: ok ? 'ok' : 'fail' } : s));
     },
+    toolOmit(id) {
+      satellites = satellites.filter(s => s.id !== id);
+    },
     get satellites() { return satellites; },
     dispose() { stop(); svg.remove(); log.remove(); }
   };

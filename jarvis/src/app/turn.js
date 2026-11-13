@@ -48,6 +48,7 @@ export function createTurn(app) {
   /** 打断（barge-in）：停止朗读并中止正在执行的任务 */
   function interrupt() {
     const had = app.speaker.speaking || app.active;
+    app.messageQueue?.pause();
     if (app.active) app.callouts?.show();
     if (app.active) {
       const turn = app.active;
@@ -130,10 +131,13 @@ export function createTurn(app) {
   // —— 干活时插话、切换对话后台继续
   const backgroundTurns = new Set();
   /** 干活时又发来一句：问进度直接答；说停就停；其他的交给正在干的未央（下一步开始前看到），不打断 */
-  async function interject(text, { thumbs = [] } = {}) {
+  async function interject(text, { thumbs = [], mode = 'auto' } = {}) {
     const turn = app.active;
+    if (!turn || turn.streamDone) return send(text);
+    if (mode === 'auto' && separateRequest(text)) return app.messageQueue.enqueue(text);
     app.transcript.add('user', text, Date.now(), { thumbs });
     const reply = (words) => {
+      if (app.session.id !== turn.session.id || turn.queueScope !== app.messageQueue?.scope()) return;
       const b = app.transcript.add('agent', words);
       b.done();
     };
@@ -147,12 +151,6 @@ export function createTurn(app) {
       return;
     }
     app.rememberTurn('user', text, thumbs.length ? { thumbs } : {}, turn.session);
-    // 明说是另一件事：不塞进正在做的任务（以前会和手上的要求混在一起核对、一起回答），做完手上这件再单独做
-    if (separateRequest(text)) {
-      (turn.later ||= []).push(text);
-      reply('收到，这是另一件事。手上这件做完马上单独做它，不会混在一起。');
-      return;
-    }
     if (!turn.remote) {
       turn.inbox.push(text);
       if (MOBILE) {
@@ -167,6 +165,7 @@ export function createTurn(app) {
       try {
         await app.server.appendTaskNote(turn.remoteId, text);
       } catch (e) {
+        if (app.session.id !== turn.session.id || turn.queueScope !== app.messageQueue?.scope()) return;
         if (!app.prompt.value.trim()) {
           app.prompt.value = text;
           app.autosize();
@@ -210,13 +209,25 @@ export function createTurn(app) {
   }
 
   /** 正在干活时又发来一句（可能带附件）：附件先传到服务器，再按插话处理 */
-  async function addToRunningTurn(text, { echo, byVoice }) {
+  async function addToRunningTurn(text, { echo, byVoice, mode }) {
+    const turn = app.active;
+    if (STOP_ASK.test(text) && !app.attachments.length) return interject(text, { mode: 'steer' });
+    if (mode === 'queue' || (mode !== 'steer' && separateRequest(text))) return app.messageQueue.enqueue(text);
+    const client = app.server;
     const extra = app.attachments.splice(0);
     app.renderAttachments();
-    if (app.server && extra.length) {
+    if (client && extra.length) {
       try {
-        for (const f of extra) await app.server.upload(f.path, await ws.readBlob(f.path));
+        for (const f of extra) {
+          if (app.server !== client || app.session.id !== turn.session.id) break;
+          await client.upload(f.path, await ws.readBlob(f.path));
+        }
       } catch (e) {
+        if (app.server !== client || app.session.id !== turn.session.id) {
+          app.messageQueue.enqueue(text, { files: extra, target: turn.session, client: turn.queueScope });
+          app.messageQueue.finished(turn, false);
+          return;
+        }
         app.attachments.unshift(...extra);
         app.renderAttachments();
         if (!app.prompt.value.trim()) {
@@ -226,6 +237,11 @@ export function createTurn(app) {
         toast(`附件未送达，已保留：${e.message}`);
         return;
       }
+      if (app.server !== client || app.session.id !== turn.session.id || (app.active && app.active !== turn)) {
+        app.messageQueue.enqueue(text, { files: extra, target: turn.session, client: turn.queueScope });
+        app.messageQueue.finished(turn, false);
+        return;
+      }
       if (!app.active || app.active.streamDone) {
         app.attachments.unshift(...extra);
         app.renderAttachments();
@@ -233,18 +249,19 @@ export function createTurn(app) {
       }
     }
     const content = extra.length ? text + '\n\n[已上传到工作区：' + extra.map((f) => f.path).join('、') + ']' : text;
-    return interject(content, { thumbs: extra.filter((f) => f.image).map((f) => ({ src: f.image.thumb, path: f.path })) });
+    return interject(content, { mode: 'steer', thumbs: extra.filter((f) => f.image).map((f) => ({ src: f.image.thumb, path: f.path })) });
   }
 
-  async function send(text, { echo = true, byVoice = false } = {}) {
+  async function send(text, { echo = true, byVoice = false, mode = 'auto', queuedFiles } = {}) {
     noteAction(byVoice ? '语音提问' : '发消息');
     app.askNotifyOnce();
     text = String(text || '').trim();
-    if (!text && !app.attachments.length) return;
-    if (!app.attachments.length && app.companion?.perform(text)) return;
-    if (!text && app.attachments.some((a) => a.image)) text = '请看看这张图片。';
+    const inputFiles = queuedFiles ?? app.attachments;
+    if (!text && !inputFiles.length) return;
+    if (!inputFiles.length && app.companion?.perform(text)) return;
+    if (!text && inputFiles.some((a) => a.image)) text = '请看看这张图片。';
     // 正在干活时又发了一句：不打断，问进度就直接答，别的话交给正在干的未央；说“停”才停
-    if (echo && app.active && !app.active.streamDone) return addToRunningTurn(text, { echo, byVoice });
+    if (echo && app.active && !app.active.streamDone) return addToRunningTurn(text, { echo, byVoice, mode });
     if (app.active) {
       app.active.ctrl.abort();
       app.active = null;
@@ -252,7 +269,7 @@ export function createTurn(app) {
     app.speaker.cancel();
     app.speaker.unlock(); // 发送多由点击 / 回车触发：顺便启动音频上下文，云端语音才能播放
 
-    const { files, userText, imgs, withImages, llmHistory } = app.takeTurnInput(text, echo);
+    const { files, userText, imgs, withImages, llmHistory } = app.takeTurnInput(text, echo, queuedFiles);
 
     if (app.machine.task !== 'listening') app.machine.beginUserTurn();
     const ctrl = new AbortController();
@@ -260,7 +277,19 @@ export function createTurn(app) {
     app.liveBubble = bubble;
     bubble.el.classList.add('streaming');
     // 这一轮属于哪个会话：切到别的对话后在后台接着做，结果、文件都记回这个会话
-    const turn = { ctrl, streamDone: false, bubble, session: app.session, files: new Set(), inbox: [], t0: now(), steps: 0, status: '', background: false };
+    const turn = {
+      ctrl,
+      streamDone: false,
+      bubble,
+      session: app.session,
+      queueScope: app.messageQueue?.scope(),
+      files: new Set(),
+      inbox: [],
+      t0: now(),
+      steps: 0,
+      status: '',
+      background: false
+    };
     app.active = turn;
     app.setTask('processing', '思考中');
     // 这一轮的进度记录：事件处理（turnEvents）边收边改，做完 / 出错时用来显示和记进对话
@@ -301,6 +330,7 @@ export function createTurn(app) {
       app.active = null;
       app.setTask('error', '需要配置模型');
       app.showPanel('models');
+      app.messageQueue?.finished(turn, false);
       return;
     }
 
@@ -511,6 +541,7 @@ export function createTurn(app) {
       app.compressHistory();
       if (!app.speaker.speaking) finishTurn();
     } catch (err) {
+      turn.queueFailed = true;
       if (err.name === 'AbortError') return;
       turn.observationLost = serverTaskMayBeRunning(err);
       if (turn.background) {
@@ -557,17 +588,18 @@ export function createTurn(app) {
       app.endControl();
       // 回答写完的一瞬间又收到的话（没来得及交给模型）：接着当一句新话处理
       const left = turn.inbox.splice(0);
-      const later = turn.later?.splice(0) ?? []; // 干活时说的“另一件事”
-      const canSend = !ctrl.signal.aborted && !turn.background && !turn.observationLost && app.session === turn.session;
+      const canSend = !ctrl.signal.aborted && !turn.queueFailed && !turn.background && !turn.observationLost && app.session === turn.session;
       const putBack = (texts, words) => {
         app.prompt.value += (app.prompt.value.trim() ? '\n' : '') + texts.join('\n');
         app.autosize();
         toast(words);
       };
-      if (left.length && turn.remote) putBack(left, '未送达的补充已放回输入框，没有另开任务');
-      const next = [...(turn.remote ? [] : left), ...later];
-      if (next.length && canSend && !(left.length && turn.remote)) setTimeout(() => send(next.join('\n'), { echo: false }), 0);
-      else if (later.length) putBack(later, '刚才说的另一件事放在输入框里了，发送就接着做');
+      if (left.length && turn.remote && app.session === turn.session && turn.queueScope === app.messageQueue?.scope())
+        putBack(left, '未送达的补充已放回输入框，没有另开任务');
+      else if (left.length && turn.remote)
+        for (const text of left) app.messageQueue?.enqueue(text, { files: [], echo: false, target: turn.session, client: turn.queueScope });
+      if (!turn.remote) for (const text of left) app.messageQueue?.enqueue(text, { files: [], echo: false, target: turn.session, client: turn.queueScope });
+      app.messageQueue?.finished(turn, canSend && !(left.length && turn.remote));
     }
   }
 

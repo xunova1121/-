@@ -22,6 +22,14 @@ export function openaiSearchPanel({ cfg, workspace, node, toast }) {
     node('option', { value: 'chat-completions', textContent: 'Chat Completions · 搜索模型' })
   );
   protocol.value = cfg.openaiSearchProtocol || 'responses';
+  const modelHelp = node('p', { className: 'ml-muted' });
+  const explainModel = () => {
+    modelHelp.textContent = protocol.value === 'responses'
+      ? '这里填支持 Responses 联网工具的模型 ID（调用示例中的 model），不是 WebSearch 工具名称。服务商还必须支持 tools: [{type: "web_search"}]；仅兼容 OpenAI 聊天不代表支持此功能。'
+      : '这里填服务商提供的联网搜索模型 ID（调用示例中的 model）。普通聊天型号不会自动获得搜索能力。';
+  };
+  protocol.addEventListener('change', explainModel);
+  explainModel();
   const key = node('input', {
     type: 'password', autocomplete: 'off', ariaLabel: '自定义搜索API Key', maxLength: 512,
     placeholder: configuredKey ? '已配置；留空保留' : '填写此搜索服务的 API Key'
@@ -86,7 +94,8 @@ export function openaiSearchPanel({ cfg, workspace, node, toast }) {
     node('summary', { textContent: `自定义联网搜索（OpenAI兼容） · ${where}` }),
     node('p', { className: 'ml-muted', textContent: '可搭配任意聊天模型。为搜索单独配置地址、密钥和模型，仅保存在当前选择的位置。' }),
     node('label', {}, enabled, '启用自定义联网搜索'),
-    field('API 地址', baseURL), field('API Key', key), field('联网搜索模型 ID', model), field('接口格式', protocol),
+    field('API 地址', baseURL), field('API Key', key), field('联网搜索模型 ID', model), field('接口格式', protocol), modelHelp,
+    node('p', { className: 'ml-muted', textContent: 'API GET：官网列出的 WebSearch 是工具计费项，不是可填写的模型 ID。请从登录后的 WorkBuddy 配置或客服调用示例确认 model、tools 和接口路径；公开价格页不足以确认本面板可用，不要把 WebSearch 当型号填写。' }),
     node('p', { className: 'ml-muted', textContent: '按服务商说明选择接口格式。需要支持联网搜索并返回网页来源；普通聊天接口不会因此自动联网。Key 留空保存会保留原值，取消勾选即可停用。' }),
     node('p', { className: 'ml-muted', textContent: '保存后再测试。测试会调用一次该搜索接口，可能按服务商规则计费；不使用其他搜索服务代测。' }),
     save, test, action('停止搜索测试', async () => controller?.abort()), result

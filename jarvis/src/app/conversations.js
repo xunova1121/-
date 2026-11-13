@@ -192,6 +192,7 @@ export function createConversations(app) {
     else openingCallouts();
     app.sessionsPanel?.refresh();
     app.setTask('idle');
+    app.messageQueue?.refresh();
     return true;
   }
   const newSession = createNewSessionAction(app, { create: sessionsApi.create, focus: () => $('#prompt').focus() });
