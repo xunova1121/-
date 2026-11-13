@@ -647,9 +647,9 @@ function guardedSearchRoute(engine, id, now = Date.now, profiles = null) {
   return {
     ...engine,
     get staggerMs() {
-      if (!latencies.length) return 1200;
+      if (!latencies.length) return Math.max(1200, latencies.waitFloorMs || 0);
       const sorted = [...latencies].sort((a, b) => a - b);
-      return Math.max(500, Math.min(2500, Math.round(sorted[Math.ceil(sorted.length * 0.8) - 1] * 0.8)));
+      return Math.max(500, Math.min(2500, Math.max(latencies.waitFloorMs || 0, sorted[Math.ceil(sorted.length * 0.8) - 1] + 200)));
     },
     async search(query, count, options = {}) {
       if (options.signal?.aborted) throw options.signal.reason;
@@ -669,9 +669,11 @@ function guardedSearchRoute(engine, id, now = Date.now, profiles = null) {
         if (!options.signal?.aborted) {
           latencies.push(Math.max(0, now() - started));
           if (latencies.length > 8) latencies.shift();
+          latencies.waitFloorMs = 0;
         }
         return result;
       } catch (error) {
+        if (options.signal?.reason?.code === "SEARCH_RACE_DONE") latencies.waitFloorMs = Math.min(2500, Math.max(latencies.waitFloorMs || 0, now() - started + 200));
         if (options.signal?.aborted || error.name === "AbortError" || ["RETRIEVAL_BUDGET", "EVAL_QUOTA", "EVAL_EXPIRED"].includes(error.code)) throw error;
         const delay = searchBackoff(error);
         if (delay || error.skipped) failed?.add(id);
@@ -2369,7 +2371,7 @@ function staggeredSearch(order, query, n, opts = {}, preferred = null, staggerMs
       clearTimeout(timer);
       outer?.removeEventListener("abort", stop);
       outer?.removeEventListener("abort", finish);
-      ctrl.abort();
+      ctrl.abort(hits.length && !controlFailure && !outer?.aborted ? Object.assign(new Error("\u5DF2\u53D6\u5F97\u6709\u6548\u641C\u7D22\u7ED3\u679C"), { name: "AbortError", code: "SEARCH_RACE_DONE" }) : void 0);
       if (outer?.aborted) reject(outer.reason ?? Object.assign(new Error("aborted"), { name: "AbortError" }));
       else if (controlFailure) reject(controlFailure);
       else if (hits.length) resolve(hits.slice(0, n));

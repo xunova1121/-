@@ -161,8 +161,36 @@ it('来源耗时只保留8个数字，换查询复用并保持500至2500毫秒�
   const guarded = guardedSearchRoute(engine, 'same', () => at, profiles);
   expect(guarded.staggerMs).toBe(1200);
   for (let i = 0; i < 12; i++) await guarded.search('内容不保存', 1);
-  expect(guarded.staggerMs).toBe(640); expect(profiles.get('same')).toHaveLength(8);
-  expect(guardedSearchRoute(engine, 'same', () => at, profiles).staggerMs).toBe(640);
+  expect(guarded.staggerMs).toBe(1000); expect(profiles.get('same')).toHaveLength(8);
+  expect(guardedSearchRoute(engine, 'same', () => at, profiles).staggerMs).toBe(1000);
+});
+
+it('正常来源校准后不会每次额外发备用；竞速冷源最终有机会独立完成', async () => {
+  vi.useFakeTimers();
+  try {
+    const profiles = new Map(), counts = [];
+    const delayed = (ms, signal) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { signal.removeEventListener('abort', stop); resolve(); }, ms);
+      const stop = () => { clearTimeout(timer); reject(signal.reason); };
+      signal.addEventListener('abort', stop, { once: true });
+    });
+    let requests = 0;
+    const main = guardedSearchRoute({ name: '主来源', search: async (_query, _n, { signal }) => { requests++; await delayed(1500, signal); return [{ title: '公开服务', url: 'https://source.example.com/article', snippet: '服务信息' }]; } }, 'main', Date.now, profiles);
+    const backup = { name: '备用', search: async (_query, _n, { signal }) => { requests++; await delayed(50, signal); return [{ title: '公开服务', url: 'https://backup.example.com/article', snippet: '同样服务信息' }]; } };
+    for (let index = 0; index < 4; index++) {
+      const before = requests;
+      const pending = staggeredSearch([main, backup], '公开服务', 1, {}, null, engine => engine.staggerMs ?? 1200);
+      await vi.advanceTimersByTimeAsync(2000); expect(await pending).toHaveLength(1);
+      counts.push(requests - before);
+    }
+    expect(counts).toEqual([2, 2, 1, 1]);
+    expect(main.staggerMs).toBe(1700);
+    const abort = new AbortController();
+    const request = main.search('公开服务', 1, { signal: abort.signal });
+    const stopped = expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.advanceTimersByTimeAsync(100); abort.abort(); await stopped;
+    expect(main.staggerMs).toBe(1700);
+  } finally { vi.useRealTimers(); }
 });
 
 it('查询副本裁历史而不拆工具配对，长原文可按编号取回，当前补充和原历史不变', async () => {

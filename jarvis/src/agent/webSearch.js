@@ -252,7 +252,7 @@ export function staggeredSearch(order, query, n, opts = {}, preferred = null, st
       clearTimeout(timer);
       outer?.removeEventListener('abort', stop);
       outer?.removeEventListener('abort', finish);
-      ctrl.abort();
+      ctrl.abort(hits.length && !controlFailure && !outer?.aborted ? Object.assign(new Error('已取得有效搜索结果'), { name: 'AbortError', code: 'SEARCH_RACE_DONE' }) : undefined);
       if (outer?.aborted) reject(outer.reason ?? Object.assign(new Error('aborted'), { name: 'AbortError' }));
       else if (controlFailure) reject(controlFailure);
       else if (hits.length) resolve(hits.slice(0, n));

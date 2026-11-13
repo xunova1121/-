@@ -8,6 +8,7 @@ import { createFetchPageRun } from '../src/agent/fetchPageTool.js';
 import { createPageReader } from '../src/agent/pageReader.js';
 import { createRetrievalBudget } from '../src/agent/retrievalBudget.js';
 import { staggeredSearch } from '../src/agent/webSearch.js';
+import { guardedSearchRoute } from '../src/agent/searchPolicy.js';
 import { pageReadBatch } from '../src/agent/pageReadReceipt.js';
 import { projectLookupMessages } from '../src/agent/requestContext.js';
 import { createTurnArchive } from '../src/agent/turnContext.js';
@@ -64,12 +65,13 @@ const searchSample = (search, delay) => async () => {
     requests++; await sleep(ms, signal);
     return [{ title: '示例企业业务', url: `https://source${index}.example.com/article`, snippet: '示例企业公开农业服务资料' }];
   } }));
-  const hits = await search(engines, '示例企业业务', 1, {}, null, delay);
+  const routes = typeof delay === 'function' ? engines.map((engine, index) => guardedSearchRoute(engine, String(index))) : engines;
+  const hits = await search(routes, '示例企业业务', 1, {}, null, delay);
   assert.equal(hits[0].url, 'https://source1.example.com/article');
   assert.equal(requests, 2);
   return { requests, ok: true, sources: 1 };
 };
-cases.push(await compare('慢首源、同一100毫秒备用源；2500到1200毫秒错峰', 10, searchSample(oldSearch.staggeredSearch, 2500), searchSample(staggeredSearch, 1200)));
+cases.push(await compare('冷启动慢首源、同一100毫秒备用源；2500到1200毫秒错峰', 10, searchSample(oldSearch.staggeredSearch, 2500), searchSample(staggeredSearch, engine => engine.staggerMs)));
 const duplicateSample = create => async () => {
   let requests = 0;
   const reader = create({ fetchImpl: async () => { requests++; await sleep(25); return new Response('示例企业实际公开正文，预算600万元。'.repeat(50), { headers: { 'content-type': 'text/plain' } }); } });
