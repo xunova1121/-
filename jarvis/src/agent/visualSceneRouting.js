@@ -8,7 +8,7 @@ export function visualSceneRequest(text = '') {
     /(?:交互|互动)(?:式|版|演示)?\s*(?:Demo|演示|网页|页面|HTML)|(?:可点击|可筛选|可切换|可操作).{0,12}(?:Demo|演示|网页|页面)|(?:Demo|HTML|网页|演示).{0,12}(?:交互|互动|可点击|可筛选|可切换)|(?:同一?设计|同稿).{0,10}Demo|(?:补|加|做|给|要|提供|交付).{0,8}Demo/i.test(clause)
   );
   const posterDemo = /海报|封面|\.poster\.json/i.test(value) && interactive;
-  const existing = /\.visual\.json/i.test(value) || /\.(?:poster|design)\.json/i.test(value) && requested.some(clause => /Demo|交互|互动|演示|HTML/i.test(clause));
+  const existing = /\.visual\.json/i.test(value) || /\.(?:poster|design|canvas)\.json/i.test(value) && requested.some(clause => /Demo|交互|互动|演示|HTML/i.test(clause));
   const dashboard = /(?:数据|可视化|监控|指挥|运营|业务|气象|天气|城市|态势|智慧).{0,8}(?:大屏|驾驶舱)|(?:气象|天气).{0,8}(?:看板|仪表盘)/.test(value);
   const visualPrototype = (interactive || /(?:高清|图文|视觉).{0,10}(?:原型|Demo)/i.test(value)) && /高清|图文|视觉|原型图|倒计时/.test(value) && /Demo|演示|原型/i.test(value);
   if (!posterDemo && !existing && !dashboard && !visualPrototype) return false;
@@ -21,7 +21,7 @@ export function visualSceneRequest(text = '') {
 
 export const VISUAL_SCENE_TOOLS = ['create_visual_demo', 'generate_image', 'process_image', 'inspect_image', 'read_image_text', 'read_file', 'list_files', 'find_files', 'preview', 'update_plan'];
 
-export const VISUAL_SCENE_GUIDANCE = '高清海报加同稿交互Demo、图文页面原型和数据驾驶舱调用create_visual_demo。新稿优先design：按内容与参考选择起稿或layout=free+layers自由安排图片/文字/图标/卡片/图表，不局限气象与经营两套槽位；图片用design.assets工作区真实路径，需要新视觉才generate_image生成无字素材。已有make_poster返回.design.json用source_path直接补同稿Demo，PNG/SVG/PPTX和离线HTML/ZIP共用全部图层；改稿用changes按id修改，同步所有格式，不手改SVG造成源稿丢图标。旧.visual.json/.poster.json继续兼容。中文、数值、单位和图表程序绘制，图片不承载关键文字；手机用语义卡片重排而非整张4K缩图。需要切换数据时提供design.states明确快照值；提供数据必须dataMode=provided+source，无数据就明确demo，不虚构实时接口、坐标或中国地图。海报只要图片时主交PNG，不强迫用户开Demo。实际交付/回读、字体、原文一致、对比度、视觉与交互分开报告；完整文件不代表视觉或交互已验收。4K只表示实际导出像素，不代表底图原生细节。失败保留源稿，修改复用素材，不自动付费重画；普通网页源码和架构图保持原工具路线。';
+export const VISUAL_SCENE_GUIDANCE = '保留底图卡槽直接填字的Demo用canvas.entries或source_path复用.canvas.json，只叠Canvas真实文字、保留原图构图，不走SVG；交付PNG/PPTX/拖动编辑HTML/ZIP。以下design路线用于重新构图。高清海报加同稿交互Demo、图文页面原型和数据驾驶舱调用create_visual_demo。新稿优先design：按内容与参考选择起稿或layout=free+layers自由安排图片/文字/图标/卡片/图表，不局限气象与经营两套槽位；图片用design.assets工作区真实路径，需要新视觉才generate_image生成无字素材。已有make_poster返回.design.json用source_path直接补同稿Demo，PNG/SVG/PPTX和离线HTML/ZIP共用全部图层；改稿用changes按id修改，同步所有格式，不手改SVG造成源稿丢图标。旧.visual.json/.poster.json继续兼容。中文、数值、单位和图表程序绘制，图片不承载关键文字；手机用语义卡片重排而非整张4K缩图。需要切换数据时提供design.states明确快照值；提供数据必须dataMode=provided+source，无数据就明确demo，不虚构实时接口、坐标或中国地图。海报只要图片时主交PNG，不强迫用户开Demo。实际交付/回读、字体、原文一致、对比度、视觉与交互分开报告；完整文件不代表视觉或交互已验收。4K只表示实际导出像素，不代表底图原生细节。失败保留源稿，修改复用素材，不自动付费重画；普通网页源码和架构图保持原工具路线。';
 
 const checked = state => ['passed', 'failed'].includes(state) ? state : 'not_checked';
 
@@ -30,18 +30,19 @@ export function visualSceneReceipt(ok, output = '') {
   let value;
   try { value = JSON.parse(String(output).slice(0, 24000)); } catch { value = null; }
   const valid = value?.kind === 'visual_demo';
+  const canvas = valid && value.renderer === 'canvas' && value.designVersion === 'canvas-image-text-1';
   const outputs = valid && Array.isArray(value.files) ? value.files.slice(0, 8).filter(file =>
     ['png', 'svg', 'pptx', 'html', 'zip'].includes(file?.format) && typeof file.path === 'string' && file.path.length > 0 && file.path.length <= 400 && file.path.toLowerCase().endsWith('.' + file.format)
   ).map(file => ({ format: file.format, path: file.path, readback: checked(file.readback), structure: checked(file.structure), render: checked(file.render) })) : [];
   const usable = ok ? outputs.filter(file => file.readback === 'passed' && file.structure === 'passed') : [];
   const dimensions = valid && Number.isSafeInteger(value.width) && value.width > 0 && Number.isSafeInteger(value.height) && value.height > 0;
-  const designPath = ok && valid && typeof value.designPath === 'string' && value.designPath.length <= 400 && /\.(?:visual|design)\.json$/i.test(value.designPath) ? value.designPath : undefined;
+  const designPath = ok && valid && typeof value.designPath === 'string' && value.designPath.length <= 400 && /\.(?:visual|design|canvas)\.json$/i.test(value.designPath) ? value.designPath : undefined;
   const dataMode = valid && ['demo', 'provided'].includes(value.dataMode) ? value.dataMode : 'not_checked';
   const errors = valid && Array.isArray(value.errors) ? value.errors.length : 0;
   const complete = ok && valid && value.status === 'complete' && value.textRendering === 'program' && value.fontCheck === 'passed' && dimensions && designPath && dataMode !== 'not_checked' && !errors
-    && ['png', 'svg', 'html'].every(format => usable.some(file => file.format === format && (format !== 'png' || file.render === 'passed')));
+    && (!canvas || value.backgroundCheck?.status === 'passed' && value.layout?.status === 'passed' && value.contrast?.status === 'passed' && value.detection?.confidence >= 0.8) && (canvas ? ['png', 'pptx', 'html', 'zip'] : ['png', 'svg', 'html']).every(format => usable.some(file => file.format === format && (format !== 'png' || file.render === 'passed')));
   return {
-    kind: 'visual_demo', state: !ok ? 'failed' : complete ? 'completed' : usable.length ? 'partial' : 'pending',
+    kind: 'visual_demo', ...(canvas && { renderer: 'canvas' }), state: !ok ? 'failed' : complete ? 'completed' : usable.length ? 'partial' : 'pending',
     files: usable.map(file => file.path), outputs: ok ? outputs : [], ...(designPath && { designPath }), ...(dimensions && { width: value.width, height: value.height }),
     fontCheck: checked(valid && value.fontCheck), visual: checked(valid && value.visual), interaction: checked(valid && value.interaction), dataMode,
     errors, errorCodes: valid && Array.isArray(value.errors) ? value.errors.slice(0, 3).map(error => String(error?.code || '').slice(0, 80)) : []

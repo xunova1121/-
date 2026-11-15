@@ -354,6 +354,8 @@ jobs:
         run: node e2e/layered-design.mjs "$RUNNER_TEMP/jarvis-e2e/layered-design"
       - name: 验证海报手机整图字号、三种结构、素材用途与真实Office导出
         run: node e2e/poster-reading.mjs "$RUNNER_TEMP/jarvis-e2e/poster-reading"
+      - name: 验证Canvas原图卡槽填字、零遮挡、可编辑PPTX及压缩编辑器
+        run: node e2e/canvas-text.mjs "$RUNNER_TEMP/jarvis-e2e/canvas-text"
       - name: 验证沉浸海报连续渐变、中文与可编辑PPTX
         run: node e2e/poster-gradient.mjs "$RUNNER_TEMP/jarvis-e2e/poster-gradient"
       - name: 验证分享返回状态、原字节和同账号会话恢复（原生事件模拟）
@@ -477,6 +479,7 @@ jobs:
           npm ci --prefix desktop --no-audit --no-fund
           for i in 1 2 3; do node desktop/node_modules/electron/install.js && break; [ $i = 3 ] && exit 1; echo "Electron 下载失败，$((i*20)) 秒后重试"; sleep $((i*20)); done
           npm --prefix desktop run prepare-app
+          xvfb-run -a node e2e/canvas-desktop.mjs "$RUNNER_TEMP/jarvis-e2e/canvas-desktop"
           xvfb-run -a node e2e/hologram-desktop.mjs "$RUNNER_TEMP/jarvis-e2e"
           xvfb-run -a node e2e/pc-control.mjs "$RUNNER_TEMP/jarvis-e2e"
       - name: 网页版和单文件版端到端测试

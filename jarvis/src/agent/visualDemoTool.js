@@ -12,6 +12,8 @@ import { throwControl } from '../core/networkRequest.js';
 import { themeById } from './themes.js';
 import { LAYERED_PROPERTIES, usesLayeredDesign } from './layeredDesignSchema.js';
 import { deliverLayeredDesign } from './layeredDesignDelivery.js';
+import { CANVAS_TEXT_PROPERTIES, usesCanvasText } from './imageTextInput.js';
+import { deliverCanvasText } from './imageTextDelivery.js';
 
 async function save(path, blob, ctx, signal) {
   throwControl(null, signal);
@@ -25,7 +27,7 @@ async function save(path, blob, ctx, signal) {
 }
 
 const properties = {
-  ...LAYERED_PROPERTIES,
+  ...LAYERED_PROPERTIES, ...CANVAS_TEXT_PROPERTIES,
   title: { type: 'string', description: '准确标题；保留用户提供的中文' }, subtitle: { type: 'string' },
   preset: { type: 'string', enum: ['weather', 'operations'], description: 'weather地理气象大屏；operations经营指标图表' },
   width: { type: 'integer', description: '输出实际像素宽，默认3840' }, height: { type: 'integer', description: '默认2160' },
@@ -51,9 +53,10 @@ const properties = {
 export function createVisualDemoTool(ctx = {}) {
   return {
     name: 'create_visual_demo',
-    description: '制作同源高清图文海报与交互Demo：新稿用design.sections内容驱动起稿或design.layers自由构图；引用.design.json补Demo保留全部文字/图片/图标/版式。交付真实PNG、可编辑SVG/PPTX、离线HTML和ZIP。桌面保留构图，手机采用可读卡片；真实支持搜索/分类/详情/图片图层开关及明确提供的数据快照。默认4K画布，不自动接实时数据；素材放大单独记录。旧气象/经营preset与.poster.json/.visual.json继续兼容。',
+    description: '已有底图填字Demo用canvas.entries或source_path复用.canvas.json，只叠Canvas文字保留全图，交付PNG/PPTX/可拖动文字框HTML/ZIP，不使用SVG。制作同源高清图文海报与交互Demo：新稿用design.sections内容驱动起稿或design.layers自由构图；引用.design.json补Demo保留全部文字/图片/图标/版式。交付真实PNG、可编辑SVG/PPTX、离线HTML和ZIP。桌面保留构图，手机采用可读卡片；真实支持搜索/分类/详情/图片图层开关及明确提供的数据快照。默认4K画布，不自动接实时数据；素材放大单独记录。旧气象/经营preset与.poster.json/.visual.json继续兼容。',
     input_schema: { type: 'object', properties, additionalProperties: false },
     run: async (input = {}, { signal, progress, checkpoint, retrieval } = {}) => {
+      if (usesCanvasText(input)) return deliverCanvasText(input, ctx, { signal, progress, checkpoint, retrieval }, true);
       if (usesLayeredDesign(input)) return deliverLayeredDesign(input, ctx, { signal, progress, checkpoint, retrieval }, true);
       const loaded = await loadVisualDesign(input, signal);
       const { design, background, backgroundPath, posterOptions } = loaded;

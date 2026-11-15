@@ -14,6 +14,7 @@ import { editImage } from '../src/llm/imageEdit.js';
 import { renderSvg } from './svgRender.mjs';
 import { renderPoster } from './posterRaster.mjs';
 import { renderVisualScene } from './visualSceneRaster.mjs';
+import { serverCanvasRenderer } from './canvasImageText.mjs';
 import { compareDiagramPpt } from './diagramCompare.mjs';
 import { cropImageRegion } from './imageRegion.mjs';
 import { qweatherConfig } from '../src/core/qweather.js';
@@ -370,6 +371,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       renderSvg,
       renderPoster,
       renderVisualScene,
+      canvasRenderer: serverCanvasRenderer,
       compareDiagramPpt,
       visionLlm: sight(cfg, task).describeImages || null,
       ocr: ocrLine(cfg) ? (file, o) => recognizeText(cfg, file, { ...o, fetchImpl: evaluationModelFetch }) : null, // 文字识别（智谱 GLM-OCR）

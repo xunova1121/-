@@ -38,12 +38,12 @@ export const AGENT_SKILLS = Object.freeze({
 8. 交付前检查：每个数字都有来源和时间；没有把旧闻当最新；结论没有超出证据。`,
 
   'poster-designer': `## 海报设计专业方法
-1. 制作海报时先明确用途、尺寸比例、主标题、时间地点和品牌色；原片修图直接按用户要求处理，不问海报标题文案。
-2. 信息层级：主标题最大最醒目，副标题次之，时间地点和二维码等细节放下方；全图文字越少越好，主标题不超过 12 个字。
-3. 版式：留安全边距，文字背景简洁；2–3色、1–2字体。支持free+layers自由坐标，换结构可用timeline/newspaper/campaign，不能只换色。竖版390px整图正文至少12px；素材purpose=poster_art，不画字或空框。
-4. 新图文海报优先 make_poster.design：按文案/参考图确定主次、视觉和分组，sections内容起稿或layout=free+layers自由构图，避免所有海报都是底部居中列表。照片/产品/插画有合适原图就复用design.assets真实路径；否则先 generate_image 画“不要任何文字”的素材，不固定下半部留白。中文用真实字体独立排版，交付最终 PNG、自包含可编辑 SVG 和 PPTX；图标、卡片和图片独立可改，不只交 PPTX 让用户自行导出，不绕去 Python、手写 HTML 截图或 render_diagram。无图像能力用独立矢量图标/形状起稿，不能把渐变圆形吹成模型插画。复杂大屏或海报加交互Demo用 create_visual_demo；新稿.design.json同源交付PNG/SVG/PPTX/离线HTML/ZIP，手机重排为可读卡片。source_path复用已有.design.json/.visual.json/.poster.json，补Demo不重画底图；修改新稿changes按id同步所有格式，不能仅手改SVG。
-5. 图片处理用 process_image：人像优化/美颜选portrait_retouch，P瘦/显瘦/瘦身选portrait_slim，不能拿upscale清晰化冒充美颜。默认natural自然力度，instructions只填用户要求；保留长相和年龄特征、服装背景。必须用本次或当前对话指定原图，缺原图请上传，不搜其它照片。原片不覆盖、结果另存；以真实像素和portraitReview报告效果，未复核不承诺保真，已有双图视觉对照不重复调用inspect_image，也不因没过检查自动再付费修一张。抠图、证件照、修复、清晰化的原流程保持。
-6. 检查：按实际工具回执分别报告生成、读回、字体和视觉检查状态；需要看图时 inspect_image 核对最终 PNG。生成成功不等于视觉或交互验收，generated不算通过；示例/用户提供数据不冒充实时数据，4K输出不证明底图原生4K。不承诺绝对无错字；局部失败保留已有文件并说清缺失格式/阶段，不假装完整交付。`,
+1. 明确用途、尺寸、文字、品牌色；原片修图不问海报标题。留安全边距，2–3色、1–2字体。
+2. 已有底图卡槽/保留全图直接填字用make_poster.canvas：background_path原图，entries标题/正文，header主标题；自动定位或regions指定原图0–1比例，protected保护人物图标。只叠Canvas真实字体，不裁图、不加面板、不走SVG；交付PNG/原生文字PPTX/可拖动编辑HTML/ZIP/.canvas.json。source_path+canvas.entries改字，源图与位置复用；装不下调整区域或拆版，不截字。
+3. 重新构图用make_poster.design，sections组织主次或free+layers自由坐标；换结构可用timeline/newspaper/campaign，不能只换色或固定底部列表。竖版390px整图正文至少12px。复用design.assets真实图片，缺素材才generate_image(purpose=poster_art)画无字主体场景，不画空框/整页。图标/卡片独立可改，无图像能力用矢量形状，不吹成模型插画。交最终 PNG/SVG/PPTX，不只交PPTX，不绕Python/手写HTML截图/render_diagram。
+4. 复杂大屏或海报加交互Demo用create_visual_demo；.design.json同源PNG/SVG/PPTX/HTML/ZIP，手机可读卡片；.canvas.json保持原图构图。source_path复用.design.json/.canvas.json/.visual.json/.poster.json，补Demo不重画。分层稿changes按id同步全格式，不仅手改SVG。
+5. process_image：人像美颜portrait_retouch，显瘦portrait_slim，不能以upscale冒充美颜；natural默认自然，instructions按用户要求。仅用指定原图，保留长相/年龄/服装背景；缺原图请上传，不搜别人照片。原片保留、另存；按portraitReview报告，未复核不承诺保真；已有双图检查不重复inspect_image，不因未通过自动付费重修。原抠图/证件照/修复流程保持。
+6. 按真实回执分别报告原文、字体、像素/手机可读、对比和视觉状态；需看图用inspect_image核对最终PNG。生成成功不等于视觉或交互验收，示例/提供数据不冒充实时数据，4K画布不证明原图细节。不保证绝对无错字，失败保留源文件说明缺失阶段。`,
 
   'image-reader': `## 图片转文字专业方法
 1. 按原图顺序提取，保留段落、标题层级和列表；表格还原成 Markdown 表格，行列对应不能错位。

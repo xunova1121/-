@@ -18,7 +18,7 @@ if (fs.existsSync(path.join(root, 'licenses'))) fs.cpSync(path.join(root, 'licen
 // 网关打成单文件：把它用到的 Claude SDK、MCP SDK 等依赖一起打进去（原来 node_modules 有 6000 多个文件、41 MB）
 const { build } = await import(pathToFileURL(path.join(root, 'node_modules/esbuild/lib/main.js')).href);
 await build({
-  entryPoints: { server: path.join(root, 'server/server.mjs'), mcp: path.join(root, 'server/mcp.mjs') },
+  entryPoints: { server: path.join(root, 'server/server.mjs'), mcp: path.join(root, 'server/mcp.mjs'), canvasImageText: path.join(root, 'server/canvasImageText.mjs'), canvasImageTextWorker: path.join(root, 'server/canvasImageTextWorker.mjs') },
   outdir: path.join(app, 'server'),
   outExtension: { '.js': '.mjs' },
   bundle: true,
@@ -28,10 +28,17 @@ await build({
   target: 'node20',
   minify: true,
   legalComments: 'none',
+  external: ['@napi-rs/canvas'],
   logLevel: 'warning',
   // 打进 ESM 的 CommonJS 依赖会 require 内置模块
   banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" }
 });
+// 原生Canvas只在独立子进程中加载；携带当前安装平台的模块/二进制及许可证，不能丢掉URL引用的入口。
+const nativeRoot = path.join(root, 'node_modules', '@napi-rs'), nativeTarget = path.join(app, 'node_modules', '@napi-rs');
+fs.mkdirSync(nativeTarget, { recursive: true });
+const nativePackages = fs.readdirSync(nativeRoot).filter(name => name === 'canvas' || name.startsWith('canvas-'));
+if (nativePackages.length < 2) throw new Error('Canvas原生模块或当前平台二进制未安装，不能交付缺渲染能力的桌面包');
+for (const name of nativePackages) fs.cpSync(path.join(nativeRoot, name), path.join(nativeTarget, name), { recursive: true });
 // shared/*.js 是 ES 模块
 fs.writeFileSync(path.join(app, 'package.json'), JSON.stringify({ type: 'module' }, null, 2));
 console.log('桌面版资源已就绪：', app);

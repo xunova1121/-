@@ -1,8 +1,11 @@
-import { textPosterRequest, posterReceipt } from './posterRouting.js';
+import { textPosterRequest, posterReceipt, canvasTextRequest } from './posterRouting.js';
 import { visualSceneRequest, visualSceneReceipt } from './visualSceneRouting.js';
 /** 只识别明确的媒体制作动作；讲方法、写提示词、题设和技能说明不等于要立即调用生成服务。 */
 export function mediaRequirement(text = '') {
   const value = String(text).slice(-6000);
+  const canvas = canvasTextRequest(value);
+  if (canvas && visualSceneRequest(value)) return { kind: 'visual_demo', tool: 'create_visual_demo', renderer: 'canvas', label: '原图填字PNG、可编辑PPTX及同稿编辑HTML/ZIP' };
+  if (canvas) return { kind: 'poster', tool: 'make_poster', renderer: 'canvas', label: '原图填字PNG、可编辑PPTX及编辑HTML/ZIP' };
   if (visualSceneRequest(value)) return { kind: 'visual_demo', tool: 'create_visual_demo', label: '高清PNG、可编辑SVG及同设计交互HTML' };
   // 明确拒绝制作时不能用收尾检查反向要求调用付费服务。
   if (/(?:不要|不用|无需|别|暂不|不必|先不).{0,8}(?:生成|制作|画|谱曲|演唱|唱)/.test(value)) return null;

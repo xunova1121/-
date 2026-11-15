@@ -47,6 +47,7 @@
       "bundle/**/*"
     ],
     "asar": true,
+    "asarUnpack": ["bundle/server/**", "bundle/node_modules/**"],
     "compression": "maximum",
     "publish": [
       {

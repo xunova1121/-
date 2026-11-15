@@ -12,6 +12,8 @@ import { imageCoverReceipt, readImageMetadata } from './imageMetadata.js';
 import { decodePngRgba, measureTextContrast, withoutText } from './posterContrast.js';
 import { LAYERED_PROPERTIES, usesLayeredDesign } from './layeredDesignSchema.js';
 import { deliverLayeredDesign } from './layeredDesignDelivery.js';
+import { CANVAS_TEXT_PROPERTIES, usesCanvasText } from './imageTextInput.js';
+import { deliverCanvasText } from './imageTextDelivery.js';
 
 const SIZES = { 竖版: [1080, 1920], 横版: [1920, 1080], 方形: [1440, 1440], 朋友圈封面: [1440, 1080], 小红书: [1024, 1536] };
 const inputError = message => Object.assign(new Error(message), { name: 'ValidationError', code: 'INVALID_POSTER', kind: 'input' });
@@ -141,11 +143,11 @@ async function gradientContrast(ctx, compose, out, signal) {
 export function createPosterDeliveryTool(ctx = {}) {
   return {
     name: 'make_poster',
-    description: '制作准确中文图文海报：新稿优先design按内容构图，sections组织主次新闻/图文/数值卡片，或layers自由安排文字、图片、矢量图标、形状与图表。已有图片放design.assets，GPT仅生成需要的无字视觉素材。交付同源PNG/SVG/可编辑PPTX和.design.json；改字用source_path+changes，补同稿Demo用create_visual_demo复用源稿，不重画。旧稿.poster.json及panel/gradient接口保持兼容；gradient为底部连续渐变。回执区分原文、字体、像素、对比、视觉，4K不等于素材原生细节，不能保证绝对无错字。',
+    description: '已有无字底图卡槽填字用canvas.entries，可配header/footer/regions/protected；保留全图只用Canvas真实字体，不经SVG、不加遮罩；交付PNG/原生文字PPTX/可拖动编辑HTML/ZIP/.canvas.json，改字或补Demo复用source_path。制作准确中文图文海报：新稿优先design按内容构图，sections组织主次新闻/图文/数值卡片，或layers自由安排文字、图片、矢量图标、形状与图表。已有图片放design.assets，GPT仅生成需要的无字视觉素材。交付同源PNG/SVG/可编辑PPTX和.design.json；改字用source_path+changes，补同稿Demo用create_visual_demo复用源稿，不重画。旧稿.poster.json及panel/gradient接口保持兼容；gradient为底部连续渐变。回执区分原文、字体、像素、对比、视觉，4K不等于素材原生细节，不能保证绝对无错字。',
     input_schema: {
       type: 'object',
       properties: {
-        ...LAYERED_PROPERTIES,
+        ...LAYERED_PROPERTIES, ...CANVAS_TEXT_PROPERTIES,
         title: { type: 'string', description: '准确主标题，保留用户给定文字，不自行改写' },
         subtitle: { type: 'string' },
         lines: { type: 'array', maxItems: 32, items: { type: 'string' }, description: '准确要点，每项一段；放不下会明确报错，不删字' },
@@ -172,6 +174,7 @@ export function createPosterDeliveryTool(ctx = {}) {
     },
     run: async (input = {}, { signal, progress, checkpoint, retrieval } = {}) => {
       if (!input || typeof input !== 'object' || Array.isArray(input)) throw inputError('海报参数必须是对象');
+      if (usesCanvasText(input)) return deliverCanvasText(input.size !== undefined ? { ...input, ...Object.fromEntries(['width', 'height'].map((key, i) => [key, dimensions(input)[i]])) } : input, ctx, { signal, progress, checkpoint, retrieval });
       if (usesLayeredDesign(input)) {
         const resize = !input.source_path || input.design && (input.size !== undefined || input.width !== undefined || input.height !== undefined);
         const [width, height] = resize ? dimensions(input) : [];

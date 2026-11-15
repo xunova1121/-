@@ -283,7 +283,9 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     const style = styleNote(request, lastDocument());
     if (style) issues.push(style);
     if (result.visualIssue) issues.push(result.visualIssue);
-    if (result.media && result.media.state !== 'completed') issues.push(result.media.kind === 'poster'
+    if (result.media && result.media.state !== 'completed') issues.push(result.media.renderer === 'canvas'
+      ? `用户要求原图直接填字，当前${result.media.state}；须取得Canvas PNG、原生文字PPTX、编辑HTML/ZIP和.canvas.json回执，原图保护、字体与全文布局通过。布局失败保留原图与源稿，调整文字区，不改走SVG或添加面板。`
+      : result.media.kind === 'poster'
       ? `用户要求海报PNG及可编辑SVG/PPTX，当前${result.media.state}；须取得make_poster对应三格式的真实读回回执。保留已生成底图和源文件，按回执说明缺失格式与失败阶段，不能只交PPTX让用户自行导出，也不能靠重画底图冒充完成。`
       : result.media.kind === 'visual_demo'
         ? `用户要求高清PNG、可编辑SVG及同设计交互HTML，当前${result.media.state}；须取得create_visual_demo三格式真实读回与结构、PNG渲染和字体回执。保留已有底图和源文件，已有.visual.json或.poster.json用source_path续做，失败不自动重画；视觉、交互和数据来源分别报告，生成成功不等于验收。`

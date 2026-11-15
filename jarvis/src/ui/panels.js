@@ -1,4 +1,5 @@
 import { initWorkspaceView } from './workspaceView.js';
+import { htmlPreviewSandbox } from './htmlPreviewSandbox.js';
 /**
  * 右侧面板：工作区 / 知识库 / 记忆与进化 / 模型。
  */
@@ -141,7 +142,8 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     try {
       const blob = await ws.readBlob(path);
       if (e === 'html' || e === 'htm') {
-        body.replaceChildren(el('iframe', { sandbox: 'allow-scripts allow-forms allow-modals', srcdoc: await inlineAssets(path, await blob.text()), title: path }));
+        const source = await inlineAssets(path, await blob.text());
+        body.replaceChildren(el('iframe', { sandbox: htmlPreviewSandbox(source), srcdoc: source, title: path }));
       } else if (e === 'md') {
         const div = el('div', { className: 'msg agent' });
         const inner = el('div', { className: 'body' });
