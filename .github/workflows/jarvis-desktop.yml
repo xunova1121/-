@@ -350,6 +350,8 @@ jobs:
         run: node e2e/poster-composition.mjs "$RUNNER_TEMP/jarvis-e2e/poster-composition"
       - name: 验证4K大屏同设计PNG与离线交互Demo
         run: node e2e/visual-demo.mjs "$RUNNER_TEMP/jarvis-e2e/visual-demo"
+      - name: 验证分层海报、同稿Demo、中文可读性与Office真实导出
+        run: node e2e/layered-design.mjs "$RUNNER_TEMP/jarvis-e2e/layered-design"
       - name: 验证沉浸海报连续渐变、中文与可编辑PPTX
         run: node e2e/poster-gradient.mjs "$RUNNER_TEMP/jarvis-e2e/poster-gradient"
       - name: 验证分享返回状态、原字节和同账号会话恢复（原生事件模拟）
@@ -537,7 +539,14 @@ jobs:
       - name: 写发布说明
         run: |
           cat > release-notes.md <<'NOTES'
-          ## 本版优化 · 搜索与回答提速
+          ## 本版新增 · 分层海报与同稿高清Demo
+          - 新海报可按内容起稿，也可自由安排文字、图片、矢量图标、卡片和图表；不再只有固定的底部文字面板。原图优先复用，需要新素材时由已配置的图像模型制作无字视觉素材。
+          - 中文、日期和数值使用真实字体独立排版，逐项检查原文、字形、边界与实际像素对比。配置了视觉能力时仅核验一次实际PNG，不会为了纠错自动反复付费重画；仍不承诺文案事实或所有文字绝对正确。
+          - 同一.design.json源稿同步导出PNG、可编辑SVG/PPTX，补Demo直接复用原图和全部图层，交付离线HTML与ZIP；修改文字、换构图或换画幅另存，保留旧稿和素材摘要。旧海报与旧大屏接口保持兼容。
+          - Demo支持真实筛选、详情、图片图层开关与明确提供的数据快照；手机按可读卡片重排。4K导出核对实际像素，同时记录素材原始像素和放大倍率，不把低清图片放大称作原生4K。
+          - 新增三类实际导出样例、手机/PC离线浏览器操作与Office转PDF门禁；未连接用户付费模型、用户服务器或真机，安装包发布不等于用户设备已安装。
+
+          ## 保留上一版 · 搜索与回答提速
           - 批量公网直读在预留额度后最多两页并发，保留所有页面的真实来源与状态；带付费代读的路径继续逐页处理。停止后不发排队请求，未用预留会退回。
           - 搜索备用源按当前账号和配置的近期耗时调整错峰，最多两路在途；先筛选相关性与日期，再决定返回，不为速度选无关结果。
           - 普通联网查询的模型发送副本只保留近期相关历史，长结果提取原文片段并保留回读编号；完整历史、需求和核验记录保持。文档、识图、复杂核验不套普通查询裁剪。

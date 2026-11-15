@@ -14,6 +14,7 @@ export function textPosterRequest(text = '') {
   if (/架构图|流程图|关系图|组织图|拓扑图/.test(value)) return false;
   if (/(?:开发|实现|编写|提供|交付|写一段).{0,12}(?:代码|程序|脚本|应用)|(?:只给|只要)(?:代码|脚本)/.test(value)) return false;
   if (/(?:图像模型|图片模型|生图模型|generate_image).{0,12}直接.{0,8}(?:画字|写字|画带字|生成文字)/i.test(value)) return false;
+  if (/(?:GPT(?:[ -]?(?:Image|图片|画图))?(?:[ -]?[\d.]+)?|gpt-image-[\w.-]+).{0,8}直接.{0,10}(?:画字|写字|画带字|生成文字|画整张带字|生成整张带字)/i.test(value)) return false;
   if (/(?:Word|docx|Excel|xlsx|文档|报告).{0,6}封面/i.test(value) || new RegExp(`(?:Word|docx|Excel|xlsx).{0,12}(?:${POSTER_KINDS}|告示)|(?:${POSTER_KINDS}).{0,12}(?:Word|docx|Excel|xlsx)`, 'i').test(value)) return false;
   // 只要宣传单/请柬的文案、话术，不出图
   if (new RegExp(`(?:${POSTER_KINDS})的?(?:文案|话术|文字稿|措辞|内容)`).test(value) && !/图|画|设计|排版|做成|生成/.test(value.replace(new RegExp(`(?:${POSTER_KINDS})的?(?:文案|话术|文字稿|措辞|内容)`, 'g'), ''))) return false;
@@ -26,7 +27,7 @@ export function textPosterRequest(text = '') {
 
 export const POSTER_TOOLS = ['generate_image', 'make_poster', 'process_image', 'inspect_image', 'read_image_text', 'read_file', 'list_files', 'find_files', 'preview', 'update_plan'];
 
-export const POSTER_GUIDANCE = '图片明确要求写上中文、使用黑体字，或海报/封面的标题、活动文案、日期和联系方式需要准确排字时：优先复用用户已有底图并把真实路径交给make_poster的background_path；没有合适底图时，先generate_image生成“不要任何文字”的底图并留出文字空间，再make_poster程序排字。沉浸式、去拼接感、不要硬色块或渐变蒙版用text_style=gradient，默认底部35%渐变、居中排字；在既有source_path上只改这个参数就能复用原底图，不重新生图。改字时把上次回执designPath传给make_poster.source_path，只传要改的文字，保留原尺寸和无字底图，不把最终带字PNG当作新底图。保留用户原文，文案较多时分清标题、要点与页脚，不擅自删字。交付最终PNG、自包含可编辑SVG和PPTX，不能只交PPTX让用户自行导出，也不要改走sandbox、run_python、手写HTML截图或render_diagram。只有用户明确要无字素材或图像模型直接画字时才采用相应图片路线。按make_poster真实回执区分已生成、读回、字体检查和视觉检查；生成成功不等于视觉验收，不承诺绝对无错字。局部失败保留已有文件并说明缺失格式/阶段，不反复重画底图。';
+export const POSTER_GUIDANCE = '中文图文海报新稿优先make_poster.design：先按用途/受众/参考图/文案量确定主视觉、标题层级、分组与留白，再选editorial/celebration起稿或用layout=free,layers自由安排文字、图片、卡片、矢量图标和图表；起稿不是固定模板，不要每次都用底部居中列表。新闻用sections把主新闻和次级卡片分开；照片/产品图优先复用用户真实路径design.assets；确需新视觉才用generate_image画“不要任何文字”的素材。全部中文、日期、数字、单位独立程序排字，原文保留，不擅自删字或用清晰化冒充纠错。改稿用上次.design.json作为source_path，changes按图层id修改；不手改SVG后遗漏PPTX/JSON，不用带错字成品作新底图覆盖文字。补同稿Demo用create_visual_demo.source_path，不重画。旧.poster.json继续原接口；明确沉浸渐变可用text_style=gradient，默认底部35%渐变，不强制用于所有新稿。最终交付PNG、自包含可编辑SVG和PPTX，不能只交PPTX让用户自己导出；不要绕到sandbox、run_python、手写HTML截图或render_diagram。用户明确要无字素材或图像模型直接画字时尊重其选择；GPT/图像模型画字不能保证准确，须检查成品。按真实回执区分原文一致、字体/字形、裁切/重叠、实际像素对比和视觉核验；4K画布不证明底图原生4K，生成成功不等于视觉验收，不承诺绝对无错字。失败保留候选，只改文字/布局，不反复付费重画素材。';
 
 /** 仅收实际工具返回的三格式回执，不凭“已生成”或文件名认定海报完成。 */
 export function posterReceipt(ok, output = '') {
@@ -40,7 +41,7 @@ export function posterReceipt(ok, output = '') {
   const dimensions = Number.isSafeInteger(value?.width) && value.width > 0 && Number.isSafeInteger(value?.height) && value.height > 0;
   const errors = Array.isArray(value?.errors) ? value.errors.length : 0;
   const complete = ok && value?.status === 'complete' && value.textRendering === 'program' && value.fontCheck === 'passed' && dimensions && !errors && ['png', 'svg', 'pptx'].every(format => usable.some(file => file.format === format && (format !== 'png' || file.render === 'passed')));
-  const designPath = ok && typeof value?.designPath === 'string' && value.designPath.length <= 400 && /\.poster\.json$/i.test(value.designPath) ? value.designPath : undefined;
+  const designPath = ok && typeof value?.designPath === 'string' && value.designPath.length <= 400 && /\.(?:poster|design)\.json$/i.test(value.designPath) ? value.designPath : undefined;
   return { kind: 'poster', ...(designPath && { designPath }), state: !ok ? 'failed' : complete ? 'completed' : usable.length ? 'partial' : 'pending', files: usable.map(file => file.path), outputs: ok ? outputs : [], ...(dimensions && { width: value.width, height: value.height }), visual: checked(value?.visual), fontCheck: checked(value?.fontCheck), errors, errorCodes: Array.isArray(value?.errors) ? value.errors.slice(0, 3).map(error => String(error?.code || '').slice(0, 80)) : [] };
 }
 

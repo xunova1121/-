@@ -10,6 +10,8 @@ import { normalizePosterBackground } from './posterCompositionInput.js';
 import { assertPosterPng } from './posterDeliveryTool.js';
 import { throwControl } from '../core/networkRequest.js';
 import { themeById } from './themes.js';
+import { LAYERED_PROPERTIES, usesLayeredDesign } from './layeredDesignSchema.js';
+import { deliverLayeredDesign } from './layeredDesignDelivery.js';
 
 async function save(path, blob, ctx, signal) {
   throwControl(null, signal);
@@ -23,6 +25,7 @@ async function save(path, blob, ctx, signal) {
 }
 
 const properties = {
+  ...LAYERED_PROPERTIES,
   title: { type: 'string', description: '准确标题；保留用户提供的中文' }, subtitle: { type: 'string' },
   preset: { type: 'string', enum: ['weather', 'operations'], description: 'weather地理气象大屏；operations经营指标图表' },
   width: { type: 'integer', description: '输出实际像素宽，默认3840' }, height: { type: 'integer', description: '默认2160' },
@@ -36,7 +39,7 @@ const properties = {
   alerts: { type: 'array', maxItems: 3, items: { type: 'object', properties: { title: { type: 'string' }, detail: { type: 'string' }, time: { type: 'string' }, level: { type: 'string', description: 'info提示、warning关注、critical紧急；也接受蓝色、黄色、橙色、红色等别名' } }, required: ['title'] } },
   markers: { type: 'array', maxItems: 12, items: { type: 'object', properties: { name: { type: 'string' }, lon: { type: 'number' }, lat: { type: 'number' }, value: { type: ['string', 'number'] } }, required: ['name', 'lon', 'lat'] } },
   background_path: { type: 'string', description: '可选工作区无字底图，真实PNG/JPEG/WebP。不要传已带错字的截图作为底图' },
-  source_path: { type: 'string', description: '复用上次.visual.json改数据；已有海报用make_poster返回的.poster.json，同版式补可交互Demo，无需重画底图' },
+  source_path: { type: 'string', description: '新稿复用.design.json，用changes按图层id修改；已有.poster.json/.visual.json仍兼容；同稿补Demo无需重画图片' },
   text_style: { type: 'string', enum: ['panel', 'gradient'], description: '仅复用海报源稿：实色或底部连续渐变；切换gradient默认底部35%居中' },
   text_position: { type: 'string', enum: ['top', 'bottom', 'left', 'right', 'center'], description: '仅海报源稿；gradient目前只支持bottom' },
   text_fraction: { type: 'number', description: '仅海报源稿：文字区比例0.15–1；原渐变稿修改保留旧比例' },
@@ -48,9 +51,10 @@ const properties = {
 export function createVisualDemoTool(ctx = {}) {
   return {
     name: 'create_visual_demo',
-    description: '制作高清数据大屏、气象/经营驾驶舱及同设计交互Demo：中文、数字、图表和地图标注由程序绘制；交付原尺寸PNG、可编辑SVG、自包含离线HTML和打包文件。已有中文海报用source_path复用.poster.json。图层/指标/城市/预警可点击查看；不自动接实时数据。支持4K画布但如实标底图放大倍率；不声称原生4K细节或视觉已验收。',
+    description: '制作同源高清图文海报与交互Demo：新稿用design.sections内容驱动起稿或design.layers自由构图；引用.design.json补Demo保留全部文字/图片/图标/版式。交付真实PNG、可编辑SVG/PPTX、离线HTML和ZIP。桌面保留构图，手机采用可读卡片；真实支持搜索/分类/详情/图片图层开关及明确提供的数据快照。默认4K画布，不自动接实时数据；素材放大单独记录。旧气象/经营preset与.poster.json/.visual.json继续兼容。',
     input_schema: { type: 'object', properties, additionalProperties: false },
-    run: async (input = {}, { signal, progress, checkpoint } = {}) => {
+    run: async (input = {}, { signal, progress, checkpoint, retrieval } = {}) => {
+      if (usesLayeredDesign(input)) return deliverLayeredDesign(input, ctx, { signal, progress, checkpoint, retrieval }, true);
       const loaded = await loadVisualDesign(input, signal);
       const { design, background, backgroundPath, posterOptions } = loaded;
       progress?.('正在用同一份设计排版中文、指标与图表…');

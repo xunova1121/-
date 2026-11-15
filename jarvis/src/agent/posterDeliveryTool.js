@@ -10,6 +10,8 @@ import { posterDesignInput, posterDesignBlob, checkPosterDesignBackground } from
 import { throwControl } from '../core/networkRequest.js';
 import { imageCoverReceipt, readImageMetadata } from './imageMetadata.js';
 import { decodePngRgba, measureTextContrast, withoutText } from './posterContrast.js';
+import { LAYERED_PROPERTIES, usesLayeredDesign } from './layeredDesignSchema.js';
+import { deliverLayeredDesign } from './layeredDesignDelivery.js';
 
 const SIZES = { 竖版: [1080, 1920], 横版: [1920, 1080], 方形: [1440, 1440], 朋友圈封面: [1440, 1080], 小红书: [1024, 1536] };
 const inputError = message => Object.assign(new Error(message), { name: 'ValidationError', code: 'INVALID_POSTER', kind: 'input' });
@@ -139,10 +141,11 @@ async function gradientContrast(ctx, compose, out, signal) {
 export function createPosterDeliveryTool(ctx = {}) {
   return {
     name: 'make_poster',
-    description: '制作中文海报/封面：把工作区底图与准确文案用真实字体程序排版，直接输出同尺寸PNG成品、自包含可编辑SVG和可编辑PPTX。先定尺寸/文字位置，再让generate_image只画无字底图；已有底图直接复用。文字不交给画图模型生成。沉浸海报用text_style=gradient，默认底部35%透明到深色渐变、文字居中；实色面板用panel。下方1/3留给标题时text_position=bottom,text_fraction=0.333333。partial表示成品尚未全部交付；真实渲染通过也不代表已经人工或视觉模型核对。',
+    description: '制作准确中文图文海报：新稿优先design按内容构图，sections组织主次新闻/图文/数值卡片，或layers自由安排文字、图片、矢量图标、形状与图表。已有图片放design.assets，GPT仅生成需要的无字视觉素材。交付同源PNG/SVG/可编辑PPTX和.design.json；改字用source_path+changes，补同稿Demo用create_visual_demo复用源稿，不重画。旧稿.poster.json及panel/gradient接口保持兼容；gradient为底部连续渐变。回执区分原文、字体、像素、对比、视觉，4K不等于素材原生细节，不能保证绝对无错字。',
     input_schema: {
       type: 'object',
       properties: {
+        ...LAYERED_PROPERTIES,
         title: { type: 'string', description: '准确主标题，保留用户给定文字，不自行改写' },
         subtitle: { type: 'string' },
         lines: { type: 'array', maxItems: 32, items: { type: 'string' }, description: '准确要点，每项一段；放不下会明确报错，不删字' },
@@ -151,7 +154,7 @@ export function createPosterDeliveryTool(ctx = {}) {
         width: { type: 'integer', description: '精确宽度像素；与height一起提供时优先于size' },
         height: { type: 'integer', description: '精确高度像素' },
         background_path: { type: 'string', description: '工作区底图路径，PNG/JPEG/WebP；无需传给代码沙箱' },
-        source_path: { type: 'string', description: '修改已有海报时传上次返回的designPath（.poster.json）；复用原底图和版式，只填写要改的文字/字段，不重新生图' },
+        source_path: { type: 'string', description: '复用designPath：新稿.design.json用changes按id改字/版式；旧稿.poster.json保留原字段；原稿/原图保持，另存新版本' },
         text_position: { type: 'string', enum: ['top', 'bottom', 'left', 'right', 'center'] },
         text_fraction: { type: 'number', description: '文字面板占画幅比例；下方三分之一用0.333333' },
         text_style: { type: 'string', enum: ['panel', 'gradient'], description: 'panel实色文字区；gradient沉浸渐变，默认底部35%从透明过渡至文字区底色' },
@@ -167,8 +170,12 @@ export function createPosterDeliveryTool(ctx = {}) {
       required: [],
       additionalProperties: false
     },
-    run: async (input = {}, { signal, progress, checkpoint } = {}) => {
+    run: async (input = {}, { signal, progress, checkpoint, retrieval } = {}) => {
       if (!input || typeof input !== 'object' || Array.isArray(input)) throw inputError('海报参数必须是对象');
+      if (usesLayeredDesign(input)) {
+        const [width, height] = input.source_path ? [] : dimensions(input);
+        return deliverLayeredDesign(input.source_path ? input : { ...input, width, height }, ctx, { signal, progress, checkpoint, retrieval });
+      }
       input = await posterDesignInput(input, signal);
       if (typeof input.title !== 'string' || !input.title.trim()) throw inputError('海报要有主标题');
       throwControl(null, signal);

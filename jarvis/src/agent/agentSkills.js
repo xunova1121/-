@@ -41,7 +41,7 @@ export const AGENT_SKILLS = Object.freeze({
 1. 制作海报时先明确用途、尺寸比例、主标题、时间地点和品牌色；原片修图直接按用户要求处理，不问海报标题文案。
 2. 信息层级：主标题最大最醒目，副标题次之，时间地点和二维码等细节放下方；全图文字越少越好，主标题不超过 12 个字。
 3. 版式：留出安全边距；文字放在背景简单的区域；一张图只用 2–3 种颜色和 1–2 种字体。
-4. 纯海报生成分两步：有合适底图就复用真实路径；否则先用 generate_image 画“不要任何文字”的底图（写清主体、风格、色调，下半部分留白给文字）。再用 make_poster 把标题、要点、时间地点按用户原文排上去，交付最终 PNG、自包含可编辑 SVG 和 PPTX，不能只交 PPTX 让用户自行导出；不绕去 Python、手写 HTML 截图或 render_diagram。没有图像能力时 make_poster 用原创插画做底图。复杂数据大屏、气象驾驶舱或海报加交互Demo则用 create_visual_demo，从同一.visual.json交付PNG、可编辑SVG和离线HTML；source_path可复用已有.visual.json或.poster.json，补Demo不重画底图，ZIP可选。
+4. 新图文海报优先 make_poster.design：按文案/参考图确定主次、视觉和分组，sections内容起稿或layout=free+layers自由构图，避免所有海报都是底部居中列表。照片/产品/插画有合适原图就复用design.assets真实路径；否则先 generate_image 画“不要任何文字”的素材，不固定下半部留白。中文用真实字体独立排版，交付最终 PNG、自包含可编辑 SVG 和 PPTX；图标、卡片和图片独立可改，不只交 PPTX 让用户自行导出，不绕去 Python、手写 HTML 截图或 render_diagram。无图像能力用独立矢量图标/形状起稿，不能把渐变圆形吹成模型插画。复杂大屏或海报加交互Demo用 create_visual_demo；新稿.design.json同源交付PNG/SVG/PPTX/离线HTML/ZIP，手机重排为可读卡片。source_path复用已有.design.json/.visual.json/.poster.json，补Demo不重画底图；修改新稿changes按id同步所有格式，不能仅手改SVG。
 5. 图片处理用 process_image：人像优化/美颜选portrait_retouch，P瘦/显瘦/瘦身选portrait_slim，不能拿upscale清晰化冒充美颜。默认natural自然力度，instructions只填用户要求；保留长相和年龄特征、服装背景。必须用本次或当前对话指定原图，缺原图请上传，不搜其它照片。原片不覆盖、结果另存；以真实像素和portraitReview报告效果，未复核不承诺保真，已有双图视觉对照不重复调用inspect_image，也不因没过检查自动再付费修一张。抠图、证件照、修复、清晰化的原流程保持。
 6. 检查：按实际工具回执分别报告生成、读回、字体和视觉检查状态；需要看图时 inspect_image 核对最终 PNG。生成成功不等于视觉或交互验收，generated不算通过；示例/用户提供数据不冒充实时数据，4K输出不证明底图原生4K。不承诺绝对无错字；局部失败保留已有文件并说清缺失格式/阶段，不假装完整交付。`,
 
