@@ -56,5 +56,19 @@
     "原7db2e10的4055单测与大量原成品门禁通过，但不能代替最终3778985的完整CI",
     "未测Android/Windows真机、实际VPN/WiFi/流量切换或用户服务器；不保证永久在线",
     "草稿发布读取返回404；正式CI将以apksigner验证完整性及原证书，公开后实际下载核对"
-  ]
+  ],
+  "held445": {
+    "runId": 43719101970,
+    "published": false,
+    "reason": "新增签名校验误拦V2 Signer格式",
+    "originalCertificateConfirmed": true,
+    "apksignerIntegrityPassed": true,
+    "signatureRegressionTests": 6
+  },
+  "localLoadTimeout": {
+    "test": "taskRequirementsIntegration",
+    "originalDeadlineMs": 5000,
+    "isolatedOriginalSixPassed": true,
+    "ci445All4055Passed": true
+  }
 }

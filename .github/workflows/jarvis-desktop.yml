@@ -253,19 +253,7 @@ jobs:
       - name: 验证正式APK完整性与原签名证书
         if: env.PUBLISH == 'true'
         shell: bash
-        run: |
-          python3 - <<'PY'
-          import os, pathlib, re, subprocess
-          tools = list(pathlib.Path(os.environ['ANDROID_HOME']).glob('build-tools/*/apksigner'))
-          if not tools:
-              raise SystemExit('未找到Android签名校验工具，停止正式发布')
-          signer = max(tools, key=lambda p: tuple(map(int, re.findall(r'\d+', p.parent.name))))
-          result = subprocess.check_output([str(signer), 'verify', '--verbose', '--print-certs', 'android/app/build/outputs/apk/release/app-release.apk'], text=True)
-          print(result)
-          expected = '56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6'
-          if 'Signer #1 certificate SHA-256 digest: ' + expected not in result.splitlines():
-              raise SystemExit('APK没有沿用原签名证书，停止正式发布；不得改用临时签名升级')
-          PY
+        run: python3 scripts/check-apk-signature.py android/app/build/outputs/apk/release/app-release.apk
       - name: 上传 APK（正式发版：直接传到草稿发布）
         if: env.PUBLISH == 'true'
         shell: bash
