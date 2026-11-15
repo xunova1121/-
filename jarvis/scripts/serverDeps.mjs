@@ -7,9 +7,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { builtinModules } from 'node:module';
 
-export const SERVER_DEPS = ['@anthropic-ai/sdk', '@modelcontextprotocol/sdk', '@xmldom/xmldom', 'docx', 'exceljs', 'jszip', 'mammoth', 'marked', 'pdf-lib', 'pdfjs-dist', 'pptxgenjs', 'xlsx', 'ws'];
+export const SERVER_DEPS = ['@anthropic-ai/sdk', '@modelcontextprotocol/sdk', '@napi-rs/canvas', '@xmldom/xmldom', 'docx', 'exceljs', 'jszip', 'mammoth', 'marked', 'pdf-lib', 'pdfjs-dist', 'pptxgenjs', 'xlsx', 'ws'];
 
 const IMPORT = /(?:^|[^\w.])(?:import\s*(?:[\w*{}\s,$]+from\s*)?|export\s*[\w*{}\s,$]+from\s*|import\s*\(\s*)['"]([^'"]+)['"]/g;
+// fork/Worker 的URL入口不会出现在import图里，也必须检查它实际需要的包。
+const MODULE_URL = /\bnew\s+URL\s*\(\s*['"](\.[^'"]+\.m?js)['"]\s*,\s*import\.meta\.url\s*\)/g;
 const PACKAGE = /^(@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*$/i;
 
 /** 从入口顺着相对路径的 import / import() 走一遍，返回用到的第三方包 → 第一次出现的文件 */
@@ -20,6 +22,7 @@ export function serverImports(root, entry = 'server/server.mjs') {
     seen.add(file);
     let src;
     try { src = fs.readFileSync(file, 'utf8'); } catch { return; }
+    for (const [, relative] of src.matchAll(MODULE_URL)) walk(path.resolve(path.dirname(file), relative));
     for (const [, spec] of src.matchAll(IMPORT)) {
       if (spec.startsWith('.')) {
         let next = path.resolve(path.dirname(file), spec);

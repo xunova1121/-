@@ -303,3 +303,5 @@
 2026-11-15 Codex 必要打包接缝：独立Canvas渲染必须随桌面网关携带，拟在 desktop/scripts/prepare.mjs 追加受控渲染入口/当前平台原生依赖，desktop/package.json 只补asar解包规则；不改版本、身份、签名或发布配置。Electron子进程仅在检测到Electron时设置RUN_AS_NODE，防止误起第二个界面。
 
 2026-11-15 Codex 必要预览接缝：src/ui/panels.js 原HTML沙箱没有allow-downloads，新增编辑器的导出按钮在应用内会被浏览器拦截。仅对带固定Canvas编辑器标识的HTML补此权限，保留不允许same-origin等隔离；普通HTML策略不变，追加真实iframe下载验收。
+
+2026-11-15 Codex 服务器打包接缝：测试归档发现 scripts/serverDeps.mjs 原依赖遍历不跟踪 new URL 子进程入口，Canvas可能仅靠PDF可选依赖碰巧存在。补列直接依赖并遍历相对JS入口，新增真实子进程依赖回归，不放宽原打包规则；本地临时归档验收，不上传/部署。
