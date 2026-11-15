@@ -131,7 +131,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     try{return await req(path,{method:'POST',body:payload,timeout:firstTimeout});}
     catch(e){
       if(e.status||e.name==='AbortError'&&!e.timeout)throw e;
-      taskProtocol ??= req('/api/server/status',{}).then(x=>Boolean(x.features?.taskRequestIds)).catch(()=>false);
+      taskProtocol ??= quickRead('/api/server/status',{retry:false}).then(x=>Boolean(x.features?.taskRequestIds)).catch(()=>false);
       if(!await taskProtocol)throw e;
       return req(path,{method:'POST',body:payload});
     }
@@ -233,7 +233,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     updateUser: (id, action) => req('/api/server/users/' + encodeURIComponent(id), { method: 'PATCH', body: { action } }),
     async login(password) { return (await req('/api/server/login', { method: 'POST', body: { password } })).token; },
     health: () => quickRead('/api/health'),
-    status: (signal) => req('/api/server/status',{signal}),
+    status: (signal) => quickRead('/api/server/status',{signal}),
     async getConfig() {
       const config = await quickRead('/api/server/config');
       const current = loadServerSettings();

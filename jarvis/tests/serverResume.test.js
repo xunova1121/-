@@ -86,10 +86,12 @@ describe('轻量读取和原生物理超时', () => {
     const client = createServerClient({ base: 'https://fixture.invalid', fetchImpl: native });
     await client.getConfig();
     expect(request.mock.calls[0][0]).toMatchObject({ connectTimeout: QUICK_READ_MS, readTimeout: QUICK_READ_MS });
+    await client.status();
+    expect(request.mock.calls[1][0]).toMatchObject({ connectTimeout: QUICK_READ_MS, readTimeout: QUICK_READ_MS });
     await client.upload('测试.txt', new Blob(['原文']));
-    expect(request.mock.calls[1][0]).toMatchObject({ connectTimeout: 20000, readTimeout: 120000, method: 'PUT' });
+    expect(request.mock.calls[2][0]).toMatchObject({ connectTimeout: 20000, readTimeout: 120000, method: 'PUT' });
     await native('https://fixture.invalid/legacy');
-    expect(request.mock.calls[2][0]).toMatchObject({ connectTimeout: 20000, readTimeout: 180000 });
+    expect(request.mock.calls[3][0]).toMatchObject({ connectTimeout: 20000, readTimeout: 180000 });
   });
 
   it('轻量读取最多两次五秒，不保留原20+20秒等待', async () => {
