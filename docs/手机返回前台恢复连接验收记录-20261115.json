@@ -1,0 +1,56 @@
+{
+  "realAndroid": false,
+  "realUserServer": false,
+  "syntheticHTTP": true,
+  "resumeMs": 11,
+  "cachedMs": 131,
+  "checks": [
+    {
+      "label": "联网成功后模型选择器显示服务器型号",
+      "ok": true
+    },
+    {
+      "label": "持久化预览不含模型Key、访问Token或上游URL",
+      "ok": true
+    },
+    {
+      "label": "前台立即续接同一任务，不等10秒轮询或45秒失活",
+      "ok": true
+    },
+    {
+      "label": "前台/焦点双事件只续接一次，任务没有重复提交",
+      "ok": true
+    },
+    {
+      "label": "结果完整续回且旧段落不重复",
+      "ok": true
+    },
+    {
+      "label": "进程重建后服务器配置仍挂起，缓存型号已可见",
+      "ok": true
+    },
+    {
+      "label": "界面说明仍在同步，没有把缓存当作服务器已连接",
+      "ok": true
+    },
+    {
+      "label": "切换账号后即使服务器配置挂起，也不显示上个账号的缓存型号",
+      "ok": true
+    },
+    {
+      "label": "浏览器没有脚本错误或未处理拒绝",
+      "ok": true
+    }
+  ],
+  "errors": [],
+  "runtimeRevision": "7db2e10ecc87d8b9e95854ada82fc506c4d4fcf9",
+  "browserDevelopmentRevision": "6fbd5ee44ae50c34c236db4335481bbf830a2a00",
+  "runtimeFiles": 983,
+  "status": "development_passed_release_gate_running",
+  "notes": [
+    "初验浏览器9项已通过；随后状态检查期限2行补齐，经49项专项通过；最终完整门禁/CI负责复验冻结源码",
+    "单文件与手机产物按最终源码重新构建；旧源码加载中的单测进程已停止，不计作完整结果",
+    "原模型库54、手机服务器15、分享返回22与对话队列通过，均为本地受控验收",
+    "未部署用户服务器、未测Android/Windows真机或VPN/WiFi/移动网络切换，不保证永久在线"
+  ]
+}
