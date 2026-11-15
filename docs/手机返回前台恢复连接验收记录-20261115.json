@@ -2,8 +2,8 @@
   "realAndroid": false,
   "realUserServer": false,
   "syntheticHTTP": true,
-  "resumeMs": 11,
-  "cachedMs": 131,
+  "resumeMs": 10,
+  "cachedMs": 242,
   "checks": [
     {
       "label": "联网成功后模型选择器显示服务器型号",
@@ -43,14 +43,18 @@
     }
   ],
   "errors": [],
-  "runtimeRevision": "7db2e10ecc87d8b9e95854ada82fc506c4d4fcf9",
-  "browserDevelopmentRevision": "6fbd5ee44ae50c34c236db4335481bbf830a2a00",
+  "runtimeRevision": "377898555a7cd58cf1f5df76b405f9b69a2b38af",
   "runtimeFiles": 983,
-  "status": "development_passed_release_gate_running",
-  "notes": [
-    "初验浏览器9项已通过；随后状态检查期限2行补齐，经49项专项通过；最终完整门禁/CI负责复验冻结源码",
-    "单文件与手机产物按最终源码重新构建；旧源码加载中的单测进程已停止，不计作完整结果",
-    "原模型库54、手机服务器15、分享返回22与对话队列通过，均为本地受控验收",
-    "未部署用户服务器、未测Android/Windows真机或VPN/WiFi/移动网络切换，不保证永久在线"
+  "status": "development_passed_final_ci_pending",
+  "heldCandidate": {
+    "version": "1.0.444",
+    "runId": 43717899068,
+    "status": "cancelled_not_published",
+    "reason": "新增调用链断言复现旧登录首次换发误判切账号；已修复并经77项专项与最终手机浏览器9项通过"
+  },
+  "limitations": [
+    "原7db2e10的4055单测与大量原成品门禁通过，但不能代替最终3778985的完整CI",
+    "未测Android/Windows真机、实际VPN/WiFi/流量切换或用户服务器；不保证永久在线",
+    "草稿发布读取返回404；正式CI将以apksigner验证完整性及原证书，公开后实际下载核对"
   ]
 }
