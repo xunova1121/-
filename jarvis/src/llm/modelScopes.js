@@ -26,8 +26,10 @@ export function createModelScopes({ getLocal, saveLocal, getClient, onServerSave
     if (identity !== key) { identity = key; serverConfig = null; pending = null; revision++; }
     return client;
   };
-  const ensure = key => {
-    if (clientKey(clientNow()) !== key) throw Object.assign(new Error('服务器账号已切换，请重新打开模型设置'), { code: 'SERVER_SCOPE_CHANGED', kind: 'api' });
+  const ensure = client => {
+    // 比较执行该请求的真实客户端身份。仅服务端认证成功的旧登录换发会更新它；
+    // 不能把正常换发误判成切账号，真正换账号时旧客户端仍保留原凭证。
+    if (clientKey(clientNow()) !== clientKey(client)) throw Object.assign(new Error('服务器账号已切换，请重新打开模型设置'), { code: 'SERVER_SCOPE_CHANGED', kind: 'api' });
   };
   return {
     get(scope) {
@@ -43,14 +45,14 @@ export function createModelScopes({ getLocal, saveLocal, getClient, onServerSave
       const client = clientNow();
       if (!client) throw missing();
       if (pending) return pending;
-      const key = identity;
       const read = async () => {
         await writeQueue.catch(() => {});
-        ensure(key);
+        ensure(client);
         const current = revision;
         const loaded = await client.getConfig();
-        ensure(key);
-        if (current === revision) { serverConfig = loaded; preview.save(client, loaded); }
+        const unchanged = current === revision;
+        ensure(client);
+        if (unchanged) { serverConfig = loaded; preview.save(client, loaded); }
         return serverConfig;
       };
       const reading = read();
@@ -61,22 +63,21 @@ export function createModelScopes({ getLocal, saveLocal, getClient, onServerSave
     patch(scope, update) {
       if (scope !== 'server') return Promise.resolve(saveLocal(update(getLocal())));
       const client = clientNow();
-      const key = identity;
       const run = async () => {
         if (!client) throw missing();
-        ensure(key);
+        ensure(client);
         revision++;
         // 每次写前读当前配置，防止另一台设备刚换的型号被旧快照覆盖。
         const before = await client.getConfig();
-        ensure(key);
+        ensure(client);
         if (before.readOnly) throw Object.assign(new Error('当前使用管理员共享模型；模型设置由管理员维护'), { status: 403, code: 'SHARED_MODELS' });
         const after = update(before);
-        ensure(key);
+        ensure(client);
         const delta = configDelta(before, after);
         if (Object.keys(delta).length) await client.putConfig(delta);
-        ensure(key);
+        ensure(client);
         const confirmed = await client.getConfig();
-        ensure(key);
+        ensure(client);
         for (const [id, key] of Object.entries(delta.keys || {})) {
           if (typeof key !== 'string' || !key.trim() || key.startsWith('••••')) continue;
           if (confirmed.keys?.[id] !== `••••${key.trim().slice(-4)}`)

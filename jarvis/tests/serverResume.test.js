@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { onServerResume } from '../src/core/serverResume.js';
 import { followTask, createServerClient, QUICK_READ_MS, saveServerSettings, loadServerSettings } from '../src/core/serverClient.js';
 import { nativeFetcher } from '../src/mobile/nativeFetch.js';
+import { createModelScopes } from '../src/llm/modelScopes.js';
 
 const foreground = (target, active) => { target.__jarvisForeground = active; target.dispatchEvent(Object.assign(new Event('jarvis:foreground'), { detail: { active } })); };
 const frame = event => `data: ${JSON.stringify(event)}\n\n`;
@@ -127,7 +128,9 @@ describe('轻量读取和原生物理超时', () => {
       const fetchImpl = vi.fn(async url => new Response(JSON.stringify(String(url).endsWith('/auth/migrate')
         ? { token, userId: 'owner', role: 'owner' } : { provider: 'custom', models: { custom: '主人模型' } })));
       const client = createServerClient({ base, token: old, fetchImpl });
-      await client.getConfig();
+      const scopes = createModelScopes({ getLocal: () => ({}), saveLocal: vi.fn(), getClient: () => client, storage });
+      await expect(scopes.refresh('server')).resolves.toMatchObject({ models: { custom: '主人模型' } });
+      expect(scopes.get('server').models.custom).toBe('主人模型');
       expect(loadServerSettings(storage)).toMatchObject({ token, userId: 'owner', role: 'owner', enabled: true });
       expect(client.account.userId).toBe('owner');
       const preview = storage.getItem('jarvis.server.model-preview.v1');
