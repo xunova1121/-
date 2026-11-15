@@ -42,7 +42,8 @@ export async function executeToolCalls(
   let newScreenThisStep = false;
   let phoneActionThisStep = false;
   const exec = async (c) => {
-    c = { ...c, args: compositionToolArgs(c.name, c.args, requirementText) };
+    // 主循环以调用对象身份按原顺序关联回执，必须保留c，只规范本次参数。
+    c.args = compositionToolArgs(c.name, c.args, requirementText);
     const tool = loader.get(c.name);
     // 执行器分配操作ID，不依赖中转站可能重复的工具ID；同一实际调用的回执可幂等保存。
     const workCallId = uid('op') + ':' + c.id;

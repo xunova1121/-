@@ -248,8 +248,9 @@ async function isolatedContext(userText, { sessionId, summary, history }) {
  * @returns {Promise<{ text: string, steps: number, toolCalls: number }>}
  */
 export async function runAgent(options) {
-  const requirementText = posterFollowupRequirement(options.requirementText ?? options.userText, options.history || []);
-  return withLookupDeadline({ ...options, requirementText }, runAgentLoop, { profiles: true });
+  const original = options.requirementText ?? options.userText;
+  const requirementText = posterFollowupRequirement(original, options.history || []);
+  return withLookupDeadline(requirementText !== original ? { ...options, requirementText } : options, runAgentLoop, { profiles: true });
 }
 
 export const COMPUTER_NOTE = `## 本机文件与工作区的区别

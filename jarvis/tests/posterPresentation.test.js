@@ -9,6 +9,7 @@ import { posterFollowupRequirement } from '../src/agent/posterFollowup.js';
 import { textPosterRequest, POSTER_GUIDANCE } from '../src/agent/posterRouting.js';
 import { compositionToolArgs, imageCompositionPrompt } from '../src/agent/imageCompositionPrompt.js';
 import { createTools } from '../src/agent/tools.js';
+import { runAgent } from '../src/agent/agent.js';
 import { availableLayerOutputBase, releaseLayerOutputBase } from '../src/agent/layeredDesignSource.js';
 import { newsInput } from '../e2e/fixtures/layered-design.mjs';
 
@@ -100,6 +101,17 @@ describe('海报实际阅读尺度', () => {
 });
 
 describe('实际海报任务的能力发现与素材约束', () => {
+  it('新增素材规范不破坏普通工具调用关联，回执回到下一次请求且次数保持', async () => {
+    const tool = { name: 'fixture_echo', description: '回传固定测试文本', input_schema: { type: 'object', properties: {} }, run: async () => '真实工具回执' };
+    let calls = 0;
+    const adapter = { async stream({ messages, onText }) {
+      if (++calls === 1) return { text: '', toolCalls: [{ id: 'echo', name: tool.name, args: {} }], stop: 'tool_use' };
+      expect(messages.find(m => m.role === 'tool')?.content).toBe('真实工具回执');
+      onText('完成'); return { text: '完成', toolCalls: [], stop: 'end_turn' };
+    } };
+    const result = await runAgent({ adapter, tools: [tool], model: 'fixture', userText: '执行样例', history: [], context: { dynamic: '' }, emit() {}, quiet: true });
+    expect(result.toolCalls).toBe(1); expect(calls).toBe(2);
+  });
   const history = [{ role: 'user', content: '做今日新闻海报' }, { role: 'assistant', content: '海报：设计/新闻.design.json；可以换结构。' }];
   it.each(['换结构，不动颜色', '再做一个其他风格', '做一个类似这种的', '没合成？', '做啊'])('短追问“%s”保留本轮海报能力说明', text => {
     const normalized = posterFollowupRequirement(text, history);

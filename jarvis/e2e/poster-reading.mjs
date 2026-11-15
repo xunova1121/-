@@ -89,11 +89,19 @@ async function tinyReproduction() {
 async function actualFollowup(art) {
   let calls = 0, imageCalls = 0, actualPrompt;
   const tools = createTools({ ...ctx, imageGen: async ({ prompt, beforeRequest }) => { imageCalls++; actualPrompt = prompt; beforeRequest?.(); return { blob: new Blob([art], { type: 'image/png' }), model: 'fixture' }; } });
-  const adapter = { async stream({ system, tools: active, onText }) {
+  const adapter = { async stream({ system, tools: active, messages, onText }) {
     calls++;
     check('短追问实际模型请求带自由构图说明与完整layers schema', JSON.stringify(system).includes('当前工具明确支持自由构图') && active.some(t => t.name === 'make_poster' && t.input_schema.properties.design.properties.layers.items.properties.x));
     if (calls === 1) return { text: '', toolCalls: [{ id: 'art', name: 'generate_image', args: { prompt: '浅蓝科技场景和玻璃球，仅视觉主体', size: '1200x1200' } }], stop: 'tool_use' };
-    if (calls === 2) return { text: '', toolCalls: [{ id: 'poster', name: 'make_poster', args: { ...copy, design: { ...copy.design, layout: 'timeline' }, path: '阅读验收/followup.png' } }], stop: 'tool_use' };
+    if (calls === 2) {
+      const last = messages.filter(m => m.role === 'tool').at(-1);
+      check('生图实际回执回传到下一次模型请求，未因包装丢失关联', last?.name === 'generate_image' && JSON.parse(last.content).readback === 'passed');
+      return { text: '', toolCalls: [{ id: 'poster', name: 'make_poster', args: { ...copy, design: { ...copy.design, layout: 'timeline' }, path: '阅读验收/followup.png' } }], stop: 'tool_use' };
+    }
+    if (calls === 3) {
+      const last = messages.filter(m => m.role === 'tool').at(-1);
+      check('海报完成回执实际回传，模型可读真实格式和检查状态', last?.name === 'make_poster' && JSON.parse(last.content).status === 'complete');
+    }
     const text = '已生成同源PNG、SVG和可编辑PPTX；视觉模型未配置，不能称已通过实际模型审美验收。';
     onText(text); return { text, toolCalls: [], stop: 'end_turn' };
   } };
