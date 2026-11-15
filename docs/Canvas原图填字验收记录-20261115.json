@@ -1,0 +1,125 @@
+{
+  "sourceRevision": "7511cca87f4b008e571945f483cc361e848241d6",
+  "runtimeFiles": 981,
+  "releaseStatus": "not_published",
+  "stableRelease": "1.0.442",
+  "fullUnit": {
+    "files": 465,
+    "tests": 4037,
+    "result": "passed"
+  },
+  "finalFocusedUnit": {
+    "tests": 109,
+    "result": "passed"
+  },
+  "additionalServerDependencyGuard": {
+    "tests": 4,
+    "result": "passed"
+  },
+  "newCanvasE2E": {
+    "checks": 45,
+    "result": "passed",
+    "basis": "controlled_fixture_not_user_original"
+  },
+  "oldPosterSuites": [
+    {
+      "name": "poster-composition",
+      "exit": 0
+    },
+    {
+      "name": "visual-demo",
+      "exit": 0
+    },
+    {
+      "name": "layered-design",
+      "exit": 0
+    },
+    {
+      "name": "poster-reading",
+      "exit": 0
+    },
+    {
+      "name": "poster-gradient",
+      "exit": 0
+    }
+  ],
+  "uiSuites": [
+    {
+      "name": "smoke",
+      "exit": 0
+    },
+    {
+      "name": "standalone",
+      "exit": 0
+    },
+    {
+      "name": "server-mobile",
+      "exit": 0
+    },
+    {
+      "name": "mobile-ui",
+      "exit": 0
+    },
+    {
+      "name": "conversation-flow",
+      "exit": 0
+    },
+    {
+      "name": "server-mode",
+      "exit": 0
+    },
+    {
+      "name": "pc-agent-navigation",
+      "exit": 0
+    },
+    {
+      "name": "agent-resources-cross-origin",
+      "exit": 0
+    },
+    {
+      "name": "share-return",
+      "exit": 0
+    },
+    {
+      "name": "pc-control",
+      "exit": 0
+    }
+  ],
+  "builds": [
+    {
+      "name": "web",
+      "exit": 0
+    },
+    {
+      "name": "standalone",
+      "exit": 0
+    },
+    {
+      "name": "mobile",
+      "exit": 0
+    },
+    {
+      "name": "desktop-prepare",
+      "exit": 0
+    }
+  ],
+  "desktopAsar": "passed_Linux_Electron",
+  "oldHologram": "passed",
+  "evalChecks": 39,
+  "serverPackage": {
+    "checks": 4,
+    "result": "passed",
+    "nonOwnerServiceStartup": "not_run_requires_root_or_passwordless_sudo",
+    "sha256": "9adfec4430e5d31d04ef24b472a77b0805149efa7631585582ee6b037b2eda12"
+  },
+  "notTested": [
+    "actual_user_original_bytes",
+    "actual_GPT_or_vision_provider",
+    "user_server",
+    "Windows_installation",
+    "Android_device",
+    "WeChat"
+  ],
+  "standaloneSha256": "48a29a00c6ba3c8ad187a7ad7afbdd0945912af91f891653864290ada55212e5",
+  "frozenCanvasAndDesktopRetest": "passed_45_checks_and_real_Electron_ASAR"
+}
