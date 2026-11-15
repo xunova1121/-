@@ -3,6 +3,8 @@ import { createAgentProfileClient } from './agentProfileClient.js';
 import { createStudioClient } from './studioClient.js';
 import { createPhoneClient } from './phoneClient.js';
 import { createTenderClient } from './tenderClient.js';
+import { onServerResume } from './serverResume.js';
+import { serverModelPreview } from './serverModelPreview.js';
 /**
  * 服务器模式的客户端：手机 / 电脑把任务交给自己的云服务器做（服务器端见 server/serverMode.mjs）。
  *
@@ -77,9 +79,13 @@ export const FIRST_WRITE_MS = 6000;
 export const STREAM_FIRST_MS = 6000;
 /** 唤醒连接的最短间隔 */
 const WARM_GAP_MS = 30_000;
+export const QUICK_READ_MS = 5000;
 
 export function createServerClient({ base, token = '', fetchImpl = (...a) => globalThis.fetch(...a), timeoutMs = 20000 }) {
   const root = normalizeUrl(base);
+  const preview = serverModelPreview();
+  const account = loadServerSettings();
+  const quickRead = (path, options = {}) => req(path, { timeout: Math.min(timeoutMs, QUICK_READ_MS), ...options });
   const thisDevice = deviceId();
   async function migrate(signal) {
     if (signal?.aborted) throw signal.reason ?? Object.assign(new Error('已停止'), { name: 'AbortError' });
@@ -97,7 +103,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
         const result = await res.json().catch(() => ({}));
         if (!res.ok || !/^[A-Za-z0-9_-]{43,}$/.test(result.token || '')) throw Object.assign(new Error('服务器登录换发未完成，请在服务器设置核对登录状态'), { status: res.status || 401, code: 'SESSION_MIGRATION' });
         const current = loadServerSettings();
-        if (normalizeUrl(current.url) === root && current.token === old) saveServerSettings({ ...current, token: result.token });
+        if (normalizeUrl(current.url) === root && current.token === old) saveServerSettings({ ...current, token: result.token, ...(result.userId && { userId: result.userId, role: result.role }) });
         return result.token;
       })() };
       migrations.set(root, pending);
@@ -146,6 +152,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     try {
       const res = await abortableFetch(fetchImpl, `${root}${path}`, {
         method, signal: ctrl.signal,
+        ...(timeout && { connectTimeout: Math.min(timeout, 20000), readTimeout: timeout }),
         // 手机 App 退到原生网络时：binary 让它按原始字节读（不然 Word、图片这类文件会被当成文字读坏）
         ...(binary && { binary: true }),
         // stream：要边收边显示（事件流），手机 App 不走一次性返回的原生网络
@@ -167,14 +174,14 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
       signal?.removeEventListener('abort', stop);
     }
   }
-  async function req(path, { method = 'GET', body, raw = false, signal, headers = {}, binary = false, stream = false, timeout = raw ? 0 : timeoutMs } = {}) {
+  async function req(path, { method = 'GET', body, raw = false, signal, headers = {}, binary = false, stream = false, timeout = raw ? 0 : timeoutMs, retry = true } = {}) {
     if (path !== '/api/server/login') await migrate(signal);
     let res;
     try {
       res = await send(path, { method, body, signal, headers, binary, stream, timeout });
     } catch (e) {
       // 读数据的请求网络一抖就失败：再试一次（写数据的不重试，免得做两遍）
-      if (method !== 'GET' || signal?.aborted || e?.code === 'RETRIEVAL_BUDGET' || !['network', 'timeout'].includes(errorKind(e))) throw e;
+      if (!retry || method !== 'GET' || signal?.aborted || e?.code === 'RETRIEVAL_BUDGET' || !['network', 'timeout'].includes(errorKind(e))) throw e;
       await sleep(retryWait(250, e), signal);
       res = await send(path, { method, body, signal, headers, binary, stream, timeout, attempt: 2 });
     }
@@ -187,7 +194,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     if (!res.ok) throw Object.assign(new Error(res.status === 401 ? '服务器登录已失效，请到 设置 → 服务器模式 重新登录' : data.error || `服务器返回 ${res.status}`), { status: res.status, requestTiming: responseTimings.get(res), ...(data.code && { code: data.code }), ...(data.kind && { kind: data.kind }), ...(data.upstreamStatus && { upstreamStatus: data.upstreamStatus }) });
     return data;
   }
-  let warmedAt = 0;
+  let warmedAt = -Infinity, warming = null;
   // 回答边收边显示（WebView 收事件流）：有的手机网络下 WebView 连不上或收不到，试过不行就退回原生网络（一次给全），记一天
   const streamKey = `jarvis.server.noStream:${root}`;
   let streaming = true;
@@ -202,17 +209,22 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
       return true;
     },
     base: root,
-    account: loadServerSettings(),
+    get account() {
+      const saved = loadServerSettings();
+      return normalizeUrl(saved.url) === root && saved.token === token ? saved : account;
+    },
     agentProfiles: createAgentProfileClient(req),
     studio: createStudioClient(req),
     tenders: createTenderClient(req),
     phone: createPhoneClient(req),
     timings,
     /** 唤醒连接：点输入框、回到 App 时先轻轻问一下服务器，断掉的旧连接在发消息前就换掉（30 秒内只问一次） */
-    warm() {
-      if (Date.now() - warmedAt < WARM_GAP_MS) return;
+    warm({ force = false } = {}) {
+      if (warming) return warming;
+      if (!force && Date.now() - warmedAt < WARM_GAP_MS) return;
       warmedAt = Date.now();
-      req('/api/health', { timeout: 5000 }).catch(() => {});
+      warming = quickRead('/api/health', { retry: false }).catch(() => {}).finally(() => { warming = null; });
+      return warming;
     },
     /** @returns {Promise<string>} 令牌 */
     loginAccount: password => req('/api/server/login', { method: 'POST', body: { password } }),
@@ -220,9 +232,14 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     createUser: name => req('/api/server/users', { method: 'POST', body: { name } }),
     updateUser: (id, action) => req('/api/server/users/' + encodeURIComponent(id), { method: 'PATCH', body: { action } }),
     async login(password) { return (await req('/api/server/login', { method: 'POST', body: { password } })).token; },
-    health: () => req('/api/health'),
+    health: () => quickRead('/api/health'),
     status: (signal) => req('/api/server/status',{signal}),
-    getConfig: () => req('/api/server/config'),
+    async getConfig() {
+      const config = await quickRead('/api/server/config');
+      const current = loadServerSettings();
+      if (normalizeUrl(current.url) === root && current.token === token) preview.save({ base: root, account: current }, config);
+      return config;
+    },
     weather: (city, signal) => req('/api/weather?' + new URLSearchParams({ latitude: String(city.latitude), longitude: String(city.longitude) }), { signal, timeout: 15000 }),
     weatherCities: (query, signal) => req('/api/weather/cities?' + new URLSearchParams({ q: String(query).slice(0, 80) }), { signal, timeout: 8000 }),
     sportsScores: (query, signal) => req('/api/sports/scores?' + new URLSearchParams(query), { signal, timeout: 20000 }),
@@ -247,11 +264,11 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     modelEvents: (body,signal) => req('/api/server/pc-model',{method:'POST',body,raw:true,signal,headers:{Accept:'text/event-stream'}}),
     startTask: (o) => taskWrite('/api/tasks',o),
     appendTaskNote: (id,text) => taskWrite(`/api/tasks/${encodeURIComponent(id)}/notes`,{text}),
-    getTask: (id) => req(`/api/tasks/${id}`),
+    getTask: (id) => quickRead(`/api/tasks/${id}`),
     stopTask: (id) => req(`/api/tasks/${id}/stop`, { method: 'POST' }),
     // 要求事件流：手机 App 退到原生网络时也边收边显示（见 mobile/nativeFetch.js 的 wantsStream）
     events: (id, after, signal) => req(`/api/tasks/${id}/events?after=${after}`, { raw: true, stream: streaming, signal, timeout: streaming ? STREAM_FIRST_MS : timeoutMs, headers: { Accept: 'text/event-stream' } }),
-    listSessions: () => req('/api/sessions'),
+    listSessions: () => quickRead('/api/sessions'),
     /** 服务器上的技能和技能运行器状态 */
     listSchedules: () => req('/api/server/schedules'),
     listCodeProjects: (sessionId) => req('/api/server/code-projects?session=' + encodeURIComponent(sessionId)),
@@ -277,7 +294,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     setSkillEnabled: (name, enabled) => req(`/api/server/skills/${encodeURIComponent(name)}`, { method: 'PATCH', body: { enabled } }),
     /** 手机 / 电脑上卸载技能时，服务器上的也删掉 */
     removeSkill: (name) => req(`/api/server/skills/${encodeURIComponent(name)}`, { method: 'DELETE' }),
-    getSession: (id) => req(`/api/sessions/${encodeURIComponent(id)}`).catch((e) => { if (e.status === 404) return null; throw e; }),
+    getSession: (id) => quickRead(`/api/sessions/${encodeURIComponent(id)}`).catch((e) => { if (e.status === 404) return null; throw e; }),
     patchSession: (id, patch) => req(`/api/sessions/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }),
     deleteSession: (id) => req(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     trashSession: (id) => req(`/api/sessions/${encodeURIComponent(id)}/trash`, { method: 'POST' }),
@@ -305,7 +322,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
  * 收一个任务的进度：断线自动重连（从收到的最后一个序号接着收），直到任务结束
  * @returns {Promise<object>} 结束时的 task_state 事件
  */
-export async function followTask(client, id, { onEvent, signal, after = 0, retryMs = [1000, 2000, 4000, 8000], checkMs = 10000, idleMs = 45000, firstMs = STREAM_FIRST_MS, maxConsecutiveFailures = 5 } = {}) {
+export async function followTask(client, id, { onEvent, signal, after = 0, retryMs = [1000, 2000, 4000, 8000], checkMs = 10000, idleMs = 45000, firstMs = STREAM_FIRST_MS, maxConsecutiveFailures = 5, subscribeResume = onServerResume } = {}) {
   let last = after, failures = 0, reader = null, attempt = null;
   let touched = Date.now(), checking = false;
   let connection = 'connected', finalFailure = null, downgraded = false, closed = false;
@@ -329,6 +346,13 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
   const stop = () => { closed = true; waiting.abort(); reconnect(); };
   if (signal?.aborted) throw aborted();
   signal?.addEventListener('abort', stop, { once: true });
+  let wakeEpoch = 0, retryWake = null;
+  const unwatch = subscribeResume(() => {
+    if (closed || finalFailure || signal?.aborted) return;
+    wakeEpoch++;
+    retryWake?.abort();
+    reconnect();
+  });
   const watch = setInterval(async () => {
     if (closed) return;
     if (Date.now() - touched >= idleMs) reconnect();
@@ -350,6 +374,7 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
       if (signal?.aborted) throw aborted();
       if (finalFailure) throw finalFailure;
       attempt = new AbortController();
+      const epoch = wakeEpoch;
       touched = Date.now();
       let got = false, firstTimer = null, fastRetry = false;
       const trying = Boolean(client.streaming);
@@ -374,6 +399,7 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
           const { value, done } = await reader.read();
           if (signal?.aborted) throw aborted();
           if (finalFailure) throw finalFailure;
+          if (attempt.signal.aborted) break;
           if (done) break;
           const input = buf + dec.decode(value, { stream: true });
           const { events, rest } = parseSse(input);
@@ -399,7 +425,7 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
         if (denied) throw denied;
         if (e.final) throw e;
         // 边收边显示的路一点东西都没收到就断了：马上改用一次给全的方式重连，不再原样重试
-        downgrade();
+        if (epoch === wakeEpoch) downgrade();
         // 观察连接自行中断（含失活检测）时继续按序号重连。
       } finally {
         clearTimeout(firstTimer);
@@ -407,17 +433,21 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
         reader = null;
         attempt?.abort();
       }
+      if (epoch !== wakeEpoch) continue; // 前台主动续接不算传输故障，不把流式路线误降级。
       failures++;
       // 一次瞬断透明恢复；持续断线只在状态变化时提示，避免重复刷屏。
       if (failures >= 2) connectionState('reconnecting', failures);
       if (signal?.aborted) throw aborted();
       if (failures >= limit) throw Object.assign(new Error('任务已提交，但暂时无法接收服务器进度；服务器可能继续运行，请稍后打开原对话查看。'), { code: 'TASK_OBSERVATION_LOST', kind: 'network' });
       if (fastRetry) continue;
-      try { await sleep(retryMs[Math.min(failures - 1, retryMs.length - 1)], waiting.signal); }
-      catch (error) { if (signal?.aborted) throw aborted(); throw finalFailure || error; }
+      retryWake = new AbortController();
+      try { await sleep(retryMs[Math.min(failures - 1, retryMs.length - 1)], AbortSignal.any([waiting.signal, retryWake.signal])); }
+      catch (error) { if (signal?.aborted) throw aborted(); if (finalFailure || epoch === wakeEpoch) throw finalFailure || error; }
+      finally { retryWake = null; }
     }
   } finally {
     closed = true;
+    unwatch?.();
     clearInterval(watch);
     signal?.removeEventListener('abort', stop);
     reconnect();

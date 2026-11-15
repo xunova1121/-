@@ -46,7 +46,7 @@ export function nativeFetcher(http) {
     // binary：读网页时要原始字节（GBK 等编码的中文站由调用方按网页声明的编码解码；原生按 UTF-8 读会把字读坏）
     const binary = Boolean(init.binary);
     // 带密钥的搜索明确禁止重定向时，也必须约束系统网络层；仅检查返回状态已经太晚。
-    const req = http.request({ url, method: init.method || 'GET', headers, data, dataType, responseType: binary ? 'arraybuffer' : 'text', connectTimeout: 20000, readTimeout: init.readTimeout || 180000, ...(init.redirect === 'error' && { disableRedirects: true }) });
+    const req = http.request({ url, method: init.method || 'GET', headers, data, dataType, responseType: binary ? 'arraybuffer' : 'text', connectTimeout: init.connectTimeout || 20000, readTimeout: init.readTimeout || 180000, ...(init.redirect === 'error' && { disableRedirects: true }) });
     const res = await (signal ? Promise.race([req, new Promise((_, rej) => signal.addEventListener('abort', () => rej(new DOMException('Aborted', 'AbortError')), { once: true }))]) : req);
     if (init.redirect === 'error' && res.status >= 300 && res.status < 400)
       throw Object.assign(new Error('此请求不允许重定向'), { code: 'REDIRECT_BLOCKED', kind: 'api' });

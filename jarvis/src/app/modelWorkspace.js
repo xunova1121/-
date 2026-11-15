@@ -46,6 +46,7 @@ export function createModelWorkspace(app) {
       return loadServerSettings();
     },
     config: (target = scope) => scopes.get(target),
+    preview: (target = scope) => scopes.preview(target),
     refresh: (target = scope) => scopes.refresh(target),
     patch: (update, target = scope) => scopes.patch(target, update),
     async documentStyles(target = scope) {

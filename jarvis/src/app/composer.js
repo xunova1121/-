@@ -14,6 +14,7 @@ import { prepareImage, isImageName } from '../agent/images.js';
 import * as ws from '../agent/workspace.js';
 import { $, toast } from './env.js';
 import { createComposerQueue } from './composerQueue.js';
+import { onServerResume } from '../core/serverResume.js';
 
 export function createComposer(app) {
   /** 下一条消息要带的附件（已经存进工作区“上传/”） */
@@ -118,9 +119,7 @@ export function createComposer(app) {
   const warm = () => app.server?.warm?.();
   $('#prompt').addEventListener('focus', warm);
   $('#prompt').addEventListener('input', warm);
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) warm();
-  });
+  onServerResume(() => app.server?.warm?.({ force: true }));
   // 粘贴截图 / 图片
   $('#prompt').addEventListener('paste', (e) => {
     const imgs = [...(e.clipboardData?.items ?? [])]

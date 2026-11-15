@@ -16,6 +16,7 @@ import { $, DESKTOP, COMPACT, toast } from './env.js';
 import { sportsCardRefresh } from './sportsCards.js';
 import { loadSongAsset } from '../../shared/musicAsset.js';
 import { createNewSessionAction, noteSessionNavigation } from './sessionNavigation.js';
+import { onServerResume } from '../core/serverResume.js';
 
 export function createConversations(app) {
   const transcript = new Transcript($('#transcript'), {
@@ -278,10 +279,7 @@ export function createConversations(app) {
     lastPull = Date.now();
     refreshFromServer();
   };
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) pullSoon();
-  });
-  addEventListener('focus', pullSoon);
+  onServerResume(pullSoon);
 
   /** 对话里点生成的文件：切到工作区并打开它 */
   /** 导出一段对话：复制全部内容，或存成 Word / Markdown 放进工作区“导出”文件夹（在工作区里能下载、分享） */

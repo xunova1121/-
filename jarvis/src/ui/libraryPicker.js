@@ -41,7 +41,7 @@ export function initLibraryPicker({ getWorkspace, openSettings, toast }) {
     const workspace = getWorkspace();
     if (!workspace) return;
     const runtime = workspace.runtime;
-    const cfg = workspace.config(runtime);
+    const cfg = workspace.config(runtime) || workspace.preview?.(runtime);
     const head = node('header', { className: 'ml-picker-head' }, node('h2', { textContent: '切换模型' }), makeButton('×', dismiss, 'ml-dismiss'));
     head.lastElementChild.setAttribute('aria-label', '关闭模型选择');
     const tabs = node(
@@ -155,7 +155,8 @@ export function initLibraryPicker({ getWorkspace, openSettings, toast }) {
     if (!workspace) return;
     const current = ++ticket;
     query = '';
-    notice = '正在读取配置…';
+    const cached = workspace.config(workspace.runtime) || workspace.preview?.(workspace.runtime);
+    notice = cached ? '正在同步最新配置…' : '正在读取配置…';
     sheet.hidden = false;
     scrim.hidden = false;
     anchor?.setAttribute('aria-expanded', 'true');
@@ -166,7 +167,7 @@ export function initLibraryPicker({ getWorkspace, openSettings, toast }) {
       await workspace.refresh(workspace.runtime);
       if (current === ticket) notice = '';
     } catch (error) {
-      if (current === ticket) notice = error.message;
+      if (current === ticket) notice = cached ? `暂未连上服务器，显示上次的模型；切换需要联网确认。${error.message}` : error.message;
     }
     if (current === ticket && !sheet.hidden) render();
   }

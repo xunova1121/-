@@ -436,6 +436,7 @@ jobs:
           node e2e/search-fallback.mjs "$RUNNER_TEMP/jarvis-e2e/search-fallback"
           node e2e/model-credentials.mjs "$RUNNER_TEMP/jarvis-e2e/model-credentials"
           node e2e/server-mobile.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/server-resume.mjs "$RUNNER_TEMP/jarvis-e2e/server-resume"
           node e2e/conversation-flow.mjs
           node e2e/qwen-voices.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/image-inspection.mjs
@@ -544,7 +545,13 @@ jobs:
       - name: 写发布说明
         run: |
           cat > release-notes.md <<'NOTES'
-          ## 本版新增 · 保留原图的卡槽填字
+          ## 本版修复 · 手机返回前台恢复连接
+          - 返回未央或网络恢复时立即续接原任务，合并同轮原生前台/网页可见性/焦点事件；跳过旧连接和重连退避的等待，按原进度序号继续接收，不重复提交任务。真实连续故障仍保留原重试上限，用户停止后不会被恢复事件唤起。
+          - 模型选择器先显示有限的账号独立预览，再同步最新服务器配置；进程重建后也可先看到型号。预览最多24条、32000字符及24小时，不保存Key/Token/上游URL，切换账号或服务器不复用，实际切换仍须服务器确认。
+          - 配置、健康检查、会话和任务状态等轻量读取每次最多等待5秒，网络失败最多重试一次；前台预热合并在途请求且不重复重试，读取期限也传给安卓原生网络。上传、下载、模型生成和更新继续使用各自合理期限。
+          - 保留后台待命、微信分享返回、队列、登录及原三端更新方式，不增加后台保活权限。浏览器原生事件替身和实际本地HTTP/SSE已验收；Android真机、VPN/移动网络与用户服务器443故障尚未实测，不能保证永久在线或生产秒连。
+
+          ## 保留上一版 · 保留原图的卡槽填字
           - 已有无字底图可直接填入中文标题和正文，完整保留原图、卡槽装饰、人物及图标；新流程只叠真实字体，不生成SVG、不裁切底图、不加覆盖面板，也不重新付费画图。
           - 卡槽位置按本次真实图片识别，没有固定七个坐标；复杂或不明确的位置可由已配置的视觉模型辅助，或在预览页手动框选。定位和成品核验各有次数与超时限制，不自动重试或重画，使用视觉模型可能产生相应调用费用。
           - 导出原尺寸PNG、原生可编辑文字PPTX、可拖动/缩放文字框的离线HTML、ZIP及.canvas.json；改字或补同稿Demo复用原图摘要和位置，另存保留旧稿。应用内预览可点击导出。

@@ -1,4 +1,5 @@
-/** 本机与服务器严格分库；服务端只存内存中的掩码快照，写操作串行且仅发送改动字段。 */
+import { serverModelPreview } from '../core/serverModelPreview.js';
+/** 本机与服务器严格分库；完整掩码配置只存内存，持久化预览不能用于写回。 */
 export function configDelta(before, after) {
   const delta = {};
   for (const [key, value] of Object.entries(after)) {
@@ -10,38 +11,72 @@ export function configDelta(before, after) {
   return delta;
 }
 
-export function createModelScopes({ getLocal, saveLocal, getClient, onServerSaved = () => {} }) {
+export function createModelScopes({ getLocal, saveLocal, getClient, onServerSaved = () => {}, storage, now }) {
   let serverConfig = null;
+  let identity = '';
+  let pending = null;
+  const preview = serverModelPreview({ storage, now });
   let writeQueue = Promise.resolve();
   let revision = 0;
   const missing = () => Object.assign(new Error('请先在设置中登录云服务器'), { kind: 'api', code: 'SERVER_NOT_CONNECTED' });
+  const clientKey = client => client ? JSON.stringify([client.base || '', client.account?.userId || '', client.account?.token || '']) : '';
+  const clientNow = () => {
+    const client = getClient();
+    const key = clientKey(client);
+    if (identity !== key) { identity = key; serverConfig = null; pending = null; revision++; }
+    return client;
+  };
+  const ensure = key => {
+    if (clientKey(clientNow()) !== key) throw Object.assign(new Error('服务器账号已切换，请重新打开模型设置'), { code: 'SERVER_SCOPE_CHANGED', kind: 'api' });
+  };
   return {
     get(scope) {
-      return scope === 'server' ? serverConfig : getLocal();
+      if (scope !== 'server') return getLocal();
+      clientNow();
+      return serverConfig;
+    },
+    preview(scope) {
+      return scope === 'server' ? preview.read(clientNow()) : getLocal();
     },
     async refresh(scope) {
       if (scope !== 'server') return getLocal();
-      const client = getClient();
+      const client = clientNow();
       if (!client) throw missing();
-      await writeQueue.catch(() => {});
-      const current = revision;
-      const loaded = await client.getConfig();
-      if (current === revision) serverConfig = loaded;
-      return serverConfig;
+      if (pending) return pending;
+      const key = identity;
+      const read = async () => {
+        await writeQueue.catch(() => {});
+        ensure(key);
+        const current = revision;
+        const loaded = await client.getConfig();
+        ensure(key);
+        if (current === revision) { serverConfig = loaded; preview.save(client, loaded); }
+        return serverConfig;
+      };
+      const reading = read();
+      pending = reading;
+      try { return await reading; }
+      finally { if (pending === reading) pending = null; }
     },
     patch(scope, update) {
       if (scope !== 'server') return Promise.resolve(saveLocal(update(getLocal())));
+      const client = clientNow();
+      const key = identity;
       const run = async () => {
-        revision++;
-        const client = getClient();
         if (!client) throw missing();
+        ensure(key);
+        revision++;
         // 每次写前读当前配置，防止另一台设备刚换的型号被旧快照覆盖。
         const before = await client.getConfig();
+        ensure(key);
         if (before.readOnly) throw Object.assign(new Error('当前使用管理员共享模型；模型设置由管理员维护'), { status: 403, code: 'SHARED_MODELS' });
         const after = update(before);
+        ensure(key);
         const delta = configDelta(before, after);
         if (Object.keys(delta).length) await client.putConfig(delta);
+        ensure(key);
         const confirmed = await client.getConfig();
+        ensure(key);
         for (const [id, key] of Object.entries(delta.keys || {})) {
           if (typeof key !== 'string' || !key.trim() || key.startsWith('••••')) continue;
           if (confirmed.keys?.[id] !== `••••${key.trim().slice(-4)}`)
@@ -51,6 +86,7 @@ export function createModelScopes({ getLocal, saveLocal, getClient, onServerSave
         if (typeof searchKey === 'string' && searchKey.trim() && !searchKey.startsWith('••••') && confirmed.openaiSearchKey !== `••••${searchKey.trim().slice(-4)}`)
           throw Object.assign(new Error('云服务器搜索Key读回核对不一致，未确认保存；请刷新后重试'), { code: 'MODEL_KEY_SAVE' });
         serverConfig = confirmed;
+        preview.save(client, confirmed);
         onServerSaved(serverConfig);
         return serverConfig;
       };
