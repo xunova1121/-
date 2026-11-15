@@ -352,6 +352,8 @@ jobs:
         run: node e2e/visual-demo.mjs "$RUNNER_TEMP/jarvis-e2e/visual-demo"
       - name: 验证分层海报、同稿Demo、中文可读性与Office真实导出
         run: node e2e/layered-design.mjs "$RUNNER_TEMP/jarvis-e2e/layered-design"
+      - name: 验证海报手机整图字号、三种结构、素材用途与真实Office导出
+        run: node e2e/poster-reading.mjs "$RUNNER_TEMP/jarvis-e2e/poster-reading"
       - name: 验证沉浸海报连续渐变、中文与可编辑PPTX
         run: node e2e/poster-gradient.mjs "$RUNNER_TEMP/jarvis-e2e/poster-gradient"
       - name: 验证分享返回状态、原字节和同账号会话恢复（原生事件模拟）

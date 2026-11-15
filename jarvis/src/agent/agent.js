@@ -24,6 +24,7 @@ import { runArchitectureDirector } from './architectureDirector.js';
 import { asksDocumentStyles } from './documentStyleQuery.js';
 import { IMAGE_RECHECK, IMAGE_READING_RULES } from './imageReading.js';
 import { textPosterRequest, POSTER_GUIDANCE } from './posterRouting.js';
+import { posterFollowupRequirement } from './posterFollowup.js';
 import { visualSceneRequest, VISUAL_SCENE_GUIDANCE } from './visualSceneRouting.js';
 import { conversationFocus } from '../core/responseRevision.js';
 import { responseGuidance } from './responseGuidance.js';
@@ -247,7 +248,8 @@ async function isolatedContext(userText, { sessionId, summary, history }) {
  * @returns {Promise<{ text: string, steps: number, toolCalls: number }>}
  */
 export async function runAgent(options) {
-  return withLookupDeadline(options, runAgentLoop, { profiles: true });
+  const requirementText = posterFollowupRequirement(options.requirementText ?? options.userText, options.history || []);
+  return withLookupDeadline({ ...options, requirementText }, runAgentLoop, { profiles: true });
 }
 
 export const COMPUTER_NOTE = `## 本机文件与工作区的区别

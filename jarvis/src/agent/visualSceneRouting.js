@@ -10,7 +10,7 @@ export function visualSceneRequest(text = '') {
   const posterDemo = /海报|封面|\.poster\.json/i.test(value) && interactive;
   const existing = /\.visual\.json/i.test(value) || /\.(?:poster|design)\.json/i.test(value) && requested.some(clause => /Demo|交互|互动|演示|HTML/i.test(clause));
   const dashboard = /(?:数据|可视化|监控|指挥|运营|业务|气象|天气|城市|态势|智慧).{0,8}(?:大屏|驾驶舱)|(?:气象|天气).{0,8}(?:看板|仪表盘)/.test(value);
-  const visualPrototype = interactive && /高清|图文|视觉|原型图|倒计时/.test(value) && /Demo|演示|原型/i.test(value);
+  const visualPrototype = (interactive || /(?:高清|图文|视觉).{0,10}(?:原型|Demo)/i.test(value)) && /高清|图文|视觉|原型图|倒计时/.test(value) && /Demo|演示|原型/i.test(value);
   if (!posterDemo && !existing && !dashboard && !visualPrototype) return false;
   if (/(?:不要|不用|无需|别|暂不|不必|先不)[^，,。；;\n]{0,5}(?:生成|制作|设计|开发|创建|做|画)[^，,。；;\n]{0,8}(?:大屏|驾驶舱|海报|Demo|交互演示)/i.test(value)) return false;
   if (/(?:不要|不用|无需|别|暂不|不必|先不)[^，,。；;\n]{0,5}(?:修改|更新|生成|制作|导出)[^，,。；;\n]{0,200}\.visual\.json/i.test(value)) return false;

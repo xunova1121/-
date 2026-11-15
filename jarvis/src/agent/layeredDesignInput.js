@@ -4,6 +4,7 @@ import { wrapParagraphs } from './posterComposition.js';
 export const designError = (message, code = 'DESIGN_INVALID') => Object.assign(new Error(message), { code, kind: 'input' });
 export const DESIGN_LIMITS = { layers: 160, text: 12000, source: 180000, pixels: 16e6, side: 4096 };
 export const PALETTES = {
+  campaign: { background: '#EEF6FF', ink: '#10365A', muted: '#294F70', accent: '#1259A5', card: '#FFFFFF' },
   editorial: { background: '#F5F2EB', ink: '#192D30', muted: '#405356', accent: '#962F1B', card: '#FFFFFF' },
   celebration: { background: '#FFF6EB', ink: '#493E41', muted: '#5D4D52', accent: '#8B3342', card: '#FFFFFF' },
   dashboard: { background: '#06162A', ink: '#F1F8FF', muted: '#A1BCD3', accent: '#58D9F5', card: '#0D2841' }
@@ -37,6 +38,10 @@ function normalizeLayer(node, canvas) {
   const out = { id, type, x, y, w, h, color: color(node.color, canvas.palette.ink), fill: color(node.fill, canvas.palette.card),
     group: boundedText(node.group || id, 60), category: boundedText(node.category || '', 40), detail: boundedText(node.detail || '', 1600), decorative: node.decorative === true };
   if (node.stroke !== undefined) out.stroke = color(node.stroke);
+  if (node.role !== undefined) {
+    if (!['heading', 'body', 'label', 'caption'].includes(node.role)) throw designError('文字用途需为heading/body/label/caption');
+    out.role = node.role;
+  }
   out.radius = finite(node.radius ?? 0, 0, Math.min(w, h) / 2, '圆角');
   if (type === 'text') {
     out.text = boundedText(node.text);
@@ -83,7 +88,9 @@ export function normalizeLayerDesign(raw) {
   const source = boundedText(raw.source || '', 1000);
   if (dataMode === 'provided' && !source.trim()) throw designError('用户提供数据需填写来源说明；不据此证明已联网核实');
   if (raw.fontFamily !== undefined && !['sans', 'serif'].includes(raw.fontFamily)) throw designError('字体请选择sans黑体或serif宋体');
+  if (raw.reading !== undefined && !['phone', 'desktop'].includes(raw.reading)) throw designError('阅读场景需为phone或desktop');
   return { kind: 'layered-design', version: 1, title, width, height, palette, layers, dataMode, source, asOf: boundedText(raw.asOf || '', 100), fontFamily: raw.fontFamily || 'sans',
+    ...(raw.reading !== undefined && { reading: raw.reading }),
     assets: normalizeAssets(raw.assets), states: normalizeStates(raw.states, layers, canvas) };
 }
 function normalizeAssets(assets = []) {

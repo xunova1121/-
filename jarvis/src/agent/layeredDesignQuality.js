@@ -44,15 +44,16 @@ export function applyDesignState(design, state) {
   return normalizeLayerDesign({ ...design, states: [], layers: design.layers.map(node => ({ ...node, ...(state?.changes.find(c => c.id === node.id) || {}) })) });
 }
 /** 有配置才做一次实际成品看图；独立预算、无联网/重试/自动收费重画，失败保留候选文件。 */
-export async function reviewLayeredDesign(ctx, design, png, { signal, retrieval } = {}) {
+export async function reviewLayeredDesign(ctx, design, png, { signal, retrieval, previewPng } = {}) {
   if (!ctx.visionLlm || !png || png.size > 12e6) return { status: 'not_checked', reason: '未配置视觉能力、未生成PNG或原图超过核验上限' };
   try {
     const images = [await imageData(png, { detail: 'high' })];
+    if (previewPng && png.size + previewPng.size <= 12e6) images.push(await imageData(previewPng, { detail: 'high' }));
     throwControl(null, signal);
     retrieval?.consume?.('model');
     const result = await withWebDeadline(activeSignal => ctx.visionLlm({
-      system: '你是成品核验员。先从实际图片读取文字，再与给定文案对照；不因为给了正确文案就推断图片里正确。检查错别字、缺字、乱码、文字清晰度、裁切/遮挡和不当重叠。中文看不清或小字不可辨认必须用null，不可猜。只返回JSON：copyMatches/readable/noOverlap各为true、false或null，issues为最多6条简短问题。事实真实性不在本次像素核验范围内。',
-      prompt: '请检查此实际成品；应有的准确文案：\n' + textNodes(design).map(n => `${n.id}：${n.text}`).join('\n'),
+      system: '你是成品核验员。先从实际图片读取文字，再与给定文案对照；不因为给了正确文案就推断图片里正确。检查错别字、缺字、乱码、文字清晰度、裁切/遮挡和不当重叠。中文看不清或小字不可辨认必须用null，不可猜。若第二张存在，它是整张海报缩至手机宽度的真实预览，必须以它判断正文能否正常阅读，不能以放大原图可读代替。检查主视觉是否挤压正文、是否残留空卡片/占位框、是否上图下文生硬拼接，发现则写issues；不能仅凭没有重叠就称设计通过。只返回JSON：copyMatches/readable/noOverlap各为true、false或null，issues为最多6条简短问题。事实真实性不在本次像素核验范围内。',
+      prompt: '请检查此实际成品' + (previewPng ? '和整图手机缩放预览' : '') + '；应有的准确文案：\n' + textNodes(design).map(n => `${n.id}：${n.text}`).join('\n'),
       images, signal: activeSignal, allowWebSearch: false, maxWebSearches: 0, maxTransientRetries: 0, maxPartialRetries: 0
     }), { signal, timeoutMs: 25000 });
     if (typeof result !== 'string' || result.length > 5000) return { status: 'not_checked', reason: '视觉回执无效' };

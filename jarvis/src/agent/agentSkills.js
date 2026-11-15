@@ -40,7 +40,7 @@ export const AGENT_SKILLS = Object.freeze({
   'poster-designer': `## 海报设计专业方法
 1. 制作海报时先明确用途、尺寸比例、主标题、时间地点和品牌色；原片修图直接按用户要求处理，不问海报标题文案。
 2. 信息层级：主标题最大最醒目，副标题次之，时间地点和二维码等细节放下方；全图文字越少越好，主标题不超过 12 个字。
-3. 版式：留出安全边距；文字放在背景简单的区域；一张图只用 2–3 种颜色和 1–2 种字体。
+3. 版式：留出安全边距；文字放在背景简单的区域；一张图只用 2–3 种颜色和 1–2 种字体。make_poster支持design.layers逐个指定坐标自由构图，不能误称只能套固定模板。换结构可用timeline时间轴、newspaper报纸分栏、campaign图文宣传或free重新布局，不能只换配色。竖版按390px整图检查正文12px，不能靠4K掩盖小字；无字素材用generate_image(purpose=poster_art)，不画空卡片、按钮或胶囊框。
 4. 新图文海报优先 make_poster.design：按文案/参考图确定主次、视觉和分组，sections内容起稿或layout=free+layers自由构图，避免所有海报都是底部居中列表。照片/产品/插画有合适原图就复用design.assets真实路径；否则先 generate_image 画“不要任何文字”的素材，不固定下半部留白。中文用真实字体独立排版，交付最终 PNG、自包含可编辑 SVG 和 PPTX；图标、卡片和图片独立可改，不只交 PPTX 让用户自行导出，不绕去 Python、手写 HTML 截图或 render_diagram。无图像能力用独立矢量图标/形状起稿，不能把渐变圆形吹成模型插画。复杂大屏或海报加交互Demo用 create_visual_demo；新稿.design.json同源交付PNG/SVG/PPTX/离线HTML/ZIP，手机重排为可读卡片。source_path复用已有.design.json/.visual.json/.poster.json，补Demo不重画底图；修改新稿changes按id同步所有格式，不能仅手改SVG。
 5. 图片处理用 process_image：人像优化/美颜选portrait_retouch，P瘦/显瘦/瘦身选portrait_slim，不能拿upscale清晰化冒充美颜。默认natural自然力度，instructions只填用户要求；保留长相和年龄特征、服装背景。必须用本次或当前对话指定原图，缺原图请上传，不搜其它照片。原片不覆盖、结果另存；以真实像素和portraitReview报告效果，未复核不承诺保真，已有双图视觉对照不重复调用inspect_image，也不因没过检查自动再付费修一张。抠图、证件照、修复、清晰化的原流程保持。
 6. 检查：按实际工具回执分别报告生成、读回、字体和视觉检查状态；需要看图时 inspect_image 核对最终 PNG。生成成功不等于视觉或交互验收，generated不算通过；示例/用户提供数据不冒充实时数据，4K输出不证明底图原生4K。不承诺绝对无错字；局部失败保留已有文件并说清缺失格式/阶段，不假装完整交付。`,

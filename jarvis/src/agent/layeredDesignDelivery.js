@@ -6,6 +6,7 @@ import { composeLayeredPptx } from './layeredDesignPptx.js';
 import { createLayeredHtml } from './layeredDesignHtml.js';
 import { checkLayerCopy, checkLayerOverlap, checkLayerContrast, reviewLayeredDesign, applyDesignState } from './layeredDesignQuality.js';
 import { DESIGN_LIMITS, designError } from './layeredDesignInput.js';
+import { checkDesignPresentation, phonePreviewSvg } from './layeredDesignPresentation.js';
 import { renderVisualScene } from './visualSceneRaster.js';
 import { assertPosterPng } from './posterDeliveryTool.js';
 import { throwControl } from '../core/networkRequest.js';
@@ -25,12 +26,15 @@ function recordFailure(receipt, error, phase, signal) {
 function checkGeometry(design, svg, receipt) {
   receipt.copyCheck = checkLayerCopy(design, svg);
   receipt.layoutCheck = checkLayerOverlap(design);
+  receipt.presentation = checkDesignPresentation(design);
   if (receipt.copyCheck.status !== 'passed') receipt.errors.push({ code: 'DESIGN_COPY_MISMATCH', phase: 'copy' });
   if (receipt.layoutCheck.status !== 'passed') receipt.errors.push({ code: 'DESIGN_TEXT_OVERLAP', phase: 'layout' });
+  if (receipt.presentation.status === 'failed') receipt.errors.push({ code: 'DESIGN_PRESENTATION_UNREADABLE', phase: 'presentation', message: '整张按目标宽度显示时字太小或图文失衡；请按presentation.failed增大字号/文字区、减少主视觉占比或拆版，不能只改对比度后宣称完成' });
   // 每个快照都执行完整文本/边界归一化；它们不参与“初始PNG已看过”的结论。
   for (const state of design.states) {
     const checked = checkLayerOverlap(applyDesignState(design, state));
     if (checked.status !== 'passed') receipt.errors.push({ code: 'DESIGN_STATE_OVERLAP', phase: 'layout' });
+    if (checkDesignPresentation(applyDesignState(design, state)).status === 'failed') receipt.errors.push({ code: 'DESIGN_STATE_UNREADABLE', phase: 'presentation' });
   }
 }
 async function packageDesign(design, assets, artifacts, receipt, signal) {
@@ -67,6 +71,8 @@ async function deliverLoadedDesign({ design, assets, base }, ctx, options, demo)
   const receipt = { kind: demo ? 'visual_demo' : 'poster', status: 'partial', width: design.width, height: design.height,
     files: [], textRendering: 'program', fontCheck: 'not_checked', visual: 'not_checked', interaction: 'not_checked',
     dataMode: design.dataMode, designVersion: 'layered-1', assets: assetsReceipt(design, assets), contrast: { status: 'not_checked' },
+    editing: { layouts: ['editorial', 'campaign', 'timeline', 'newspaper', 'celebration', 'dashboard', 'free'],
+      guidance: '可以自由构图：design.layout=free配合layers逐个指定文字/图片/图标的坐标。换结构用source_path+design，保留palette与原素材；局部改字用changes。无需手改SVG。' },
     notes: ['同一分层源稿生成各格式；文字不由生图模型画，图标为独立矢量对象', '文案原样保留，不证明文案中的事实或错别字已被编辑校正', '4K仅表示导出画布；素材放大倍率单独记录，未自动付费重画/放大'], errors: [] };
   checkGeometry(design, svg, receipt);
   const artifacts = new Map();
@@ -88,6 +94,7 @@ async function deliverLoadedDesign({ design, assets, base }, ctx, options, demo)
   catch (error) { recordFailure(receipt, error, 'pptx', signal); }
   const raster = ctx.renderVisualScene || renderVisualScene;
   let png;
+  let previewPng;
   try {
     progress?.('正在核验真实字体、中文字形与最终PNG像素…');
     const rendered = await raster(svg, { signal });
@@ -100,6 +107,15 @@ async function deliverLoadedDesign({ design, assets, base }, ctx, options, demo)
     receipt.contrast = await checkLayerContrast(design, svg, raster, signal);
     if (receipt.contrast.status !== 'passed') receipt.errors.push({ code: receipt.contrast.status === 'failed' ? 'DESIGN_CONTRAST_LOW' : 'DESIGN_CONTRAST_UNCHECKED', phase: 'contrast' });
   } catch (error) { recordFailure(receipt, error, 'render', signal); }
+  if (png && design.reading === 'phone') {
+    try {
+      const preview = phonePreviewSvg(svg, design), rendered = await raster(preview.svg, { signal });
+      await assertPosterPng(rendered.blob, preview.width, preview.height);
+      if (rendered.fontCheck?.status !== 'passed') throw designError('手机整图预览字体未核验', 'POSTER_FONT_CHECK_UNAVAILABLE');
+      previewPng = rendered.blob;
+      receipt.phonePreview = { path: await saveDesignFile(`${base}.phone.png`, previewPng, ctx, signal), width: preview.width, height: preview.height, readback: 'passed', render: 'passed' };
+    } catch (error) { recordFailure(receipt, error, 'phone_preview', signal); }
+  }
   if (demo) {
     try {
       progress?.('正在生成同源离线Demo和手机可读布局…');
@@ -109,7 +125,7 @@ async function deliverLoadedDesign({ design, assets, base }, ctx, options, demo)
       await deliver('zip', await packageDesign(design, assets, artifacts, receipt, signal));
     } catch (error) { recordFailure(receipt, error, 'demo', signal); }
   }
-  receipt.visualReport = await reviewLayeredDesign(ctx, design, png, options);
+  receipt.visualReport = await reviewLayeredDesign(ctx, design, png, { ...options, previewPng });
   receipt.visual = receipt.visualReport.status;
   if (receipt.visual === 'failed') receipt.errors.push({ code: 'DESIGN_VISUAL_NEEDS_REVIEW', phase: 'visual' });
   receipt.files.sort((a, b) => ['png', 'svg', 'pptx', 'html', 'zip'].indexOf(a.format) - ['png', 'svg', 'pptx', 'html', 'zip'].indexOf(b.format));

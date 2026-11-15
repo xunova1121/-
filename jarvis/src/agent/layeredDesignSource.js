@@ -10,6 +10,8 @@ import { scopedState } from './store.js';
 
 // 每个账号/后端最多64个在途输出名；WeakMap随原存储作用域回收，不在账号间共享文件名。
 const outputState = scopedState('files', () => new Set());
+const outputExtensions = ['design.json', 'svg', 'pptx', 'png', 'html', 'zip', 'phone.png'];
+const outputNames = base => outputExtensions.map(ext => `${base}.${ext}`);
 export const releaseLayerOutputBase = base => outputState().delete(base);
 
 /** 换构图时默认从原图层提取完整栏目，不把旧成品烘焙成新底图。 */
@@ -36,7 +38,7 @@ function reflowInput(input, previous) {
     width: input.width ?? previous.width, height: input.height ?? previous.height, dataMode: input.dataMode ?? previous.dataMode,
     source: input.source ?? previous.source, asOf: input.asOf ?? previous.asOf,
     font_family: input.font_family ?? previous.fontFamily,
-    design: { ...spec, palette: { ...previous.palette, ...spec.palette }, assets, ...(!spec.layers && { sections: spec.sections || sections }) } };
+    design: { ...spec, reading: spec.reading ?? previous.reading, palette: { ...previous.palette, ...spec.palette }, assets, ...(!spec.layers && { sections: spec.sections || sections }) } };
 }
 export async function loadLayerDesign(input, { signal, defaultSize } = {}) {
   throwControl(null, signal);
@@ -104,7 +106,7 @@ export function layerOutputBase(input, design) {
   const name = input.path || (input.source_path ? input.source_path.replace(/\.design\.json$/i, '') + '-修改-' + Date.now().toString(36) + '.png' : `设计/${safe}.png`);
   if (name.length > 280 || !/\.(png|svg|pptx|html|zip)$/i.test(name)) throw designError('成品路径需为PNG/SVG/PPTX/HTML/ZIP且不超过280字符');
   const base = ws.normalize(name).replace(/\.(png|svg|pptx|html|zip)$/i, '');
-  const outputs = ['png', 'svg', 'pptx', 'html', 'zip', 'design.json'].map(ext => base + '.' + ext);
+  const outputs = outputNames(base);
   if (input.source_path && outputs.includes(ws.normalize(input.source_path)) || design.assets.some(a => outputs.includes(a.path))) throw designError('输出不能覆盖原稿或素材');
   return base;
 }
@@ -115,10 +117,13 @@ export async function availableLayerOutputBase(input, design, signal, activeOutp
   for (let attempt = 0; attempt < 5; attempt++) {
     throwControl(null, signal);
     if (activeOutputs.size >= 64) throw designError('设计导出繁忙，请稍后重试', 'DESIGN_BUSY');
-    const occupied = await Promise.all(['design.json', 'svg', 'pptx', 'png', 'html', 'zip'].map(ext => ws.exists(`${base}.${ext}`)));
+    const names = outputNames(base);
+    const occupied = await Promise.all(names.map(name => ws.exists(name)));
     throwControl(null, signal);
     // await后再次判定，同一时刻两轮都查到“没有文件”也只能有一轮认领原名。
-    if (!occupied.some(Boolean) && !activeOutputs.has(base)) { activeOutputs.add(base); return base; }
+    // foo.phone.png也是foo的整组输出，不能被另一任务以foo.phone为主名抢占。
+    const claimed = [...activeOutputs].some(other => outputNames(other).some(name => names.includes(name)));
+    if (!occupied.some(Boolean) && !claimed) { activeOutputs.add(base); return base; }
     if (original.length > 240) throw designError('同名成品已存在，请用短一些的新文件名另存');
     base = `${original}-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
   }

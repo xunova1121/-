@@ -1,6 +1,7 @@
 /** 内容驱动的起稿；结果都是独立图层，后续可自由移动/改字，而非锁死模板截图。 */
 import { PALETTES, normalizeLayerDesign, boundedText, designError } from './layeredDesignInput.js';
 import { wrapParagraphs } from './posterComposition.js';
+import { storyMetrics, drawStory, readableStoryPlan, drawStoryPlan, timelineStories, newspaperStories } from './layeredStoryLayout.js';
 
 function builder(width, height, palette) {
   const layers = [];
@@ -32,19 +33,22 @@ function sectionsOf(input) {
       eyebrow: boundedText(section.eyebrow || '', 100), category: boundedText(section.category || '', 40), detail: boundedText(section.detail || '', 1600) };
   });
 }
-function header(b, input, label) {
+function header(b, input, label, contentWidth) {
   const { width: w, u, palette: p, text, shape } = b, m = 64 * u;
   const wide = w > b.height;
-  text('eyebrow', input.design.eyebrow || label, [m, (wide ? 30 : 48) * u, w - m * 2, (wide ? 32 : 50) * u], wide ? 20 : 24, { color: p.accent, weight: 700 });
+  const textW = contentWidth ?? w - m * 2;
+  text('eyebrow', input.design.eyebrow || label, [m, (wide ? 30 : 48) * u, textW, (wide ? 32 : 50) * u], wide ? 20 : 26, { color: p.accent, weight: 700, role: 'label' });
   const titleSize = input.title.length > 24 ? (wide ? 48 : 60) : (wide ? 64 : 84);
-  const titleRows = wrapParagraphs(input.title, titleSize * u, w - m * 2);
+  const titleRows = wrapParagraphs(input.title, titleSize * u, textW);
   const titleHeight = (titleRows?.length || 1) * titleSize * u * 1.4;
   const titleY = (wide ? 88 : 116) * u;
-  text('title', input.title, [m, titleY, w - m * 2, titleHeight], titleSize, { weight: 700 });
+  text('title', input.title, [m, titleY, textW, titleHeight], titleSize, { weight: 700, role: 'heading' });
   let bottom = titleY + titleHeight;
   if (input.subtitle) {
-    text('subtitle', input.subtitle, [m, bottom + 12 * u, w - 2 * m, (wide ? 48 : 88) * u], wide ? 24 : 27, { color: p.muted });
-    bottom += (wide ? 60 : 100) * u;
+    const subtitleSize = (wide ? 24 : 34) * u;
+    const subtitleHeight = (wrapParagraphs(input.subtitle, subtitleSize, textW)?.length || 1) * subtitleSize * 1.4;
+    text('subtitle', input.subtitle, [m, bottom + 12 * u, textW, subtitleHeight], subtitleSize / u, { color: p.muted, role: 'body', minFontSize: subtitleSize });
+    bottom += subtitleHeight + 12 * u;
   }
   shape('header-rule', [m, bottom + 24 * u, w - 2 * m, 2 * u], p.accent);
   return bottom + 58 * u;
@@ -52,9 +56,10 @@ function header(b, input, label) {
 function footer(b, input) {
   const { u, width: w, height: h, palette: p } = b;
   const copy = input.footer || (input.dataMode === 'provided' ? input.source : '设计演示 · 内容为样例');
-  b.text('footer', copy || '用户提供内容', [64 * u, h - 83 * u, w - 128 * u, 55 * u], 20, { color: p.muted });
+  b.text('footer', copy || '用户提供内容', [64 * u, h - 83 * u, w - 128 * u, 55 * u], 20, { color: p.muted, role: 'caption' });
 }
 function card(b, section, index, box, lead = false) {
+  if (b.width <= b.height) return drawStory(b, section, index, box, { lead });
   const { u, palette: p, text, shape, add } = b, [x, y, w, h] = box;
   const group = `section-${index + 1}`, meta = { group, category: section.category, detail: section.detail || section.body || section.title };
   const compact = b.width > b.height && !lead;
@@ -73,7 +78,7 @@ function editorial(b, input, sections) {
   let y = header(b, input, 'WEIYANG / EDITORIAL');
   const bottom = h - 116 * u;
   const asset = input.design.assets?.[0];
-  if (asset) {
+  if (asset && w > h) {
     const imageH = Math.min((bottom - y) * 0.3, (w - m * 2) * 0.52);
     b.add('image', 'hero-image', [m, y, w - m * 2, imageH], { asset: asset.id, group: 'hero', detail: '工作区原始视觉素材；图中文字不作为准确文案' });
     y += imageH + gap;
@@ -83,7 +88,7 @@ function editorial(b, input, sections) {
     return;
   }
   // 内容多时主稿+双栏；横版改三栏。文字框按真实内容留量，溢出会拒绝而非删字。
-  const cols = w > h ? 3 : 2, tail = sections.length - 1;
+  const tail = sections.length - 1;
   if (w > h) {
     const leftW = (w - 2 * m - gap) * 0.42, sideX = m + leftW + gap, sideW = w - m - sideX;
     card(b, sections[0], 0, [m, y, tail ? leftW : w - 2 * m, bottom - y], true);
@@ -92,13 +97,56 @@ function editorial(b, input, sections) {
     sections.slice(1).forEach((s, i) => card(b, s, i + 1, [sideX + (i % sideCols) * (cw + gap), y + Math.floor(i / sideCols) * (ch + gap), cw, ch]));
     return;
   }
-  const rows = Math.ceil(tail / cols), available = bottom - y;
-  const leadH = rows ? Math.min(available * 0.32, 370 * u) : available;
-  card(b, sections[0], 0, [m, y, w - 2 * m, leadH], true);
-  y += leadH + gap;
-  const rowH = rows ? (bottom - y - (rows - 1) * gap) / rows : 0;
-  const cw = (w - 2 * m - (cols - 1) * gap) / cols;
-  sections.slice(1).forEach((s, i) => card(b, s, i + 1, [m + (i % cols) * (cw + gap), y + Math.floor(i / cols) * (rowH + gap), cw, rowH]));
+  const contentW = w - 2 * m, needed = editorialHeight(b, sections, contentW);
+  if (asset) {
+    const imageH = Math.min((bottom - y) * 0.28, bottom - y - needed - gap);
+    if (imageH < 110 * u) throw designError('原文和插图无法同时保持手机可读，请增高画布或重新构图，未缩字或丢掉插图', 'DESIGN_TEXT_OVERFLOW');
+    b.add('image', 'hero-image', [m, y, contentW, imageH], { asset: asset.id, group: 'hero' });
+    y += imageH + gap;
+  }
+  editorialStories(b, sections, [m, y, contentW, bottom - y]);
+}
+function editorialHeight(b, sections, width) {
+  if (!sections.length) return 0;
+  const tail = sections.slice(1), lead = storyMetrics(b, sections[0], width, true).height;
+  if (!tail.length) return lead;
+  const height = Math.min(readableStoryPlan(b, tail, width, Infinity, 2).height, readableStoryPlan(b, tail, width, Infinity, 1).height);
+  return lead + 20 * b.u + height;
+}
+function editorialStories(b, sections, box) {
+  if (!sections.length) return;
+  const [x, y, w, h] = box, lead = storyMetrics(b, sections[0], w, true).height;
+  if (lead > h) throw designError('头条在可读字号下放不下，请增高画布', 'DESIGN_TEXT_OVERFLOW');
+  drawStory(b, sections[0], 0, [x, y, w, lead], { lead: true });
+  const tail = sections.slice(1), start = y + lead + 20 * b.u;
+  if (tail.length) drawStoryPlan(b, tail, [x, start, w, y + h - start], readableStoryPlan(b, tail, w, y + h - start), { startIndex: 1 });
+}
+function campaign(b, input, sections) {
+  const { width: w, height: h, u, palette: p } = b, m = 52 * u, bottom = h - 110 * u;
+  const titleW = w * 0.46, titleSize = 76 * u;
+  const titleH = (wrapParagraphs(input.title, titleSize, titleW)?.length || 1) * titleSize * 1.4;
+  const subtitleH = input.subtitle ? (wrapParagraphs(input.subtitle, 34 * u, titleW)?.length || 1) * 34 * u * 1.4 : 0;
+  const minimumHero = 120 * u + titleH + (subtitleH ? 18 * u + subtitleH : 0);
+  const heroH = Math.min(h * 0.32, bottom - editorialHeight(b, sections, w - 2 * m) - 28 * u);
+  if (heroH < minimumHero) throw designError('主视觉标题与正文在可读字号下放不下，请增加画布高度或用free重新分配图文，未把新闻挤成小字', 'DESIGN_TEXT_OVERFLOW');
+  const asset = input.design.assets?.[0];
+  if (asset) b.add('image', 'hero-image', [w * 0.5, 0, w * 0.5, heroH], { asset: asset.id, group: 'hero' });
+  else b.add('icon', 'hero-symbol', [w * 0.65, heroH * 0.25, 180 * u, 180 * u], { icon: 'news', color: p.accent, decorative: true });
+  b.text('eyebrow', input.design.eyebrow || 'WEIYANG / DAILY BRIEF', [m, 36 * u, titleW, 52 * u], 26, { color: p.accent, role: 'label', weight: 700 });
+  b.text('title', input.title, [m, 100 * u, titleW, titleH], 76, { color: p.ink, role: 'heading', weight: 700, minFontSize: titleSize });
+  if (input.subtitle) b.text('subtitle', input.subtitle, [m, 100 * u + titleH + 18 * u, titleW, subtitleH], 34, { color: p.muted, role: 'body', minFontSize: 34 * u });
+  b.shape('hero-rule', [m, heroH - 4 * u, w - 2 * m, 3 * u], p.accent);
+  editorialStories(b, sections, [m, heroH + 28 * u, w - 2 * m, bottom - heroH - 28 * u]);
+}
+function alternateStories(b, input, sections, timeline) {
+  const asset = input.design.assets?.[0], headerW = (b.width - 128 * b.u) * 0.64;
+  const y = header(b, input, timeline ? 'WEIYANG / TIMELINE' : 'WEIYANG / NEWSPAPER', asset ? headerW : undefined);
+  const m = 56 * b.u;
+  if (asset) {
+    const imageX = 64 * b.u + headerW + 24 * b.u;
+    b.add('image', 'hero-image', [imageX, 48 * b.u, b.width - 64 * b.u - imageX, y - 98 * b.u], { asset: asset.id, fit: 'contain', group: 'hero' });
+  }
+  (timeline ? timelineStories : newspaperStories)(b, sections, [m, y, b.width - 2 * m, b.height - 116 * b.u - y]);
 }
 function celebration(b, input, sections) {
   const { width: w, height: h, u, palette: p, text, shape, add } = b;
@@ -118,7 +166,7 @@ function celebration(b, input, sections) {
     if (!s.value) return card(b, s, i, [x, cy, cellW, cellH]);
     const meta = { group, detail: s.detail || `${s.title}：${s.value}${s.unit || ''}`, category: s.category };
     shape(group + '-card', [x, cy, cellW, cellH], p.card, 24 * u, { group });
-    text(group + '-title', s.title, [x + 28 * u, cy + 24 * u, cellW - 56 * u, 52 * u], 25, { ...meta, color: p.muted });
+    text(group + '-title', s.title, [x + 28 * u, cy + 24 * u, cellW - 56 * u, 52 * u], 34, { ...meta, color: p.muted, role: 'body', minFontSize: 34 * u });
     text(group + '-value', s.value + (s.unit || ''), [x + 28 * u, cy + 94 * u, cellW - 56 * u, cellH - 120 * u], 92, { ...meta, color: p.accent, weight: 700, minFontSize: 38 * u });
   });
 }
@@ -162,7 +210,7 @@ export function planLayerDesign(input, defaultSize = [1080, 1920]) {
   if (!input.title.trim()) throw designError('请提供准确标题');
   const width = input.width ?? defaultSize[0], height = input.height ?? defaultSize[1];
   const layout = spec.layout || (width > height ? 'dashboard' : 'editorial');
-  if (!['editorial', 'celebration', 'dashboard', 'free'].includes(layout)) throw designError('请选择支持的起稿布局，或用free自由图层');
+  if (!['editorial', 'campaign', 'timeline', 'newspaper', 'celebration', 'dashboard', 'free'].includes(layout)) throw designError('请选择支持的起稿布局，或用free自由图层');
   const palette = { ...(PALETTES[layout] || PALETTES.editorial),
     ...(input.background_color && { background: input.background_color }), ...(input.text_color && { ink: input.text_color }), ...(input.panel_color && { card: input.panel_color }), ...spec.palette };
   const assets = spec.assets || (input.background_path ? [{ id: 'hero', path: input.background_path }] : []);
@@ -172,8 +220,9 @@ export function planLayerDesign(input, defaultSize = [1080, 1920]) {
   else {
     if (layout === 'free') throw designError('自由排版需明确提供layers');
     const sections = sectionsOf(input);
-    ({ editorial, celebration, dashboard })[layout](b, input, sections);
+    if (layout === 'timeline' || layout === 'newspaper') alternateStories(b, input, sections, layout === 'timeline');
+    else ({ editorial, campaign, celebration, dashboard })[layout](b, input, sections);
     footer(b, input);
   }
-  return normalizeLayerDesign({ ...input, width, height, palette, assets, layers: b.layers, states: spec.states, fontFamily: input.font_family || 'sans' });
+  return normalizeLayerDesign({ ...input, width, height, palette, assets, layers: b.layers, states: spec.states, fontFamily: input.font_family || 'sans', reading: spec.reading || (width > height ? 'desktop' : 'phone') });
 }

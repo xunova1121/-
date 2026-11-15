@@ -10,6 +10,7 @@ import { assertArchitectureToolCall } from './architectureStateProtection.js';
 import { toolFailureScope } from './toolFailureScope.js';
 import { recordImageInputRecovery } from './imageInputRecovery.js';
 import { isRetrievalStop, RETRIEVAL_FINISHED } from '../../shared/retrievalStop.js';
+import { compositionToolArgs } from './imageCompositionPrompt.js';
 
 /** 产出文件、核对数字的本地工具：联网到点后照常可用 */
 export const OUTPUT_TOOLS = /^(?:process_image|create_document|write_long_document|edit_office_document|check_document|write_file|edit_file|preview|create_diagram|export_diagram|make_poster|create_visual_demo|reconcile_numbers|verify_numbers|time_calc)$/;
@@ -41,6 +42,7 @@ export async function executeToolCalls(
   let newScreenThisStep = false;
   let phoneActionThisStep = false;
   const exec = async (c) => {
+    c = { ...c, args: compositionToolArgs(c.name, c.args, requirementText) };
     const tool = loader.get(c.name);
     // 执行器分配操作ID，不依赖中转站可能重复的工具ID；同一实际调用的回执可幂等保存。
     const workCallId = uid('op') + ':' + c.id;

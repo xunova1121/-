@@ -2,6 +2,10 @@ import { visualSceneRequest } from './visualSceneRouting.js';
 /** 图片明确要求排字、海报/封面标题走现有工具；无字素材、Office正文和架构图保留原路由。 */
 const POSTER_KINDS = '海报|封面|宣传单|传单|易拉宝|展架|横幅|条幅|展板|请柬|请帖|贺卡|明信片|头图|题图|首图|桌牌|台卡';
 const POSTER_KIND = new RegExp(POSTER_KINDS);
+export function directModelTextRequest(value = '') {
+  return /(?:图像模型|图片模型|生图模型|generate_image).{0,12}直接.{0,8}(?:画字|写字|画带字|生成文字)/i.test(value)
+    || /(?:GPT(?:[ -]?(?:Image|图片|画图))?(?:[ -]?[\d.]+)?|gpt-image-[\w.-]+).{0,8}直接.{0,10}(?:画字|写字|画带字|生成文字|画整张带字|生成整张带字)/i.test(value);
+}
 export function textPosterRequest(text = '') {
   const value = String(text).slice(-6000);
   if (visualSceneRequest(value)) return false;
@@ -13,8 +17,7 @@ export function textPosterRequest(text = '') {
   if (/(?:不要|不用|无需|别|暂不|不必|先不).{0,8}(?:生成|制作|设计|画)/.test(value)) return false;
   if (/架构图|流程图|关系图|组织图|拓扑图/.test(value)) return false;
   if (/(?:开发|实现|编写|提供|交付|写一段).{0,12}(?:代码|程序|脚本|应用)|(?:只给|只要)(?:代码|脚本)/.test(value)) return false;
-  if (/(?:图像模型|图片模型|生图模型|generate_image).{0,12}直接.{0,8}(?:画字|写字|画带字|生成文字)/i.test(value)) return false;
-  if (/(?:GPT(?:[ -]?(?:Image|图片|画图))?(?:[ -]?[\d.]+)?|gpt-image-[\w.-]+).{0,8}直接.{0,10}(?:画字|写字|画带字|生成文字|画整张带字|生成整张带字)/i.test(value)) return false;
+  if (directModelTextRequest(value)) return false;
   if (/(?:Word|docx|Excel|xlsx|文档|报告).{0,6}封面/i.test(value) || new RegExp(`(?:Word|docx|Excel|xlsx).{0,12}(?:${POSTER_KINDS}|告示)|(?:${POSTER_KINDS}).{0,12}(?:Word|docx|Excel|xlsx)`, 'i').test(value)) return false;
   // 只要宣传单/请柬的文案、话术，不出图
   if (new RegExp(`(?:${POSTER_KINDS})的?(?:文案|话术|文字稿|措辞|内容)`).test(value) && !/图|画|设计|排版|做成|生成/.test(value.replace(new RegExp(`(?:${POSTER_KINDS})的?(?:文案|话术|文字稿|措辞|内容)`, 'g'), ''))) return false;
@@ -27,7 +30,7 @@ export function textPosterRequest(text = '') {
 
 export const POSTER_TOOLS = ['generate_image', 'make_poster', 'process_image', 'inspect_image', 'read_image_text', 'read_file', 'list_files', 'find_files', 'preview', 'update_plan'];
 
-export const POSTER_GUIDANCE = '中文图文海报新稿优先make_poster.design：先按用途/受众/参考图/文案量确定主视觉、标题层级、分组与留白，再选editorial/celebration起稿或用layout=free,layers自由安排文字、图片、卡片、矢量图标和图表；起稿不是固定模板，不要每次都用底部居中列表。新闻用sections把主新闻和次级卡片分开；照片/产品图优先复用用户真实路径design.assets；确需新视觉才用generate_image画“不要任何文字”的素材。全部中文、日期、数字、单位独立程序排字，原文保留，不擅自删字或用清晰化冒充纠错。改稿用上次.design.json作为source_path，changes按图层id修改；不手改SVG后遗漏PPTX/JSON，不用带错字成品作新底图覆盖文字。补同稿Demo用create_visual_demo.source_path，不重画。旧.poster.json继续原接口；明确沉浸渐变可用text_style=gradient，默认底部35%渐变，不强制用于所有新稿。最终交付PNG、自包含可编辑SVG和PPTX，不能只交PPTX让用户自己导出；不要绕到sandbox、run_python、手写HTML截图或render_diagram。用户明确要无字素材或图像模型直接画字时尊重其选择；GPT/图像模型画字不能保证准确，须检查成品。按真实回执区分原文一致、字体/字形、裁切/重叠、实际像素对比和视觉核验；4K画布不证明底图原生4K，生成成功不等于视觉验收，不承诺绝对无错字。失败保留候选，只改文字/布局，不反复付费重画素材。';
+export const POSTER_GUIDANCE = '中文图文海报用make_poster.design。当前工具明确支持自由构图：design.layout=free配合layers指定每个文字/图片/图标/形状/图表的坐标，不能沿用历史回答声称“只有固定模板/不能加图标”，更不能以此绕去手改SVG。先按参考图和文案量构图，用户说换结构时真正更换坐标与分组；palette只换色。可用起稿：editorial主次编排、campaign图文宣传、timeline时间轴、newspaper报纸双栏、celebration纪念、dashboard大屏；都能再用free调整。已有分层源稿换结构可传source_path为原稿.design.json、design.layout为timeline，复用原文/配色，不重画素材。新闻用sections保留各条标题和事实，不将宣传大图占满上半张再塞小字列表。竖版默认reading=phone，按390px整张显示检查正文至少12px；presentation失败须重排而非只加深颜色，必要时增高或拆版，不擅删原文。照片/产品图复用design.assets；需要新视觉才generate_image(purpose=poster_art)，只画主体和场景，不画标题、文字、空卡片/胶囊框/按钮或完整宣传页，所有排字和卡片由程序完成。已有带字成品不能当无字素材，源图含占位卡片先说明需替换，不能用它假装已完成融合。中文、日期、数字、单位独立真实字体排版。改字用source_path+changes；不手改SVG后遗漏PPTX/JSON。补同稿Demo用create_visual_demo.source_path，不重画。旧.poster.json和明确gradient要求保持原接口。交付最终PNG、自包含可编辑SVG和PPTX，phonePreview是原海报按手机宽度缩放的实际文件，应核对它，不以另排Demo卡片可读冒充海报可读。不要绕sandbox/run_python/手写HTML截图/render_diagram。用户明确要求模型直接画字则尊重选择并核对。原文、字体、像素、对比、手机缩放、视觉各按回执报告，不能说四项通过就证明好看、绝对无错字或原生4K。失败保留源稿，只修文字/布局，不反复付费重画素材。';
 
 /** 仅收实际工具返回的三格式回执，不凭“已生成”或文件名认定海报完成。 */
 export function posterReceipt(ok, output = '') {
