@@ -45,7 +45,7 @@
   "errors": [],
   "runtimeRevision": "377898555a7cd58cf1f5df76b405f9b69a2b38af",
   "runtimeFiles": 983,
-  "status": "development_passed_final_ci_pending",
+  "status": "released",
   "heldCandidate": {
     "version": "1.0.444",
     "runId": 43717899068,
@@ -70,5 +70,27 @@
     "originalDeadlineMs": 5000,
     "isolatedOriginalSixPassed": true,
     "ci445All4055Passed": true
+  },
+  "version": "1.0.446",
+  "buildRevision": "8928acd54c6253e043fe72fbdc8104c27f53a0f8",
+  "runId": 43720404316,
+  "publishedAt": "2026-11-15T14:10:40Z",
+  "finalRecord": "验收记录/1.0.446-20261115.json",
+  "localGate": {
+    "status": "completed_with_environment_failures_rechecked",
+    "passedSteps": 28,
+    "failedSteps": 2,
+    "skippedSteps": 7,
+    "runtimeRevision": "377898555a7cd58cf1f5df76b405f9b69a2b38af",
+    "unitFiles": 468,
+    "unitPassed": 4054,
+    "unitTimedOut": 1,
+    "originalTeamSixRecheckPassed": true,
+    "standaloneOriginalFourteenRecheckPassed": true,
+    "notes": [
+      "原团队用例在本机并发时超过原5秒期限；未改断言/期限，原6项独立通过，最终CI全部4061通过",
+      "单文件模拟.test网关两项在环境代理开启时失败，NODE_USE_ENV_PROXY=0按原14项通过；产品代码未因此修改",
+      "本机完整脚本不称全绿；完整最终CI全项成功另计"
+    ]
   }
 }
