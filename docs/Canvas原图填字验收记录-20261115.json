@@ -1,8 +1,8 @@
 {
   "sourceRevision": "7511cca87f4b008e571945f483cc361e848241d6",
   "runtimeFiles": 981,
-  "releaseStatus": "not_published",
-  "stableRelease": "1.0.442",
+  "releaseStatus": "published",
+  "stableRelease": "1.0.443",
   "fullUnit": {
     "files": 465,
     "tests": 4037,
@@ -110,7 +110,8 @@
     "checks": 4,
     "result": "passed",
     "nonOwnerServiceStartup": "not_run_requires_root_or_passwordless_sudo",
-    "sha256": "9adfec4430e5d31d04ef24b472a77b0805149efa7631585582ee6b037b2eda12"
+    "sha256": "9adfec4430e5d31d04ef24b472a77b0805149efa7631585582ee6b037b2eda12",
+    "nonOwnerServiceStartupCI": "passed_root_install_nobody_start_login"
   },
   "notTested": [
     "actual_user_original_bytes",
@@ -121,5 +122,16 @@
     "WeChat"
   ],
   "standaloneSha256": "48a29a00c6ba3c8ad187a7ad7afbdd0945912af91f891653864290ada55212e5",
-  "frozenCanvasAndDesktopRetest": "passed_45_checks_and_real_Electron_ASAR"
+  "frozenCanvasAndDesktopRetest": "passed_45_checks_and_real_Electron_ASAR",
+  "officialRelease": {
+    "version": "1.0.443",
+    "runId": 43698744743,
+    "buildRevision": "b66ed9a9a6f58dd475d2d2c172138ba8fd62b26f",
+    "publishedAtBeijing": "2026-11-15T17:42:52+08:00",
+    "url": "https://github.com/xunova1121/weiyang-release/releases/tag/desktop-v1.0.443",
+    "testFiles": 466,
+    "unitTests": 4038,
+    "artifactChecks": 23,
+    "proof": "docs/验收记录/1.0.443-20261115.json"
+  }
 }
