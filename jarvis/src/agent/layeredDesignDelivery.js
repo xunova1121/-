@@ -1,6 +1,6 @@
 /** 分层稿共享交付入口：一份源稿驱动海报和Demo，不调用生图、修图或升级图片分辨率。 */
 import JSZip from 'jszip';
-import { loadLayerDesign, layerOutputBase, saveDesignFile } from './layeredDesignSource.js';
+import { loadLayerDesign, claimLayerOutputBase, saveDesignFile } from './layeredDesignSource.js';
 import { composeLayeredSvg } from './layeredDesignSvg.js';
 import { composeLayeredPptx } from './layeredDesignPptx.js';
 import { createLayeredHtml } from './layeredDesignHtml.js';
@@ -50,10 +50,16 @@ async function packageDesign(design, assets, artifacts, receipt, signal) {
 }
 
 export async function deliverLayeredDesign(input, ctx = {}, options = {}, demo = false) {
-  const { signal, progress, checkpoint } = options;
+  const { signal } = options;
   const defaultSize = demo ? [3840, 2160] : [1080, 1920];
   const { design, assets } = await loadLayerDesign(input, { signal, defaultSize });
-  const base = layerOutputBase(input, design);
+  const { base, release } = await claimLayerOutputBase(input, design, signal);
+  try { return await deliverLoadedDesign({ design, assets, base }, ctx, options, demo); }
+  finally { release(); }
+}
+
+async function deliverLoadedDesign({ design, assets, base }, ctx, options, demo) {
+  const { signal, progress, checkpoint } = options;
   const source = new Blob([JSON.stringify(design, null, 2)], { type: 'application/json' });
   if (source.size > DESIGN_LIMITS.source) throw designError('归一化源稿超过180KB，请拆版');
   progress?.('正在编排独立文字、图标、图片与内容卡片…');
@@ -70,7 +76,11 @@ export async function deliverLayeredDesign(input, ctx = {}, options = {}, demo =
     receipt.files.push({ format, path, readback: 'passed', structure: 'passed', render });
     return path;
   };
-  try { receipt.designPath = await saveDesignFile(`${base}.design.json`, source, ctx, signal); }
+  try {
+    const path = await saveDesignFile(`${base}.design.json`, source, ctx, signal);
+    if (!/\.design\.json$/i.test(path)) throw designError('文件夹并发改名改变了源稿后缀，未当成可复用完成稿', 'DESIGN_SOURCE_NAME');
+    receipt.designPath = path;
+  }
   catch (error) { recordFailure(receipt, error, 'source', signal); }
   try { await deliver('svg', new Blob([svg], { type: 'image/svg+xml' })); }
   catch (error) { recordFailure(receipt, error, 'svg', signal); }

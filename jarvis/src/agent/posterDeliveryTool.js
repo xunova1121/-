@@ -173,8 +173,9 @@ export function createPosterDeliveryTool(ctx = {}) {
     run: async (input = {}, { signal, progress, checkpoint, retrieval } = {}) => {
       if (!input || typeof input !== 'object' || Array.isArray(input)) throw inputError('海报参数必须是对象');
       if (usesLayeredDesign(input)) {
-        const [width, height] = input.source_path ? [] : dimensions(input);
-        return deliverLayeredDesign(input.source_path ? input : { ...input, width, height }, ctx, { signal, progress, checkpoint, retrieval });
+        const resize = !input.source_path || input.design && (input.size !== undefined || input.width !== undefined || input.height !== undefined);
+        const [width, height] = resize ? dimensions(input) : [];
+        return deliverLayeredDesign(resize ? { ...input, width, height } : input, ctx, { signal, progress, checkpoint, retrieval });
       }
       input = await posterDesignInput(input, signal);
       if (typeof input.title !== 'string' || !input.title.trim()) throw inputError('海报要有主标题');

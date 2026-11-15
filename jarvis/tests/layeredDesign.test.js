@@ -7,7 +7,8 @@ import { composeLayeredSvg } from '../src/agent/layeredDesignSvg.js';
 import { composeLayeredPptx } from '../src/agent/layeredDesignPptx.js';
 import { checkLayerCopy, checkLayerOverlap, reviewLayeredDesign, applyDesignState } from '../src/agent/layeredDesignQuality.js';
 import { createLayeredHtml } from '../src/agent/layeredDesignHtml.js';
-import { loadLayerDesign, layerOutputBase } from '../src/agent/layeredDesignSource.js';
+import { loadLayerDesign, layerOutputBase, availableLayerOutputBase, releaseLayerOutputBase, claimLayerOutputBase } from '../src/agent/layeredDesignSource.js';
+import { useBackend } from '../src/agent/store.js';
 import { createPosterTool } from '../src/agent/posterTool.js';
 import { createVisualDemoTool } from '../src/agent/visualDemoTool.js';
 import { posterReceipt, POSTER_GUIDANCE } from '../src/agent/posterRouting.js';
@@ -125,6 +126,48 @@ describe('各格式同源和真实编辑', () => {
     expect(changed.design.layers.find(n => n.id === 'section-2-card').x).not.toBe(d.layers.find(n => n.id === 'section-2-card').x);
     expect(await ws.readText('分层回归/reflow.design.json')).toBe(JSON.stringify(d));
   });
+  it('海报真实入口支持size横版重新构图，不能忽略尺寸名称', async () => {
+    await ws.write('分层回归/named-size.design.json', JSON.stringify(planLayerDesign(input)));
+    const result = JSON.parse(await createPosterTool({ renderVisualScene: async () => { throw new Error('协议验收不使用替身像素'); } }).run({ source_path: '分层回归/named-size.design.json', size: '横版', design: { layout: 'editorial' }, path: '分层回归/named-size-wide.png' }));
+    expect(result).toMatchObject({ width: 1920, height: 1080 });
+    const d = JSON.parse(await ws.readText(result.designPath));
+    expect(d.width).toBe(1920); expect(d.height).toBe(1080);
+    for (const section of input.design.sections) expect(d.layers.some(n => n.text === section.title)).toBe(true);
+  });
+  it('同名新稿整组另存，源稿后缀可复用且旧文件字节不变', async () => {
+    const tool = createPosterTool({ renderVisualScene: async () => { throw new Error('协议验收不代造像素'); } });
+    const first = JSON.parse(await tool.run({ ...input, path: '分层回归/same-name.png' }));
+    const before = await ws.readText(first.designPath), svg = await ws.readText(first.files.find(f => f.format === 'svg').path);
+    const next = JSON.parse(await tool.run({ ...input, title: '第二张新稿', path: '分层回归/same-name.png' }));
+    expect(next.designPath).not.toBe(first.designPath); expect(next.designPath).toMatch(/\.design\.json$/);
+    expect(await ws.readText(first.designPath)).toBe(before);
+    expect(await ws.readText(first.files.find(f => f.format === 'svg').path)).toBe(svg);
+    expect((await loadLayerDesign({ source_path: next.designPath })).design.title).toBe('第二张新稿');
+  });
+  it('并发同名导出在异步检查后仍互斥，并在结束后可释放', async () => {
+    const d = planLayerDesign(input), args = { path: '分层回归/concurrent.png' };
+    const [a, b] = await Promise.all([availableLayerOutputBase(args, d), availableLayerOutputBase(args, d)]);
+    expect(a).not.toBe(b);
+    releaseLayerOutputBase(a); releaseLayerOutputBase(b);
+    const again = await availableLayerOutputBase(args, d);
+    expect(again).toBe('分层回归/concurrent'); releaseLayerOutputBase(again);
+  });
+  it('输出名预留按账号后端隔离，切换后释放仍绑定原作用域', async () => {
+    const d = planLayerDesign(input), args = { path: '分层回归/scope.png' };
+    const aStore = { get: async () => null }, bStore = { get: async () => null };
+    let a, b;
+    try {
+      useBackend(aStore); a = await claimLayerOutputBase(args, d);
+      useBackend(bStore); b = await claimLayerOutputBase(args, d);
+      expect(a.base).toBe(b.base);
+      a.release();
+      const extra = await claimLayerOutputBase(args, d);
+      expect(extra.base).not.toBe(b.base); extra.release();
+      useBackend(aStore);
+      const again = await claimLayerOutputBase(args, d);
+      expect(again.base).toBe(a.base); again.release();
+    } finally { a?.release(); b?.release(); useBackend(null); }
+  });
   it('快照只更新明确提供的值，不能换素材/位置；改过文字不会从旧快照恢复', async () => {
     const spec = free([{ ...titleNode, text: '自由构图' }, { ...titleNode, id: 'count', y: 230, text: '128', fontSize: 64 }]);
     spec.design.states = [{ label: '下一日', changes: [{ id: 'count', text: '127' }] }];
@@ -134,6 +177,8 @@ describe('各格式同源和真实编辑', () => {
     await ws.write('分层回归/state.design.json', JSON.stringify(d));
     const revised = await loadLayerDesign({ source_path: '分层回归/state.design.json', changes: [{ id: 'count', text: '120' }] });
     expect(revised.design.states[0].changes).toEqual([]);
+    const recolored = await loadLayerDesign({ source_path: '分层回归/state.design.json', changes: [{ id: 'count', color: '#962F1B' }] });
+    expect(recolored.design.states[0].changes).toEqual(d.states[0].changes);
     expect(() => normalizeLayerDesign({ ...d, states: [{ label: '错误', changes: [{ id: 'count', x: 10 }] }] })).toThrow(/不可修改/);
   });
   it('HTML安全内嵌原文，手机是语义文字，工具schema仅在相关任务加载', async () => {

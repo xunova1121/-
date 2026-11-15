@@ -6,6 +6,11 @@ import { normalizePosterBackground } from './posterCompositionInput.js';
 import { DESIGN_LIMITS, designError, normalizeLayerDesign } from './layeredDesignInput.js';
 import { planLayerDesign } from './layeredDesignLayout.js';
 import { throwControl } from '../core/networkRequest.js';
+import { scopedState } from './store.js';
+
+// 每个账号/后端最多64个在途输出名；WeakMap随原存储作用域回收，不在账号间共享文件名。
+const outputState = scopedState('files', () => new Set());
+export const releaseLayerOutputBase = base => outputState().delete(base);
 
 /** 换构图时默认从原图层提取完整栏目，不把旧成品烘焙成新底图。 */
 function reflowInput(input, previous) {
@@ -51,16 +56,17 @@ export async function loadLayerDesign(input, { signal, defaultSize } = {}) {
     if (!Array.isArray(input.changes ?? [])) throw designError('changes需为数组');
     if ((input.changes?.length || 0) > 80) throw designError('一次修改最多80个图层');
     const changes = [...(input.changes || [])];
-    if (input.title !== undefined) changes.push({ id: 'title', text: input.title });
-    if (input.subtitle !== undefined) changes.push({ id: 'subtitle', text: input.subtitle });
-    if (input.footer !== undefined) changes.push({ id: 'footer', text: input.footer });
+    if (!input.design && input.title !== undefined) changes.push({ id: 'title', text: input.title });
+    if (!input.design && input.subtitle !== undefined) changes.push({ id: 'subtitle', text: input.subtitle });
+    if (!input.design && input.footer !== undefined) changes.push({ id: 'footer', text: input.footer });
     if (input.lines !== undefined) throw designError('分层稿请按图层id修改changes，不能用lines覆盖图标/分组布局');
-    const seen = new Set();
+    const seen = new Set(), contentChanged = new Set();
     for (const change of changes) {
       const before = design.layers.find(node => node.id === change?.id);
       if (!before || seen.has(change.id)) throw designError('修改需引用存在且不重复的图层ID');
       if (change.type && change.type !== before.type) throw designError('局部修改不能改变图层类型');
       seen.add(change.id);
+      if (change.text !== undefined || change.points !== undefined) contentChanged.add(change.id);
       Object.assign(before, change);
     }
     const titleChange = changes.find(change => change.id === 'title' && change.text !== undefined);
@@ -68,7 +74,7 @@ export async function loadLayerDesign(input, { signal, defaultSize } = {}) {
     for (const key of ['source', 'dataMode', 'asOf']) if (input[key] !== undefined) design[key] = input[key];
     if (input.font_family !== undefined) design.fontFamily = input.font_family;
     // 标题/正文改字不让数据快照悄悄恢复旧值；显式改过的节点同步移出旧快照。
-    design.states = design.states.map(s => ({ ...s, changes: s.changes.filter(c => !seen.has(c.id)) }));
+    design.states = design.states.map(s => ({ ...s, changes: s.changes.filter(c => !contentChanged.has(c.id)) }));
     design = normalizeLayerDesign(design);
   } else design = planLayerDesign(input, defaultSize);
   const assets = new Map();
@@ -101,6 +107,27 @@ export function layerOutputBase(input, design) {
   const outputs = ['png', 'svg', 'pptx', 'html', 'zip', 'design.json'].map(ext => base + '.' + ext);
   if (input.source_path && outputs.includes(ws.normalize(input.source_path)) || design.assets.some(a => outputs.includes(a.path))) throw designError('输出不能覆盖原稿或素材');
   return base;
+}
+/** 同一组格式整体另存，防止文件夹模式把源稿改名成无法复用的.design (2).json。 */
+export async function availableLayerOutputBase(input, design, signal, activeOutputs = outputState()) {
+  const original = layerOutputBase(input, design);
+  let base = original;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    throwControl(null, signal);
+    if (activeOutputs.size >= 64) throw designError('设计导出繁忙，请稍后重试', 'DESIGN_BUSY');
+    const occupied = await Promise.all(['design.json', 'svg', 'pptx', 'png', 'html', 'zip'].map(ext => ws.exists(`${base}.${ext}`)));
+    throwControl(null, signal);
+    // await后再次判定，同一时刻两轮都查到“没有文件”也只能有一轮认领原名。
+    if (!occupied.some(Boolean) && !activeOutputs.has(base)) { activeOutputs.add(base); return base; }
+    if (original.length > 240) throw designError('同名成品已存在，请用短一些的新文件名另存');
+    base = `${original}-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+  }
+  throw designError('未找到可用的新文件名，请另存重试');
+}
+export async function claimLayerOutputBase(input, design, signal) {
+  const captured = outputState();
+  const base = await availableLayerOutputBase(input, design, signal, captured);
+  return { base, release: () => captured.delete(base) };
 }
 export async function saveDesignFile(path, blob, ctx, signal) {
   throwControl(null, signal);
