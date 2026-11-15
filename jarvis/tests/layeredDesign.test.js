@@ -66,6 +66,17 @@ describe('分层设计内容与自由构图', () => {
     expect(d.layers.find(n => n.type === 'chart').points).toEqual(args.series);
     expect(() => planLayerDesign({ ...args, design: { ...args.design, sections: [{ title: '不能忽略原指标' }] } })).toThrow(/未忽略/);
   });
+  it('高精度正负原值及快照保持，不被绘图坐标的三位小数舍入改变', () => {
+    const points = [{ label: '昨日', value: 12.345678901 }, { label: '今日', value: -0.000123456789 }];
+    const input = free([titleNode, { id: 'trend', type: 'chart', x: 60, y: 210, w: 820, h: 220, points }]);
+    input.design.states = [{ label: '另一组精确原值', changes: [{ id: 'trend', points: [{ label: '昨日', value: 0.123456789012 }, { label: '今日', value: -123.456789012 }] }] }];
+    const d = planLayerDesign(input);
+    expect(d.layers.find(n => n.id === 'trend').points).toEqual(points);
+    expect(applyDesignState(d, d.states[0]).layers.find(n => n.id === 'trend').points).toEqual(input.design.states[0].changes[0].points);
+    expect(JSON.parse(JSON.stringify(d)).layers.find(n => n.id === 'trend').points).toEqual(points);
+    expect(() => planLayerDesign({ ...input, width: 960.0001 })).toThrow(/原始整数/);
+    expect(checkLayerCopy(d, composeLayeredSvg(d)).status).toBe('passed');
+  });
   it('黑体/宋体来自真实字体白名单，GPT明确直接绘字仍保留其请求路线', async () => {
     const d = planLayerDesign({ ...input, font_family: 'serif' });
     expect(composeLayeredSvg(d)).toContain('font-family="Noto Serif CJK SC');

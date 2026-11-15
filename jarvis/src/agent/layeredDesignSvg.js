@@ -53,7 +53,9 @@ export function designLayerMarkup(node, assets, font = DESIGN_FONT) {
   }
   const geometry = chartGeometry(node);
   const path = geometry.points.map((p, i) => `${i ? 'L' : 'M'}${f(p.x)} ${f(p.y)}`).join('');
-  return `<path d="${path}" fill="none" stroke="${node.color}" stroke-width="${f(Math.max(2, w / 450))}"/>` + geometry.points.map(p => `<circle cx="${f(p.x)}" cy="${f(p.y)}" r="${f(Math.max(3, w / 280))}" fill="${node.color}"/>`).join('') +
+  // 透明命中区保留整张图表的真实按钮面积；不只让细线/圆点可点击，不改变导出像素。
+  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${node.fill || '#FFFFFF'}" fill-opacity="0"/>` +
+    `<path d="${path}" fill="none" stroke="${node.color}" stroke-width="${f(Math.max(2, w / 450))}"/>` + geometry.points.map(p => `<circle cx="${f(p.x)}" cy="${f(p.y)}" r="${f(Math.max(3, w / 280))}" fill="${node.color}"/>`).join('') +
     chartLabelNodes(node).map(label => designLayerMarkup(label, assets, font)).join('');
 }
 export function composeLayeredSvg(design, assets = new Map()) {

@@ -17,10 +17,12 @@ export function boundedText(value = '', limit = 3000) {
   if (typeof value !== 'string' || value.length > limit || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value) || [...value].some(c => c.length === 1 && c.charCodeAt(0) >= 0xd800 && c.charCodeAt(0) <= 0xdfff)) throw designError('文字类型无效、含控制符/孤立代理项或超出长度限制');
   return value;
 }
-const finite = (value, min, max, name) => {
+const checkedNumber = (value, min, max, name) => {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) throw designError(`${name}超出允许范围`);
-  return Math.round(value * 1000) / 1000;
+  return value;
 };
+// 只有布局像素舍入；原始业务数值必须保留，不能复用坐标精度改掉数据。
+const finite = (value, min, max, name) => Math.round(checkedNumber(value, min, max, name) * 1000) / 1000;
 export function designId(value) {
   if (typeof value !== 'string' || !/^[A-Za-z][\w-]{0,47}$/.test(value)) throw designError('图层/素材ID需为48字符以内的英文字母开头标识');
   return value;
@@ -51,7 +53,7 @@ function normalizeLayer(node, canvas) {
   if (type === 'image') { out.asset = designId(node.asset); out.fit = node.fit === 'contain' ? 'contain' : 'cover'; }
   if (type === 'chart') {
     if (!Array.isArray(node.points) || node.points.length < 2 || node.points.length > 24) throw designError('图表需2–24个明确数据点');
-    out.points = node.points.map(p => ({ label: boundedText(p.label, 40), value: finite(p.value, -1e10, 1e10, '图表值') }));
+    out.points = node.points.map(p => ({ label: boundedText(p.label, 40), value: checkedNumber(p.value, -1e10, 1e10, '图表值') }));
   }
   return out;
 }
@@ -65,6 +67,7 @@ export function fitDesignText(node) {
 }
 export function normalizeLayerDesign(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw designError('分层设计必须是对象');
+  if (!Number.isInteger(raw.width) || !Number.isInteger(raw.height)) throw designError('画布需为原始整数像素，不能先舍入后冒充整数');
   const width = finite(raw.width, 256, 4096, '画布宽度'), height = finite(raw.height, 256, 4096, '画布高度');
   if (!Number.isInteger(width) || !Number.isInteger(height) || width * height > DESIGN_LIMITS.pixels) throw designError('画布需整数像素，最长4096且不超过1600万像素');
   const title = boundedText(raw.title, 300);

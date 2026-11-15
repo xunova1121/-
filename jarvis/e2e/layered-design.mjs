@@ -19,10 +19,13 @@ import { imageInfo } from '../src/agent/imageInfo.js';
 import { composeLayeredSvg } from '../src/agent/layeredDesignSvg.js';
 import { normalizeLayerDesign } from '../src/agent/layeredDesignInput.js';
 import { applyDesignState } from '../src/agent/layeredDesignQuality.js';
+import { planLayerDesign } from '../src/agent/layeredDesignLayout.js';
+import { createLayeredHtml } from '../src/agent/layeredDesignHtml.js';
 import { sampleArt, newsInput, babyInput, dashboardInput } from './fixtures/layered-design.mjs';
 
 const output = path.resolve(process.argv[2] || '/tmp/weiyang-layered-design');
 await fs.mkdir(output, { recursive: true });
+await fs.rm(path.join(output, 'failure.json'), { force: true });
 const store = await fs.mkdtemp(path.join(os.tmpdir(), 'weiyang-layered-store-'));
 useBackend(createFileStore(store));
 const digest = bytes => createHash('sha256').update(bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes).digest('hex');
@@ -155,6 +158,25 @@ async function officeExport(item) {
   check(`${item.name}：真实Office转PDF且主标题未丢字`, pdf.subarray(0, 4).toString() === '%PDF' && compact(text).includes(compact(item.design.layers.find(n => n.id === 'title').text)));
   execFileSync('pdftoppm', ['-scale-to', '1440', '-singlefile', '-png', path.join(directory, `${item.name}.pdf`), path.join(directory, item.name)], { timeout: 60000 });
 }
+async function preciseValues() {
+  const points = [{ label: '昨日', value: 12.345678901 }, { label: '今日', value: -0.000123456789 }];
+  const next = [{ label: '昨日', value: 0.1234567890123 }, { label: '今日', value: -123.4567890123 }];
+  const design = planLayerDesign({ title: '精确原值核验', width: 960, height: 540, design: { layout: 'free', layers: [
+    { id: 'title', type: 'text', x: 40, y: 35, w: 880, h: 100, text: '精确原值核验', fontSize: 52 },
+    { id: 'trend', type: 'chart', x: 60, y: 200, w: 820, h: 240, points }
+  ], states: [{ label: '另一组原值', changes: [{ id: 'trend', points: next }] }] } });
+  const context = await browser.newContext({ offline: true, viewport: { width: 1280, height: 800 } });
+  const page = await context.newPage();
+  try {
+    await page.setContent(await createLayeredHtml({ design, assets: new Map() }), { waitUntil: 'load' });
+    await page.locator('#layer-trend').click();
+    check('高精度业务原值在实际详情中逐位保留', JSON.stringify(await page.locator('#design-detail-copy dd').allTextContents()) === JSON.stringify(points.map(p => String(p.value))));
+    await page.locator('#design-close').click();
+    await page.locator('#design-state').selectOption('1');
+    await page.locator('#layer-trend').click();
+    check('快照中的高精度正负数不被像素舍入改变', JSON.stringify(await page.locator('#design-detail-copy dd').allTextContents()) === JSON.stringify(next.map(p => String(p.value))));
+  } finally { await context.close(); }
+}
 try {
   browser = await chromium.launch({ headless: true });
   await makeAssets();
@@ -170,6 +192,7 @@ try {
   const archive = await JSZip.loadAsync(dashboard.files.zip), source = JSON.parse(await archive.file('design.design.json').async('string'));
   check('ZIP实际包含全部五类文件和可重导入相对素材', ['png', 'svg', 'pptx', 'html'].every(ext => archive.file(`design.${ext}`)) && source.assets.every(a => archive.file(a.path)));
   await agentEntry();
+  await preciseValues();
   for (const item of [news, baby, dashboard]) await officeExport(item);
   // 所有快照的文字/边界在编译与实际浏览器状态切换中验证，未将其声称为视觉模型已看过。
   for (const state of dashboard.design.states) check('快照设计仍可独立归一化和编译', composeLayeredSvg(applyDesignState(dashboard.design, state), new Map([['hero', { data: 'data:image/png;base64,' + (await fs.readFile(path.join(output, 'planet-asset.png'))).toString('base64') }]])).includes('3,210件'));
