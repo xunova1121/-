@@ -4,6 +4,7 @@
  */
 import { imageButton, previewWorkspaceImage, showImagePreview } from './imagePreview.js';
 import { PROCESS_FILE } from './workspaceCatalog.js';
+import { posterArtifactId } from '../../shared/posterArtifactPath.js';
 import { createSportsCard } from './sportsCard.js';
 import { createMarketCard } from './marketCard.js';
 import { mergeMarketSnapshots } from '../../shared/marketSnapshot.js';
@@ -689,13 +690,16 @@ export class Transcript {
       /** 这一轮生成 / 修改的文件：回答末尾一排按钮，点一下在工作区里打开 */
       fileLink(path, onOpen) {
         // 检查过程文件（架构候选图、审查记录等，放在“文档检查/”下）不当成果列出来，免得分不清哪个是最终图；工作区里照样能找到
-        if (PROCESS_FILE.test(path)) return;
+        const deliveryId = posterArtifactId(path);
+        if (PROCESS_FILE.test(path) && !deliveryId) return;
         if (!files) { files = document.createElement('div'); files.className = 'file-links'; el.append(files); }
         if ([...files.children].some((b) => b.dataset.path === path)) return;
+        if (deliveryId) for (const previous of [...files.children]) if (previous.dataset.deliveryId === deliveryId) previous.remove();
         const name = path.split('/').pop();
         const ext = (name.match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase();
         const b = Object.assign(document.createElement('button'), { type: 'button', className: 'file-link', title: `在工作区打开 ${path}` });
         b.dataset.path = path;
+        if (deliveryId) b.dataset.deliveryId = deliveryId;
         b.append(Object.assign(document.createElement('span'), { className: 'fl-ext', textContent: ext.slice(0, 4) || '文件' }), Object.assign(document.createElement('span'), { className: 'fl-name', textContent: name }), Object.assign(document.createElement('span'), { className: 'fl-go', textContent: '打开 ›' }));
         b.addEventListener('click', () => onOpen(path));
         files.append(b);

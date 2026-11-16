@@ -6,7 +6,7 @@ import { textPosterRequest, POSTER_TOOLS } from './posterRouting.js';
 import { visualSceneRequest, VISUAL_SCENE_TOOLS } from './visualSceneRouting.js';
 
 const BASIC = ['execution_capabilities', 'read_task_requirements', 'read_tool_result', 'review_task', 'need_more_time', 'request_capable_model'];
-const MEMORY = ['recall', 'remember', 'kb_search', 'search_conversations', 'read_conversation', 'list_my_messages', 'list_work_records'];
+const MEMORY = ['recall', 'read_memory', 'remember', 'kb_search', 'search_conversations', 'read_conversation', 'list_my_messages', 'list_work_records'];
 const FILES = ['find_files', 'search_in_files', 'list_files', 'read_file', 'write_file', 'edit_file', 'preview', 'run_javascript', 'run_project_tests'];
 const SEARCH = ['web_search', 'fetch_url', 'read_evidence', 'fetch_json', 'reconcile_numbers'];
 
@@ -16,6 +16,7 @@ export function taskToolCore(intent, text, { images = [], computerTask = false, 
   const value = String(text || '');
   const names = new Set([...BASIC, ...MEMORY]);
   const add = list => list.forEach(name => names.add(name));
+  if (/海报|Demo|大屏|文档|文件|代码|Word|PPT|Excel|研究|调研|企业|公司|招标/i.test(value)) add(['read_task_method', 'verify_delivery']);
   if (visualSceneRequest(value)) { add(VISUAL_SCENE_TOOLS); return names; }
   if (strict || images.length) return CORE;
   if (isPhoneRequest(value)) { add(['phone_devices', 'phone_action', 'get_current_time', 'time_calc']); return names; }

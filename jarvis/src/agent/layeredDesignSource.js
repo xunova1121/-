@@ -4,7 +4,7 @@ import { imageFingerprint } from './visualEvidence.js';
 import { assertImageExtension } from './imageFormat.js';
 import { normalizePosterBackground } from './posterCompositionInput.js';
 import { DESIGN_LIMITS, designError, normalizeLayerDesign } from './layeredDesignInput.js';
-import { planLayerDesign } from './layeredDesignLayout.js';
+import { planLayerDesign, planReadableLayerDesign } from './layeredDesignLayout.js';
 import { throwControl } from '../core/networkRequest.js';
 import { scopedState } from './store.js';
 
@@ -24,7 +24,7 @@ function reflowInput(input, previous) {
     const members = previous.layers.filter(n => n.group === group), get = suffix => members.find(n => n.id.endsWith('-' + suffix));
     return { title: get('title').text, body: get('body')?.text || '', ...(get('value') && { value: get('value').text }),
       icon: get('icon')?.icon, category: get('title').category, detail: get('title').detail,
-      eyebrow: get('label')?.text || '', ...(get('chart') && { points: get('chart').points }) };
+      eyebrow: get('label')?.text || '', ...(get('image') && { asset: get('image').asset }), ...(get('chart') && { points: get('chart').points, chartType: get('chart').chartType, unit: get('chart').unit }) };
   });
   if (!spec.layers && !spec.sections && !sections.length) throw designError('自由稿重新构图请明确提供layers；未擅自丢掉旧文字');
   const byPath = new Map(previous.assets.map(a => [ws.normalize(a.path), a]));
@@ -40,7 +40,7 @@ function reflowInput(input, previous) {
     font_family: input.font_family ?? previous.fontFamily,
     design: { ...spec, reading: spec.reading ?? previous.reading, palette: { ...previous.palette, ...spec.palette }, assets, ...(!spec.layers && { sections: spec.sections || sections }) } };
 }
-export async function loadLayerDesign(input, { signal, defaultSize } = {}) {
+export async function loadLayerDesign(input, { signal, defaultSize, autoHeight = false } = {}) {
   throwControl(null, signal);
   if (!input || typeof input !== 'object' || Array.isArray(input) || JSON.stringify(input).length > DESIGN_LIMITS.source) throw designError('设计参数超过180KB或格式错误');
   let design;
@@ -81,7 +81,7 @@ export async function loadLayerDesign(input, { signal, defaultSize } = {}) {
     // 标题/正文改字不让数据快照悄悄恢复旧值；显式改过的节点同步移出旧快照。
     design.states = design.states.map(s => ({ ...s, changes: s.changes.filter(c => !contentChanged.has(c.id)) }));
     design = normalizeLayerDesign(design);
-  } else design = planLayerDesign(input, defaultSize);
+  } else design = planReadableLayerDesign(input, defaultSize, autoHeight);
   const assets = new Map();
   let totalBytes = 0, totalPixels = 0;
   for (const entry of design.assets) {

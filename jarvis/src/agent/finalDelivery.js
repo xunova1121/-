@@ -1,10 +1,12 @@
 /** 收尾只恢复本轮已读回的真实产物，不复述失效草稿，不调用模型。 */
 export function missingDeliveries(answer, report) {
-  const poster = report.media?.kind === 'poster' && report.media.delivery;
+  const poster = ['poster', 'visual_demo'].includes(report.media?.kind) && report.media.delivery;
   if (poster?.primaryPath) {
-    if (String(answer).includes(poster.primaryPath)) return '';
+    const html = report.media.kind === 'visual_demo' && report.media.outputs?.find(f => f.format === 'html' && f.readback === 'passed')?.path;
+    if (String(answer).includes(poster.primaryPath) && (!html || String(answer).includes(html))) return '';
     const target = encodeURI(poster.primaryPath).replace(/[()]/g, value => '%' + value.charCodeAt(0).toString(16));
-    return `\n\n[${poster.quality === 'complete' ? '查看海报' : '查看候选海报（待核验）'}](${target})\n\n源文件和历史稿可在文件空间展开。`;
+    const demoLink = html && !String(answer).includes(html) ? `\n\n[打开同稿Demo](${encodeURI(html).replace(/[()]/g, c => '%' + c.charCodeAt(0).toString(16))})` : '';
+    return (String(answer).includes(poster.primaryPath) ? '' : `\n\n[${poster.quality === 'complete' ? '查看海报' : '查看候选海报（待核验）'}](${target})`) + demoLink + '\n\n源文件和历史稿可在文件空间展开。';
   }
   const formats = report.contract?.formats || [];
   const items = (report.artifacts || []).filter(item =>

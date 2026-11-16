@@ -11,6 +11,7 @@ import { toolFailureScope } from './toolFailureScope.js';
 import { recordImageInputRecovery } from './imageInputRecovery.js';
 import { isRetrievalStop, RETRIEVAL_FINISHED } from '../../shared/retrievalStop.js';
 import { compositionToolArgs } from './imageCompositionPrompt.js';
+import { toolCallKey, toolRepairNote } from './toolRepair.js';
 
 /** 产出文件、核对数字的本地工具：联网到点后照常可用 */
 export const OUTPUT_TOOLS = /^(?:process_image|create_document|write_long_document|edit_office_document|check_document|write_file|edit_file|preview|create_diagram|export_diagram|make_poster|create_visual_demo|reconcile_numbers|verify_numbers|time_calc)$/;
@@ -55,7 +56,7 @@ export async function executeToolCalls(
     let ok = true;
     let failure = null;
     let lookupRecovery;
-    const sig = `${c.name}:${JSON.stringify(c.args ?? {})}`;
+    const sig = toolCallKey(c.name, c.args ?? {});
     const times = (seen.get(sig) ?? 0) + 1;
     seen.set(sig, times);
     if (seen.size > 128) seen.delete(seen.keys().next().value);
@@ -70,7 +71,7 @@ export async function executeToolCalls(
         throw Object.assign(new Error('当前描述/创作无需检索，请直接依据图片和材料回答；用户明确要求外部核实后再联网'), { code: 'SEARCH_NOT_REQUESTED', kind: 'api' });
       // 无状态相同参数最多2次；已声明的状态续接最多4次同参，仍执行自身额度/材料/阶段检查，不把新状态误作旧结果。
       if (times >= 3 && !(times <= 4 && tool.isStatefulResume?.(c.args)) && !/^computer_(look|click|type|key|scroll|drag|screenshot)$/.test(c.name) && !(c.name === 'phone_action' && ['read_screen', 'screenshot'].includes(c.args?.action)))
-        throw Object.assign(new Error(`这个操作（同样的参数）已经做过 ${times - 1} 次了，结果不会变。请换一种方法，或者直接根据已有结果继续。`), isDiagramTool(c.name) ? { code: 'DIAGRAM_DUPLICATE_CALL', kind: 'input' } : {});
+        throw Object.assign(new Error(`这个操作（同样的参数）已经做过 ${times - 1} 次了，结果不会变。请换一种方法，或者直接根据已有结果继续。`), isDiagramTool(c.name) ? { code: 'DIAGRAM_DUPLICATE_CALL', kind: 'input' } : { code: 'TOOL_DUPLICATE_CALL', kind: 'input' });
       const scopeIssue = review.toolBlock?.(c.name);
       if (scopeIssue) throw Object.assign(new Error(scopeIssue), { code: 'TASK_SCOPE_AFTER_DENIAL', kind: 'input' });
       const bad = c.parseError || validateArgs(tool, c.args);
@@ -142,6 +143,7 @@ export async function executeToolCalls(
       lookupRecovery = e.lookupRecovery;
       if (e.code === 'RETRIEVAL_BUDGET') retrieval.close(e.message);
       output = isRetrievalStop(e) ? RETRIEVAL_FINISHED : `错误：${e.message || e}`;
+      output += toolRepairNote(e);
       if (isRetrievalStop(e)) emit({ type: 'diagnostic', phase: 'retrieval_stop', code: e.code, tool: c.name, reason: String(e.message || '').slice(0, 240) });
       if (e.code === 'RETRIEVAL_BUDGET' && e.partialEvidence) output += '\n' + String(e.partialEvidence).slice(0, 1800);
       // 修图已真实生成并读回，只有后续视觉核验没启动：按部分交付计一次实际操作，不伪装成未执行。

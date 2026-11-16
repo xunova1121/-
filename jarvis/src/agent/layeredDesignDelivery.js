@@ -10,7 +10,7 @@ import { checkDesignPresentation, phonePreviewSvg } from './layeredDesignPresent
 import { renderVisualScene } from './visualSceneRaster.js';
 import { assertPosterPng } from './posterDeliveryTool.js';
 import { throwControl } from '../core/networkRequest.js';
-import { posterContent } from './posterContent.js';
+import { posterContent, posterCompositionIssues } from './posterContent.js';
 
 function assetsReceipt(design, assets) {
   return design.layers.filter(n => n.type === 'image').map(node => {
@@ -57,7 +57,7 @@ async function packageDesign(design, assets, artifacts, receipt, signal) {
 export async function deliverLayeredDesign(input, ctx = {}, options = {}, demo = false) {
   const { signal } = options;
   const defaultSize = demo ? [3840, 2160] : [1080, 1920];
-  const { design, assets } = await loadLayerDesign(input, { signal, defaultSize });
+  const { design, assets } = await loadLayerDesign(input, { signal, defaultSize, autoHeight: options.autoPosterHeight });
   if (design.illustrated || options.requiresRichVisual) {
     design.illustrated = true;
     options = { ...options, requiresRichVisual: true };
@@ -76,11 +76,15 @@ async function deliverLoadedDesign({ design, assets, base }, ctx, options, demo)
   const receipt = { kind: demo ? 'visual_demo' : 'poster', title: design.title, status: 'partial', width: design.width, height: design.height,
     files: [], textRendering: 'program', fontCheck: 'not_checked', visual: 'not_checked', interaction: 'not_checked',
     dataMode: design.dataMode, designVersion: 'layered-1', assets: assetsReceipt(design, assets), contrast: { status: 'not_checked' },
-    editing: { layouts: ['editorial', 'campaign', 'timeline', 'newspaper', 'celebration', 'dashboard', 'free'],
+    editing: { layouts: ['editorial', 'magazine', 'campaign', 'timeline', 'newspaper', 'celebration', 'dashboard', 'free'],
       guidance: '可以自由构图：design.layout=free配合layers逐个指定文字/图片/图标的坐标。换结构用source_path+design，保留palette与原素材；局部改字用changes。无需手改SVG。' },
     notes: ['同一分层源稿生成各格式；文字不由生图模型画，图标为独立矢量对象', '文案原样保留，不证明文案中的事实或错别字已被编辑校正', '4K仅表示导出画布；素材放大倍率单独记录，未自动付费重画/放大'], errors: [] };
   checkGeometry(design, svg, receipt);
   if (options.requiresRichVisual) receipt.contentCheck = posterContent(design);
+  if (options.requiresRichVisual) {
+    receipt.compositionIssues = posterCompositionIssues(design);
+    receipt.errors.push(...receipt.compositionIssues.map(issue => ({ ...issue, phase: 'composition' })));
+  }
   if (receipt.contentCheck?.status === 'failed') receipt.errors.push({ code: 'DESIGN_ILLUSTRATION_MISSING', phase: 'composition', message: '图文并茂需实际主题图片或有来源图表，图标/数字卡片不能代替。源稿保留；不编造时间走势，不自动付费重画。' });
   const artifacts = new Map();
   const deliver = async (format, blob, render = 'not_checked') => {
@@ -98,6 +102,7 @@ async function deliverLoadedDesign({ design, assets, base }, ctx, options, demo)
   try { await deliver('svg', new Blob([svg], { type: 'image/svg+xml' })); }
   catch (error) { recordFailure(receipt, error, 'svg', signal); }
   if (options.posterAttempt && receipt.errors.length) return JSON.stringify(receipt);
+  options.beginPosterAttempt?.();
   if (!options.posterAttempt) {
     try { await deliver('pptx', await composeLayeredPptx(design, assets)); }
     catch (error) { recordFailure(receipt, error, 'pptx', signal); }

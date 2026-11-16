@@ -8,7 +8,7 @@ const sessions = collection('sessions');
 const INDEX = 'work-ledger-v1';
 export const WORK_RECORD_LIMIT = 4096;
 const TOOLS =
-  /^(make_poster|sing_song|generate_image|generate_video|prepare_architecture_evidence|revise_architecture_plan|create_architecture_package|plan_architecture|create_diagram|export_diagram|create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet)$/;
+  /^(make_poster|create_visual_demo|sing_song|generate_image|generate_video|prepare_architecture_evidence|revise_architecture_plan|create_architecture_package|plan_architecture|create_diagram|export_diagram|create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet)$/;
 const scopes = new WeakMap();
 const ledgerState = scopedState('kv', () => ({ tail: Promise.resolve(), pending: 0 }));
 
@@ -47,10 +47,11 @@ export async function recordWorkAttempt({ tool, args = {}, output = '', ok, sess
   if (!session || session.evaluationId) return null;
   const media = mediaReceipt(tool, ok, output);
   let delivery;
-  if (tool === 'make_poster') {
+  if (tool === 'make_poster' || tool === 'create_visual_demo') {
     try { delivery = JSON.parse(String(output).slice(0, 24000)).delivery; } catch { /* 无结构回执不索引 */ }
-    if (!delivery || !/^[a-f0-9-]{36}$/.test(delivery.id || '') || delivery.historyPrefix !== `.workflows/posters/${delivery.id}/` ||
-      typeof delivery.primaryPath !== 'string' || !delivery.primaryPath.startsWith(delivery.historyPrefix) || !delivery.primaryPath.endsWith('.png')) return null;
+    if (tool === 'make_poster' && !delivery) return null;
+    if (delivery && (!/^[a-f0-9-]{36}$/.test(delivery.id || '') || delivery.historyPrefix !== `.workflows/posters/${delivery.id}/` ||
+      typeof delivery.primaryPath !== 'string' || !delivery.primaryPath.startsWith(delivery.historyPrefix) || !delivery.primaryPath.endsWith('.png'))) return null;
   }
   const candidates = [
     ...String(output)
@@ -73,7 +74,7 @@ export async function recordWorkAttempt({ tool, args = {}, output = '', ok, sess
     kind:
       tool === 'sing_song'
         ? 'song'
-        : tool === 'generate_image' || tool === 'make_poster'
+        : tool === 'generate_image' || tool === 'make_poster' || tool === 'create_visual_demo'
           ? 'image'
           : tool === 'generate_video'
             ? 'video'
@@ -183,6 +184,7 @@ export async function removeWorkRecord(id) {
 }
 export async function dropSessionWork(sessionId) {
   return serial(async () => {
+    await kv.delete('design-task:' + String(sessionId).slice(0, 200));
     const index = await kv.get(INDEX);
     if (!index) return;
     const removed = new Set();

@@ -30,6 +30,8 @@ export function pageReadSources(output) {
     if (!pageUrl(receipt.url) || receipt.read === false || receipt.pages || receipt.read_mode === 'all') return [];
     const body = text.slice(first.length).split('【最初页面（不作为指南正文证据）】')[0].split('【页面内链接')[0].trim();
     if (!body || body.startsWith('原网页读取失败')) return [];
-    return [{ url: receipt.url, read: true, title: body.split('\n')[0].slice(0, 120), summary: body.slice(0, 350) }];
+    return [{ url: receipt.url, read: true, title: body.split('\n')[0].slice(0, 120), summary: body.slice(0, 350),
+      ...(typeof receipt.retrievedAt === 'string' && { retrievedAt: receipt.retrievedAt.slice(0, 40) }),
+      ...(typeof receipt.evidenceId === 'string' && { evidenceId: receipt.evidenceId.slice(0, 80) }) }];
   } catch { return []; }
 }

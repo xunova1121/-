@@ -14,6 +14,7 @@ import { createArchitecturePackageTool } from './architecturePackage.js';
 import { createArchitectureRevisionTool } from './architectureRevision.js';
 import { communicationPreferenceSupported } from './communicationPreferences.js';
 import { createWorkRecordsTool } from './workLedger.js';
+import { memoryProvenance } from './memoryReadTool.js';
 import { createFetchPageRun, normalizeFetchUrlArgs, fetchUrlPlan } from './fetchPageTool.js';
 import { createDocumentTools } from './documentTools.js';
 import { searchRequest, screenSearchHits } from './retrievalQuality.js';
@@ -193,7 +194,7 @@ export function createTools(ctx) {
         const r = await memory.recall(query);
         const lines = [
           ...(r.lessons ?? []).map((l) => `- [经验教训] ${l.content}`),
-          ...r.memories.map((m) => `- [${m.id}] ${m.content}（${memory.CATEGORIES[m.category] ?? '其他'}，重要度 ${m.importance}${m.history?.length ? `，更新过 ${m.history.length} 次` : ''}）`),
+          ...r.memories.map((m) => `- [${m.id}] ${m.content}（${memory.CATEGORIES[m.category] ?? '其他'}，重要度 ${m.importance}${m.history?.length ? `，更新过 ${m.history.length} 次` : ''}；${JSON.stringify(memoryProvenance(m))}；原话用read_memory按ID读取）`),
           ...r.episodes.map((e) => `- [对话 ${new Date(e.ts).toLocaleDateString('zh-CN')}] ${e.summary}`)
         ];
         return lines.length ? lines.join('\n') : '没有相关记忆。';

@@ -2,6 +2,7 @@
 import { PALETTES, normalizeLayerDesign, boundedText, designError } from './layeredDesignInput.js';
 import { wrapParagraphs } from './posterComposition.js';
 import { storyMetrics, drawStory, readableStoryPlan, drawStoryPlan, timelineStories, newspaperStories } from './layeredStoryLayout.js';
+import { illustratedStories } from './illustratedStoryLayout.js';
 
 function builder(width, height, palette) {
   const layers = [];
@@ -56,7 +57,8 @@ function header(b, input, label, contentWidth) {
 function footer(b, input) {
   const { u, width: w, height: h, palette: p } = b;
   const copy = input.footer || (input.dataMode === 'provided' ? input.source : '设计演示 · 内容为样例');
-  b.text('footer', copy || '用户提供内容', [64 * u, h - 83 * u, w - 128 * u, 55 * u], 20, { color: p.muted, role: 'caption' });
+  const height = b.footerHeight || 55 * u;
+  b.text('footer', copy || '用户提供内容', [64 * u, h - height - 28 * u, w - 128 * u, height], 20, { color: p.muted, role: 'caption', minFontSize: 20 * u });
 }
 function card(b, section, index, box, lead = false) {
   if (b.width <= b.height) return drawStory(b, section, index, box, { lead });
@@ -76,7 +78,7 @@ function card(b, section, index, box, lead = false) {
 function editorial(b, input, sections) {
   const { width: w, height: h, u } = b, m = 64 * u, gap = 22 * u;
   let y = header(b, input, 'WEIYANG / EDITORIAL');
-  const bottom = h - 116 * u;
+  const bottom = h - b.footerHeight - 61 * u;
   const asset = input.design.assets?.[0];
   if (asset && w > h) {
     const imageH = Math.min((bottom - y) * 0.3, (w - m * 2) * 0.52);
@@ -122,7 +124,7 @@ function editorialStories(b, sections, box) {
   if (tail.length) drawStoryPlan(b, tail, [x, start, w, y + h - start], readableStoryPlan(b, tail, w, y + h - start), { startIndex: 1 });
 }
 function campaign(b, input, sections) {
-  const { width: w, height: h, u, palette: p } = b, m = 52 * u, bottom = h - 110 * u;
+  const { width: w, height: h, u, palette: p } = b, m = 52 * u, bottom = h - b.footerHeight - 55 * u;
   const titleW = w * 0.46, titleSize = 76 * u;
   const titleH = (wrapParagraphs(input.title, titleSize, titleW)?.length || 1) * titleSize * 1.4;
   const subtitleH = input.subtitle ? (wrapParagraphs(input.subtitle, 34 * u, titleW)?.length || 1) * 34 * u * 1.4 : 0;
@@ -146,12 +148,12 @@ function alternateStories(b, input, sections, timeline) {
     const imageX = 64 * b.u + headerW + 24 * b.u;
     b.add('image', 'hero-image', [imageX, 48 * b.u, b.width - 64 * b.u - imageX, y - 98 * b.u], { asset: asset.id, fit: 'contain', group: 'hero' });
   }
-  (timeline ? timelineStories : newspaperStories)(b, sections, [m, y, b.width - 2 * m, b.height - 116 * b.u - y]);
+  (timeline ? timelineStories : newspaperStories)(b, sections, [m, y, b.width - 2 * m, b.height - b.footerHeight - 61 * b.u - y]);
 }
 function celebration(b, input, sections) {
   const { width: w, height: h, u, palette: p, text, shape, add } = b;
   const m = 64 * u, y = header(b, input, '把美好，慢慢收藏');
-  const end = h - 116 * u, available = end - y;
+  const end = h - b.footerHeight - 61 * u, available = end - y;
   const imageH = Math.min(available * 0.42, (w - 2 * m) * 0.67);
   if (input.design.assets?.length) add('image', 'hero-image', [m, y, w - 2 * m, imageH], { asset: input.design.assets[0].id, group: 'hero' });
   else {
@@ -176,7 +178,7 @@ function dashboard(b, input, sections) {
   text('eyebrow', input.dataMode === 'provided' ? '用户提供数据 · 未核实实时性' : '演示数据 · 离线原型', [m, 26 * u, w - 2 * m, 40 * u], 22, { color: p.accent });
   text('title', input.title, [m, 76 * u, w - 2 * m, 96 * u], 64, { weight: 700 });
   if (input.subtitle) text('subtitle', input.subtitle, [m, 180 * u, w - 2 * m, 40 * u], 24, { color: p.muted });
-  const top = 230 * u, end = h - 110 * u, leftW = (w - 2 * m - gap) * 0.29, rightX = m + leftW + gap, rightW = w - m - rightX;
+  const top = 230 * u, end = h - b.footerHeight - 55 * u, leftW = (w - 2 * m - gap) * 0.29, rightX = m + leftW + gap, rightW = w - m - rightX;
   const metrics = sections.filter(s => s.value !== undefined), main = sections.filter(s => s.value === undefined);
   const count = Math.max(1, metrics.length), cellH = (end - top - gap * (count - 1)) / count;
   metrics.forEach((s, i) => {
@@ -210,19 +212,38 @@ export function planLayerDesign(input, defaultSize = [1080, 1920]) {
   if (!input.title.trim()) throw designError('请提供准确标题');
   const width = input.width ?? defaultSize[0], height = input.height ?? defaultSize[1];
   const layout = spec.layout || (width > height ? 'dashboard' : 'editorial');
-  if (!['editorial', 'campaign', 'timeline', 'newspaper', 'celebration', 'dashboard', 'free'].includes(layout)) throw designError('请选择支持的起稿布局，或用free自由图层');
+  if (!['editorial', 'magazine', 'campaign', 'timeline', 'newspaper', 'celebration', 'dashboard', 'free'].includes(layout)) throw designError('请选择支持的起稿布局，或用free自由图层');
   const palette = { ...(PALETTES[layout] || PALETTES.editorial),
     ...(input.background_color && { background: input.background_color }), ...(input.text_color && { ink: input.text_color }), ...(input.panel_color && { card: input.panel_color }), ...spec.palette };
   const assets = spec.assets || (input.background_path ? [{ id: 'hero', path: input.background_path }] : []);
   input = { ...input, design: { ...spec, assets } };
   const b = builder(width, height, palette);
+  const footerCopy = input.footer || (input.dataMode === 'provided' ? input.source : '设计演示 · 内容为样例') || '用户提供内容';
+  const footerRows = spec.layers ? [''] : wrapParagraphs(footerCopy, 20 * b.u, width - 128 * b.u);
+  if (!footerRows) throw designError('脚注在当前画幅放不下，请调整宽度', 'DESIGN_TEXT_OVERFLOW');
+  b.footerHeight = Math.max(55 * b.u, footerRows.length * 28 * b.u);
   if (spec.layers) b.layers.push(...spec.layers);
   else {
     if (layout === 'free') throw designError('自由排版需明确提供layers');
     const sections = sectionsOf(input);
-    if (layout === 'timeline' || layout === 'newspaper') alternateStories(b, input, sections, layout === 'timeline');
+    if (layout === 'magazine' || sections.some(s => s.asset)) {
+      const start = header(b, input, 'WEIYANG / NEWS');
+      illustratedStories(b, sections, [64 * b.u, start, width - 128 * b.u, height - b.footerHeight - 61 * b.u - start], assets);
+    }
+    else if (layout === 'timeline' || layout === 'newspaper') alternateStories(b, input, sections, layout === 'timeline');
     else ({ editorial, campaign, celebration, dashboard })[layout](b, input, sections);
     footer(b, input);
   }
   return normalizeLayerDesign({ ...input, width, height, palette, assets, layers: b.layers, states: spec.states, fontFamily: input.font_family || 'sans', reading: spec.reading || (width > height ? 'desktop' : 'phone') });
+}
+
+/** 未指定尺寸的新竖稿可在写文件前增加高度；明确画幅、原稿和横版绝不悄悄改变。 */
+export function planReadableLayerDesign(input, defaultSize = [1080, 1920], grow = false) {
+  const width = input.width ?? defaultSize[0], first = input.height ?? defaultSize[1];
+  for (let height = first; ; height = Math.min(4096, height + 384)) {
+    try { return planLayerDesign({ ...input, width, height }, defaultSize); }
+    catch (error) {
+      if (!grow || width > first || height >= 4096 || error.code !== 'DESIGN_TEXT_OVERFLOW') throw error;
+    }
+  }
 }

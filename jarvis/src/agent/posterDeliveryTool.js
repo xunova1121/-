@@ -144,6 +144,7 @@ async function gradientContrast(ctx, compose, out, signal) {
 export function createPosterDeliveryTool(ctx = {}) {
   return withPosterDelivery({
     name: 'make_poster',
+    posterLifecycle: true,
     description: '已有无字底图卡槽填字用canvas.entries，可配header/footer/regions/protected；保留全图只用Canvas真实字体，不经SVG、不加遮罩；交付PNG/原生文字PPTX/可拖动编辑HTML/ZIP/.canvas.json，改字或补Demo复用source_path。制作准确中文图文海报：新稿优先design按内容构图，sections组织主次新闻/图文/数值卡片，或layers自由安排文字、图片、矢量图标、形状与图表。已有图片放design.assets，GPT仅生成需要的无字视觉素材。交付同源PNG/SVG/可编辑PPTX和.design.json；改字用source_path+changes，补同稿Demo用create_visual_demo复用源稿，不重画。旧稿.poster.json及panel/gradient接口保持兼容；gradient为底部连续渐变。回执区分原文、字体、像素、对比、视觉，4K不等于素材原生细节，不能保证绝对无错字。',
     input_schema: {
       type: 'object',
@@ -173,13 +174,14 @@ export function createPosterDeliveryTool(ctx = {}) {
       required: [],
       additionalProperties: false
     },
-    run: async (input = {}, { signal, progress, checkpoint, retrieval, requiresRichVisual, posterAttempt } = {}) => {
+    run: async (input = {}, { signal, progress, checkpoint, retrieval, requiresRichVisual, posterAttempt, beginPosterAttempt } = {}) => {
       if (!input || typeof input !== 'object' || Array.isArray(input)) throw inputError('海报参数必须是对象');
-      if (usesCanvasText(input)) return deliverCanvasText(input.size !== undefined ? { ...input, ...Object.fromEntries(['width', 'height'].map((key, i) => [key, dimensions(input)[i]])) } : input, ctx, { signal, progress, checkpoint, retrieval, requiresRichVisual });
+      if (usesCanvasText(input)) return deliverCanvasText(input.size !== undefined ? { ...input, ...Object.fromEntries(['width', 'height'].map((key, i) => [key, dimensions(input)[i]])) } : input, ctx, { signal, progress, checkpoint, retrieval, requiresRichVisual, beginPosterAttempt });
       if (usesLayeredDesign(input)) {
         const resize = !input.source_path || input.design && (input.size !== undefined || input.width !== undefined || input.height !== undefined);
         const [width, height] = resize ? dimensions(input) : [];
-        return deliverLayeredDesign(resize ? { ...input, width, height } : input, ctx, { signal, progress, checkpoint, retrieval, requiresRichVisual, posterAttempt });
+        const autoPosterHeight = !input.source_path && input.width === undefined && input.height === undefined && input.size === undefined;
+        return deliverLayeredDesign(resize ? { ...input, width, height } : input, ctx, { signal, progress, checkpoint, retrieval, requiresRichVisual, posterAttempt, beginPosterAttempt, autoPosterHeight });
       }
       input = await posterDesignInput(input, signal);
       if (typeof input.title !== 'string' || !input.title.trim()) throw inputError('海报要有主标题');
@@ -194,6 +196,7 @@ export function createPosterDeliveryTool(ctx = {}) {
       const compose = (extra = {}) => composePoster({ ...defaults, ...input, ...extra, width, height, background });
       let out = await compose();
       throwControl(null, signal);
+      beginPosterAttempt?.();
       let measured = null;
       if (out.layout.input.text_style === 'gradient') {
         progress?.('正在按底图真实像素检查文字对比度…');

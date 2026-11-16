@@ -9,6 +9,10 @@ import { isRetrievalStop } from '../../shared/retrievalStop.js';
 import * as ws from '../agent/workspace.js';
 import * as sessionsApi from '../agent/sessions.js';
 import { now, toast } from './env.js';
+import { posterArtifactId } from '../../shared/posterArtifactPath.js';
+import { scopedState } from '../agent/store.js';
+
+const fileIdentity = scopedState('files', () => ({}));
 
 export function createRemoteTask(app) {
   /** 服务器模式：打开一个服务器上还在干活的对话，从头补上它的进度，做完后换成服务器记下的完整对话 */
@@ -109,24 +113,40 @@ export function createRemoteTask(app) {
 
   /** 服务器模式：服务器上生成了文件，下载到本机工作区，照常预览、保存 */
   async function pullServerFile(path, turn) {
+    turn ??= { files: new Set(), bubble: app.liveBubble };
     if (turn?.files.has(path)) return; // 同一轮里同一个文件只取一次（画图会同时报“新文件”和“显示图片”）
-    turn?.files.add(path);
-    try {
-      const blob = await app.server.download(path);
-      await ws.write(path, blob);
-      app.panels.markFresh(path);
-      app.panels.refreshFiles();
-      const out = turn?.bubble ?? app.liveBubble;
-      // 服务器画的图、做的视频：和本机一样直接显示在回答里
-      if (/^images\/.+\.(png|jpe?g|webp|gif)$/i.test(path)) out?.image?.(URL.createObjectURL(blob));
-      else if (/^videos\/.+\.(mp4|webm|mov)$/i.test(path)) out?.video?.(URL.createObjectURL(blob));
-      if (!/^skills\//.test(path)) {
-        out?.fileLink?.(path, app.openInWorkspace);
+    const client = app.server;
+    const owner = fileIdentity();
+    const current = () => app.server === client && owner === fileIdentity() && !turn.ctrl?.signal.aborted;
+    if (!client) return;
+    turn.pendingFiles ??= new Map();
+    if (turn.pendingFiles.has(path)) return turn.pendingFiles.get(path);
+    const pull = async () => {
+      try {
+        const blob = await client.download(path);
+        if (!current()) return;
+        const saved = await ws.write(path, blob);
+        if (!current()) return;
+        const actual = saved.path;
         turn?.files.add(path);
+        turn?.files.add(actual);
+        app.panels.markFresh(actual);
+        app.panels.refreshFiles();
+        const out = turn?.bubble ?? app.liveBubble;
+        // 服务器画的图、做的视频：和本机一样直接显示在回答里
+        if (/^images\/.+\.(png|jpe?g|webp|gif)$/i.test(actual) || posterArtifactId(actual)) out?.image?.(URL.createObjectURL(blob));
+        else if (/^videos\/.+\.(mp4|webm|mov)$/i.test(path)) out?.video?.(URL.createObjectURL(blob));
+        if (!/^skills\//.test(path)) {
+          out?.fileLink?.(actual, app.openInWorkspace);
+        }
+      } catch (e) {
+        turn?.files.delete(path);
+        if (current()) toast('文件暂未取回，可重新打开下载：' + e.message);
       }
-    } catch (e) {
-      toast(e.message);
-    }
+    };
+    const pending = pull().finally(() => turn.pendingFiles.delete(path));
+    turn.pendingFiles.set(path, pending);
+    return pending;
   }
 
   return { followServerTask, pullServerFile };

@@ -15,6 +15,7 @@ import { styleRequests, styleIssues, styleNote } from './styleCheck.js';
 import { completedDeliverySteps } from './deliveryCompletion.js';
 import { priceComparisonIssues } from './priceComparison.js';
 import { reconcileAnswerIssues, conflictingNumbers, weatherConflicts } from './numberReconcile.js';
+import { createSourceEvidence } from './sourceEvidence.js';
 /** 问的是数字类事实（几条、多少、排第几、里程、人口……）：交付前查同一回答里有没有前后不一致的数 */
 const NUMERIC_FACT = /多少|几条|几个|几座|第几|排名|排第|里程|人口|面积|总量|规模|金额|营收|产量|占比/;
 
@@ -26,6 +27,7 @@ const DOC_TOOLS = /^(?:build_architecture|create_diagram|export_diagram|create_d
 export function createExecutionReview(goal = '', { visual = false } = {}) {
   let request = String(goal).slice(0, 4000);
   const receipts = [];
+  const sourceEvidence = createSourceEvidence();
   const visualEvidence = createVisualEvidence(visual || /截图|识图|OCR|看图|图片识字/.test(goal), { requireRecheck: IMAGE_RECHECK.test(goal) });
   let visualIssue = '';
   let declinedTool = '';
@@ -49,6 +51,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   const newsOriginalIssue = () => /打开.{0,8}原文|核实原文|原文核实|查原文|核对原文/.test(request) && newsOriginals.size && (selectedNews.size ? [...selectedNews].some(url => !newsRead.has(url)) : !newsRead.size) ? '用户要求打开报道原文核实，目前只取得汇总页条目；请并发读取选用报道的原文，未读部分保留具体内容并标待核实，不能称核实完成' : '';
   const newsLinks = new Map(); // 仅本轮最多8条候选标题/网址，不保存摘要。
   const revise = (text) => {
+    sourceEvidence.clear();
     const previous = taskContract(request);
     const replaceLookup = previous.researching && !previous.formats.length && !previous.coding && !previous.remembering && !previous.askingMemory
       && !files.size && !artifacts.size && !/文档|报告|方案|表格|代码|程序/.test(request)
@@ -74,6 +77,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     }
   };
   const record = ({ name: toolName, args = {}, ok, validation, output = '', code = '' }) => {
+    sourceEvidence.record(toolName, ok, output);
     // 数字定案结果：交付前核对回答只用主数字（最多保留 12 组）
     if (ok && toolName === 'reconcile_numbers') { try { numberDecisions = [...numberDecisions, ...(JSON.parse(output).decisions || [])].slice(-12); } catch { /* 回执不是 JSON 时不记 */ } }
     let dataRetrieved;
@@ -239,6 +243,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     const media = mediaDelivery(request, current);
     return {
       media,
+      sourceLedger: sourceEvidence.list(),
       pendingFormats: taskContract(request).formats.filter(
         (format) => media?.kind === 'poster'
           ? !media.outputs?.some(item => item.format === format && item.readback === 'passed' && item.structure === 'passed')

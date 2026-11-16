@@ -14,6 +14,7 @@ import { LAYERED_PROPERTIES, usesLayeredDesign } from './layeredDesignSchema.js'
 import { deliverLayeredDesign } from './layeredDesignDelivery.js';
 import { CANVAS_TEXT_PROPERTIES, usesCanvasText } from './imageTextInput.js';
 import { deliverCanvasText } from './imageTextDelivery.js';
+import { withPosterDelivery } from './posterDeliverySession.js';
 
 async function save(path, blob, ctx, signal) {
   throwControl(null, signal);
@@ -51,19 +52,22 @@ const properties = {
 };
 
 export function createVisualDemoTool(ctx = {}) {
-  return {
+  return withPosterDelivery({
     name: 'create_visual_demo',
+    posterLifecycle: true,
     description: '已有底图填字Demo用canvas.entries或source_path复用.canvas.json，只叠Canvas文字保留全图，交付PNG/PPTX/可拖动文字框HTML/ZIP，不使用SVG。制作同源高清图文海报与交互Demo：新稿用design.sections内容驱动起稿或design.layers自由构图；引用.design.json补Demo保留全部文字/图片/图标/版式。交付真实PNG、可编辑SVG/PPTX、离线HTML和ZIP。桌面保留构图，手机采用可读卡片；真实支持搜索/分类/详情/图片图层开关及明确提供的数据快照。默认4K画布，不自动接实时数据；素材放大单独记录。旧气象/经营preset与.poster.json/.visual.json继续兼容。',
     input_schema: { type: 'object', properties, additionalProperties: false },
-    run: async (input = {}, { signal, progress, checkpoint, retrieval } = {}) => {
-      if (usesCanvasText(input)) return deliverCanvasText(input, ctx, { signal, progress, checkpoint, retrieval }, true);
-      if (usesLayeredDesign(input)) return deliverLayeredDesign(input, ctx, { signal, progress, checkpoint, retrieval }, true);
+    run: async (input = {}, options = {}) => {
+      const { signal, progress, checkpoint, beginPosterAttempt } = options;
+      if (usesCanvasText(input)) return deliverCanvasText(input, ctx, options, true);
+      if (usesLayeredDesign(input)) return deliverLayeredDesign(input, ctx, options, true);
       const loaded = await loadVisualDesign(input, signal);
       const { design, background, backgroundPath, posterOptions } = loaded;
       progress?.('正在用同一份设计排版中文、指标与图表…');
       const palette = posterOptions?.theme ? themeById(posterOptions.theme)?.colors : null;
       const defaults = palette ? { background_color: '#' + palette.primary, ...(!posterOptions.text_color && { panel_color: '#' + palette.primary }) } : {};
       const composed = posterOptions ? await composePoster({ ...defaults, ...posterOptions, background }) : await composeVisualScene(design, { background });
+      beginPosterAttempt?.();
       const { svg, width, height } = composed;
       Object.assign(design, { width, height });
       const base = visualOutputBase(input, design, backgroundPath);
@@ -123,5 +127,5 @@ export function createVisualDemoTool(ctx = {}) {
       await checkpoint?.({ type: 'artifact_validation', path: receipt.designPath || `${base}.svg`, validation: { kind: 'visual_demo', readback: receipt.files.length ? 'passed' : 'failed', render: receipt.fontCheck === 'passed' ? 'passed' : 'failed', visual: 'not_checked', business: 'not_checked', errors: receipt.errors.length } });
       return JSON.stringify(receipt);
     }
-  };
+  }, ctx, createVisualDemoTool);
 }

@@ -481,6 +481,8 @@ jobs:
           node e2e/settings-navigation.mjs "$RUNNER_TEMP/jarvis-e2e/settings-navigation"
       - name: 验证海报单份交付、图文证据、分类图表与真实Office及文件空间
         run: node e2e/poster-task-delivery.mjs "$RUNNER_TEMP/jarvis-e2e/poster-task-delivery"
+      - name: 验证海报参数纠正、跨轮同稿与聊天主图实际打开下载
+        run: node e2e/poster-intelligence.mjs "$RUNNER_TEMP/jarvis-e2e/poster-intelligence"
       - name: 验证 Electron 全息桌面互动
         run: |
           npm ci --prefix desktop --no-audit --no-fund

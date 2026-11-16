@@ -1,6 +1,7 @@
 /** 同一份像素版式生成自包含 SVG 与可编辑 PPTX；文字始终是字体文本，不交给图片模型画。 */
 import { normalizePosterInput, normalizePosterBackground, posterError } from './posterCompositionInput.js';
 import { applyPosterGradient } from './posterGradientPptx.js';
+import { wrapPosterLine } from './posterLineBreak.js';
 
 const PX_PER_INCH = 96;
 const round = (value) => Math.round(value * 1000) / 1000;
@@ -21,6 +22,7 @@ function graphemes(text) {
 }
 
 function glyphUnits(value) {
+  if (value === '·' || value === '•') return 1.1;
   // 中文真实字体通常为1em；额外10%留量兼容各端替代字体，西文保守估宽而不横向压缩字形。
   if (/^[\u0020-\u007e]+$/.test(value)) {
     return [...value].reduce((sum, ch) => sum + (/[MW@%]/.test(ch) ? 1.1 : /[il.,'!:;| ]/.test(ch) ? 0.4 : 0.8), 0);
@@ -43,20 +45,9 @@ function glyphUnits(value) {
 export function wrapParagraphs(text, fontSize, width) {
   const rows = [];
   for (const paragraph of text.split('\n')) {
-    let row = '';
-    let used = 0;
-    for (const glyph of graphemes(paragraph)) {
-      const advance = glyphUnits(glyph) * fontSize;
-      if (advance > width) return null;
-      if (row && used + advance > width) {
-        rows.push(row);
-        row = '';
-        used = 0;
-      }
-      row += glyph;
-      used += advance;
-    }
-    rows.push(row);
+    const wrapped = wrapPosterLine(paragraph, fontSize, width, graphemes, glyphUnits);
+    if (!wrapped) return null;
+    rows.push(...wrapped);
   }
   return rows;
 }

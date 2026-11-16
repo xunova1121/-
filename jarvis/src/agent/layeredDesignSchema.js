@@ -24,12 +24,13 @@ export const LAYERED_PROPERTIES = {
     description: '新稿优先使用。按内容构图；layout只是起稿，layers可完全自由排版。source_path+design可重新构图/换画幅，默认复用原栏目和素材；改字用changes。精确文字独立排字，图片用工作区无字素材。',
     properties: {
       eyebrow: { type: 'string', description: '可选栏目/品牌眉题' },
-      layout: { type: 'string', enum: ['editorial', 'campaign', 'timeline', 'newspaper', 'celebration', 'dashboard', 'free'], description: '真正不同的结构：editorial主次编排；campaign图文融合宣传；timeline时间轴；newspaper报纸分栏；free用layers逐个指定坐标，支持自由构图，无需手改SVG。只换palette不是换版式。' },
+      layout: { type: 'string', enum: ['editorial', 'magazine', 'campaign', 'timeline', 'newspaper', 'celebration', 'dashboard', 'free'], description: 'magazine栏目配图交错编排，用sections.asset关联素材；editorial主次编排；campaign宣传；timeline时间轴；newspaper报纸分栏；free自由坐标。只换色不是换版式。' },
       reading: { type: 'string', enum: ['phone', 'desktop'], description: '阅读场景；竖版默认phone，按390px整图宽度检查正文至少12px；横版默认desktop。不靠4K像素掩盖小字。' },
       palette: { type: 'object', properties: { background: str, ink: str, muted: str, accent: str, card: str }, additionalProperties: false },
       assets: { type: 'array', maxItems: 4, items: { type: 'object', properties: { id: str, path: str }, required: ['id', 'path'], additionalProperties: false } },
       sections: { type: 'array', maxItems: 12, items: { type: 'object', properties: {
         title: str, body: str, eyebrow: str, icon: layerFields.icon, value: str, unit: str, detail: str, category: str,
+        asset: { type: 'string', description: '与本栏目内容相关的assets素材ID；会与本栏目文字融合编排，不以图标充当配图' },
         points: layerFields.points, chartType: layerFields.chartType
       }, required: ['title'], additionalProperties: false } },
       layers: { type: 'array', maxItems: 160, description: '自由构图的完整独立图层，顺序为从底到顶；坐标单位为画布像素。例如1080×1920画布的文字层：{id:"title",type:"text",x:64,y:80,w:900,h:140,text:"今日要闻",fontSize:80,role:"heading"}。图片先在assets登记，再用image层的asset引用ID。', items: { type: 'object', properties: layerFields, required: ['id', 'type', 'x', 'y', 'w', 'h'], additionalProperties: false } },

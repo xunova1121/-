@@ -25,6 +25,11 @@ import { asksDocumentStyles } from './documentStyleQuery.js';
 import { IMAGE_RECHECK, IMAGE_READING_RULES } from './imageReading.js';
 import { textPosterRequest, POSTER_GUIDANCE } from './posterRouting.js';
 import { posterFollowupRequirement } from './posterFollowup.js';
+import { designTaskRequirement } from './designTaskMemory.js';
+import { taskMethodContext, createTaskMethodsTool } from './taskMethods.js';
+import { createMemoryReadTool } from './memoryReadTool.js';
+import { sourceEvidenceContext } from './sourceEvidence.js';
+import { createDeliveryAccessTool } from './deliveryAccess.js';
 import { visualSceneRequest, VISUAL_SCENE_GUIDANCE } from './visualSceneRouting.js';
 import { conversationFocus } from '../core/responseRevision.js';
 import { responseGuidance } from './responseGuidance.js';
@@ -189,7 +194,7 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
   parts.push(ws.mode() === 'folder' ? `工作区：已连接本地文件夹「${ws.folderName()}」` : '工作区：浏览器内的虚拟工作区（用户可下载文件，或连接本地文件夹）');
   if (rules) parts.push(rulesBlock(rules));
   if (ctx.core?.human || ctx.core?.persona) parts.push(`## 核心记忆\n${ctx.core.human ? `【关于用户】${ctx.core.human}\n` : ''}${ctx.core.persona ? `【我的设定】${ctx.core.persona}` : ''}`.trim());
-  const memLine = (m) => `- [${m.pending ? '线索; ' : ''}来源:${m.source || '未记录'}; 时间:${new Date(m.updatedAt || m.ts).toISOString()}; 版本:${(m.history?.length || 0)+1}] ${m.content}`;
+  const memLine = (m) => `- [id:${m.id}; ${m.pending ? '线索; ' : ''}来源:${m.source || '未记录'}; 时间:${new Date(m.updatedAt || m.ts).toISOString()}; 版本:${(m.history?.length || 0)+1}] ${m.content.length > 280 ? m.content.slice(0, 280) + '…（详情用read_memory按ID读取）' : m.content}`;
   // 用户的基本情况：每轮都带上（问“我多大了 / 我住哪”时不用再去猜）
   if (ctx.basics?.length) parts.push(`## 用户的基本情况（用户说过的；标“线索”的没找到原话依据，不能当事实说；和当前原话冲突时以当前为准）\n${ctx.basics.map(memLine).join('\n')}`);
   const related = ctx.memories.filter((m) => !ctx.basics?.includes(m));
@@ -249,7 +254,8 @@ async function isolatedContext(userText, { sessionId, summary, history }) {
  */
 export async function runAgent(options) {
   const original = options.requirementText ?? options.userText;
-  const requirementText = posterFollowupRequirement(original, options.history || []);
+  const remembered = await designTaskRequirement(original, options);
+  const requirementText = posterFollowupRequirement(remembered, options.history || []);
   return withLookupDeadline(requirementText !== original ? { ...options, requirementText } : options, runAgentLoop, { profiles: true });
 }
 
@@ -319,6 +325,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   const { ctx: preparedContext, record, requirementContext, archive } = await prepareAgentContext({ userText, priorMessages: history, context, sessionId, summary, light: light || Boolean(questionProfile), requirements, depth, requirementText, emit, buildContext, isolated });
   // 动态规则只属于本轮，不能修改调用方复用的上下文，让新闻规则污染后面的写作。
   const ctx = { ...preparedContext };
+  if (!light && !questionProfile) ctx.dynamic = (ctx.dynamic || '') + '\n' + taskMethodContext(requirementText, availableTools);
   if (complaint) ctx.dynamic = (ctx.dynamic || '') + '\n用户当前是在询问状态或抱怨，不是要求重新搜索。根据已有任务状态简短回答；没有正在执行的任务就不假称还在查。本条仅问状态时不要调用联网工具；之后明确追加新查询则按新要求处理。';
   else if (!light && !questionProfile && !codeWork?.enabled && !images.length && (isQuickLookup(requirementText, images) || todayNewsIntent(requirementText) || /深度调研|查资料|联网查询|逐项核验/.test(requirementText))) ctx.dynamic = (ctx.dynamic || '') + '\n' + lookupAnswerNote(lookupIntent(requirementText, { history }), requirementText);
   ctx.dynamic = (ctx.dynamic || '') + await workHistoryBlock(requirementText, sessionId, { signal });
@@ -364,6 +371,9 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   // 本批只在文字任务升级；不能把正在看图/操作电脑的上下文切给未知看图能力的线路。
   const capabilityUpgrade = createCapabilityUpgrade({ routes: images.length || computerTask || history.some(message => message.images?.length) ? [] : capabilityRoutes, intent: taskIntent, signal, emit });
   const own = [...(oneFile ? [] : [plan.tool]), review.tool, executionTool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: sportsNewsOnly ? tools : availableTools })] : []), ...(lookupDeadline && lookupControl?.release ? [moreTimeTool] : [])].filter((t) => !tools.some((x) => x.name === t.name));
+  own.push(createTaskMethodsTool(availableTools));
+  if (!isolated && availableTools.some(tool => tool.name === 'recall')) own.push(createMemoryReadTool());
+  if (availableTools.some(tool => tool.name === 'read_file')) own.push(createDeliveryAccessTool());
   if (capabilityUpgrade.tool) own.push(capabilityUpgrade.tool);
   // 工具按需加载：工具多时只带常用的完整说明，其余列名字、用 tool_search 加载（见 toolLoader.js）
   // 普通问答、查资料：做文档的工具先只列名字（用到时按名字调用或 tool_search 加载）
@@ -571,7 +581,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     const request = makeRequest(requestCurrent, acceptVisible, () => primaryActivity?.());
     // 测量实际发送的提示与工具说明，动态规则和短说明均计入字符数。
     // 用的哪个模型：中途换了备用的，也照实写
-    const responseNote = [responseGuidance(currentRequest, history, { light, compact: Boolean(questionProfile), model: requestCurrent?.model || model, hasImages: images.length > 0, visibleText: String(convo.filter(m => m.role === 'user').at(-1)?.content || '').slice(0, 1800) })].filter(Boolean).join('\n');
+    const responseNote = [responseGuidance(currentRequest, history, { light, compact: Boolean(questionProfile), model: requestCurrent?.model || model, hasImages: images.length > 0, visibleText: String(convo.filter(m => m.role === 'user').at(-1)?.content || '').slice(0, 1800) }), sourceEvidenceContext(review.report().sourceLedger)].filter(Boolean).join('\n');
     const usingNote = fastAnswer ? `本次公开数据已取得，使用用户配置的日常回答模型 ${requestCurrent.model} 整理；仍须保留来源、日期和数值口径。` : phase ? `本次${phase === 'lookup_plan' ? '检索规划' : '资料取舍与回答'}使用已配置推理模型 ${requestCurrent.model}。` : upgraded ? `当前由用户配置的能力模型 ${cur.model} 继续完成原任务；最多${UPGRADE_CALLS}次请求，原任务预算不增加。` : modelNote && (cur.model !== model ? `${modelNote}\n（原定的 ${model} 出错了，这一轮实际换成了 ${cur.model}。）` : modelNote);
     const measuredSystem = questionProfile ? [BASIC_ANSWER_PROMPT, [ctx.dynamic, agentNote, usingNote, responseNote, imagePreferenceNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : light ? [LIGHT_PROMPT, [ctx.dynamic, agentNote, usingNote, responseNote, imagePreferenceNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, agentNote, usingNote, dialoguePolicy(review.report().request), responseNote, imagePreferenceNote, capabilities, computerNote, requirementContext, toolHint, singleDocumentTask(review.report().request) && '单份文档由文档引擎内部规划和检查；如需外层计划只列一次，不用update_plan逐节重复同步。有效产物回执可直接交付，不重复查找、读回或重做。', review.contractNote(), documentRouteNote(review.report().request), creativeWithoutLookup(currentRequest) && CREATIVE_NOTE, voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
     const measuredTools = lookupFinal ? [] : closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list();
@@ -877,6 +887,7 @@ export function finishCheck({ steps = [], wroteCode = false, ranCode = false, la
 
 /** 子任务分身能用的工具：只读的查资料、读文件、算一算，不改文件、不操作电脑（不需要用户确认） */
 export const DELEGATE_TOOLS = new Set([...PARALLEL_SAFE, 'fact_check', 'deep_research', 'run_javascript', 'run_python']);
+for (const tool of ['read_memory', 'read_task_method', 'verify_delivery']) PARALLEL_SAFE.add(tool);
 
 /** delegate_task：在独立的上下文里做一个子任务，只把结论带回主线（中间读过的大量资料不进主线） */
 function delegateTool({ adapter, model, effort, signal, tools }) {

@@ -99,6 +99,7 @@ export async function deliverCanvasText(input, ctx = {}, options = {}, demo = fa
     progress?.('正在按底图卡槽排字，核对中文、可读字号和底图像素…');
     let rendered;
     try {
+      options.beginPosterAttempt?.();
       rendered = await renderer.render(original.blob, design, { signal });
       receipt.fontCheck = rendered.fontCheck?.status === 'passed' ? 'passed' : 'not_checked';
       receipt.layout = {

@@ -42,7 +42,7 @@ export function visualSceneReceipt(ok, output = '') {
   const complete = ok && valid && value.status === 'complete' && value.textRendering === 'program' && value.fontCheck === 'passed' && dimensions && designPath && dataMode !== 'not_checked' && !errors
     && (!canvas || value.backgroundCheck?.status === 'passed' && value.layout?.status === 'passed' && value.contrast?.status === 'passed' && value.detection?.confidence >= 0.8) && (canvas ? ['png', 'pptx', 'html', 'zip'] : ['png', 'svg', 'html']).every(format => usable.some(file => file.format === format && (format !== 'png' || file.render === 'passed')));
   return {
-    kind: 'visual_demo', ...(canvas && { renderer: 'canvas' }), state: !ok ? 'failed' : complete ? 'completed' : usable.length ? 'partial' : 'pending',
+    kind: 'visual_demo', ...(canvas && { renderer: 'canvas' }), ...(value?.delivery?.primaryPath && { delivery: value.delivery }), state: !ok ? 'failed' : complete ? 'completed' : usable.length ? 'partial' : 'pending',
     files: usable.map(file => file.path), outputs: ok ? outputs : [], ...(designPath && { designPath }), ...(dimensions && { width: value.width, height: value.height }),
     fontCheck: checked(valid && value.fontCheck), visual: checked(valid && value.visual), interaction: checked(valid && value.interaction), dataMode,
     errors, errorCodes: valid && Array.isArray(value.errors) ? value.errors.slice(0, 3).map(error => String(error?.code || '').slice(0, 80)) : []
