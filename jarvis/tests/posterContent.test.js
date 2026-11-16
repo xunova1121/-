@@ -9,6 +9,7 @@ import { checkLayerCopy, reviewLayeredDesign } from '../src/agent/layeredDesignQ
 import { posterAnswerIssues } from '../src/agent/posterRouting.js';
 import { loadLayerDesign } from '../src/agent/layeredDesignSource.js';
 import * as ws from '../src/agent/workspace.js';
+import { posterFollowupRequirement } from '../src/agent/posterFollowup.js';
 
 const title = { id: 'title', type: 'text', text: '指数涨跌幅', x: 60, y: 60, w: 940, h: 140, fontSize: 68 };
 const bar = { id: 'comparison', type: 'chart', chartType: 'bar', unit: '%', x: 60, y: 300, w: 940, h: 700,
@@ -18,6 +19,8 @@ const png = new Blob([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCA
 it('真实大图/图表和装饰数字卡区分，完全遮挡及微型配图不能充数', () => {
   expect(wantsIllustratedPoster('做成图文并茂的海报')).toBe(true);
   expect(wantsIllustratedPoster('文字海报')).toBe(false);
+  expect(wantsIllustratedPoster(posterFollowupRequirement('换结构，不动颜色', [{ role: 'user', content: '做新闻海报' }]))).toBe(false);
+  expect(wantsIllustratedPoster(posterFollowupRequirement('换结构，图文并茂', [{ role: 'user', content: '做新闻海报' }]))).toBe(true);
   expect(posterContent(design([{ id: 'card', type: 'shape', x: 50, y: 300, w: 950, h: 600 }])).status).toBe('failed');
   expect(posterContent(design([bar]))).toMatchObject({ status: 'passed', semantic: 'not_checked' });
   expect(posterContent(design([bar, { id: 'cover', type: 'shape', x: 0, y: 200, w: 1080, h: 1000 }])).status).toBe('failed');

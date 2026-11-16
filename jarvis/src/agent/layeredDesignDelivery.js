@@ -62,7 +62,6 @@ export async function deliverLayeredDesign(input, ctx = {}, options = {}, demo =
     design.illustrated = true;
     options = { ...options, requiresRichVisual: true };
   }
-  if (options.requiresRichVisual && posterContent(design).status !== 'passed') throw designError('图文并茂需实际主题图片或数据图表；数字卡片、图标和文字列表不能代替。复用已有配图，或用有来源的同单位数据画chartType=bar对比图；不编造时间走势，不自动付费重画。', 'DESIGN_ILLUSTRATION_MISSING');
   const { base, release } = await claimLayerOutputBase(input, design, signal);
   try { return await deliverLoadedDesign({ design, assets, base }, ctx, options, demo); }
   finally { release(); }
@@ -82,6 +81,7 @@ async function deliverLoadedDesign({ design, assets, base }, ctx, options, demo)
     notes: ['同一分层源稿生成各格式；文字不由生图模型画，图标为独立矢量对象', '文案原样保留，不证明文案中的事实或错别字已被编辑校正', '4K仅表示导出画布；素材放大倍率单独记录，未自动付费重画/放大'], errors: [] };
   checkGeometry(design, svg, receipt);
   if (options.requiresRichVisual) receipt.contentCheck = posterContent(design);
+  if (receipt.contentCheck?.status === 'failed') receipt.errors.push({ code: 'DESIGN_ILLUSTRATION_MISSING', phase: 'composition', message: '图文并茂需实际主题图片或有来源图表，图标/数字卡片不能代替。源稿保留；不编造时间走势，不自动付费重画。' });
   const artifacts = new Map();
   const deliver = async (format, blob, render = 'not_checked') => {
     const path = await saveDesignFile(`${base}.${format}`, blob, ctx, signal);

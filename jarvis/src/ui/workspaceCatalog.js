@@ -56,6 +56,7 @@ export function catalogGroups(files, { items = {}, query = '', view = 'recent', 
   const sources = new Map();
   for (const record of records.slice(0, 200)) for (const path of record.files || []) if (!sources.has(path)) sources.set(path, record);
   const posterPrimary = new Map(records.filter(r => r.artifactKind === 'poster' && r.files?.length === 1).map(r => [r.files[0], r]));
+  const posterSources = new Set(records.filter(r => r.artifactKind === 'poster').flatMap(r => r.sourceAliases || []));
   const groups = new Map();
   const q = String(query).trim().toLowerCase();
   for (const file of files) {
@@ -63,6 +64,7 @@ export function catalogGroups(files, { items = {}, query = '', view = 'recent', 
     const trash = Boolean(meta.trash);
     if (trash !== (view === 'trash')) continue;
     const poster = posterPrimary.get(file.path);
+    if (!process && !q && posterSources.has(file.path)) continue;
     if (!process && !q && PROCESS_FILE.test(file.path) && !poster) continue;
     if (view === 'favorites' && !meta.favorite) continue;
     if (category !== 'all' && fileCategory(file.path) !== category) continue;

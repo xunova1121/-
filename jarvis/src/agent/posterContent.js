@@ -1,5 +1,9 @@
 /** 排版通过不等于图文并茂；这里只提供结构证据，主题关联须看实际成品。 */
-export const wantsIllustratedPoster = text => /图文并茂|图文融合|图文结合|图文海报|配图海报|海报.{0,12}(?:配图|图表)|illustrated poster/i.test(String(text).slice(-12000));
+export const wantsIllustratedPoster = text => {
+  // 承接短追问时会附加工具提示；其中的“图文海报”不是用户新增的验收要求。
+  const request = String(text).split('\n【本轮承接最近的图文海报，')[0].slice(-12000);
+  return /图文并茂|图文融合|图文结合|图文海报|配图海报|海报.{0,12}(?:配图|图表)|illustrated poster/i.test(request);
+};
 
 export function posterContent(design) {
   const area = design.width * design.height;

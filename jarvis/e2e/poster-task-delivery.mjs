@@ -64,7 +64,7 @@ check('同源Demo继续生成可编辑稿及离线HTML/ZIP，不重画图片', d
 const records = (await listWorkRecords({ kind: 'image' })).items;
 check('成果索引只有一条，默认主文件是PNG', records.length === 1 && records[0].files.length === 1 && records[0].files[0] === receipt.delivery.primaryPath);
 const browserFiles = [];
-for (const file of (await ws.list()).filter(f => f.path.startsWith(receipt.delivery.historyPrefix))) {
+for (const file of (await ws.list()).filter(f => f.path.startsWith(receipt.delivery.historyPrefix) || receipt.delivery.sourceAliases.includes(f.path))) {
   browserFiles.push({ ...file, base64: Buffer.from(await (await ws.readBlob(file.path)).arrayBuffer()).toString('base64') });
 }
 // 重现旧版30份过程文件；仅测试列表收纳，不把这些占位字节当成真实设计产物。
@@ -72,7 +72,7 @@ for (let n = 0; n < 30; n++) browserFiles.push({ path: receipt.delivery.historyP
 const nextReceipt = JSON.parse(await tool.run({ ...input, title: '第二项海报任务' }, { ...options, executionScope: {} }));
 const nextRecord = (await listWorkRecords({ kind: 'image' })).items.find(r => r.deliveryId === nextReceipt.delivery.id);
 const nextFiles = [];
-for (const file of (await ws.list()).filter(f => f.path.startsWith(nextReceipt.delivery.historyPrefix))) {
+for (const file of (await ws.list()).filter(f => f.path.startsWith(nextReceipt.delivery.historyPrefix) || nextReceipt.delivery.sourceAliases.includes(f.path))) {
   nextFiles.push({ ...file, base64: Buffer.from(await (await ws.readBlob(file.path)).arrayBuffer()).toString('base64') });
 }
 const root = path.resolve('dist-mobile');
@@ -115,8 +115,8 @@ try {
     check(`${width}px：源文件和历史稿默认折叠`, await page.locator('.ws-poster-files').count() === 2 && await page.locator('.ws-poster-files[open]').count() === 0);
     await page.getByText('源文件（3）', { exact: true }).click();
     check(`${width}px：展开可见原PPTX/SVG/JSON，点击未误开主图`, await page.locator('.ws-poster-files[open] button').count() === 3);
-    await page.getByText('历史稿（31）', { exact: true }).click();
-    check(`${width}px：历史试排和手机校验图仍可查看`, await page.locator('.ws-poster-files').nth(1).locator('button').count() === 31);
+    await page.getByText('历史稿（32）', { exact: true }).click();
+    check(`${width}px：历史试排和手机校验图仍可查看`, await page.locator('.ws-poster-files').nth(1).locator('button').count() === 32);
     check(`${width}px：主卡片无横向溢出`, await page.locator('#file-list').evaluate(n => n.scrollWidth <= n.clientWidth + 1));
     await page.evaluate(async ({ files, record, previous }) => {
       const db = await new Promise((resolve, reject) => { const r = indexedDB.open('jarvis'); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });

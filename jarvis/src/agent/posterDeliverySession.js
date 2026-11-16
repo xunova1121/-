@@ -3,6 +3,7 @@ import * as ws from './workspace.js';
 import { scopedState } from './store.js';
 import { wantsIllustratedPoster } from './posterContent.js';
 import { recordWorkAttempt } from './workLedger.js';
+import { preservePosterSource } from './posterSourceAlias.js';
 import { throwControl } from '../core/networkRequest.js';
 
 const states = scopedState('files', () => new WeakMap());
@@ -22,7 +23,7 @@ export function withPosterDelivery(tool, ctx, factory) {
     let task = groups.get(groupKey);
     if (!task) {
       if (groups.size >= 12) throw failure('本轮海报数量已达12张，请分批制作');
-      task = { id: crypto.randomUUID(), attempts: 0, tail: Promise.resolve(), last: null, signatures: new Map() };
+      task = { id: crypto.randomUUID(), attempts: 0, tail: Promise.resolve(), last: null, signatures: new Map(), sourceAliases: [] };
       groups.set(groupKey, task);
     }
     // 排字不是批量出方案；同轮重复/改名不产生另一组公开成果。
@@ -53,12 +54,19 @@ export function withPosterDelivery(tool, ctx, factory) {
           message: String(error.message || '试排未通过').slice(0, 220) }] };
       }
       assertCurrent();
+      try { await preservePosterSource(input, receipt, task, options, assertCurrent); }
+      catch (error) {
+        throwControl(error, options.signal);
+        assertCurrent();
+        receipt.status = 'partial';
+        (receipt.errors ||= []).push({ code: 'POSTER_SOURCE_ALIAS_FAILED', message: '指定路径的源稿未保存成功；内部源稿保留，不能称全部完成' });
+      }
       const png = receipt.files?.find(f => f.format === 'png' && f.render === 'passed' && f.readback === 'passed');
       const sources = [...(receipt.files || []).filter(f => f !== png).map(f => f.path), receipt.designPath].filter(Boolean);
       if (rich && !receipt.contentCheck) receipt.contentCheck = { status: 'not_checked', semantic: 'not_checked', basis: '当前路径未完成主题配图及图文融合复核，不能称图文并茂验收通过' };
       if (rich && (receipt.contentCheck.status !== 'passed' || receipt.contentCheck.semantic !== 'passed')) receipt.status = 'partial';
       receipt.delivery = { id: task.id, title: String(receipt.title || input.title || '海报').slice(0, 160), primaryPath: png?.path || null,
-        sourceFiles: sources.slice(0, 8), historyPrefix, attempts: attempt, retryAllowed: attempt < MAX_ATTEMPTS,
+        sourceFiles: sources.slice(0, 8), sourceAliases: [...task.sourceAliases], historyPrefix, attempts: attempt, retryAllowed: attempt < MAX_ATTEMPTS,
         quality: receipt.status === 'complete' ? 'complete' : 'needs_review' };
       receipt.guidance = '默认只展示delivery.primaryPath一张成品；源文件可在文件空间展开，历史试排保留。技术检查不证明事实或审美；未通过项如实说明，不报全项检查通过。不要因改名/重复保存再次制作。';
       // 后续失败不能把已有可交付稿替换为空；仍向模型说明本次失败。
@@ -73,7 +81,7 @@ export function withPosterDelivery(tool, ctx, factory) {
         ctx.onFileChanged?.(png.path);
         ctx.onImage?.(URL.createObjectURL(blob), png.path);
       } else if (task.last) {
-        receipt.delivery = { ...task.last.delivery, attempts: attempt, retryAllowed: attempt < MAX_ATTEMPTS };
+        receipt.delivery = { ...task.last.delivery, sourceAliases: [...task.sourceAliases], attempts: attempt, retryAllowed: attempt < MAX_ATTEMPTS };
         receipt.previousDelivery = '本次试排未替换上一份成品，当前展示仍为上一稿；不能称本次修改成功';
       }
       await options.checkpoint?.({ type: 'artifact_validation', path: receipt.delivery.primaryPath || `${historyPrefix}attempt-${attempt}/成品.png`,

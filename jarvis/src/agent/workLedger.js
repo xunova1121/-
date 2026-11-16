@@ -65,6 +65,7 @@ export async function recordWorkAttempt({ tool, args = {}, output = '', ok, sess
     if (path.length <= 400 && (await workspace.exists(path))) files.push(path);
   }
   const generationStatus = !ok ? 'failed' : !['plan_architecture', 'revise_architecture_plan', 'prepare_architecture_evidence'].includes(tool) && files.length && (!media || media.state === 'completed') ? 'success' : 'unverified';
+  const sourceAliases = (Array.isArray(delivery?.sourceAliases) ? delivery.sourceAliases : []).filter(p => typeof p === 'string' && p.length <= 400 && /\.(?:design|canvas|poster)\.json$/i.test(p)).slice(0, 3);
   const record = {
     id: delivery ? 'poster:' + delivery.id : await recordId(scope, callId, files),
     sessionId: String(sessionId).slice(0, 200),
@@ -82,7 +83,7 @@ export async function recordWorkAttempt({ tool, args = {}, output = '', ok, sess
     title: String(delivery?.title || args.title || files[0]?.split('/').pop() || tool).slice(0, 160),
     files,
     ...(delivery && { artifactKind: 'poster', deliveryId: delivery.id, historyPrefix: delivery.historyPrefix,
-      sourceFiles: (Array.isArray(delivery.sourceFiles) ? delivery.sourceFiles : []).filter(p => typeof p === 'string' && p.length <= 400 && p.startsWith(delivery.historyPrefix)).slice(0, 8),
+      sourceFiles: (Array.isArray(delivery.sourceFiles) ? delivery.sourceFiles : []).filter(p => typeof p === 'string' && p.length <= 400 && (p.startsWith(delivery.historyPrefix) || sourceAliases.includes(p))).slice(0, 8), sourceAliases,
       attempts: Math.min(3, Number(delivery.attempts) || 1), quality: delivery.quality === 'complete' ? 'complete' : 'needs_review' }),
     status: generationStatus,
     ...(!ok && /^(?:ARCHITECTURE_|DIAGRAM_|SVG_)/.test(failure?.code || '') && {
@@ -96,7 +97,10 @@ export async function recordWorkAttempt({ tool, args = {}, output = '', ok, sess
   return serial(async () => {
     if (!(await sessionStore.get(sessionId))) return null;
     const previous = await storage.get(keyOf(record.id));
-    if (previous?.status === 'success' && (!delivery || record.status !== 'success')) return { ...previous, id: previous.generationId };
+    if (previous?.status === 'success' && (!delivery || record.status !== 'success')) {
+      if (delivery) await storage.put({ ...previous, sourceAliases: [...new Set([...(previous.sourceAliases || []), ...sourceAliases])].slice(0, 3), attempts: record.attempts });
+      return { ...previous, id: previous.generationId };
+    }
     const index = (await storage.get(INDEX)) || { id: INDEX, since: Date.now(), ids: [], truncated: false };
     await storage.put({ ...record, ...(delivery && previous?.displayTitle && { displayTitle: previous.displayTitle }), id: keyOf(record.id), generationId: record.id });
     const ids = [...index.ids.filter((id) => id !== record.id), record.id];

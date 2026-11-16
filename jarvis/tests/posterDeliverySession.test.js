@@ -41,6 +41,8 @@ it('6次重复调用只执行一次，默认一张成品，源文件可追溯且
   expect(coreCalls).toHaveBeenCalledTimes(1);
   expect(images).toHaveBeenCalledTimes(1);
   expect(changes).toHaveBeenCalledTimes(1);
+  expect(receipt.designPath).toBe('海报/重复0.design.json');
+  expect(await ws.readText(receipt.designPath)).toBe('{}');
   const records = (await listWorkRecords({ kind: 'image' })).items;
   expect(records).toHaveLength(1);
   expect(records[0].files).toEqual([receipt.delivery.primaryPath]);
@@ -97,4 +99,16 @@ it('要求图文并茂时，无图文语义证据只能交候选，不能伪装�
   expect(result.status).toBe('partial');
   expect(result.delivery.quality).toBe('needs_review');
   expect(result.contentCheck.semantic).toBe('not_checked');
+});
+it('指定源稿名称已存在时另存，不能覆盖旧稿；归组仍只有一张新成品', async () => {
+  await ws.write('海报/保留.design.json', '{"original":true}');
+  await collection('sessions').put({ id: 'alias-session', messages: [] });
+  const scope = {}, output = await fixture().run({ title: '保留', path: '海报/保留.png' }, { executionScope: scope, sessionId: 'alias-session' });
+  const result = JSON.parse(output);
+  expect(result.designPath).not.toBe('海报/保留.design.json');
+  expect(await ws.readText('海报/保留.design.json')).toBe('{"original":true}');
+  const record = (await listWorkRecords({ kind: 'image' })).items[0];
+  const grouped = catalogGroups(await ws.list(), { records: [record] });
+  expect(grouped).toHaveLength(2);
+  expect(grouped.find(g => g.poster).poster.sourceFiles.some(f => f.path === result.designPath)).toBe(true);
 });
