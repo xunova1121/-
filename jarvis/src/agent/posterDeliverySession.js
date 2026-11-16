@@ -76,8 +76,10 @@ export function withPosterDelivery(tool, ctx, factory) {
         receipt = JSON.parse(output);
       } catch (error) {
         throwControl(error, options.signal);
-        receipt = { kind: 'poster', status: 'partial', files: [], errors: [{ code: /^(?:DESIGN|POSTER|CANVAS)_[A-Z_]+$/.test(error.code || '') ? error.code : 'POSTER_INPUT_INVALID',
+        receipt = { kind: 'poster', status: 'partial', files: [], errors: [{ phase: started ? 'render' : 'preflight', code: /^(?:DESIGN|POSTER|CANVAS)_[A-Z_]+$/.test(error.code || '') ? error.code : 'POSTER_INPUT_INVALID',
           message: String(error.message || '试排未通过').slice(0, 220) }] };
+        if (Array.isArray(error.issues)) receipt.preflight = { status: 'failed', issueCount: error.issueCount,
+          issues: error.issues, adjustments: error.adjustments || [] };
       }
       assertCurrent();
       if (!started && receipt.files?.some(f => f.format === 'png' && f.render === 'passed')) beginPosterAttempt();
@@ -106,7 +108,7 @@ export function withPosterDelivery(tool, ctx, factory) {
         sourceFiles: sources.slice(0, 8), sourceAliases: [...task.sourceAliases], historyPrefix, attempts: task.attempts, corrections: task.corrections,
         retryAllowed: task.attempts < MAX_ATTEMPTS && task.corrections < MAX_CORRECTIONS,
         quality: receipt.status === 'complete' ? 'complete' : 'needs_review' };
-      receipt.guidance = '默认只展示delivery.primaryPath一张成品；源文件可在文件空间展开，历史试排保留。技术检查不证明事实或审美；未通过项如实说明，不报全项检查通过。不要因改名/重复保存再次制作。';
+      receipt.guidance = '一次处理preflight.issues中的全部问题；若缺空间请重新构图，不删字/改小字/逐项盲试。不要换工具绕过预算，或让用户反复回继续。默认只展示delivery.primaryPath；技术通过不证明事实或审美，未通过项如实说明。';
       // 后续失败不能把已有可交付稿替换为空；仍向模型说明本次失败。
       if (png && (!task.last || receipt.status === 'complete' || task.last.status !== 'complete')) {
         task.last = structuredClone(receipt);

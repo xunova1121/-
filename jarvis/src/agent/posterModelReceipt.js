@@ -37,6 +37,23 @@ export function compactPosterModelReceipt(message, archive) {
   if (value.retryAllowed === false) receipt.retryAllowed = false;
   const id = archive?.remember(message);
   if (id) receipt.receiptId = id;
+  // 失败路径优先保留可执行修正值，不能把多项检查压成一个“failed”再让模型猜。
+  if (value.preflight?.status === 'failed' && Array.isArray(value.preflight.issues) && value.preflight.issues.length) {
+    const issues = value.preflight.issues.slice(0, 32).map(issue => ({ code: short(issue.code, 80), id: short(issue.id, 48),
+      ...(Array.isArray(issue.ids) && { ids: issue.ids.slice(0, 2).map(v => short(v, 48)) }), field: short(issue.field, 60),
+      ...(Number.isFinite(issue.minimumFontSize) && { minimumFontSize: issue.minimumFontSize }),
+      ...(Number.isFinite(issue.minimumHeight) && { minimumHeight: issue.minimumHeight }),
+      message: short(issue.message || issue.reason, 70) }));
+    receipt.preflight = { status: 'failed', issueCount: value.preflight.issueCount || issues.length, issues, omitted: 0 };
+    receipt.guidance = '本次停在渲染前检查，不据此声称缺少渲染引擎。一次修正全部preflight.issues；omitted>0先用read_tool_result读取receiptId完整清单。不换工具绕预算，不要求用户反复回继续；此前成品不代表本次修改成功。';
+    // 让修正清单占用原2000预算，原始状态/主文件/预算/未核验事实不删除。
+    for (const key of ['renderer', 'designVersion', 'textRendering', 'layout', 'layoutCheck', 'copyCheck', 'presentation', 'contrast']) delete receipt[key];
+    receipt.errors = receipt.errors.map(({ code, phase }) => ({ code, phase }));
+    delete receipt.designPath;
+    if (receipt.delivery && receipt.files.some(f => f.path === receipt.delivery.primaryPath)) delete receipt.delivery.primaryPath;
+    while (JSON.stringify(receipt).length > 1950 && issues.length > 1) issues.pop();
+    receipt.preflight.omitted = receipt.preflight.issueCount - issues.length;
+  }
   let json = JSON.stringify(receipt);
   if (json.length > 1900) {
     receipt.errors = receipt.errors.map(({ code, phase }) => ({ code, phase }));

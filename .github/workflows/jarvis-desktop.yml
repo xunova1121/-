@@ -483,6 +483,8 @@ jobs:
         run: node e2e/poster-task-delivery.mjs "$RUNNER_TEMP/jarvis-e2e/poster-task-delivery"
       - name: 验证海报参数纠正、跨轮同稿与聊天主图实际打开下载
         run: node e2e/poster-intelligence.mjs "$RUNNER_TEMP/jarvis-e2e/poster-intelligence"
+      - name: 验证自由海报全部预检、文字适配与真实PNG和Office交付
+        run: node e2e/poster-preflight.mjs "$RUNNER_TEMP/jarvis-e2e/poster-preflight"
       - name: 验证 Electron 全息桌面互动
         run: |
           npm ci --prefix desktop --no-audit --no-fund

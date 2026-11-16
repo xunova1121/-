@@ -28,7 +28,7 @@ export function designId(value) {
   if (typeof value !== 'string' || !/^[A-Za-z][\w-]{0,47}$/.test(value)) throw designError('图层/素材ID需为48字符以内的英文字母开头标识');
   return value;
 }
-function normalizeLayer(node, canvas) {
+function normalizeLayer(node, canvas, fitText = true) {
   if (!node || typeof node !== 'object' || Array.isArray(node)) throw designError('图层必须是对象');
   const id = designId(node.id), type = node.type;
   if (!['text', 'shape', 'icon', 'image', 'chart'].includes(type)) throw designError('不支持的图层类型');
@@ -49,7 +49,7 @@ function normalizeLayer(node, canvas) {
     out.minFontSize = finite(node.minFontSize ?? Math.min(out.fontSize, Math.max(12, out.fontSize * 0.78)), 12, out.fontSize, '最小字号');
     out.weight = node.weight === 700 ? 700 : 400;
     out.align = ['left', 'center', 'right'].includes(node.align) ? node.align : 'left';
-    fitDesignText(out);
+    if (fitText) fitDesignText(out);
   }
   if (type === 'icon') {
     if (!['news', 'chart', 'leaf', 'heart', 'star', 'calendar', 'cloud', 'check', 'arrow', 'building'].includes(node.icon)) throw designError('请选择内置矢量图标');
@@ -71,19 +71,40 @@ export function fitDesignText(node) {
     const rows = wrapParagraphs(node.text, size, node.w);
     if (rows && rows.length * size * 1.4 <= node.h + 0.01) return { fontSize: size, lineHeight: size * 1.4, rows };
   }
-  throw designError(`图层${node.id}文案放不下；请增大文字框或明确调整排版，未截字`, 'DESIGN_TEXT_OVERFLOW');
+  const rows = wrapParagraphs(node.text, node.minFontSize, node.w);
+  throw Object.assign(designError(`图层${node.id}文案放不下；请增大文字框或明确调整排版，未截字`, 'DESIGN_TEXT_OVERFLOW'), {
+    repair: { field: rows ? 'h' : 'w', ...(rows && { minimumHeight: Math.ceil(rows.length * node.minFontSize * 1.4) }), minimumFontSize: node.minFontSize }
+  });
 }
-export function normalizeLayerDesign(raw) {
+/** 错误逐项收集，不能让模型为四个独立文字框来回猜四次。 */
+export function throwDesignIssues(issues) {
+  const first = issues[0];
+  // 原件最多160层及少量顶层字段，完整保留供按编号读取；模型发送副本另有2000字符预算。
+  throw Object.assign(designError(first.message, first.code), { issues: issues.slice(0, DESIGN_LIMITS.layers + 8), issueCount: issues.length });
+}
+export function normalizeLayerDesign(raw, { fitText = true } = {}) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw designError('分层设计必须是对象');
   if (!Number.isInteger(raw.width) || !Number.isInteger(raw.height)) throw designError('画布需为原始整数像素，不能先舍入后冒充整数');
   const width = finite(raw.width, 256, 4096, '画布宽度'), height = finite(raw.height, 256, 4096, '画布高度');
   if (!Number.isInteger(width) || !Number.isInteger(height) || width * height > DESIGN_LIMITS.pixels) throw designError('画布需整数像素，最长4096且不超过1600万像素');
-  const title = boundedText(raw.title, 300);
-  if (!title.trim()) throw designError('请提供准确标题');
+  const issues = [];
+  const checked = (read, field, id) => {
+    try { return read(); }
+    catch (error) {
+      if (error.kind !== 'input') throw error;
+      issues.push({ code: error.code, field, ...(typeof id === 'string' && /^[A-Za-z][\w-]{0,47}$/.test(id) && { id }), message: error.message, ...error.repair });
+    }
+  };
+  const title = checked(() => {
+    const value = boundedText(raw.title, 300);
+    if (!value.trim()) throw designError('请提供准确标题');
+    return value;
+  }, 'title');
   const palette = Object.fromEntries(Object.keys(PALETTES.editorial).map(key => [key, color(raw.palette?.[key], PALETTES.editorial[key])]));
   const canvas = { width, height, palette };
   if (!Array.isArray(raw.layers) || !raw.layers.length || raw.layers.length > DESIGN_LIMITS.layers) throw designError('设计需1–160个独立图层');
-  const layers = raw.layers.map(node => normalizeLayer(node, canvas));
+  const layers = raw.layers.map((node, i) => checked(() => normalizeLayer(node, canvas, fitText), `layers[${i}]`, node?.id)).filter(Boolean);
+  if (issues.length) throwDesignIssues(issues);
   if (new Set(layers.map(n => n.id)).size !== layers.length) throw designError('图层ID不能重复');
   if (layers.filter(n => n.type === 'image').length > 4) throw designError('每张设计最多放4个图片图层');
   if (!layers.some(n => n.type === 'text' && n.text.trim()) || layers.reduce((sum, n) => sum + (n.text?.length || 0), 0) > DESIGN_LIMITS.text) throw designError('设计需有文字，全文不超过12000字');

@@ -57,17 +57,17 @@ async function packageDesign(design, assets, artifacts, receipt, signal) {
 export async function deliverLayeredDesign(input, ctx = {}, options = {}, demo = false) {
   const { signal } = options;
   const defaultSize = demo ? [3840, 2160] : [1080, 1920];
-  const { design, assets } = await loadLayerDesign(input, { signal, defaultSize, autoHeight: options.autoPosterHeight });
+  const { design, assets, preflight } = await loadLayerDesign(input, { signal, defaultSize, autoHeight: options.autoPosterHeight });
   if (design.illustrated || options.requiresRichVisual) {
     design.illustrated = true;
     options = { ...options, requiresRichVisual: true };
   }
   const { base, release } = await claimLayerOutputBase(input, design, signal);
-  try { return await deliverLoadedDesign({ design, assets, base }, ctx, options, demo); }
+  try { return await deliverLoadedDesign({ design, assets, base, preflight }, ctx, options, demo); }
   finally { release(); }
 }
 
-async function deliverLoadedDesign({ design, assets, base }, ctx, options, demo) {
+async function deliverLoadedDesign({ design, assets, base, preflight }, ctx, options, demo) {
   const { signal, progress, checkpoint } = options;
   const source = new Blob([JSON.stringify(design, null, 2)], { type: 'application/json' });
   if (source.size > DESIGN_LIMITS.source) throw designError('归一化源稿超过180KB，请拆版');
@@ -86,6 +86,15 @@ async function deliverLoadedDesign({ design, assets, base }, ctx, options, demo)
     receipt.errors.push(...receipt.compositionIssues.map(issue => ({ ...issue, phase: 'composition' })));
   }
   if (receipt.contentCheck?.status === 'failed') receipt.errors.push({ code: 'DESIGN_ILLUSTRATION_MISSING', phase: 'composition', message: '图文并茂需实际主题图片或有来源图表，图标/数字卡片不能代替。源稿保留；不编造时间走势，不自动付费重画。' });
+  const issues = [
+    ...(receipt.presentation.failed || []).map(item => ({ code: 'DESIGN_PRESENTATION_UNREADABLE', ...item,
+      ...(item.minimum && { field: 'fontSize', minimumFontSize: Math.ceil(item.minimum * design.width / receipt.presentation.previewWidth * 1000) / 1000 }) })),
+    ...(receipt.layoutCheck.failed || []).map(ids => ({ code: 'DESIGN_TEXT_OVERLAP', ids, field: 'position', message: '这两个文字区域重叠，需调整位置' })),
+    ...(receipt.compositionIssues || []),
+    ...(receipt.contentCheck?.status === 'failed' ? [{ code: 'DESIGN_ILLUSTRATION_MISSING', field: 'design.assets', message: '需可见主题图片/有来源图表，图标和数字不算配图' }] : [])
+  ];
+  receipt.preflight = { status: receipt.errors.length ? 'failed' : 'passed', issueCount: issues.length,
+    issues: issues.slice(0, 32), adjustments: preflight?.adjustments || [] };
   const artifacts = new Map();
   const deliver = async (format, blob, render = 'not_checked') => {
     const path = await saveDesignFile(`${base}.${format}`, blob, ctx, signal);

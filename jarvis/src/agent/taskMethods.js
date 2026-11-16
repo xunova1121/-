@@ -2,7 +2,7 @@
 const METHODS = Object.freeze({
   poster: { label: '图文海报与同稿Demo', match: /海报|\.design\.json|\.canvas\.json|同稿.*Demo/i,
     tools: ['make_poster', 'create_visual_demo', 'inspect_image', 'read_file'],
-    steps: ['先确定原文、阅读场景和真实源稿；只改标题时保留其余图层。', '已有卡槽用Canvas保护原图；重新设计用design，栏目配图用magazine+sections.asset或自由图层。图像须服务内容，不能用空地图和重复文字卡片充数。', '数字单位不断开，中文用真实字体。参数修正在渲染前进行；根据明确失败字段修改，遵守corrections与retryAllowed。', '检查最终PNG和手机预览；图文关联/字体/像素/事实分别核验。交付实际读回的主PNG，Demo另附HTML，不把文件齐全当审美通过。'] },
+    steps: ['先确定原文、阅读场景和真实源稿；只改标题时保留其余图层。', '已有卡槽用Canvas保护原图；新图文稿优先magazine+sections.asset组织栏目，只有确需精确构图才写自由layers。配图对应内容，不能用空地图和重复文字卡片充数。', '新自由稿文字自动在安全空间适配；一次处理preflight.issues全部字段，omitted>0先回读完整回执。缺空间须重新构图，不能删文案/缩成小字；不换工具绕预算，不让用户反复回继续。', '检查最终PNG和手机预览；图文关联/字体/像素/事实分别核验。交付实际读回的主PNG，Demo另附HTML，不把文件齐全当审美通过。'] },
   company: { label: '企业与招投标研究', match: /企业|公司|工商|股东|股权|招投标|招标|中标|采购公告/,
     tools: ['lookup_company', 'search_tenders', 'read_tender_notice', 'web_search', 'fetch_url'],
     steps: ['先按用户完整公司名/地区检索，名称近似的企业分别核对；不要把无结果理解为公司不存在。', '专业接口没有资料时，在已开放搜索预算内找官网、公告、年报或监管原文。股权需注明对应时间与直接/间接关系。', '区分候选摘要、已读原文和已核实事实；招标记录保留发布日、截止日、地区及原文链接。', '来源冲突先核对时间和统计口径；缺项具体说明，不编造股东/项目/实时性，不要求用户理解后台工具名。'] },

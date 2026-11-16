@@ -13,6 +13,13 @@ function textRole(node, design) {
   return /(?:^eyebrow$|-(?:label|category|meta)$)/.test(node.id) ? 'label' : 'body';
 }
 
+/** 预排和验收用同一阅读尺度，不能在自动适配时另设更低的合格线。 */
+export function designTextMinimum(node, design) {
+  const role = textRole(node, design);
+  const previewWidth = Math.min(design.width, design.reading === 'phone' ? 390 : 1440);
+  return { role, minimum: MINIMUM[role], fontSize: Math.ceil(MINIMUM[role] * design.width / previewWidth * 1000) / 1000 };
+}
+
 /** 缩放整张原构图，而非另排可读卡片来掩盖原海报的小字；原SVG白名单保持不变。 */
 export function phonePreviewSvg(svg, design) {
   const width = Math.min(390, design.width), scale = width / design.width;

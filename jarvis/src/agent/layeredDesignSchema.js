@@ -23,6 +23,7 @@ export const LAYERED_PROPERTIES = {
     type: 'object', additionalProperties: false,
     description: '新稿优先使用。按内容构图；layout只是起稿，layers可完全自由排版。source_path+design可重新构图/换画幅，默认复用原栏目和素材；改字用changes。精确文字独立排字，图片用工作区无字素材。',
     properties: {
+      text_fit: { type: 'string', enum: ['auto', 'strict'], description: '新自由稿/完整重新构图默认auto：安全空白内适配字号/行高，原文、坐标、素材和画幅不变；strict严格保留框尺寸。source_path+changes局部修改不自动重排。一次处理preflight.issues全部问题，不逐项试错。' },
       eyebrow: { type: 'string', description: '可选栏目/品牌眉题' },
       layout: { type: 'string', enum: ['editorial', 'magazine', 'campaign', 'timeline', 'newspaper', 'celebration', 'dashboard', 'free'], description: 'magazine栏目配图交错编排，用sections.asset关联素材；editorial主次编排；campaign宣传；timeline时间轴；newspaper报纸分栏；free自由坐标。只换色不是换版式。' },
       reading: { type: 'string', enum: ['phone', 'desktop'], description: '阅读场景；竖版默认phone，按390px整图宽度检查正文至少12px；横版默认desktop。不靠4K像素掩盖小字。' },

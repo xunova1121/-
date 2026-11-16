@@ -7,6 +7,7 @@ import { DESIGN_LIMITS, designError, normalizeLayerDesign } from './layeredDesig
 import { planLayerDesign, planReadableLayerDesign } from './layeredDesignLayout.js';
 import { throwControl } from '../core/networkRequest.js';
 import { scopedState } from './store.js';
+import { prepareFreeLayerDesign } from './layeredDesignPreflight.js';
 
 // 每个账号/后端最多64个在途输出名；WeakMap随原存储作用域回收，不在账号间共享文件名。
 const outputState = scopedState('files', () => new Set());
@@ -43,7 +44,7 @@ function reflowInput(input, previous) {
 export async function loadLayerDesign(input, { signal, defaultSize, autoHeight = false } = {}) {
   throwControl(null, signal);
   if (!input || typeof input !== 'object' || Array.isArray(input) || JSON.stringify(input).length > DESIGN_LIMITS.source) throw designError('设计参数超过180KB或格式错误');
-  let design;
+  let design, preflight;
   if (input.source_path) {
     if (!/\.design\.json$/i.test(input.source_path)) throw designError('新分层设计仅复用.design.json，旧稿继续用原海报/大屏接口');
     const blob = await ws.readBlob(input.source_path);
@@ -54,7 +55,9 @@ export async function loadLayerDesign(input, { signal, defaultSize, autoHeight =
     design = normalizeLayerDesign(previous);
     if (input.background_path) throw designError('分层稿更换图片请明确design.assets，不用旧底图字段悄悄换素材');
     if (input.design) {
-      design = planLayerDesign(reflowInput(input, design), defaultSize);
+      const rebuilt = reflowInput(input, design);
+      if (input.design.layers) ({ design, preflight } = prepareFreeLayerDesign(rebuilt, defaultSize));
+      else design = planLayerDesign(rebuilt, defaultSize);
       if (previous.illustrated === true) design.illustrated = true;
     }
     else if (input.width && input.width !== design.width || input.height && input.height !== design.height || input.size) throw designError('改画幅请同时用design重新构图，不能把旧稿整体拉伸成新画幅');
@@ -81,7 +84,8 @@ export async function loadLayerDesign(input, { signal, defaultSize, autoHeight =
     // 标题/正文改字不让数据快照悄悄恢复旧值；显式改过的节点同步移出旧快照。
     design.states = design.states.map(s => ({ ...s, changes: s.changes.filter(c => !contentChanged.has(c.id)) }));
     design = normalizeLayerDesign(design);
-  } else design = planReadableLayerDesign(input, defaultSize, autoHeight);
+  } else if (input.design?.layers) ({ design, preflight } = prepareFreeLayerDesign(input, defaultSize));
+  else design = planReadableLayerDesign(input, defaultSize, autoHeight);
   const assets = new Map();
   let totalBytes = 0, totalPixels = 0;
   for (const entry of design.assets) {
@@ -101,7 +105,7 @@ export async function loadLayerDesign(input, { signal, defaultSize, autoHeight =
   }
   if (design.layers.some(n => n.type === 'image' && !assets.has(n.asset))) throw designError('图片图层引用了不存在的素材');
   throwControl(null, signal);
-  return { design, assets };
+  return { design, assets, preflight };
 }
 
 export function layerOutputBase(input, design) {

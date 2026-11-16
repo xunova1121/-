@@ -204,12 +204,14 @@ function dashboard(b, input, sections) {
   if (main.some(s => !usedMain.includes(s))) throw designError('驾驶舱起稿只能安排一组趋势或说明；请用layers自由排版其余内容，未删除文案');
 }
 
-export function planLayerDesign(input, defaultSize = [1080, 1920]) {
+export function planLayerDesign(input, defaultSize = [1080, 1920], normalization = {}) {
   const spec = input.design;
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) throw designError('请提供design构图参数');
   if (JSON.stringify(input).length > 180000) throw designError('设计参数超过180KB');
-  input = { ...input, title: boundedText(input.title, 300) };
-  if (!input.title.trim()) throw designError('请提供准确标题');
+  // 自由稿常已写出完整title文字层；只复用这个唯一明确标题，不从主题/文件名猜文案。
+  const titles = Array.isArray(spec.layers) ? spec.layers.filter(n => n?.id === 'title' && n.type === 'text') : [];
+  input = { ...input, title: boundedText(input.title ?? (titles.length === 1 ? titles[0].text : undefined), 300) };
+  if (!input.title.trim() && !spec.layers) throw designError('请提供准确标题');
   const width = input.width ?? defaultSize[0], height = input.height ?? defaultSize[1];
   const layout = spec.layout || (width > height ? 'dashboard' : 'editorial');
   if (!['editorial', 'magazine', 'campaign', 'timeline', 'newspaper', 'celebration', 'dashboard', 'free'].includes(layout)) throw designError('请选择支持的起稿布局，或用free自由图层');
@@ -235,7 +237,7 @@ export function planLayerDesign(input, defaultSize = [1080, 1920]) {
     else ({ editorial, campaign, celebration, dashboard })[layout](b, input, sections);
     footer(b, input);
   }
-  return normalizeLayerDesign({ ...input, width, height, palette, assets, layers: b.layers, states: spec.states, fontFamily: input.font_family || 'sans', reading: spec.reading || (width > height ? 'desktop' : 'phone') });
+  return normalizeLayerDesign({ ...input, width, height, palette, assets, layers: b.layers, states: spec.states, fontFamily: input.font_family || 'sans', reading: spec.reading || (width > height ? 'desktop' : 'phone') }, normalization);
 }
 
 /** 未指定尺寸的新竖稿可在写文件前增加高度；明确画幅、原稿和横版绝不悄悄改变。 */
