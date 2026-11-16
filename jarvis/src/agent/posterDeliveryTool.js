@@ -1,6 +1,7 @@
 /** 海报一次交付同版式 PNG、SVG、PPTX；文件读回和视觉验收分别记录。 */
 import * as ws from './workspace.js';
 import { imageFormat, assertImageExtension } from './imageFormat.js';
+import { withPosterDelivery } from './posterDeliverySession.js';
 import { composePoster } from './posterComposition.js';
 import { posterPngInfo } from './posterCompositionInput.js';
 import { renderPoster } from './posterRaster.js';
@@ -141,7 +142,7 @@ async function gradientContrast(ctx, compose, out, signal) {
 }
 
 export function createPosterDeliveryTool(ctx = {}) {
-  return {
+  return withPosterDelivery({
     name: 'make_poster',
     description: '已有无字底图卡槽填字用canvas.entries，可配header/footer/regions/protected；保留全图只用Canvas真实字体，不经SVG、不加遮罩；交付PNG/原生文字PPTX/可拖动编辑HTML/ZIP/.canvas.json，改字或补Demo复用source_path。制作准确中文图文海报：新稿优先design按内容构图，sections组织主次新闻/图文/数值卡片，或layers自由安排文字、图片、矢量图标、形状与图表。已有图片放design.assets，GPT仅生成需要的无字视觉素材。交付同源PNG/SVG/可编辑PPTX和.design.json；改字用source_path+changes，补同稿Demo用create_visual_demo复用源稿，不重画。旧稿.poster.json及panel/gradient接口保持兼容；gradient为底部连续渐变。回执区分原文、字体、像素、对比、视觉，4K不等于素材原生细节，不能保证绝对无错字。',
     input_schema: {
@@ -172,13 +173,13 @@ export function createPosterDeliveryTool(ctx = {}) {
       required: [],
       additionalProperties: false
     },
-    run: async (input = {}, { signal, progress, checkpoint, retrieval } = {}) => {
+    run: async (input = {}, { signal, progress, checkpoint, retrieval, requiresRichVisual, posterAttempt } = {}) => {
       if (!input || typeof input !== 'object' || Array.isArray(input)) throw inputError('海报参数必须是对象');
-      if (usesCanvasText(input)) return deliverCanvasText(input.size !== undefined ? { ...input, ...Object.fromEntries(['width', 'height'].map((key, i) => [key, dimensions(input)[i]])) } : input, ctx, { signal, progress, checkpoint, retrieval });
+      if (usesCanvasText(input)) return deliverCanvasText(input.size !== undefined ? { ...input, ...Object.fromEntries(['width', 'height'].map((key, i) => [key, dimensions(input)[i]])) } : input, ctx, { signal, progress, checkpoint, retrieval, requiresRichVisual });
       if (usesLayeredDesign(input)) {
         const resize = !input.source_path || input.design && (input.size !== undefined || input.width !== undefined || input.height !== undefined);
         const [width, height] = resize ? dimensions(input) : [];
-        return deliverLayeredDesign(resize ? { ...input, width, height } : input, ctx, { signal, progress, checkpoint, retrieval });
+        return deliverLayeredDesign(resize ? { ...input, width, height } : input, ctx, { signal, progress, checkpoint, retrieval, requiresRichVisual, posterAttempt });
       }
       input = await posterDesignInput(input, signal);
       if (typeof input.title !== 'string' || !input.title.trim()) throw inputError('海报要有主标题');
@@ -243,5 +244,5 @@ export function createPosterDeliveryTool(ctx = {}) {
       await checkpoint?.({ type: 'artifact_validation', path: receipt.files.find(file => file.format === 'svg')?.path || `${base}.svg`, validation: { kind: 'poster', format: 'svg', readback: receipt.files.some(file => file.format === 'svg') ? 'passed' : 'failed', render: receipt.files.some(file => file.format === 'png') ? 'passed' : 'failed', visual: 'not_checked', business: 'not_checked', errors: receipt.errors.length } });
       return JSON.stringify(receipt);
     }
-  };
+  }, ctx, createPosterDeliveryTool);
 }

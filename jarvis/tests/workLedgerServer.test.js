@@ -54,3 +54,30 @@ it('成果API需要认证，允许手机来源；只能删除成果记录，不�
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+it('云端候选海报可按all查询，默认成功列表仍不冒充已完成', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'poster-ledger-server-'));
+  const mode = createServerMode({ dataDir: dir, password: 'poster-fixture' });
+  const server = createServer({ serverMode: mode, ollama: null });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = 'http://127.0.0.1:' + server.address().port;
+  const headers = { Authorization: 'Bearer ' + tokenFor('poster-fixture') };
+  try {
+    await collection('sessions').put({ id: 'poster-cloud', messages: [] });
+    const id = '11111111-1111-4111-a111-111111111111', prefix = `.workflows/posters/${id}/`, file = prefix + 'attempt-1/成品.png';
+    await workspace.write(file, new Blob(['protocol fixture']));
+    await recordWorkAttempt({ tool: 'make_poster', ok: true, sessionId: 'poster-cloud', scope: {}, callId: 'one', output: JSON.stringify({
+      kind: 'poster', status: 'partial', errors: [{ code: 'DESIGN_ILLUSTRATION_UNVERIFIED' }], files: [{ format: 'png', path: file, readback: 'passed', render: 'passed', structure: 'passed' }],
+      delivery: { id, title: '候选图', primaryPath: file, historyPrefix: prefix, sourceFiles: [], quality: 'needs_review' }
+    }) });
+    expect((await (await fetch(base + '/api/work-records?kind=image', { headers })).json()).total).toBe(0);
+    const result = await (await fetch(base + '/api/work-records?kind=image&status=all', { headers })).json();
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ artifactKind: 'poster', status: 'unverified', files: [file] });
+    expect((await (await fetch(base + '/api/work-records?kind=image&status=', { headers })).json()).total).toBe(1);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    useBackend(null);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

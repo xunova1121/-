@@ -1,6 +1,7 @@
 /** 文本、卡片、折线均为原生可编辑对象；图标独立矢量对象，原图独立图片对象。 */
 import { fitDesignText } from './layeredDesignInput.js';
 import { chartGeometry, chartLabelNodes, designIconMarkup } from './layeredDesignSvg.js';
+import { barChartGeometry } from './posterBarChart.js';
 
 const inch = px => px / 96;
 function dataSvg(svg) {
@@ -19,6 +20,13 @@ function text(slide, node, font = 'Noto Sans CJK SC') {
   }));
 }
 function chart(pptx, slide, node, font) {
+  if (node.chartType === 'bar') {
+    const g = barChartGeometry(node);
+    slide.addShape(pptx.ShapeType.line, { x: inch(g.zero), y: inch(node.y), w: 0, h: inch(node.h), line: { color: node.color.slice(1), width: 1 }, objectName: `layer-${node.id}-zero` });
+    g.bars.filter(b => b.w > 0).forEach((b, i) => slide.addShape(pptx.ShapeType.rect, { x: inch(b.x), y: inch(b.y), w: inch(b.w), h: inch(b.h), fill: { color: node.color.slice(1) }, line: { transparency: 100 }, objectName: `layer-${node.id}-bar-${i}` }));
+    g.labels.forEach(label => text(slide, label, font));
+    return;
+  }
   const g = chartGeometry(node);
   // 用可编辑线段和数据标签，而不是把整张图表烘焙成一张图片。
   for (let i = 1; i < g.points.length; i++) {

@@ -1,6 +1,7 @@
 /** 所有格式消费同一图层；SVG只由本模块编译，再经过原视觉SVG白名单。 */
 import { validateVisualSceneSvg } from './visualSceneSvg.js';
 import { fitDesignText, designError } from './layeredDesignInput.js';
+import { barChartGeometry } from './posterBarChart.js';
 
 export const DESIGN_FONT = 'Noto Sans CJK SC,Microsoft YaHei,PingFang SC,Noto Sans SC,Source Han Sans SC,Droid Sans Fallback,sans-serif';
 export const designFont = family => family === 'serif' ? 'Noto Serif CJK SC,SimSun,Songti SC,Noto Serif SC,Source Han Serif SC,serif' : DESIGN_FONT;
@@ -30,6 +31,7 @@ export function chartGeometry(node) {
   return { pad, low, high, points: node.points.map((p, i) => ({ ...p, x: node.x + pad + i / (values.length - 1) * innerW, y: node.y + pad + (high - p.value) / span * innerH })) };
 }
 export function chartLabelNodes(node) {
+  if (node.chartType === 'bar') return barChartGeometry(node).labels;
   const size = Math.max(12, Math.min(26, node.h * 0.09)), h = Math.min(64, node.h * 0.24);
   return [node.points[0], node.points.at(-1)].map((p, i) => ({
     id: node.id + '-label-' + i, type: 'text', text: p.label, fontSize: size, minFontSize: 12, weight: 400, color: node.color,
@@ -50,6 +52,12 @@ export function designLayerMarkup(node, assets, font = DESIGN_FONT) {
     const anchor = node.align === 'center' ? 'middle' : node.align === 'right' ? 'end' : 'start';
     // 每行独立真实文字，不使用textLength压扁中文；实际字体/字形在导出时核验。
     return fitted.rows.map((row, i) => `<text x="${f(tx)}" y="${f(y + fitted.fontSize * 1.08 + i * fitted.lineHeight)}" font-family="${font}" font-size="${f(fitted.fontSize)}" font-weight="${node.weight}" fill="${node.color}" text-anchor="${anchor}" xml:space="preserve">${esc(row)}</text>`).join('');
+  }
+  if (node.chartType === 'bar') {
+    const g = barChartGeometry(node);
+    return `<path d="M${f(g.zero)} ${y}V${f(y + h)}" fill="none" stroke="${node.color}" stroke-width="1"/>` +
+      g.bars.filter(b => b.w > 0).map(b => `<rect x="${f(b.x)}" y="${f(b.y)}" width="${f(b.w)}" height="${f(b.h)}" fill="${node.color}"/>`).join('') +
+      g.labels.map(label => designLayerMarkup(label, assets, font)).join('');
   }
   const geometry = chartGeometry(node);
   const path = geometry.points.map((p, i) => `${i ? 'L' : 'M'}${f(p.x)} ${f(p.y)}`).join('');

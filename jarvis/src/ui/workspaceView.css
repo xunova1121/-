@@ -161,6 +161,29 @@
 .ws-formats:empty {
   display: none;
 }
+.ws-poster-files {
+  flex: 1 1 100px;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 11px;
+  overflow: hidden;
+}
+.ws-poster-files summary {
+  cursor: pointer;
+  padding: 7px 10px;
+  color: var(--accent);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.ws-poster-files[open] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+.ws-poster-files button {
+  min-width: 0;
+  width: 100%;
+}
 .ws-formats button {
   max-width: 100%;
   overflow: hidden;

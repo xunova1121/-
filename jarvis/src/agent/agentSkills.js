@@ -38,12 +38,12 @@ export const AGENT_SKILLS = Object.freeze({
 8. 交付前检查：每个数字都有来源和时间；没有把旧闻当最新；结论没有超出证据。`,
 
   'poster-designer': `## 海报设计专业方法
-1. 明确用途、尺寸、文字、品牌色；原片修图不问海报标题。留安全边距，2–3色、1–2字体。
+1. 明确用途、尺寸、文字、品牌色；原片修图不问海报标题。留安全边距。图文并茂须真实主题配图/图表，图标/数字卡片不算；不同指数对比用chartType=bar，不编造走势。
 2. 已有底图卡槽/保留全图直接填字用make_poster.canvas：background_path原图，entries标题/正文，header主标题；自动定位或regions指定原图0–1比例，protected保护人物图标。只叠Canvas真实字体，不裁图、不加面板、不走SVG；交付PNG/原生文字PPTX/可拖动编辑HTML/ZIP/.canvas.json。source_path+canvas.entries改字，源图与位置复用；装不下调整区域或拆版，不截字。
-3. 重新构图用make_poster.design，sections组织主次或free+layers自由坐标；换结构可用timeline/newspaper/campaign，不能只换色或固定底部列表。竖版390px整图正文至少12px。复用design.assets真实图片，缺素材才generate_image(purpose=poster_art)画无字主体场景，不画空框/整页。图标/卡片独立可改，无图像能力用矢量形状，不吹成模型插画。交最终 PNG/SVG/PPTX，不只交PPTX，不绕Python/手写HTML截图/render_diagram。
+3. 重新构图用make_poster.design，sections组织主次或free+layers自由坐标；换结构可用timeline/newspaper/campaign，不能只换色或固定底部列表。竖版390px整图正文至少12px。复用design.assets真实图片，缺素材才generate_image(purpose=poster_art)画无字主体场景，不画空框/整页。图标/卡片独立可改，装饰不冒充主题配图。默认交一张最终 PNG；源文件/历史稿在文件空间展开，不重复改名导出。最多3次试排，按retryAllowed收尾，不绕Python/手写截图。
 4. 复杂大屏或海报加交互Demo用create_visual_demo；.design.json同源PNG/SVG/PPTX/HTML/ZIP，手机可读卡片；.canvas.json保持原图构图。source_path复用.design.json/.canvas.json/.visual.json/.poster.json，补Demo不重画。分层稿changes按id同步全格式，不仅手改SVG。
-5. process_image：人像美颜portrait_retouch，显瘦portrait_slim，不能以upscale冒充美颜；natural默认自然，instructions按用户要求。仅用指定原图，保留长相/年龄/服装背景；缺原图请上传，不搜别人照片。原片保留、另存；按portraitReview报告，未复核不承诺保真；已有双图检查不重复inspect_image，不因未通过自动付费重修。原抠图/证件照/修复流程保持。
-6. 按真实回执分别报告原文、字体、像素/手机可读、对比和视觉状态；需看图用inspect_image核对最终PNG。生成成功不等于视觉或交互验收，示例/提供数据不冒充实时数据，4K画布不证明原图细节。不保证绝对无错字，失败保留源文件说明缺失阶段。`,
+5. process_image：人像美颜portrait_retouch，显瘦portrait_slim，不能以upscale冒充美颜；natural默认自然，instructions按用户要求。仅用指定原图，保留长相/年龄/服装背景；缺原图请上传，不搜别人照片。原片保留、另存；按portraitReview报告，未复核不承诺保真；已有双图检查不重复inspect_image，不因未通过自动付费重修。原流程保持。
+6. 按真实回执分别报告原文、字体、像素/手机可读、对比和视觉状态；需看图用inspect_image核对最终PNG。生成不等于审美验收，图文关联未复核不能称全项通过；提供数据不冒充实时数据，4K画布不证明细节。不保证绝对无错字，失败保留源文件说明缺失阶段。`,
 
   'image-reader': `## 图片转文字专业方法
 1. 按原图顺序提取，保留段落、标题层级和列表；表格还原成 Markdown 表格，行列对应不能错位。

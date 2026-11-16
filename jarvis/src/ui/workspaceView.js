@@ -72,20 +72,20 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
   });
   list.after(more);
 
-  async function sourceRecords(scope, path) {
-    if (cachedSources?.scope === scope && cachedSources.path === path && Date.now() - cachedSources.at < 30000) return cachedSources.items;
+  async function sourceRecords(scope, path, revision = '') {
+    if (cachedSources?.scope === scope && cachedSources.path === path && cachedSources.revision === revision && Date.now() - cachedSources.at < 30000) return cachedSources.items;
     sourceController?.abort();
     const controller = (sourceController = new AbortController());
     const timer = setTimeout(() => controller.abort(), 1500);
     let result;
     try {
-      result = await getRecords?.({ path, limit: 1, signal: controller.signal });
+      result = await getRecords?.(path ? { path, limit: 1, signal: controller.signal } : { kind: 'image', status: '', limit: 200, signal: controller.signal });
     } finally {
       clearTimeout(timer);
       if (sourceController === controller) sourceController = null;
     }
     const records = (result?.items || []).slice(0, 200);
-    cachedSources = { scope, path, at: Date.now(), items: records };
+    cachedSources = { scope, path, revision, at: Date.now(), items: records };
     return records;
   }
   const scopeNow = () => getScope() + ':' + workspace.mode() + ':' + (workspace.folderName() || '');
@@ -231,9 +231,14 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
       items = {};
       toast('文件管理标记读取失败，先显示原文件，不会删除文件。');
     }
-    const records = cachedSources?.scope === scope ? cachedSources.items : [];
-    // 来源查询只在打开管理时进行，不让可选云端索引阻塞文件查找。
-    if (!isCurrent()) return null;
+    // 只有存在任务海报时才取简短成果索引，最多等待1.5秒；无此类文件保持原首屏路径。
+    let records = cachedSources?.scope === scope ? cachedSources.items : [];
+    const posterFiles = files.filter(f => /^\.workflows\/posters\//.test(f.path));
+    if (posterFiles.length) {
+      const revision = posterFiles.length + ':' + posterFiles.reduce((latest, f) => Math.max(latest, Number(f.mtime) || 0), 0);
+      try { records = await sourceRecords(scope, '', revision); } catch { /* 索引不可达时仍可打开过程文件 */ }
+    }
+    if (!isCurrent() || scope !== scopeNow()) return null;
     const groups = catalogGroups(files, { items, records, query, category, view, project, process: showProcess });
     projectSelect.hidden = view !== 'projects';
     const projects = [
@@ -276,9 +281,18 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
         else selected.delete(group.key);
         syncBatch();
       };
-      const fileTitle = group.files.length === 1 && !items[primary.path]?.title ? primary.path.split('/').pop() : group.title;
+      const fileTitle = group.files.length === 1 && !group.poster && !items[primary.path]?.title ? primary.path.split('/').pop() : group.title;
       const formats = element('div', { className: 'ws-formats' });
       if (group.files.length > 1) for (const file of group.files) formats.append(action(file.path.split('/').pop(), () => openFile(file.path)));
+      if (group.poster) {
+        for (const [label, entries] of [['源文件', group.poster.sourceFiles], ['历史稿', group.poster.historyFiles]]) {
+          const detail = element('details', { className: 'ws-poster-files' }, element('summary', { textContent: label + `（${entries.length}）` }));
+          detail.onclick = event => event.stopPropagation();
+          for (const file of entries) detail.append(action(file.path.split('/').slice(-2).join(' / '), () => { assertScope(scope); return openFile(file.path); }));
+          formats.append(detail);
+        }
+        formats.prepend(element('span', { textContent: group.poster.quality === 'complete' ? '成品海报' : '候选海报 · 待核验' }));
+      }
       const subtitle = [
         group.project,
         primary.path,

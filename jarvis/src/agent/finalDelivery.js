@@ -1,5 +1,11 @@
 /** 收尾只恢复本轮已读回的真实产物，不复述失效草稿，不调用模型。 */
 export function missingDeliveries(answer, report) {
+  const poster = report.media?.kind === 'poster' && report.media.delivery;
+  if (poster?.primaryPath) {
+    if (String(answer).includes(poster.primaryPath)) return '';
+    const target = encodeURI(poster.primaryPath).replace(/[()]/g, value => '%' + value.charCodeAt(0).toString(16));
+    return `\n\n[${poster.quality === 'complete' ? '查看海报' : '查看候选海报（待核验）'}](${target})\n\n源文件和历史稿可在文件空间展开。`;
+  }
   const formats = report.contract?.formats || [];
   const items = (report.artifacts || []).filter(item =>
     formats.includes(item.format) && !item.stale && item.readback === 'passed' && typeof item.path === 'string'

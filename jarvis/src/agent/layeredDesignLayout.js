@@ -194,7 +194,7 @@ function dashboard(b, input, sections) {
     const group = `section-${sections.indexOf(chart) + 1}`;
     shape(group + '-card', [rightX, bodyY, rightW, bodyH], p.card, 18 * u, { group });
     text(group + '-title', chart.title, [rightX + 30 * u, bodyY + 18 * u, rightW - 60 * u, 55 * u], 28, { group });
-    add('chart', group + '-chart', [rightX + 30 * u, bodyY + 90 * u, rightW - 60 * u, bodyH - 118 * u], { points: chart.points, color: p.accent, group, detail: chart.detail || chart.title });
+    add('chart', group + '-chart', [rightX + 30 * u, bodyY + 90 * u, rightW - 60 * u, bodyH - 118 * u], { points: chart.points, chartType: chart.chartType, unit: chart.unit, color: p.accent, group, detail: chart.detail || chart.title });
   } else if (main.length) card(b, main[0], sections.indexOf(main[0]), [rightX, bodyY, rightW, bodyH], false);
   else text('empty-data', '未提供趋势数据', [rightX, bodyY, rightW, bodyH], 34, { color: p.muted });
   // 不允许自动布局静默丢掉尚未容纳的内容。

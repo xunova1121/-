@@ -57,6 +57,9 @@ function normalizeLayer(node, canvas) {
   }
   if (type === 'image') { out.asset = designId(node.asset); out.fit = node.fit === 'contain' ? 'contain' : 'cover'; }
   if (type === 'chart') {
+    if (node.chartType !== undefined && !['line', 'bar'].includes(node.chartType)) throw designError('图表类型需为line或bar');
+    if (node.chartType !== undefined) out.chartType = node.chartType;
+    if (node.unit !== undefined) out.unit = boundedText(node.unit, 20);
     if (!Array.isArray(node.points) || node.points.length < 2 || node.points.length > 24) throw designError('图表需2–24个明确数据点');
     out.points = node.points.map(p => ({ label: boundedText(p.label, 40), value: checkedNumber(p.value, -1e10, 1e10, '图表值') }));
   }
@@ -90,6 +93,7 @@ export function normalizeLayerDesign(raw) {
   if (raw.fontFamily !== undefined && !['sans', 'serif'].includes(raw.fontFamily)) throw designError('字体请选择sans黑体或serif宋体');
   if (raw.reading !== undefined && !['phone', 'desktop'].includes(raw.reading)) throw designError('阅读场景需为phone或desktop');
   return { kind: 'layered-design', version: 1, title, width, height, palette, layers, dataMode, source, asOf: boundedText(raw.asOf || '', 100), fontFamily: raw.fontFamily || 'sans',
+    ...(raw.illustrated === true && { illustrated: true }),
     ...(raw.reading !== undefined && { reading: raw.reading }),
     assets: normalizeAssets(raw.assets), states: normalizeStates(raw.states, layers, canvas) };
 }

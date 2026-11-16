@@ -10,6 +10,7 @@ import { checkDesignPresentation, phonePreviewSvg } from './layeredDesignPresent
 import { renderVisualScene } from './visualSceneRaster.js';
 import { assertPosterPng } from './posterDeliveryTool.js';
 import { throwControl } from '../core/networkRequest.js';
+import { posterContent } from './posterContent.js';
 
 function assetsReceipt(design, assets) {
   return design.layers.filter(n => n.type === 'image').map(node => {
@@ -57,6 +58,11 @@ export async function deliverLayeredDesign(input, ctx = {}, options = {}, demo =
   const { signal } = options;
   const defaultSize = demo ? [3840, 2160] : [1080, 1920];
   const { design, assets } = await loadLayerDesign(input, { signal, defaultSize });
+  if (design.illustrated || options.requiresRichVisual) {
+    design.illustrated = true;
+    options = { ...options, requiresRichVisual: true };
+  }
+  if (options.requiresRichVisual && posterContent(design).status !== 'passed') throw designError('图文并茂需实际主题图片或数据图表；数字卡片、图标和文字列表不能代替。复用已有配图，或用有来源的同单位数据画chartType=bar对比图；不编造时间走势，不自动付费重画。', 'DESIGN_ILLUSTRATION_MISSING');
   const { base, release } = await claimLayerOutputBase(input, design, signal);
   try { return await deliverLoadedDesign({ design, assets, base }, ctx, options, demo); }
   finally { release(); }
@@ -68,13 +74,14 @@ async function deliverLoadedDesign({ design, assets, base }, ctx, options, demo)
   if (source.size > DESIGN_LIMITS.source) throw designError('归一化源稿超过180KB，请拆版');
   progress?.('正在编排独立文字、图标、图片与内容卡片…');
   const svg = composeLayeredSvg(design, assets);
-  const receipt = { kind: demo ? 'visual_demo' : 'poster', status: 'partial', width: design.width, height: design.height,
+  const receipt = { kind: demo ? 'visual_demo' : 'poster', title: design.title, status: 'partial', width: design.width, height: design.height,
     files: [], textRendering: 'program', fontCheck: 'not_checked', visual: 'not_checked', interaction: 'not_checked',
     dataMode: design.dataMode, designVersion: 'layered-1', assets: assetsReceipt(design, assets), contrast: { status: 'not_checked' },
     editing: { layouts: ['editorial', 'campaign', 'timeline', 'newspaper', 'celebration', 'dashboard', 'free'],
       guidance: '可以自由构图：design.layout=free配合layers逐个指定文字/图片/图标的坐标。换结构用source_path+design，保留palette与原素材；局部改字用changes。无需手改SVG。' },
     notes: ['同一分层源稿生成各格式；文字不由生图模型画，图标为独立矢量对象', '文案原样保留，不证明文案中的事实或错别字已被编辑校正', '4K仅表示导出画布；素材放大倍率单独记录，未自动付费重画/放大'], errors: [] };
   checkGeometry(design, svg, receipt);
+  if (options.requiresRichVisual) receipt.contentCheck = posterContent(design);
   const artifacts = new Map();
   const deliver = async (format, blob, render = 'not_checked') => {
     const path = await saveDesignFile(`${base}.${format}`, blob, ctx, signal);
@@ -90,8 +97,11 @@ async function deliverLoadedDesign({ design, assets, base }, ctx, options, demo)
   catch (error) { recordFailure(receipt, error, 'source', signal); }
   try { await deliver('svg', new Blob([svg], { type: 'image/svg+xml' })); }
   catch (error) { recordFailure(receipt, error, 'svg', signal); }
-  try { await deliver('pptx', await composeLayeredPptx(design, assets)); }
-  catch (error) { recordFailure(receipt, error, 'pptx', signal); }
+  if (options.posterAttempt && receipt.errors.length) return JSON.stringify(receipt);
+  if (!options.posterAttempt) {
+    try { await deliver('pptx', await composeLayeredPptx(design, assets)); }
+    catch (error) { recordFailure(receipt, error, 'pptx', signal); }
+  }
   const raster = ctx.renderVisualScene || renderVisualScene;
   let png;
   let previewPng;
@@ -127,7 +137,17 @@ async function deliverLoadedDesign({ design, assets, base }, ctx, options, demo)
   }
   receipt.visualReport = await reviewLayeredDesign(ctx, design, png, { ...options, previewPng });
   receipt.visual = receipt.visualReport.status;
+  if (receipt.contentCheck) {
+    const checks = receipt.visualReport.checks || {};
+    receipt.contentCheck.semantic = ['visualsPresent', 'relatedToTopic', 'integrated'].some(k => checks[k] === false) ? 'failed'
+      : ['visualsPresent', 'relatedToTopic', 'integrated'].every(k => checks[k] === true) ? 'passed' : 'not_checked';
+    if (receipt.contentCheck.semantic !== 'passed') receipt.errors.push({ code: 'DESIGN_ILLUSTRATION_UNVERIFIED', phase: 'visual', message: '图文并茂尚未通过实际成品复核，保留候选，不承诺验收通过' });
+  }
   if (receipt.visual === 'failed') receipt.errors.push({ code: 'DESIGN_VISUAL_NEEDS_REVIEW', phase: 'visual' });
+  if (options.posterAttempt && png && !receipt.errors.length) {
+    try { await deliver('pptx', await composeLayeredPptx(design, assets)); }
+    catch (error) { recordFailure(receipt, error, 'pptx', signal); }
+  }
   receipt.files.sort((a, b) => ['png', 'svg', 'pptx', 'html', 'zip'].indexOf(a.format) - ['png', 'svg', 'pptx', 'html', 'zip'].indexOf(b.format));
   const required = demo ? ['png', 'svg', 'pptx', 'html', 'zip'] : ['png', 'svg', 'pptx'];
   receipt.status = receipt.designPath && required.every(format => artifacts.has(format)) && !receipt.errors.length ? 'complete' : 'partial';

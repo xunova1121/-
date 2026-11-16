@@ -10,6 +10,8 @@ const layerFields = {
   asset: str, fit: { type: 'string', enum: ['cover', 'contain'] },
   role: { type: 'string', enum: ['heading', 'body', 'label', 'caption'], description: '文字用途；正文不能标成caption来逃避手机可读字号检查' },
   points: { type: 'array', maxItems: 24, items: point },
+  chartType: { type: 'string', enum: ['line', 'bar'], description: '分类/不同指数涨跌幅对比用bar；line仅用于真实有序趋势，不能把三个指数连成走势' },
+  unit: str,
   detail: str, group: str, category: str, decorative: { type: 'boolean' }
 };
 export const LAYERED_PROPERTIES = {
@@ -28,7 +30,7 @@ export const LAYERED_PROPERTIES = {
       assets: { type: 'array', maxItems: 4, items: { type: 'object', properties: { id: str, path: str }, required: ['id', 'path'], additionalProperties: false } },
       sections: { type: 'array', maxItems: 12, items: { type: 'object', properties: {
         title: str, body: str, eyebrow: str, icon: layerFields.icon, value: str, unit: str, detail: str, category: str,
-        points: layerFields.points
+        points: layerFields.points, chartType: layerFields.chartType
       }, required: ['title'], additionalProperties: false } },
       layers: { type: 'array', maxItems: 160, description: '自由构图的完整独立图层，顺序为从底到顶；坐标单位为画布像素。例如1080×1920画布的文字层：{id:"title",type:"text",x:64,y:80,w:900,h:140,text:"今日要闻",fontSize:80,role:"heading"}。图片先在assets登记，再用image层的asset引用ID。', items: { type: 'object', properties: layerFields, required: ['id', 'type', 'x', 'y', 'w', 'h'], additionalProperties: false } },
       states: { type: 'array', maxItems: 4, description: '真实可切换的数据快照；只有明确提供的值才更新，不制造实时数据。', items: {

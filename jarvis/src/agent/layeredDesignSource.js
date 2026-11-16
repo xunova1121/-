@@ -53,7 +53,10 @@ export async function loadLayerDesign(input, { signal, defaultSize } = {}) {
     if (previous?.kind !== 'layered-design' || previous.version !== 1) throw designError('不是支持的分层设计源文件');
     design = normalizeLayerDesign(previous);
     if (input.background_path) throw designError('分层稿更换图片请明确design.assets，不用旧底图字段悄悄换素材');
-    if (input.design) design = planLayerDesign(reflowInput(input, design), defaultSize);
+    if (input.design) {
+      design = planLayerDesign(reflowInput(input, design), defaultSize);
+      if (previous.illustrated === true) design.illustrated = true;
+    }
     else if (input.width && input.width !== design.width || input.height && input.height !== design.height || input.size) throw designError('改画幅请同时用design重新构图，不能把旧稿整体拉伸成新画幅');
     if (!Array.isArray(input.changes ?? [])) throw designError('changes需为数组');
     if ((input.changes?.length || 0) > 80) throw designError('一次修改最多80个图层');

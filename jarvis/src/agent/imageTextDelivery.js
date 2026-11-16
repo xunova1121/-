@@ -150,6 +150,12 @@ export async function deliverCanvasText(input, ctx = {}, options = {}, demo = fa
       options
     );
     receipt.visual = receipt.visualReport.status;
+    if (options.requiresRichVisual) {
+      const checks = receipt.visualReport.checks || {}, keys = ['visualsPresent', 'relatedToTopic', 'integrated'];
+      const semantic = keys.some(k => checks[k] === false) ? 'failed' : keys.every(k => checks[k] === true) ? 'passed' : 'not_checked';
+      receipt.contentCheck = { status: checks.visualsPresent === true ? 'passed' : checks.visualsPresent === false ? 'failed' : 'not_checked', semantic, basis: '实际原图、成品及手机预览复核；不改变原图或加遮挡面板' };
+      if (semantic !== 'passed') receipt.errors.push({ code: 'CANVAS_ILLUSTRATION_UNVERIFIED', phase: 'visual' });
+    }
     if (receipt.visual === 'failed')
       receipt.errors.push({
         code: 'CANVAS_VISUAL_NEEDS_REVIEW',

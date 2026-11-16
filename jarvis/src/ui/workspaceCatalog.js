@@ -55,13 +55,15 @@ export function patchCatalog(scope, paths, patch) {
 export function catalogGroups(files, { items = {}, query = '', view = 'recent', category = 'all', project = '', process = false, records = [] } = {}) {
   const sources = new Map();
   for (const record of records.slice(0, 200)) for (const path of record.files || []) if (!sources.has(path)) sources.set(path, record);
+  const posterPrimary = new Map(records.filter(r => r.artifactKind === 'poster' && r.files?.length === 1).map(r => [r.files[0], r]));
   const groups = new Map();
   const q = String(query).trim().toLowerCase();
   for (const file of files) {
     const meta = items[file.path] || {};
     const trash = Boolean(meta.trash);
     if (trash !== (view === 'trash')) continue;
-    if (!process && !q && PROCESS_FILE.test(file.path)) continue;
+    const poster = posterPrimary.get(file.path);
+    if (!process && !q && PROCESS_FILE.test(file.path) && !poster) continue;
     if (view === 'favorites' && !meta.favorite) continue;
     if (category !== 'all' && fileCategory(file.path) !== category) continue;
     if (project && meta.project !== project) continue;
@@ -70,7 +72,8 @@ export function catalogGroups(files, { items = {}, query = '', view = 'recent', 
     // 只归拢同目录同名文件；不同目录或用户指定不同项目不能合并成同一成果。
     const key = stem + '\0' + (meta.project || '');
     if (!groups.has(key))
-      groups.set(key, { key, title: meta.title || stem.split('/').pop(), project: meta.project || '', favorite: false, mtime: 0, files: [], source: null });
+      groups.set(key, { key, title: meta.title || poster?.displayTitle || poster?.title || stem.split('/').pop(), project: meta.project || '', favorite: false, mtime: 0, files: [], source: null,
+        ...(poster && { poster: { sourceFiles: files.filter(f => poster.sourceFiles?.includes(f.path)), historyFiles: files.filter(f => f.path.startsWith(poster.historyPrefix) && f.path !== file.path && !poster.sourceFiles?.includes(f.path)), quality: poster.quality } }) });
     const group = groups.get(key);
     group.files.push(file);
     group.favorite ||= Boolean(meta.favorite);

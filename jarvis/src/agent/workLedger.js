@@ -8,7 +8,7 @@ const sessions = collection('sessions');
 const INDEX = 'work-ledger-v1';
 export const WORK_RECORD_LIMIT = 4096;
 const TOOLS =
-  /^(sing_song|generate_image|generate_video|prepare_architecture_evidence|revise_architecture_plan|create_architecture_package|plan_architecture|create_diagram|export_diagram|create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet)$/;
+  /^(make_poster|sing_song|generate_image|generate_video|prepare_architecture_evidence|revise_architecture_plan|create_architecture_package|plan_architecture|create_diagram|export_diagram|create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet)$/;
 const scopes = new WeakMap();
 const ledgerState = scopedState('kv', () => ({ tail: Promise.resolve(), pending: 0 }));
 
@@ -42,9 +42,16 @@ const keyOf = (id) => 'work-record:' + id;
 /** 仅存精简生成回执，不存歌词、提示、工具原文或密钥；保留4096条并明确覆盖缺口。 */
 export async function recordWorkAttempt({ tool, args = {}, output = '', ok, sessionId, scope, callId, failure }) {
   if (!sessionId || !TOOLS.test(tool)) return null;
-  const session = await sessions.get(sessionId);
+  const storage = kv.bind(), sessionStore = sessions.bind();
+  const session = await sessionStore.get(sessionId);
   if (!session || session.evaluationId) return null;
   const media = mediaReceipt(tool, ok, output);
+  let delivery;
+  if (tool === 'make_poster') {
+    try { delivery = JSON.parse(String(output).slice(0, 24000)).delivery; } catch { /* 无结构回执不索引 */ }
+    if (!delivery || !/^[a-f0-9-]{36}$/.test(delivery.id || '') || delivery.historyPrefix !== `.workflows/posters/${delivery.id}/` ||
+      typeof delivery.primaryPath !== 'string' || !delivery.primaryPath.startsWith(delivery.historyPrefix) || !delivery.primaryPath.endsWith('.png')) return null;
+  }
   const candidates = [
     ...String(output)
       .slice(0, 12000)
@@ -52,28 +59,31 @@ export async function recordWorkAttempt({ tool, args = {}, output = '', ok, sess
   ]
     .slice(0, 12)
     .map((match) => match[0]);
-  const paths = [...new Set([...(media?.files || []), ...(typeof args.path === 'string' ? [args.path] : []), ...candidates])];
+  const paths = delivery ? [delivery.primaryPath] : [...new Set([...(media?.files || []), ...(typeof args.path === 'string' ? [args.path] : []), ...candidates])];
   const files = [];
   for (const path of paths.slice(0, 12)) {
     if (path.length <= 400 && (await workspace.exists(path))) files.push(path);
   }
   const generationStatus = !ok ? 'failed' : !['plan_architecture', 'revise_architecture_plan', 'prepare_architecture_evidence'].includes(tool) && files.length && (!media || media.state === 'completed') ? 'success' : 'unverified';
   const record = {
-    id: await recordId(scope, callId, files),
+    id: delivery ? 'poster:' + delivery.id : await recordId(scope, callId, files),
     sessionId: String(sessionId).slice(0, 200),
     tool,
     kind:
       tool === 'sing_song'
         ? 'song'
-        : tool === 'generate_image'
+        : tool === 'generate_image' || tool === 'make_poster'
           ? 'image'
           : tool === 'generate_video'
             ? 'video'
             : /^(prepare_architecture_evidence|revise_architecture_plan|create_architecture_package|plan_architecture|create_diagram|export_diagram)$/.test(tool)
               ? 'diagram'
               : 'document',
-    title: String(args.title || files[0]?.split('/').pop() || tool).slice(0, 160),
+    title: String(delivery?.title || args.title || files[0]?.split('/').pop() || tool).slice(0, 160),
     files,
+    ...(delivery && { artifactKind: 'poster', deliveryId: delivery.id, historyPrefix: delivery.historyPrefix,
+      sourceFiles: (Array.isArray(delivery.sourceFiles) ? delivery.sourceFiles : []).filter(p => typeof p === 'string' && p.length <= 400 && p.startsWith(delivery.historyPrefix)).slice(0, 8),
+      attempts: Math.min(3, Number(delivery.attempts) || 1), quality: delivery.quality === 'complete' ? 'complete' : 'needs_review' }),
     status: generationStatus,
     ...(!ok && /^(?:ARCHITECTURE_|DIAGRAM_|SVG_)/.test(failure?.code || '') && {
       failure: {
@@ -84,15 +94,15 @@ export async function recordWorkAttempt({ tool, args = {}, output = '', ok, sess
     createdAt: Date.now()
   };
   return serial(async () => {
-    if (!(await sessions.get(sessionId))) return null;
-    const previous = await kv.get(keyOf(record.id));
-    if (previous?.status === 'success') return { ...previous, id: previous.generationId };
-    const index = (await kv.get(INDEX)) || { id: INDEX, since: Date.now(), ids: [], truncated: false };
-    await kv.put({ ...record, id: keyOf(record.id), generationId: record.id });
+    if (!(await sessionStore.get(sessionId))) return null;
+    const previous = await storage.get(keyOf(record.id));
+    if (previous?.status === 'success' && (!delivery || record.status !== 'success')) return { ...previous, id: previous.generationId };
+    const index = (await storage.get(INDEX)) || { id: INDEX, since: Date.now(), ids: [], truncated: false };
+    await storage.put({ ...record, ...(delivery && previous?.displayTitle && { displayTitle: previous.displayTitle }), id: keyOf(record.id), generationId: record.id });
     const ids = [...index.ids.filter((id) => id !== record.id), record.id];
     const removed = ids.splice(0, Math.max(0, ids.length - WORK_RECORD_LIMIT));
-    await kv.put({ ...index, ids, truncated: index.truncated || removed.length > 0 });
-    for (const id of removed) await kv.delete(keyOf(id));
+    await storage.put({ ...index, ids, truncated: index.truncated || removed.length > 0 });
+    for (const id of removed) await storage.delete(keyOf(id));
     return record;
   });
 }
@@ -125,7 +135,7 @@ export async function listWorkRecords({
     for (const record of batch) {
       if (
         !record ||
-        (path && !record.files.includes(path)) ||
+        (path && !record.files.includes(path) && !record.sourceFiles?.includes(path)) ||
         (kind && record.kind !== kind) ||
         (sessionId && record.sessionId !== sessionId) ||
         (recordStatus && record.status !== recordStatus) ||
