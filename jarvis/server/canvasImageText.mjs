@@ -13,7 +13,7 @@ async function work(blob, data, signal) {
   active++;
   try {
     const bytes = await blob.arrayBuffer();
-    if (bytes.byteLength > 10e6) throw canvasError('原图超过10MB');
+    if (bytes.byteLength > (data.action === 'svg' ? 16e6 : 10e6)) throw canvasError(data.action === 'svg' ? '场景超过16MB' : '原图超过10MB');
     return await new Promise((resolve, reject) => {
       const script = fileURLToPath(new URL('./canvasImageTextWorker.mjs', import.meta.url)).replace(
         /\.asar([\\/])/,
@@ -57,6 +57,11 @@ async function work(blob, data, signal) {
   }
 }
 export const inspectCanvasImage = (blob, { signal } = {}) => work(blob, { action: 'inspect' }, signal);
+/** 只供已校验场景的内部渲染入口使用，字体、取消与子进程隔离沿用现有机制。 */
+export async function renderCanvasSvg(svg, family, { signal } = {}) {
+  const fonts = await canvasFontFiles(family, signal);
+  return work(new Blob([svg]), { action: 'svg', family, fonts }, signal);
+}
 export async function renderCanvasImageText(blob, design, { signal } = {}) {
   const fontCheck = await checkPosterFonts(canvasFontRequest(design), { signal });
   const fonts = await canvasFontFiles(fontCheck.family, signal);

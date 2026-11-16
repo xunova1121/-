@@ -77,7 +77,16 @@ export async function checkPosterFonts(checked, { signal, run = execute } = {}) 
   throw posterError(found ? '现有中文字体不能覆盖海报全文，需安装支持所用字符的字体；未输出最终PNG' : '缺少海报所需中文字体，请安装Noto Sans/Serif CJK SC；未输出最终PNG', found ? 'POSTER_FONT_GLYPHS_MISSING' : 'POSTER_FONT_MISSING', 'capability');
 }
 
-async function renderPixels(svg, checked, { signal, spawnImpl }) {
+async function renderPixels(svg, checked, { signal, spawnImpl, family }) {
+  // 部分librsvg会在约10MB处中止解析；大稿直接用已有隔离原生进程，不压图、不增加试排。
+  // 输入仍先经过同一白名单、字形和原图实解码；共用外层20秒截止及原输出限额。
+  if (Buffer.byteLength(svg) > 8e6) {
+    const { renderCanvasSvg } = await import('./canvasImageText.mjs');
+    const result = await renderCanvasSvg(svg, family, { signal });
+    const bytes = Buffer.from(result.bytes);
+    if (bytes.length > POSTER_LIMITS.outputBytes) throw posterError('海报渲染输出超过限额', 'POSTER_RENDER_SIZE', 'api');
+    return bytes;
+  }
   try {
     return await execute('rsvg-convert', ['--format=png', `--width=${checked.width}`, `--height=${checked.height}`], { signal, input: svg, spawnImpl });
   } catch (error) {
@@ -88,7 +97,7 @@ async function renderPixels(svg, checked, { signal, spawnImpl }) {
   try {
     throwControl(null, signal);
     await writeFile(path.join(directory, 'source.svg'), svg);
-    return await execute('ffmpeg', ['-v', 'error', '-max_alloc', '67108864', '-max_pixels', String(POSTER_LIMITS.pixels), '-threads', '1', '-width', String(checked.width), '-height', String(checked.height), '-keep_ar', '1', '-i', 'source.svg', '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', 'pipe:1'], { signal, cwd: directory, spawnImpl });
+    return await execute('ffmpeg', ['-v', 'error', '-max_alloc', '67108864', '-max_pixels', String(POSTER_LIMITS.pixels), '-threads', '1', '-width', String(checked.width), '-height', String(checked.height), '-keep_ar', '1', '-i', 'source.svg', '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', '-threads', '1', 'pipe:1'], { signal, cwd: directory, spawnImpl });
   } catch (error) {
     throwControl(error, signal);
     if (error.code === 'ENOENT') throw posterError('服务器缺少rsvg-convert和ffmpeg，无法导出最终海报PNG', 'POSTER_RENDER_UNAVAILABLE', 'capability');
@@ -133,7 +142,7 @@ export const createServerSvgRaster = (validate, { decodeImages = false } = {}) =
     const fontCheck = await posterWait(fontProbe(checked, { signal: renderSignal }), renderSignal);
     if (decodeImages) await checkServerRasterImages(checked.svg, { signal: renderSignal, spawnImpl });
     throwControl(null, renderSignal);
-    const bytes = await renderPixels(lockPosterFont(checked.svg, fontCheck.family), checked, { signal: renderSignal, spawnImpl });
+    const bytes = await renderPixels(lockPosterFont(checked.svg, fontCheck.family), checked, { signal: renderSignal, spawnImpl, family: fontCheck.family });
     throwControl(null, renderSignal);
     const actual = imageInfo(bytes);
     const complete = bytes.length >= 67 && bytes.subarray(-12).equals(Buffer.from([0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130]));

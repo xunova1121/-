@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { builtinModules } from 'node:module';
 
-export const SERVER_DEPS = ['@anthropic-ai/sdk', '@modelcontextprotocol/sdk', '@napi-rs/canvas', '@xmldom/xmldom', 'docx', 'exceljs', 'jszip', 'mammoth', 'marked', 'pdf-lib', 'pdfjs-dist', 'pptxgenjs', 'xlsx', 'ws'];
+export const SERVER_DEPS = ['@anthropic-ai/sdk', '@modelcontextprotocol/sdk', '@napi-rs/canvas', '@resvg/resvg-js', '@xmldom/xmldom', 'docx', 'exceljs', 'jszip', 'mammoth', 'marked', 'pdf-lib', 'pdfjs-dist', 'pptxgenjs', 'xlsx', 'ws'];
 
 const IMPORT = /(?:^|[^\w.])(?:import\s*(?:[\w*{}\s,$]+from\s*)?|export\s*[\w*{}\s,$]+from\s*|import\s*\(\s*)['"]([^'"]+)['"]/g;
 // fork/Worker 的URL入口不会出现在import图里，也必须检查它实际需要的包。

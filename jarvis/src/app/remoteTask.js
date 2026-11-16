@@ -121,6 +121,12 @@ export function createRemoteTask(app) {
     if (!client) return;
     turn.pendingFiles ??= new Map();
     if (turn.pendingFiles.has(path)) return turn.pendingFiles.get(path);
+    // 最多32件在途；未启动的文件不登记完成，之后可从服务器文件空间打开或再次通知重取。
+    if (turn.pendingFiles.size >= 32) {
+      if (!turn.fileQueueNotified && current()) toast('文件仍在取回，其余文件可稍后在文件空间打开');
+      turn.fileQueueNotified = true;
+      return;
+    }
     const pull = async () => {
       try {
         const blob = await client.download(path);

@@ -4,6 +4,8 @@ import { renderVisualScene } from '../server/visualSceneRaster.mjs';
 import { renderPoster } from '../server/posterRaster.mjs';
 import { imageInfo } from '../src/agent/imageInfo.js';
 import { visualRasterPng, visualRasterImageTag } from './fixtures/visualRasterImages.js';
+import { spawn } from 'node:child_process';
+import { createCanvas, loadImage } from '@napi-rs/canvas';
 
 const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5X0AAAAASUVORK5CYII=', 'base64');
 const fontCheck = { status: 'passed', family: 'Noto Sans CJK SC', method: 'fontconfig-charset', glyphCount: 6 };
@@ -27,6 +29,32 @@ function fakeChild({ output, started, error } = {}) {
 }
 
 afterEach(() => vi.useRealTimers());
+
+it('无rsvg命令时完整渲染大于10MB的真实内嵌图片SVG，保留原图像素和中文', async () => {
+  const source = createCanvas(1600, 1600), context = source.getContext('2d'), pixels = context.createImageData(1600, 1600);
+  let seed = 83627;
+  for (let i = 0; i < pixels.data.length; i += 4) {
+    for (let c = 0; c < 3; c++) { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; pixels.data[i + c] = seed >>> 24; }
+    pixels.data[i + 3] = 255;
+  }
+  context.putImageData(pixels, 0, 0);
+  const bytes = source.toBuffer('image/png');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1920" viewBox="0 0 1920 1920"><g><rect width="1920" height="1920" fill="#ffffff"/><image x="80" y="200" width="1600" height="1600" preserveAspectRatio="none" href="data:image/png;base64,${bytes.toString('base64')}"/><text x="60" y="120" font-family="Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="64" fill="#111111">中文高清素材</text></g></svg>`;
+  expect(Buffer.byteLength(svg)).toBeGreaterThan(10e6);
+  const result = await renderVisualScene(svg, { spawnImpl: (command, args, options) => command === 'rsvg-convert' ? fakeChild({ error: 'ENOENT' }) : spawn(command, args, options) });
+  const canvas = createCanvas(1920, 1920), output = canvas.getContext('2d');
+  output.drawImage(await loadImage(Buffer.from(await result.blob.arrayBuffer())), 0, 0);
+  for (const [x, y] of [[10, 10], [800, 800], [1500, 1500]]) {
+    const actual = output.getImageData(80 + x, 200 + y, 1, 1).data;
+    const at = (y * 1600 + x) * 4;
+    expect([...actual].every((value, c) => Math.abs(value - pixels.data[at + c]) <= 1)).toBe(true);
+  }
+  const ink = output.getImageData(50, 40, 1000, 100).data;
+  let dark = 0;
+  for (let i = 0; i < ink.length; i += 4) if (ink[i] < 80 && ink[i + 1] < 80 && ink[i + 2] < 80) dark++;
+  expect(dark).toBeGreaterThan(300);
+  expect(result.fontCheck.status).toBe('passed');
+}, 20000);
 
 it('场景真实渲染渐变、路径、分组与中文，按1920×1080输出PNG并核验全文字形', async () => {
   const result = await renderVisualScene(sceneSvg(1920, 1080));

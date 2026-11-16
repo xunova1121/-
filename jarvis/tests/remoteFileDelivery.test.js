@@ -51,3 +51,10 @@ it('文件夹同名另存后，按钮使用实际保存路径', async () => {
   await remote.pullServerFile(path, turn);
   expect(bubble.fileLink).toHaveBeenCalledWith('海报/今日新闻 (2).png', app.openInWorkspace);
 });
+it('在途文件有界，超过上限不登记完成也不触发额外下载', async () => {
+  const { app, turn, remote } = fixture();
+  turn.pendingFiles = new Map(Array.from({ length: 32 }, (_, i) => [String(i), Promise.resolve()]));
+  await remote.pullServerFile(path, turn);
+  expect(app.server.download).not.toHaveBeenCalled();
+  expect(turn.files.has(path)).toBe(false);
+});

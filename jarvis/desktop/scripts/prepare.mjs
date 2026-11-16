@@ -28,7 +28,7 @@ await build({
   target: 'node20',
   minify: true,
   legalComments: 'none',
-  external: ['@napi-rs/canvas'],
+  external: ['@napi-rs/canvas', '@resvg/resvg-js'],
   logLevel: 'warning',
   // 打进 ESM 的 CommonJS 依赖会 require 内置模块
   banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" }
@@ -39,6 +39,12 @@ fs.mkdirSync(nativeTarget, { recursive: true });
 const nativePackages = fs.readdirSync(nativeRoot).filter(name => name === 'canvas' || name.startsWith('canvas-'));
 if (nativePackages.length < 2) throw new Error('Canvas原生模块或当前平台二进制未安装，不能交付缺渲染能力的桌面包');
 for (const name of nativePackages) fs.cpSync(path.join(nativeRoot, name), path.join(nativeTarget, name), { recursive: true });
+// 大图渲染器同样保留平台原生模块；asarUnpack已覆盖bundle/node_modules。
+const svgRoot = path.join(root, 'node_modules', '@resvg'), svgTarget = path.join(app, 'node_modules', '@resvg');
+fs.mkdirSync(svgTarget, { recursive: true });
+const svgPackages = fs.readdirSync(svgRoot).filter(name => name === 'resvg-js' || name.startsWith('resvg-js-'));
+if (svgPackages.length < 2) throw new Error('高清SVG渲染模块或当前平台二进制未安装');
+for (const name of svgPackages) fs.cpSync(path.join(svgRoot, name), path.join(svgTarget, name), { recursive: true });
 // shared/*.js 是 ES 模块
 fs.writeFileSync(path.join(app, 'package.json'), JSON.stringify({ type: 'module' }, null, 2));
 console.log('桌面版资源已就绪：', app);

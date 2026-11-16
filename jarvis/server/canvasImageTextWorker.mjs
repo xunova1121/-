@@ -5,6 +5,15 @@ const reply = (result) => process.send(result, () => process.disconnect());
 process.once('message', async (work) => {
   try {
     const { action, bytes, design, family, fonts } = work;
+    if (action === 'svg') {
+      const { Resvg } = await import('@resvg/resvg-js');
+      const output = new Resvg(Buffer.from(bytes), {
+        font: { fontBuffers: fonts.map(data => Buffer.from(data)), loadSystemFonts: false, defaultFontFamily: family }
+      }).render().asPng();
+      if (output.length > 24e6) throw new Error('image size');
+      reply({ bytes: output });
+      return;
+    }
     const image = await loadImage(Buffer.from(bytes));
     if (image.width * image.height > 25e6) throw new Error('image pixels');
     if (action === 'inspect') {
