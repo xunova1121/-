@@ -20,3 +20,10 @@ it('只跳过 CI 专属步骤：装系统软件、Docker、下载 Electron、上
   for (const step of skipped) expect(step.run).toMatch(/sudo|apt-get|ci-official-apt|docker|_IMAGE=|electron|npm ci|gh release|upload|playwright install/);
   expect(skipReason(steps.find(step => step.name.includes('服务器模式端到端测试')))).toBe('');
 });
+it('成品文件空间回归必须在手机版实际构建之后执行', () => {
+  const mobile = steps.findIndex(step => step.name === '构建并验证手机版界面' && step.run.includes('npm run build:mobile'));
+  const poster = steps.findIndex(step => step.run.includes('node e2e/poster-task-delivery.mjs'));
+  expect(mobile).toBeGreaterThan(-1);
+  expect(poster).toBeGreaterThan(mobile);
+  expect(skipReason(steps[poster])).toBe('');
+});

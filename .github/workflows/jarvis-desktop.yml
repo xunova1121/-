@@ -358,8 +358,6 @@ jobs:
         run: node e2e/layered-design.mjs "$RUNNER_TEMP/jarvis-e2e/layered-design"
       - name: 验证海报手机整图字号、三种结构、素材用途与真实Office导出
         run: node e2e/poster-reading.mjs "$RUNNER_TEMP/jarvis-e2e/poster-reading"
-      - name: 验证海报单份交付、图文证据、分类图表与真实Office及文件空间
-        run: node e2e/poster-task-delivery.mjs "$RUNNER_TEMP/jarvis-e2e/poster-task-delivery"
       - name: 验证Canvas原图卡槽填字、零遮挡、可编辑PPTX及压缩编辑器
         run: node e2e/canvas-text.mjs "$RUNNER_TEMP/jarvis-e2e/canvas-text"
       - name: 验证沉浸海报连续渐变、中文与可编辑PPTX
@@ -481,6 +479,8 @@ jobs:
           node e2e/mobile-theme.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/model-library.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/settings-navigation.mjs "$RUNNER_TEMP/jarvis-e2e/settings-navigation"
+      - name: 验证海报单份交付、图文证据、分类图表与真实Office及文件空间
+        run: node e2e/poster-task-delivery.mjs "$RUNNER_TEMP/jarvis-e2e/poster-task-delivery"
       - name: 验证 Electron 全息桌面互动
         run: |
           npm ci --prefix desktop --no-audit --no-fund
