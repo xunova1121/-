@@ -1,5 +1,6 @@
 import { estimateTokens } from './contextBudget.js';
 import { compactToolResults } from './turnContext.js';
+import { compactPosterModelReceipt } from './posterModelReceipt.js';
 
 /** 普通查询只裁发送副本，持久历史、核验账本与本轮执行数据原样保留。 */
 export function projectLookupMessages(messages, { historyLength = 0, archive, enabled = false, query = '' } = {}) {
@@ -23,6 +24,8 @@ export function projectLookupMessages(messages, { historyLength = 0, archive, en
     if (message.role !== 'tool' || String(message.content || '').length <= 2000) continue;
     // 明确请求的原文分段不再包成新编号；否则模型将永远读不到原文。
     if (['read_tool_result', 'read_evidence', 'read_task_requirements'].includes(message.name)) continue;
+    const poster = compactPosterModelReceipt(message, archive);
+    if (poster) { message.content = poster; continue; }
     compactToolResults([message], { budget: 0, keep: 0, short: 1400, archive, preserveEvidence: true, query });
   }
   const droppedMessages = old.length - kept.length;
@@ -37,6 +40,8 @@ export function projectLookupMessages(messages, { historyLength = 0, archive, en
 export function compactLookupReceipt(found, archive) {
   if (['get_today_news', 'get_sports_scores'].includes(found.tool) || String(found.output || '').length <= 2000) return found;
   const message = { role: 'tool', name: found.tool, content: found.output };
+  const poster = compactPosterModelReceipt(message, archive);
+  if (poster) return { ...found, output: poster };
   compactToolResults([message], { budget: 0, keep: 0, short: 1400, archive, preserveEvidence: true, query: found.query || '' });
   return { ...found, output: message.content };
 }

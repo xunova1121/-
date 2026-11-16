@@ -3,6 +3,7 @@
  * 模型变慢、变笨，甚至超出上限报错。超过预算时，把较早的工具结果缩成开头一段 + 说明，最近几条原样保留；
  * 较早的截图只留最近两张。需要原文时模型可以再调用一次工具。只改这一轮的工作副本，不影响保存的对话。
  */
+import { compactPosterModelReceipt } from './posterModelReceipt.js';
 export const TURN_BUDGET = 60_000; // 工具结果合计超过这么多字才瘦身
 export const KEEP_RECENT = 6; // 最近几条工具结果原样保留
 export const SHORT = 800; // 较早的结果保留开头这么多字
@@ -16,6 +17,11 @@ export function compactToolResults(convo, { budget = TURN_BUDGET, keep = KEEP_RE
       const text = String(m.content ?? '');
       if (m.compacted || text.length <= short * 1.5) continue;
       const id = ['read_tool_result', 'phone_action'].includes(m.name) ? null : archive?.remember(m);
+      const poster = compactPosterModelReceipt(m, archive);
+      if (poster) {
+        m.content = poster; m.compacted = true; saved += text.length - poster.length;
+        continue;
+      }
       const receipt = preserveEvidence ? receiptSummary(text, short, query) : text.slice(0, short);
       m.content = `${receipt}\n…（这是较早的工具结果，为节省上下文已缩短，原文共 ${text.length} 字；${id ? `本轮原文编号 ${id}，用 read_tool_result 分段读取；若已过期需重读来源` : '还需要细节就再调用一次工具'}；省略部分不代表不存在，核对数字、来源和失败原因须回读）`;
       m.compacted = true;
