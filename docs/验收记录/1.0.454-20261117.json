@@ -1,0 +1,216 @@
+{
+  "version": "1.0.454",
+  "build": "357b58b56675afaacc1ecda12081d2ef42b9962a",
+  "frozen": "cee1dff988b43e30dc884e92b04a3bab8223e103",
+  "publishedUtc": "2026-11-16T22:59:48Z",
+  "release": "https://github.com/xunova1121/weiyang-release/releases/tag/desktop-v1.0.454",
+  "workflow": {
+    "id": 43971586990,
+    "url": "https://github.com/xunova1121/-/actions/runs/43971586990",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "id": 133664827263,
+        "name": "清理旧的构建产物",
+        "conclusion": "success"
+      },
+      {
+        "id": 133664829755,
+        "name": "同步现有安装包到公开仓库",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 133664959945,
+        "name": "建草稿发布",
+        "conclusion": "success"
+      },
+      {
+        "id": 133665031438,
+        "name": "打包 (windows-latest)",
+        "conclusion": "success"
+      },
+      {
+        "id": 133665031441,
+        "name": "发布前完整验证",
+        "conclusion": "success"
+      },
+      {
+        "id": 133665031551,
+        "name": "打包安卓 App",
+        "conclusion": "success"
+      },
+      {
+        "id": 133677339741,
+        "name": "发布到 Releases",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "checks": [
+    "完整正式CI成功且构建提交一致",
+    "源和公开两仓正式稳定发布",
+    "公开latest指向本版",
+    "两仓七件资源名称尺寸和摘要一致",
+    "实际下载六件资源逐字节摘要符合公开清单",
+    "服务器更新索引版本和摘要对应真实归档",
+    "服务器998项冻结清单及997原样源文件完整一致",
+    "归档root属主且服务账号可读，版本正确",
+    "实际公开APK仍使用原证书",
+    "实际APK包名与454版本号正确",
+    "实际APK客户端含新的安全适配协议",
+    "Windows包具有实际PE入口和原生渲染依赖",
+    "Windows实际后端包含预检和新折行协议",
+    "Windows实际ASAR版本和前端新协议正确",
+    "Windows更新索引包含实际安装器SHA512",
+    "两个固定latest入口均指向实际新版索引"
+  ],
+  "assets": [
+    {
+      "name": "Jarvis-1.0.454-android.apk",
+      "size": 18743357,
+      "digest": "sha256:8c3eba78952cdca334c692e3955160ad177959e664a7e981aab9effdb0a63e4d"
+    },
+    {
+      "name": "Jarvis-1.0.454-win-x64.zip",
+      "size": 193711374,
+      "digest": "sha256:4a3d1e3515069063f04634292fe0461fa33e60eb69a63902eccbf8b0775516e6"
+    },
+    {
+      "name": "jarvis-server-1.0.454.tar.gz",
+      "size": 28620736,
+      "digest": "sha256:18b240b1b5f0af9f0ee634028117a1e70e51cefe3c8f4417399b3e2d6271d992"
+    },
+    {
+      "name": "jarvis-server-latest.json",
+      "size": 136,
+      "digest": "sha256:64e4cff30b2b7bd2b181b230c37eec55a9c19d622a843abedd9b4d767967889c"
+    },
+    {
+      "name": "Jarvis-Setup-1.0.454.exe",
+      "size": 152867347,
+      "digest": "sha256:e50c9799316b9be98b5565775fe05206104e47db5e5dfbb46bce3d13388d3a82"
+    },
+    {
+      "name": "Jarvis-Setup-1.0.454.exe.blockmap",
+      "size": 162440,
+      "digest": "sha256:bd47ad7fb4a8e99e788326611a5f89f9458c3d28a789878c03d739b721497ce1"
+    },
+    {
+      "name": "latest.yml",
+      "size": 347,
+      "digest": "sha256:5d44358e464029243befa45e645b74c82dfee77915df55e97f2e31502ead2dfa"
+    }
+  ],
+  "runtimeManifestFiles": 998,
+  "actualSourceFiles": 997,
+  "permissionEntries": 1174,
+  "apkCertificate": "56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6",
+  "serverDeployed": false,
+  "providerTested": false,
+  "deviceTested": false,
+  "validation": {
+    "unitTestFiles": 476,
+    "unitTests": 4138,
+    "newUnitTests": 19,
+    "posterChecks": {
+      "legacyComposition": 84,
+      "layeredDesign": 105,
+      "readingStrictAndAuto": 65,
+      "canvasText": 45,
+      "gradient": 48,
+      "delivery": 19,
+      "intelligence": 13,
+      "preflight": 5
+    },
+    "originalAssertionsAndThresholdsPreserved": true,
+    "apkFullCryptographicVerification": "CI scripts/check-apk-signature.py and apksigner passed before upload",
+    "failedUnpublishedCandidates": [
+      "1.0.452",
+      "1.0.453"
+    ]
+  },
+  "localValidation": {
+    "frozen": "cee1dff988b43e30dc884e92b04a3bab8223e103",
+    "status": "incomplete",
+    "reason": "执行环境切换后原会话进程不再运行，日志没有完整结论；不能称本机全量通过",
+    "lastLogLines": [
+      "   ✓ 实际主循环只留下更正文字时，最终事件和返回均带真实文件链接 712ms",
+      " ✓ tests/architectureEvidence.test.js (10 tests) 189ms",
+      " ✓ tests/overVerify.test.js (14 tests) 638ms",
+      " ✓ tests/qianfanSearch.test.js (9 tests) 65ms",
+      " ✓ tests/architectureDirector.test.js (12 tests) 102ms"
+    ],
+    "independentLegacyChecks": 84,
+    "newFlowChecks": 5,
+    "focusedUnitTests": 109,
+    "lint": "passed",
+    "productionModelTested": false,
+    "userServerDeployed": false,
+    "checkedUtc": "2026-11-16T22:30:36.359310+00:00"
+  },
+  "sample": {
+    "path": "/workspace/outputs/海报返修实测-20261117/折行修正",
+    "actualOutputSize": [
+      1080,
+      2560
+    ],
+    "manualReview": {
+      "reviewer": "Codex",
+      "fullPngSha256": "a041bc840665307f644c6e86c9a39d990e6d5852aa9bf67955e4e56a4f8b5190",
+      "phonePngSha256": "491656bc37c4490aba493256c18707cc2fa188cea1d29a256b7936468ce283ee",
+      "checks": {
+        "noClipping": true,
+        "chineseReadableAt390": true,
+        "englishWordsNotSplit": true,
+        "illustrationRelatedToTopic": true,
+        "imageAlongsideCopy": true
+      },
+      "limitations": [
+        "同题材独立复现稿，不是用户原design.json",
+        "素材由当前图像工具生成，不是未央实际图片服务商",
+        "文字内容为结构概括，未证明第三方Markdown的官方真实性",
+        "未测试真实手机/微信显示"
+      ],
+      "reviewType": "actual-PNG-and-390px-preview",
+      "compatibilityRecheck": {
+        "frozen": "cee1dff988b43e30dc884e92b04a3bab8223e103",
+        "pngUnchanged": true,
+        "sha256": "a041bc840665307f644c6e86c9a39d990e6d5852aa9bf67955e4e56a4f8b5190",
+        "legacyChecksPassed": 84,
+        "newWorkflowChecksPassed": 5
+      }
+    },
+    "browserChecks": [
+      {
+        "width": 390,
+        "overflow": false,
+        "text": true,
+        "pictures": [
+          {
+            "w": 1254,
+            "h": 1254
+          }
+        ],
+        "errors": [],
+        "external": [],
+        "originalDownload": true
+      },
+      {
+        "width": 1440,
+        "overflow": false,
+        "text": true,
+        "pictures": [
+          {
+            "w": 1254,
+            "h": 1254
+          }
+        ],
+        "errors": [],
+        "external": [],
+        "originalDownload": true
+      }
+    ],
+    "originalUserDesignTested": false
+  },
+  "claudeIndependentReview": "pending"
+}
