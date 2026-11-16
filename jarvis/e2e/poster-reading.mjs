@@ -17,6 +17,7 @@ import { imageInfo } from '../src/agent/imageInfo.js';
 import { runAgent } from '../src/agent/agent.js';
 import { createTools } from '../src/agent/tools.js';
 import { checkDesignPresentation } from '../src/agent/layeredDesignPresentation.js';
+import { fitDesignText } from '../src/agent/layeredDesignInput.js';
 import { newsInput } from './fixtures/layered-design.mjs';
 
 const output = path.resolve(process.argv[2] || '/tmp/weiyang-poster-reading');
@@ -74,7 +75,8 @@ async function mobileView(item) {
   await page.close();
 }
 async function tinyReproduction() {
-  const args = { title: '今日要闻', width: 1024, height: 1536, design: { layout: 'free', layers: [
+  // 原小字负例走严格模式，继续验证原阅读门禁；另用同稿验证新增自动适配，不能降低字号阈值。
+  const args = { title: '今日要闻', width: 1024, height: 1536, design: { layout: 'free', text_fit: 'strict', layers: [
     { id: 'title', type: 'text', x: 60, y: 80, w: 900, h: 120, fontSize: 72, text: '今日要闻' },
     { id: 'news-body', type: 'text', x: 60, y: 860, w: 900, h: 80, fontSize: 16, text: '这段正文不重叠、对比高，但缩到手机上仍然太小。' }
   ] } };
@@ -82,6 +84,16 @@ async function tinyReproduction() {
   check('复现稿：原字体、原文、几何和像素对比通过', receipt.fontCheck === 'passed' && receipt.copyCheck.status === 'passed' && receipt.layoutCheck.status === 'passed' && receipt.contrast.status === 'passed', receipt);
   check('复现稿：仍被实际阅读尺度拦住，不能标complete', receipt.status === 'partial' && receipt.presentation.status === 'failed' && receipt.errors.some(e => e.code === 'DESIGN_PRESENTATION_UNREADABLE'));
   const before = await ws.readText(receipt.designPath);
+  const automatic = JSON.parse(await poster.run({ ...args, design: { ...args.design, text_fit: 'auto' }, path: '阅读验收/tiny-auto-fitted.png' }));
+  const automaticDesign = JSON.parse(await ws.readText(automatic.designPath));
+  const body = automaticDesign.layers.find(n => n.id === 'news-body');
+  check('同一小字稿自动适配后实际字号达标，原阅读门槛不降低', automatic.status === 'complete' && automatic.presentation.status === 'passed' && fitDesignText(body).fontSize * 390 / automaticDesign.width >= 12, automatic);
+  check('自动适配保留原文、坐标与画幅，旧严格稿原件不改', body.text === args.design.layers[1].text && body.x === 60 && body.y === 860 && body.w === 900 && automaticDesign.width === 1024 && automaticDesign.height === 1536 && await ws.readText(receipt.designPath) === before);
+  const autoPng = Buffer.from(await (await ws.readBlob(automatic.files.find(file => file.format === 'png').path)).arrayBuffer());
+  const autoPreview = Buffer.from(await (await ws.readBlob(automatic.phonePreview.path)).arrayBuffer());
+  await fs.writeFile(path.join(output, 'tiny-auto-fitted.png'), autoPng);
+  await fs.writeFile(path.join(output, 'tiny-auto-fitted.phone.png'), autoPreview);
+  check('自动适配交付原画幅PNG与390px实际手机缩图', imageInfo(autoPng).width === 1024 && imageInfo(autoPng).height === 1536 && imageInfo(autoPreview).width === 390);
   const revised = JSON.parse(await poster.run({ source_path: receipt.designPath, changes: [{ id: 'news-body', fontSize: 36, minFontSize: 36, h: 140 }], path: '阅读验收/tiny-repaired.png' }));
   check('只调整文字框字号可修复，不重画；原稿字节不变', revised.status === 'complete' && revised.presentation.status === 'passed' && await ws.readText(receipt.designPath) === before, revised);
   return receipt.presentation;
