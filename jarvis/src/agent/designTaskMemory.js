@@ -11,7 +11,8 @@ const workspace = () => ws.mode() + ':' + ws.folderName();
 export function designFollowup(text = '') {
   const value = String(text).split('\n【')[0].trim();
   if (value.length > 1000 || /先不|不做|别做|不要|不用|只(?:解释|分析|讨论)|为什么|什么原因|怎么|是否|能不能|计划|建议/.test(value)) return false;
-  return /^(?:继续(?:做海报|修改|做|吧)?|接着做|就这样做|按这个做|补(?:个|一个)?Demo)[。！! ]*$/i.test(value) || /(?:只|仅)?(?:改|换|调整|加|删除|移除|放大|缩小|保留).{0,18}(?:标题|文字|文案|字号|颜色|配色|底图|人物|卡槽|风格|版式|结构|布局)|(?:补|加|做).{0,6}(?:同稿|同设计).{0,4}Demo/i.test(value);
+  if (/(?:制作|生成|设计|新做|另做|再做|新建).{0,12}(?:海报|封面|大屏)/.test(value)) return false;
+  return /^(?:继续(?:做海报|修改|做|吧)?|接着做|就这样做|按这个做|(?:给我)?(?:补|加|做)(?:个|一个)?(?:同稿|同设计)?(?:交互)?Demo)[。！! ]*$/i.test(value) || /(?:只|仅)?(?:改|换|调整|加|删除|移除|放大|缩小|保留).{0,18}(?:标题|文字|文案|字号|颜色|配色|底图|人物|卡槽|风格|版式|结构|布局)|(?:补|加|做).{0,6}(?:同稿|同设计).{0,4}Demo/i.test(value);
 }
 export async function rememberDesignTask(sessionId, receipt, request, { signal } = {}) {
   if (!sessionId || !receipt.delivery?.primaryPath || !/\.(?:design|canvas|poster)\.json$/i.test(receipt.designPath || '')) return;

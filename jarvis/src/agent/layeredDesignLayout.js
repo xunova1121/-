@@ -58,7 +58,7 @@ function footer(b, input) {
   const { u, width: w, height: h, palette: p } = b;
   const copy = input.footer || (input.dataMode === 'provided' ? input.source : '设计演示 · 内容为样例');
   const height = b.footerHeight || 55 * u;
-  b.text('footer', copy || '用户提供内容', [64 * u, h - height - 28 * u, w - 128 * u, height], 20, { color: p.muted, role: 'caption', minFontSize: 20 * u });
+  b.text('footer', copy || '用户提供内容', [64 * u, h - height - 28 * u, w - 128 * u, height], b.footerSize, { color: p.muted, role: 'caption', minFontSize: b.footerSize * u });
 }
 function card(b, section, index, box, lead = false) {
   if (b.width <= b.height) return drawStory(b, section, index, box, { lead });
@@ -219,9 +219,10 @@ export function planLayerDesign(input, defaultSize = [1080, 1920]) {
   input = { ...input, design: { ...spec, assets } };
   const b = builder(width, height, palette);
   const footerCopy = input.footer || (input.dataMode === 'provided' ? input.source : '设计演示 · 内容为样例') || '用户提供内容';
-  const footerRows = spec.layers ? [''] : wrapParagraphs(footerCopy, 20 * b.u, width - 128 * b.u);
+  b.footerSize = spec.reading === 'desktop' || width > height ? 20 : 34;
+  const footerRows = spec.layers ? [''] : wrapParagraphs(footerCopy, b.footerSize * b.u, width - 128 * b.u);
   if (!footerRows) throw designError('脚注在当前画幅放不下，请调整宽度', 'DESIGN_TEXT_OVERFLOW');
-  b.footerHeight = Math.max(55 * b.u, footerRows.length * 28 * b.u);
+  b.footerHeight = Math.max(55 * b.u, footerRows.length * b.footerSize * b.u * 1.4);
   if (spec.layers) b.layers.push(...spec.layers);
   else {
     if (layout === 'free') throw designError('自由排版需明确提供layers');

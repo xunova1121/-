@@ -70,6 +70,10 @@ it('真实源稿与约束可跨任务实例恢复，当前新问题和失效路�
   expect(await recallDesignTask(sessionId, '只改标题')).toBeNull();
 });
 it.each(['为什么失败', '先不做，分析布局', '如何做海报', '查股价', '计划怎么做'])('解释/新问题不自动执行旧任务：%s', text => expect(designFollowup(text)).toBe(false));
+it('另做新海报并补Demo不能误续旧作品；明确补Demo可以续接', () => {
+  expect(designFollowup('再做一张海报并补同稿Demo')).toBe(false);
+  expect(designFollowup('给我补一个Demo')).toBe(true);
+});
 it('杂志式栏目配图关联自己的图层分组，不占用一整块空头图', () => {
   const d = planLayerDesign({ title: '每日观察', width: 1080, height: 2600, design: { layout: 'magazine', assets: [
     { id: 'port', path: '港口.png' }, { id: 'rain', path: '降水.png' }
@@ -126,5 +130,5 @@ it('中文标题不会把协同拆成一个孤字，长脚注在可读字号下�
     design: { layout: 'editorial', sections: [{ title: '栏目内容', body: '全部正文保留' }] } });
   const footer = d.layers.find(n => n.id === 'footer');
   expect(footer.h).toBeGreaterThan(55);
-  expect(footer.minFontSize).toBe(20);
+  expect(footer.minFontSize * 390 / d.width).toBeGreaterThanOrEqual(12);
 });
