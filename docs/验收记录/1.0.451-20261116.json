@@ -1,0 +1,767 @@
+{
+  "version": "1.0.451",
+  "publishedUtc": "2026-11-16T15:12:52Z",
+  "publishedBeijing": "2026-11-16 23:12:52",
+  "release": "https://github.com/xunova1121/weiyang-release/releases/tag/desktop-v1.0.451",
+  "build": "6595977e4fe9017c57cd9cdbb6408994b2531ba0",
+  "frozen": "8ced71081ee5ef3ee38259e102fa1387df025295",
+  "runtimeManifestFiles": 997,
+  "workflow": {
+    "id": 43888632533,
+    "url": "https://github.com/xunova1121/-/actions/runs/43888632533",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "id": 133373487885,
+        "name": "清理旧的构建产物",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "删除以前运行留下的构建产物",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "id": 133373491083,
+        "name": "同步现有安装包到公开仓库",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 133373633976,
+        "name": "建草稿发布",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "建草稿发布（只在正式分支/版本标签）",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "id": 133373756100,
+        "name": "打包 (windows-latest)",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/setup-node@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "安装网页依赖",
+            "conclusion": "success"
+          },
+          {
+            "name": "安装桌面版依赖",
+            "conclusion": "success"
+          },
+          {
+            "name": "版本号",
+            "conclusion": "success"
+          },
+          {
+            "name": "打包",
+            "conclusion": "success"
+          },
+          {
+            "name": "上传安装包（正式发版：直接传到草稿发布）",
+            "conclusion": "success"
+          },
+          {
+            "name": "上传安装包（验证分支：构建产物）",
+            "conclusion": "skipped"
+          },
+          {
+            "name": "Post Run actions/setup-node@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "id": 133373756239,
+        "name": "打包安卓 App",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/setup-node@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/setup-java@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "安装依赖",
+            "conclusion": "success"
+          },
+          {
+            "name": "使用Ubuntu官方软件源（仅临时构建机）",
+            "conclusion": "success"
+          },
+          {
+            "name": "安装 ffmpeg 和海报中文字体（单元测试需真实栅格化与字体检查）",
+            "conclusion": "success"
+          },
+          {
+            "name": "单元测试",
+            "conclusion": "success"
+          },
+          {
+            "name": "构建手机版网页并同步到安卓工程",
+            "conclusion": "success"
+          },
+          {
+            "name": "签名密钥",
+            "conclusion": "success"
+          },
+          {
+            "name": "打包 APK",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证正式APK完整性与原签名证书",
+            "conclusion": "success"
+          },
+          {
+            "name": "上传 APK（正式发版：直接传到草稿发布）",
+            "conclusion": "success"
+          },
+          {
+            "name": "上传 APK（验证分支：构建产物）",
+            "conclusion": "skipped"
+          },
+          {
+            "name": "Post Run actions/setup-java@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/setup-node@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "id": 133373756340,
+        "name": "发布前完整验证",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/setup-node@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "使用Ubuntu官方软件源（仅临时构建机）",
+            "conclusion": "success"
+          },
+          {
+            "name": "安装依赖和测试浏览器",
+            "conclusion": "success"
+          },
+          {
+            "name": "安装 ffmpeg 和海报中文字体（单元测试需真实栅格化与字体检查）",
+            "conclusion": "success"
+          },
+          {
+            "name": "完整单元测试",
+            "conclusion": "success"
+          },
+          {
+            "name": "代码检查（没定义的变量、浏览器同名全局、格式）",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证评测入口与耗时统计",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证架构实测固定版本、隔离与实际文件验收",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证多文件项目隔离执行与取消",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证项目菜单确认与隔离预览",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证Claude协议完成与断流取消",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证代码隔离与取消",
+            "conclusion": "success"
+          },
+          {
+            "name": "安装Office真实渲染环境",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证四格式结构编辑与目录连续分页",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证Word、PPT、Excel真实转PDF",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证PPT和Excel字号及Word97转换",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证Word字体字号与有界真实分页",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证四种PPT风格、可编辑元素与真实PDF",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证政企汇报风格、原生渐变与真实PDF",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证六份PPT图片美学版式、真实PDF与逐页截图",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证中文图片程序排字、三格式交付与真实浏览器及Office渲染",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证4K大屏同设计PNG与离线交互Demo",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证分层海报、同稿Demo、中文可读性与Office真实导出",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证海报手机整图字号、三种结构、素材用途与真实Office导出",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证Canvas原图卡槽填字、零遮挡、可编辑PPTX及压缩编辑器",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证沉浸海报连续渐变、中文与可编辑PPTX",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证分享返回状态、原字节和同账号会话恢复（原生事件模拟）",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证四种Excel样式、公式筛选与真实PDF",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证文档场景模板、精确修改及真实PDF逐页检查",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证只排版正文保留与真实Word、PDF读回",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证上传Word结构、图片和原件保留",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证手机与桌面失败步骤显示实际错误",
+            "conclusion": "success"
+          },
+          {
+            "name": "构建网页版",
+            "conclusion": "success"
+          },
+          {
+            "name": "服务器模式端到端测试，打包服务器版",
+            "conclusion": "success"
+          },
+          {
+            "name": "上传服务器版（正式发版：直接传到草稿发布）",
+            "conclusion": "success"
+          },
+          {
+            "name": "上传服务器版（验证分支：构建产物）",
+            "conclusion": "skipped"
+          },
+          {
+            "name": "构建并验证手机版界面",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证海报单份交付、图文证据、分类图表与真实Office及文件空间",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证海报参数纠正、跨轮同稿与聊天主图实际打开下载",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证 Electron 全息桌面互动",
+            "conclusion": "success"
+          },
+          {
+            "name": "网页版和单文件版端到端测试",
+            "conclusion": "success"
+          },
+          {
+            "name": "保存验证截图和日志",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/setup-node@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "id": 133390434497,
+        "name": "发布到 Releases",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "取回草稿发布里的安装包",
+            "conclusion": "success"
+          },
+          {
+            "name": "写发布说明",
+            "conclusion": "success"
+          },
+          {
+            "name": "发布",
+            "conclusion": "success"
+          },
+          {
+            "name": "检查安装包仓库令牌",
+            "conclusion": "success"
+          },
+          {
+            "name": "同步发布到安装包仓库",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      }
+    ]
+  },
+  "unitTests": {
+    "files": 475,
+    "passed": 4119
+  },
+  "apkSignatureCI": {
+    "unitFiles": 475,
+    "unitPassed": 4119,
+    "certified": true,
+    "nativeTestLine": "2026-11-16T14:44:49.5036583Z    ✓ 无rsvg命令时完整渲染大于10MB的真实内嵌图片SVG，保留原图像素和中文 6236ms"
+  },
+  "localFullGate": {
+    "passed": 28,
+    "failed": 4,
+    "skipped": 7,
+    "notFullGreen": true,
+    "rechecks": [
+      "两项原超时单测所在文件按原限额通过；最终补丁专项86及渲染24项通过",
+      "原Excel四样式、公式及真实PDF通过",
+      "原文档场景、定点修改及Office重算PDF通过",
+      "完整原网页/单文件步骤通过，包含174/14/22/360和PC/跨域/连接回归"
+    ],
+    "note": "本机完整运行包含开发中间状态，不替代最终冻结源码的完整CI；没有删除或放宽断言。"
+  },
+  "actualPaidWeiyangImageVisionProviderTested": false,
+  "builtInImageGenerationTested": true,
+  "actualWindowsAndroidWeChatDevicesTested": false,
+  "userServerDeployed": false,
+  "claudeIndependentReview": "pending",
+  "researchAfterPublish": {
+    "completed": true,
+    "source": "https://github.com/elder-plinius/CL4R1T4S/blob/main/ANTHROPIC/Claude-Fable-5.1.md",
+    "blob": "7165adca51712f87ebfb6591722cc8f571c511de",
+    "sourceOfficiallyAuthenticated": false,
+    "plan": "docs/Markdown能力借鉴-发布后第二批开发计划-20261116.md",
+    "nextPlanImplemented": false
+  },
+  "packageAudit": {
+    "version": "1.0.451",
+    "build": "6595977e4fe9017c57cd9cdbb6408994b2531ba0",
+    "frozen": "8ced71081ee5ef3ee38259e102fa1387df025295",
+    "checks": [
+      {
+        "label": "两仓正式版本及构建提交",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "两仓七项资产及SHA256元数据一致",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "实际下载字节及摘要：Jarvis-1.0.451-android.apk",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "实际下载字节及摘要：Jarvis-1.0.451-win-x64.zip",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "实际下载字节及摘要：jarvis-server-1.0.451.tar.gz",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "实际下载字节及摘要：jarvis-server-latest.json",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "实际下载字节及摘要：Jarvis-Setup-1.0.451.exe",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "实际下载字节及摘要：latest.yml",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "服务器更新索引版本、文件及摘要",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "服务器归档无链接、root属主且服务账号可读",
+        "passed": true,
+        "detail": 1173
+      },
+      {
+        "label": "服务器997项冻结清单完全一致",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "服务器996个运行文件逐字节一致",
+        "passed": true,
+        "detail": {
+          "files": 996,
+          "failures": []
+        }
+      },
+      {
+        "label": "服务器版本及固定原生渲染依赖",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "公开APK签名块沿用原证书",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "APK包名和版本",
+        "passed": true,
+        "detail": {
+          "versionCode": 451,
+          "versionName": "1.0.451",
+          "compileSdkVersion": 36,
+          "compileSdkVersionCodename": "16",
+          "package": "com.xunova.jarvis",
+          "platformBuildVersionCode": 36,
+          "platformBuildVersionName": 16
+        }
+      },
+      {
+        "label": "APK实际前端具备六项能力及交付守护",
+        "passed": true,
+        "detail": {
+          "read_task_method": true,
+          "read_memory": true,
+          "verify_delivery": true,
+          "design-task:": true,
+          "original_read": true,
+          "POSTER_TASK_LIMIT": true
+        }
+      },
+      {
+        "label": "Windows原生EXE及Canvas和resvg平台模块",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "Windows实际ASAR版本与前后端能力",
+        "passed": true,
+        "detail": {
+          "version": "1.0.451",
+          "markers": {
+            "read_task_method": {
+              "web": true,
+              "server": true
+            },
+            "read_memory": {
+              "web": true,
+              "server": true
+            },
+            "verify_delivery": {
+              "web": true,
+              "server": true
+            },
+            "design-task:": {
+              "web": true,
+              "server": true
+            },
+            "original_read": {
+              "web": true,
+              "server": true
+            },
+            "POSTER_TASK_LIMIT": {
+              "web": true,
+              "server": true
+            }
+          },
+          "nativeExport": true
+        }
+      },
+      {
+        "label": "Windows安装器及SHA512更新索引",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "实际固定latest入口：jarvis-server-latest.json",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "实际固定latest入口：latest.yml",
+        "passed": true,
+        "detail": null
+      }
+    ],
+    "actualDevicesTested": false,
+    "certificateVerification": "CI完整apksigner + 公开实际下载签名块证书摘要独立核对"
+  },
+  "actualImageDemo": {
+    "frozen": "8ced71081ee5ef3ee38259e102fa1387df025295",
+    "poster": "complete",
+    "demo": "complete",
+    "font": "passed",
+    "copy": {
+      "status": "passed",
+      "failed": []
+    },
+    "layout": {
+      "status": "passed",
+      "failed": []
+    },
+    "presentation": {
+      "status": "passed",
+      "target": "phone",
+      "previewWidth": 390,
+      "minimumBodyPixels": 12.28,
+      "heroShare": 0.04,
+      "failed": [],
+      "basis": "整图按此宽度显示的几何字号检查；不证明审美、事实准确或真实手机显示均通过"
+    },
+    "contrast": {
+      "status": "passed",
+      "failed": []
+    },
+    "visual": {
+      "status": "passed",
+      "checks": {
+        "copyMatches": true,
+        "readable": true,
+        "noOverlap": true,
+        "visualsPresent": true,
+        "relatedToTopic": true,
+        "integrated": true
+      },
+      "issues": [],
+      "basis": "一次实际PNG视觉核验；不证明文案事实绝对正确或所有像素毫无缺陷"
+    },
+    "assets": [
+      {
+        "path": "/workspace/generated_images/exec-85a5bd6e-af2c-46aa-84fd-eb61bc8c0d58.png",
+        "bytes": 2628946,
+        "sha256": "e3aa238120c9a3eeaf1cf6ad1fbfcc664e3658e9c869409ca05b1a6aa5f979cd"
+      },
+      {
+        "path": "/workspace/generated_images/exec-e9ec0adf-7012-4331-aef2-41796c42059c.png",
+        "bytes": 3149078,
+        "sha256": "4eca21f5435366450aaa0846b8981421892e05bc6d27da360937c796ba664e66"
+      },
+      {
+        "path": "/workspace/generated_images/exec-388f8d14-7a62-47e6-a4e3-d5d8b30b3b06.png",
+        "bytes": 2168780,
+        "sha256": "a784a40ecfc8a4abd0033f36d72830ec20bc67bc5c06ac6f4d2a9b251aee55e0"
+      }
+    ],
+    "artifacts": [
+      {
+        "name": "城市观察.png",
+        "bytes": 856345,
+        "sha256": "4e9b03c032ef21cd1b242fb8f206ce788304b11ebd3f9e40e71ebb343e83f0bd"
+      },
+      {
+        "name": "城市观察.html",
+        "bytes": 22381554,
+        "sha256": "529c67e09e0614c7c658d1e3bd873e46beb860bedc6ad49a981c7657b707105b"
+      },
+      {
+        "name": "城市观察.pptx",
+        "bytes": 8022265,
+        "sha256": "3a006811daa29b2030fc3d307bafb991dad2ae661127976c7694bbe6317f7d66"
+      },
+      {
+        "name": "城市观察.zip",
+        "bytes": 41809132,
+        "sha256": "066acb571bcdca2a447c1962839fbc9ea2c293d883272a44ea3ac6ba8a37d005"
+      },
+      {
+        "name": "demo-390.png",
+        "bytes": 727155,
+        "sha256": "c06e514f13e874cc655c9fe36ea664febdfe72a373ce8b5804256deabbc47c57"
+      },
+      {
+        "name": "demo-1440.png",
+        "bytes": 1131965,
+        "sha256": "c9e4baf63131ff320f5cf7a8ac1c36c1dcee5a053303c951f46726022181b696"
+      }
+    ],
+    "browser": [
+      {
+        "width": 390,
+        "passed": true,
+        "photos": 3,
+        "allSevenItems": true,
+        "downloadOriginalBytes": true,
+        "offline": true
+      },
+      {
+        "width": 1440,
+        "passed": true,
+        "photos": 3,
+        "allSevenItems": true,
+        "downloadOriginalBytes": true,
+        "offline": true
+      }
+    ],
+    "actualWeiyangProviderTested": false,
+    "actualDevicesTested": false,
+    "reviewMethod": "Codex actual final PNG + 390px pixels viewed, replay bound to identical image SHA256; not a controlled aesthetic pass or real Weiyang visual-provider test"
+  },
+  "assets": [
+    {
+      "name": "Jarvis-1.0.451-android.apk",
+      "bytes": 18741485,
+      "digest": "sha256:d2c091845135dd678c9652f8330c562b8d980cbf48d92747ee65b7d0cb357d7d"
+    },
+    {
+      "name": "Jarvis-1.0.451-win-x64.zip",
+      "bytes": 193706615,
+      "digest": "sha256:d6da72d4ea208912f69386cab1ee71dd149eac26c005e679b56e175ce1e2caad"
+    },
+    {
+      "name": "jarvis-server-1.0.451.tar.gz",
+      "bytes": 28628022,
+      "digest": "sha256:c0ed818b201c5ed618e3a86c1549bcb942e3bbb2aac694cf0ddaeba3d4a52402"
+    },
+    {
+      "name": "jarvis-server-latest.json",
+      "bytes": 136,
+      "digest": "sha256:f42f8068fa4406a5181f40fca280126e375e1d6493ab004d304e00edf31492b3"
+    },
+    {
+      "name": "Jarvis-Setup-1.0.451.exe",
+      "bytes": 152863001,
+      "digest": "sha256:ea1957add5f9ebab553637af30972c158ee7d6e7bcfaae5f4de68d09a13b69d9"
+    },
+    {
+      "name": "Jarvis-Setup-1.0.451.exe.blockmap",
+      "bytes": 162014,
+      "digest": "sha256:b12899bc312d21e7e5252b1604f0467d47f74b6c6a30248585e64a3f52a511fb"
+    },
+    {
+      "name": "latest.yml",
+      "bytes": 347,
+      "digest": "sha256:0888903308914f7b0e76ad5bf745a65533594513cb595e03df5c8b6fe237861d"
+    }
+  ]
+}
