@@ -1,5 +1,5 @@
 /** 数字单位成组，中文标点不独占行首；全文逐字保留，放不下由上层调整版式。 */
-export function wrapPosterLine(paragraph, fontSize, width, graphemes, glyphUnits) {
+export function wrapPosterLine(paragraph, fontSize, width, graphemes, glyphUnits, wordWrap = false) {
   const pieces = paragraph.split(/(\d{2,4}年\d{1,2}月\d{1,2}日|[+−-]?\d+(?:[./:：\-–]\d+)*(?:\s?(?:m\/s|km\/h|token\/s|mm|cm|km|kg|MB|GB|px|%|℃|°C|万元|亿元|万亿|亿|万|元|岁|年|月|日|时|分|秒|点))?)/g);
   const measure = text => graphemes(text).reduce((sum, glyph) => sum + glyphUnits(glyph) * fontSize, 0);
   const words = text => {
@@ -10,7 +10,7 @@ export function wrapPosterLine(paragraph, fontSize, width, graphemes, glyphUnits
     return segments.flatMap(s => s.split(/([_/])/)).filter(Boolean).flatMap(s => measure(s) <= width ? [s] : graphemes(s));
   };
   const tokens = pieces.flatMap((piece, i) => {
-    if (!i || i % 2 === 0 || piece.length > 32) return words(piece);
+    if (!i || i % 2 === 0 || piece.length > 32) return wordWrap ? words(piece) : graphemes(piece);
     if (/^\d+年\d+月\d+日$/.test(piece) && measure(piece) > width) return piece.match(/\d+[年月日]/g);
     return [piece];
   });
@@ -23,7 +23,8 @@ export function wrapPosterLine(paragraph, fontSize, width, graphemes, glyphUnits
       const letters = graphemes(row), tail = letters.at(-1);
       let carry = '';
       if (/^[，。！？；：、,.!?;:）】》」』]/.test(token) || /[（【《「『]$/.test(tail)) {
-        carry = previousToken && row.endsWith(previousToken) && measure(previousToken + token) <= width ? previousToken : letters.pop();
+        const keepToken = wordWrap ? previousToken && measure(previousToken + token) <= width : /^\d/.test(previousToken);
+        carry = keepToken && row.endsWith(previousToken) ? previousToken : letters.pop();
         row = row.slice(0, -carry.length);
         if (!row || measure(carry + token) > width) return null;
       }
@@ -37,7 +38,7 @@ export function wrapPosterLine(paragraph, fontSize, width, graphemes, glyphUnits
   }
   rows.push(row);
   // 尾行只剩一两个字（或一个短词）时，从上一行按原词边界匀一点空间，不删字或拆数值。
-  if (rows.length > 1 && measure(rows.at(-1)) < width * 0.28) {
+  if (wordWrap && rows.length > 1 && measure(rows.at(-1)) < width * 0.28) {
     const combined = rows.at(-2) + rows.at(-1), start = paragraph.length - combined.length;
     let offset = 0, best;
     for (const token of tokens) {

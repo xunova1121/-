@@ -42,10 +42,10 @@ function glyphUnits(value) {
   throw posterError('文字含当前不能保证完整排版的复杂字形；支持中文、西文、常用标点及有界emoji组合。', 'POSTER_UNSUPPORTED_TEXT', { character: value });
 }
 
-export function wrapParagraphs(text, fontSize, width) {
+export function wrapParagraphs(text, fontSize, width, { wordWrap = false } = {}) {
   const rows = [];
   for (const paragraph of text.split('\n')) {
-    const wrapped = wrapPosterLine(paragraph, fontSize, width, graphemes, glyphUnits);
+    const wrapped = wrapPosterLine(paragraph, fontSize, width, graphemes, glyphUnits, wordWrap);
     if (!wrapped) return null;
     rows.push(...wrapped);
   }

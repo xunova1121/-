@@ -11,7 +11,8 @@ import { createPosterTool } from '../src/agent/posterTool.js';
 import { compactPosterModelReceipt } from '../src/agent/posterModelReceipt.js';
 import { createTurnArchive } from '../src/agent/turnContext.js';
 import { projectLookupMessages } from '../src/agent/requestContext.js';
-import { wrapParagraphs } from '../src/agent/posterComposition.js';
+import { composePosterLayout, wrapParagraphs } from '../src/agent/posterComposition.js';
+import { samples as originalPosterSamples } from '../e2e/fixtures/poster-composition.mjs';
 
 const text = (id, copy, y, changes = {}) => ({ id, type: 'text', x: 64, y, w: 900, h: 40, text: copy, fontSize: 40, minFontSize: 40, role: 'body', ...changes });
 const draft = () => ({ width: 1080, height: 3860, design: { layout: 'free', reading: 'phone', layers: [
@@ -126,7 +127,7 @@ it('规范化不改变原稿严格校验，坏尺寸/复杂字形/非法字号�
   expect(() => normalizeLayerDesign({ ...prepareFreeLayerDesign(draft()).design, title: '' })).toThrow(/标题/);
 });
 it.each(['identity_and_style', 'tools_and_delivery', 'uncertainty_handling', 'legal_and_financial_advice'])('长英文在词边界折行，不能把单词剁成碎片：%s', copy => {
-  const rows = wrapParagraphs(copy, 34, 416);
+  const rows = wrapParagraphs(copy, 34, 416, { wordWrap: true });
   expect(rows.join('')).toBe(copy);
   let offset = 0;
   for (const row of rows.slice(0, -1)) {
@@ -136,8 +137,14 @@ it.each(['identity_and_style', 'tools_and_delivery', 'uncertainty_handling', 'le
 });
 it('中文尾行不会只剩“骤，”；数字/单位仍原样成组保留', () => {
   const copy = '把复杂任务拆成清楚的步骤，';
-  const rows = wrapParagraphs(copy, 34, 440);
+  const rows = wrapParagraphs(copy, 34, 440, { wordWrap: true });
   expect(rows.join('')).toBe(copy);
   expect(rows.at(-1)).not.toMatch(/^.{1,3}$/u);
-  expect(wrapParagraphs('比例1/5，风速6.8m/s，数值128.3456789。', 34, 440).join('')).toBe('比例1/5，风速6.8m/s，数值128.3456789。');
+  expect(wrapParagraphs('比例1/5，风速6.8m/s，数值128.3456789。', 34, 440, { wordWrap: true }).join('')).toBe('比例1/5，风速6.8m/s，数值128.3456789。');
+});
+it('分层稿的按词折行不重排原宋体海报，既有文字位置和字号不回退', () => {
+  const layout = composePosterLayout(originalPosterSamples.find(sample => sample.id === 'square-long-serif'));
+  expect(layout.blocks[0].rowTexts).toEqual(['秋季养生汤：把一整个秋', '天的温润与暖意盛进碗里']);
+  expect(layout.blocks[0].fontSize).toBe(87.271);
+  expect(layout.blocks[1].y).toBe(813.07);
 });

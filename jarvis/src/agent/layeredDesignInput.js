@@ -68,10 +68,11 @@ function normalizeLayer(node, canvas, fitText = true) {
 /** 保守估宽、完整换行；宁可拒绝溢出，也不省略、横压或伪造缺字检查。 */
 export function fitDesignText(node) {
   for (let size = node.fontSize; size >= node.minFontSize; size = Math.round((size - 0.5) * 1000) / 1000) {
-    const rows = wrapParagraphs(node.text, size, node.w);
+    // 仅分层稿按词折行；原图填字和旧上下/左右排版保持原来的字号、行数及像素位置。
+    const rows = wrapParagraphs(node.text, size, node.w, { wordWrap: true });
     if (rows && rows.length * size * 1.4 <= node.h + 0.01) return { fontSize: size, lineHeight: size * 1.4, rows };
   }
-  const rows = wrapParagraphs(node.text, node.minFontSize, node.w);
+  const rows = wrapParagraphs(node.text, node.minFontSize, node.w, { wordWrap: true });
   throw Object.assign(designError(`图层${node.id}文案放不下；请增大文字框或明确调整排版，未截字`, 'DESIGN_TEXT_OVERFLOW'), {
     repair: { field: rows ? 'h' : 'w', ...(rows && { minimumHeight: Math.ceil(rows.length * node.minFontSize * 1.4) }), minimumFontSize: node.minFontSize }
   });
