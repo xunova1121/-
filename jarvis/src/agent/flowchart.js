@@ -37,8 +37,9 @@ const idOf = (value, what) => {
 /** 校验并整理输入；不合规直接报错说明，不静默丢节点、丢连线 */
 export function normalizeFlowchart(raw) {
   if (!raw || typeof raw !== 'object') throw flowError('请提供流程图参数');
-  const kind = ['flow', 'swimlane', 'mindmap'].includes(raw.kind) ? raw.kind : Array.isArray(raw.lanes) && raw.lanes.length ? 'swimlane' : 'flow';
-  const direction = raw.direction === 'LR' || kind === 'mindmap' && raw.direction !== 'TB' ? 'LR' : 'TB';
+  // tree树形 org组织架构 state状态图 steps步骤 loop循环/飞轮（2026-11-17 全部图种）
+  const kind = ['flow', 'swimlane', 'mindmap', 'tree', 'org', 'state', 'steps', 'loop'].includes(raw.kind) ? raw.kind : Array.isArray(raw.lanes) && raw.lanes.length ? 'swimlane' : 'flow';
+  const direction = raw.direction === 'LR' || (kind === 'mindmap' || kind === 'steps') && raw.direction !== 'TB' ? 'LR' : 'TB';
   const lanes = (Array.isArray(raw.lanes) ? raw.lanes : []).map((lane, i) => ({ id: idOf(lane?.id, `第${i + 1}条泳道`), title: text(lane?.title, 16, '泳道标题') }));
   if (lanes.length > FLOW_LIMITS.lanes) throw flowError(`泳道最多${FLOW_LIMITS.lanes}条`);
   if (kind === 'swimlane' && lanes.length < 2) throw flowError('泳道图至少需要2条泳道（lanes）');
@@ -57,6 +58,9 @@ export function normalizeFlowchart(raw) {
   // 重点只强调1～2个（借鉴 diagram-design：强调色用在5个节点上等于没有强调）
   if (nodes.filter(n => n.focus).length > 2) throw flowError('focus重点节点最多2个：先想清楚这张图最想让人看到哪一步');
   const byId = new Map(nodes.map(n => [n.id, n]));
+  // 步骤图、循环图不给连线时按节点顺序自动连（循环图首尾相接）
+  if ((kind === 'steps' || kind === 'loop') && (!Array.isArray(raw.edges) || !raw.edges.length))
+    raw = { ...raw, edges: nodes.slice(1).map((n, i) => ({ from: nodes[i].id, to: n.id })).concat(kind === 'loop' ? [{ from: nodes.at(-1).id, to: nodes[0].id }] : []) };
   if (!Array.isArray(raw.edges) || !raw.edges.length || raw.edges.length > FLOW_LIMITS.edges) throw flowError(`需要1–${FLOW_LIMITS.edges}条连线（edges）`);
   const edges = raw.edges.map((edge, i) => {
     if (!byId.has(edge?.from) || !byId.has(edge?.to)) throw flowError(`第${i + 1}条连线的from/to必须是已有节点id`);
@@ -66,7 +70,8 @@ export function normalizeFlowchart(raw) {
   const linked = new Set(edges.flatMap(e => [e.from, e.to]));
   const orphan = nodes.filter(n => !linked.has(n.id));
   if (orphan.length) throw flowError(`节点${orphan.map(n => n.id).join('、')}没有任何连线；流程图里每个节点都要接上`);
-  return { kind: 'flowchart', version: 1, title: text(raw.title, 40, '标题'), flowKind: kind, direction, theme: THEMES[raw.theme] ? raw.theme : 'blue', lanes, nodes, edges };
+  if (kind === 'loop' && (nodes.length < 3 || nodes.length > 8)) throw flowError('循环图需要3–8个环节');
+  return { kind: 'flowchart', version: 1, title: text(raw.title, 40, '标题'), flowKind: kind, direction, ...(kind === 'loop' && raw.center && { center: text(raw.center, 12, '中心文字') }), theme: THEMES[raw.theme] ? raw.theme : 'blue', lanes, nodes, edges };
 }
 
 /** 节点尺寸：按真实字宽换行，判断菱形要更大才能放下字 */
@@ -101,6 +106,7 @@ function ranks(flow) {
 }
 
 export function layoutFlowchart(flow) {
+  if (flow.flowKind === 'loop') return layoutLoop(flow);
   const font = 15, gapMain = 64, gapCross = 40, laneHead = 40, margin = 32, titleH = 64;
   const LR = flow.direction === 'LR';
   const size = new Map(flow.nodes.map(n => [n.id, measure(n, font)]));
@@ -174,7 +180,9 @@ export function layoutFlowchart(flow) {
     const second = routeAll(attachments(flow, boxes, back, LR, actual));
     routed = second.map((edge, i) => (actual.has(i) ? routed[i] : edge));
   }
-  const edges = separateParallel(routed.map(({ plannedEnd, endSide, ...edge }) => edge));
+  const clean = routed.map(({ plannedEnd, endSide, ...edge }) => edge);
+  // 树形的主干本来就共用，不做错开
+  const edges = ['tree', 'org', 'mindmap'].includes(flow.flowKind) ? clean : separateParallel(clean);
   const laneRects = flow.lanes.map(l => {
     const lb = laneBox.get(l.id), mainFrom = margin + titleH, mainTo = height - margin / 2;
     return { ...l, ...(LR ? { x: margin / 2, y: lb.start, w: width - margin, h: lb.span } : { x: lb.start, y: mainFrom, w: lb.span, h: mainTo - mainFrom }) };
@@ -240,7 +248,10 @@ function attachments(flow, boxes, back, LR, endOverride = new Map()) {
       groups.get(k).push({ i, other, key, side, id });
     }
   });
+  // 树形、组织架构、思维导图：上级只从正中引出一根主干再分叉（常规画法），不分散出线
+  const trunk = ['tree', 'org', 'mindmap'].includes(flow.flowKind);
   for (const list of groups.values()) {
+    if (trunk && list[0].key === 'start') { list.forEach(item => { ends[item.i].start = sidePoint(boxes.get(item.id), item.side, 0.5, types.get(item.id)); }); continue; }
     const along = s => (s === 'top' || s === 'bottom' ? 0 : 1);
     list.sort((p, q) => center(p.other)[along(p.side)] - center(q.other)[along(q.side)]);
     list.forEach((item, k) => { ends[item.i][item.key] = sidePoint(boxes.get(item.id), item.side, list.length === 1 ? 0.5 : (k + 1) / (list.length + 1), types.get(item.id)); });
@@ -312,7 +323,7 @@ export function countCrossings(edges) {
   return n;
 }
 
-function shapeSvg(node, box, theme) {
+function shapeSvg(node, box, theme, kind) {
   const { x, y, w, h } = box, stroke = node.focus ? `stroke="${theme.accent}" stroke-width="3"` : `stroke="${theme.border}" stroke-width="1.5"`;
   const fill = node.type === 'start' ? theme.start : node.type === 'end' ? theme.end : node.type === 'decision' ? theme.decision : theme.fill;
   if (node.type === 'start' || node.type === 'end') return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${h / 2}" fill="${fill}" ${stroke}/>`;
@@ -320,7 +331,8 @@ function shapeSvg(node, box, theme) {
   if (node.type === 'io' || node.type === 'data') { const k = 16; return `<polygon points="${x + k},${y} ${x + w},${y} ${x + w - k},${y + h} ${x},${y + h}" fill="${fill}" ${stroke}/>`; }
   if (node.type === 'document') return `<path d="M${x} ${y}H${x + w}V${y + h - 10}C${x + w * 0.75} ${y + h - 22} ${x + w * 0.25} ${y + h + 4} ${x} ${y + h - 8}Z" fill="${fill}" ${stroke}/>`;
   if (node.type === 'subprocess') return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="${fill}" ${stroke}/><line x1="${x + 10}" y1="${y}" x2="${x + 10}" y2="${y + h}" ${stroke}/><line x1="${x + w - 10}" y1="${y}" x2="${x + w - 10}" y2="${y + h}" ${stroke}/>`;
-  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" fill="${fill}" ${stroke}/>`;
+  // 状态图的状态用大圆角，与步骤区分
+  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${kind === 'state' ? Math.min(22, h / 2) : 8}" fill="${fill}" ${stroke}/>`;
 }
 /** 横排泳道的标题竖着写，一字一行，不截字 */
 function verticalTitle(lane, theme) {
@@ -357,17 +369,21 @@ export function composeFlowchartSvg(flow, layout = layoutFlowchart(flow)) {
   }
   layout.edges.forEach((edge, i) => {
     const pts = edge.points;
-    parts.push(`<g id="edge-${i}"><polyline points="${pts.map(p => p.join(',')).join(' ')}" fill="none" stroke="${theme.line}" stroke-width="1.6"${edge.back ? ' stroke-dasharray="6 4"' : ''}/>${arrowHead(pts.at(-2), pts.at(-1), theme.line)}`);
+    // 组织架构是隶属关系，不画箭头
+    parts.push(`<g id="edge-${i}"><polyline points="${pts.map(p => p.join(',')).join(' ')}" fill="none" stroke="${theme.line}" stroke-width="1.6"${edge.back ? ' stroke-dasharray="6 4"' : ''}/>${flow.flowKind === 'org' ? '' : arrowHead(pts.at(-2), pts.at(-1), theme.line)}`);
     if (edge.label) {
       const p = labelPosition(edge), w = [...edge.label].length * 13 + 10;
       parts.push(`<rect x="${round(p.x - w / 2)}" y="${round(p.y - 11)}" width="${w}" height="22" rx="4" fill="${theme.background}"/><text x="${p.x}" y="${round(p.y + 5)}" font-family="${DESIGN_FONT}" font-size="13" fill="${theme.accent}" text-anchor="middle">${esc(edge.label)}</text>`);
     }
     parts.push('</g>');
   });
-  for (const node of flow.nodes) {
+  if (layout.loopCenter && flow.center) parts.push(`<text x="${round(layout.loopCenter.x)}" y="${round(layout.loopCenter.y + 8)}" font-family="${DESIGN_FONT}" font-size="22" font-weight="700" fill="${theme.accent}" text-anchor="middle">${esc(flow.center)}</text>`);
+  flow.nodes.forEach((node, index) => {
     const box = layout.boxes.get(node.id), { rows } = layout.sizes.get(node.id), lineH = font * 1.4, top = box.y + (box.h - rows.length * lineH) / 2;
-    parts.push(`<g id="node-${node.id}">${shapeSvg(node, box, theme)}${rows.map((row, i) => `<text x="${round(box.x + box.w / 2)}" y="${round(top + font * 1.05 + i * lineH)}" font-family="${DESIGN_FONT}" font-size="${font}" fill="${theme.ink}" text-anchor="middle" xml:space="preserve">${esc(row)}</text>`).join('')}</g>`);
-  }
+    // 步骤图左上角写序号
+    const badge = flow.flowKind === 'steps' ? `<ellipse cx="${round(box.x)}" cy="${round(box.y)}" rx="13" ry="13" fill="${theme.accent}"/><text x="${round(box.x)}" y="${round(box.y + 5)}" font-family="${DESIGN_FONT}" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="middle">${index + 1}</text>` : '';
+    parts.push(`<g id="node-${node.id}">${shapeSvg(node, box, theme, flow.flowKind)}${badge}${rows.map((row, i) => `<text x="${round(box.x + box.w / 2)}" y="${round(top + font * 1.05 + i * lineH)}" font-family="${DESIGN_FONT}" font-size="${font}" fill="${theme.ink}" text-anchor="middle" xml:space="preserve">${esc(row)}</text>`).join('')}</g>`);
+  });
   // 导出按2倍像素渲染（最长边不超过4096），手机放大看也清楚；坐标仍按原尺寸
   const scale = flowchartScale(layout), W = Math.round(width * scale), H = Math.round(height * scale);
   return validateVisualSceneSvg(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><g transform="scale(${scale})">${parts.join('')}</g></svg>`).svg;
@@ -387,12 +403,12 @@ export async function composeFlowchartPptx(flow, layout = layoutFlowchart(flow))
     slide.addShape(pptx.ShapeType.rect, { x: inch(lane.x), y: inch(lane.y), w: inch(lane.w), h: inch(lane.h), fill: { color: c(theme.lane) }, line: { color: c(theme.border), width: 0.75 }, objectName: `lane-${lane.id}` });
     slide.addText(lane.title, { x: inch(lane.x), y: inch(lane.y), w: inch(layout.LR ? 40 : lane.w), h: inch(layout.LR ? lane.h : 40), fontSize: 11, bold: true, fontFace: font, color: c(theme.ink), align: 'center', valign: 'middle', fill: { color: c(theme.laneHead) }, margin: 0 });
   }
-  const shapeOf = type => ({ start: pptx.ShapeType.flowChartTerminator, end: pptx.ShapeType.flowChartTerminator, decision: pptx.ShapeType.flowChartDecision, io: pptx.ShapeType.flowChartInputOutput, data: pptx.ShapeType.flowChartInputOutput, document: pptx.ShapeType.flowChartDocument, subprocess: pptx.ShapeType.flowChartPredefinedProcess })[type] || pptx.ShapeType.flowChartProcess;
+  const shapeOf = type => (flow.flowKind === 'state' && type === 'process' ? pptx.ShapeType.roundRect : undefined) || ({ start: pptx.ShapeType.flowChartTerminator, end: pptx.ShapeType.flowChartTerminator, decision: pptx.ShapeType.flowChartDecision, io: pptx.ShapeType.flowChartInputOutput, data: pptx.ShapeType.flowChartInputOutput, document: pptx.ShapeType.flowChartDocument, subprocess: pptx.ShapeType.flowChartPredefinedProcess })[type] || pptx.ShapeType.flowChartProcess;
   layout.edges.forEach((edge, i) => {
     edge.points.slice(1).forEach((p, k) => {
       const a = edge.points[k], last = k === edge.points.length - 2;
       slide.addShape(pptx.ShapeType.line, { x: inch(Math.min(a[0], p[0])), y: inch(Math.min(a[1], p[1])), w: inch(Math.abs(p[0] - a[0])), h: inch(Math.abs(p[1] - a[1])),
-        flipH: p[0] < a[0], flipV: p[1] < a[1], line: { color: c(theme.line), width: 1.2, ...(edge.back && { dashType: 'dash' }), ...(last && { endArrowType: 'triangle' }) }, objectName: `edge-${i}-${k}` });
+        flipH: p[0] < a[0], flipV: p[1] < a[1], line: { color: c(theme.line), width: 1.2, ...(edge.back && { dashType: 'dash' }), ...(last && flow.flowKind !== 'org' && { endArrowType: 'triangle' }) }, objectName: `edge-${i}-${k}` });
     });
     if (edge.label) {
       const p = labelPosition(edge), w = [...edge.label].length * 13 + 10;
@@ -417,12 +433,34 @@ export function checkFlowchart(flow, layout) {
     else if (outs.some(e => !e.label)) issues.push({ code: 'FLOW_DECISION_LABEL', id: node.id, message: `判断“${node.text}”的出口要写条件（如“是/否”“通过/退回”）` });
   }
   for (const node of flow.nodes.filter(n => n.type === 'end')) if (flow.edges.some(e => e.from === node.id)) issues.push({ code: 'FLOW_END_HAS_OUTPUT', id: node.id, message: `结束节点“${node.text}”不应再有出去的连线` });
-  if (flow.flowKind !== 'mindmap' && !flow.nodes.some(n => n.type === 'start')) issues.push({ code: 'FLOW_NO_START', message: '流程图建议用type=start标出起点' });
+  if (['flow', 'swimlane'].includes(flow.flowKind) && !flow.nodes.some(n => n.type === 'start')) issues.push({ code: 'FLOW_NO_START', message: '流程图建议用type=start标出起点' });
   // 密度建议（借鉴 diagram-design：一张图超过9个节点、12条线，读者就需要人讲解了）：只提示拆图，不判失败
   const advice = [];
-  const limit = flow.flowKind === 'mindmap' ? 15 : 9;
+  const limit = ['mindmap', 'org', 'tree'].includes(flow.flowKind) ? 15 : 9;
   if (flow.nodes.length > limit || flow.edges.length > 12)
     advice.push({ code: 'FLOW_TOO_DENSE', message: `本图${flow.nodes.length}个节点、${flow.edges.length}条连线，超过一张图好读的上限（${limit}个节点、12条线）；建议拆成一张总览加几张分图，或合并总是一起出现的步骤` });
   if (!flow.nodes.some(n => n.focus) && flow.nodes.length >= 6) advice.push({ code: 'FLOW_NO_FOCUS', message: '可以用focus标出1～2个最关键的步骤，读者一眼知道重点' });
   return { status: issues.length ? 'needs_review' : 'passed', issues, advice, crossings: countCrossings(layout.edges), backEdges: layout.back.size };
+}
+
+/** 循环/飞轮：环节等距排在圆上，相邻环节用顺时针圆弧箭头相连，中心可写主题 */
+function layoutLoop(flow) {
+  const font = 15, margin = 32, titleH = 64, size = new Map(flow.nodes.map(n => [n.id, measure(n, font)]));
+  const n = flow.nodes.length, maxW = Math.max(...[...size.values()].map(s => s.w)), R = Math.max(150, (maxW + 40) * n / (2 * Math.PI) + 40);
+  const cx = margin + R + maxW / 2 + 10, cy = margin + titleH + R + 50, boxes = new Map(), angle = new Map();
+  flow.nodes.forEach((node, i) => {
+    const a = -Math.PI / 2 + i / n * Math.PI * 2, s = size.get(node.id);
+    angle.set(node.id, a);
+    boxes.set(node.id, { x: cx + R * Math.cos(a) - s.w / 2, y: cy + R * Math.sin(a) - s.h / 2, w: s.w, h: s.h });
+  });
+  const pad = id => Math.max(size.get(id).w, size.get(id).h) / 2 / R + 0.08;
+  const edges = flow.edges.map(e => {
+    let a0 = angle.get(e.from) + pad(e.from), a1 = angle.get(e.to) - pad(e.to);
+    while (a1 <= a0) a1 += Math.PI * 2;
+    const steps = Math.max(4, Math.ceil((a1 - a0) / 0.08)), pts = [];
+    for (let k = 0; k <= steps; k++) { const a = a0 + (a1 - a0) * k / steps; pts.push([round(cx + R * Math.cos(a)), round(cy + R * Math.sin(a))]); }
+    return { ...e, back: false, points: pts };
+  });
+  const width = Math.ceil(cx * 2), height = Math.ceil(cy + R + maxW / 4 + 60);
+  return { width, height, boxes, sizes: size, edges, lanes: [], LR: false, titleH, margin, font, back: new Set(), loopCenter: { x: cx, y: cy } };
 }

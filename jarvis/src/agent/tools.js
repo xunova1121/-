@@ -71,6 +71,7 @@ import { createArchitectureEvidenceTool } from './architectureEvidenceTool.js';
 import { createArchitecturePlanTool } from './architectureTool.js';
 import { createDiagramTool } from './diagramTool.js';
 import { createFlowchartTool } from './flowchartTool.js';
+import { createChartTool } from './chartDiagramTool.js';
 import { createInspectImageTool } from './inspectImage.js';
 import { createRenderDiagramTool, diagramPreview } from './diagramReview.js';
 import { createExportDiagramTool } from './diagramExport.js';
@@ -158,6 +159,7 @@ export function createTools(ctx) {
     createArchitectureWorkflowTool(ctx),
     createDiagramTool(ctx, { requireArchitecture: 'strict' }),
     createFlowchartTool(ctx),
+    createChartTool(ctx),
     createExportDiagramTool(ctx),
     createRenderDiagramTool(ctx),
     createStockKlineTool(ctx),

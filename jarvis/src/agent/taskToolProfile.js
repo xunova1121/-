@@ -6,8 +6,8 @@ import { textPosterRequest, POSTER_TOOLS } from './posterRouting.js';
 import { visualSceneRequest, VISUAL_SCENE_TOOLS } from './visualSceneRouting.js';
 
 // 画图类请求（2026-11-17 复查：“业务图/泳道图/思维导图”调不出画图工具，架构图请求还混进了海报工具）
-export const DIAGRAM_REQUEST = /架构图|拓扑图|部署图|组织架构|业务架构|技术架构|系统架构|关系图|业务图|流程图|泳道图|审批流|思维导图|脑图|时序图|ER图|E-R图|甘特图|数据流图|结构图/i;
-const DIAGRAM_TOOLS = ['create_flowchart', 'create_diagram', 'export_diagram', 'render_diagram', 'build_architecture', 'read_task_method', 'verify_delivery', 'read_file', 'list_files', 'find_files', 'read_document_structure', 'preview'];
+export const DIAGRAM_REQUEST = /架构图|拓扑图|部署图|组织架构|业务架构|技术架构|系统架构|关系图|业务图|流程图|泳道图|审批流|思维导图|脑图|时序图|ER图|E-R图|甘特图|数据流图|结构图|状态图|树形图|步骤图|飞轮|循环图|时间轴|时间线|大事记|象限图|四象限|漏斗图|金字塔|鱼骨图|因果图|类图|桑基|雷达图|热力图|矩形树|瀑布图|韦恩图|看板|权限矩阵|用户旅程|服务蓝图|故事地图|柱状图|条形图|折线图|饼图|环形图|散点图|气泡图|排期图|进度图/i;
+const DIAGRAM_TOOLS = ['create_flowchart', 'create_chart', 'create_diagram', 'export_diagram', 'render_diagram', 'build_architecture', 'read_task_method', 'verify_delivery', 'read_file', 'list_files', 'find_files', 'read_document_structure', 'preview'];
 // 交互演示：不说“大屏”也要能调出 Demo 工具
 const DEMO_REQUEST = /(?:交互|演示|展示|原型)[^。！？\n]{0,8}(?:Demo|页面|原型)|产品原型|(?:做|生成|制作)[^。！？\n]{0,8}Demo/i;
 

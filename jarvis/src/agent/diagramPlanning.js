@@ -12,11 +12,12 @@ export const strictArchitecture = (text) => STRICT_ARCHITECTURE.test(String(text
 export const DIAGRAM_PLANNING =
   // 2026-11-17 复查：画图工具分工写在最前面，避免流程图被画成分层架构图、模型在6个架构工具里选错
   '【先想表达什么】有判断分支→流程图；跨部门/角色交接→泳道图；一个主题向外展开→思维导图；系统由哪些部分组成、怎么分层→架构图；上下级→组织架构图。能用表格或三句话说清就不画图。' +
-  '【先选对工具】流程图、业务流程图、审批流、泳道图、思维导图→create_flowchart（有判断分支和流转箭头），不要用本工具。' +
-  '分层的系统/业务/技术/部署架构图、组织架构图→本工具create_diagram（默认就用它，一次出图）。' +
+  '【先选对工具】流程图、业务流程图、审批流、泳道图、思维导图、树形分解、组织架构树、状态图、步骤图、循环飞轮→create_flowchart（有判断分支和流转箭头），不要用本工具。' +
+  '数据图表（柱状/折线/饼/散点/雷达/热力/矩形树/瀑布/漏斗/金字塔/韦恩/桑基/象限）、甘特图、时间轴、看板、权限矩阵、用户旅程、服务蓝图、故事地图、分层堆叠、嵌套范围、时序图、ER/表结构、UML类图、鱼骨图→create_chart。' +
+  '分层的系统/业务/技术/部署架构图→本工具create_diagram（默认就用它，一次出图）。' +
   '改已有.diagram.json或换格式→export_diagram。用户明确要“逐条核对原文需求/严格审查”→build_architecture（自动读文件、审查、出图，失败只用jobPath续跑）。' +
   '已有审查通过的架构底稿要出总体+业务闭环+数据流多张视图→create_architecture_package。plan_architecture、prepare_architecture_evidence、revise_architecture_plan是严格流程的内部步骤，普通出图不要单独调用。' +
-  '时序图、甘特图、ER图目前没有专门工具，如实告诉用户，可改用表格或流程图表达，不要硬画成架构图。' +
+  '沃德利地图、轴测爆炸图、生物过程图等暂不支持，如实告诉用户，不要硬画成架构图。' +
   '画总体架构图 / 项目架构图：直接用 create_diagram 出图。先用 read_file 读原始材料（长文件先 view=sections 看目录，再读建设内容、技术要求等相关章节）。材料里的数量、系统名、设备型号逐项写进标题、说明或要点，不压成一句概括；材料没有的层不硬凑。design.theme=gov-blue，direction=top-down，design.message 写一句主线（如“平台统筹 · 三端协同 · 感知联动”）。' +
   '好看的版式照这个填（自上而下）：①展示层 columns 3～4个（title=大屏/PC/手机，detail=用途）；②业务应用层 cards 2～4张主卡，每张都给 icon、accent（orange/blue/green 轮换）、bullets 3～4条 {text}（每条≤14字）、badge=这一端的核心能力（≤8字），相邻主卡之间连 edges 并写 label（≤6字，如“结构化线索”“任务工单”）；③闭环反馈用 band（层标题≤6字如“处置反馈”，节点 detail 写“事件回溯 · 结果归档 · 数据回流 → 支撑下次研判”）；④平台的几层用同一 group（写平台名）：业务模块 grid（8～18个只写标题），能力中心 columns（2～4个，icon + subtitle 用“/”分隔要点），感知与协同 columns；⑤基础层 columns 3个（终端感知 / 网络传输 / 云基础设施：subtitle=作用，detail=设备和数量）；⑥安全保障 band 放最后（层标题≤6字）。' +
   '节点标题≤10字、说明≤40字。跨层不连线（上下排列就是支撑关系，连了会交叉），只有同层相邻主卡用带字箭头。版式参数不合规则时程序会自动调整并在 layoutAdjusted 里说明，交付时告诉用户；仍报错就按报错删减或拆分后再画一次，一定要交出图。contentPlan 可不填。' +

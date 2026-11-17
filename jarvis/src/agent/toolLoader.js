@@ -19,7 +19,7 @@ export const DOCUMENT_TOOLS = new Set(['write_long_document', 'create_document',
 export const CORE = new Set([
   'phone_devices',
   'time_calc',
-  'build_architecture', 'create_diagram', 'create_flowchart', 'export_diagram', 'render_diagram', 'list_work_records',
+  'build_architecture', 'create_diagram', 'create_flowchart', 'create_chart', 'export_diagram', 'render_diagram', 'list_work_records',
   'write_professional_document', 'generate_task_brief',
   'verify_numbers', 'reconcile_numbers', 'check_gongwen', 'check_writing', 'make_poster', 'process_image', 'get_stock_kline', 'get_market_quote', 'record_holding', 'list_holdings', 'holding_profit', 'get_sports_scores', 'check_search_terms', 'review_task', 'execution_capabilities', 'run_project_tests', 'get_current_time', 'get_weather', 'remember', 'recall', 'core_memory_update', 'save_skill', 'use_skill',
   'get_today_news', 'fetch_json', 'web_search', 'fetch_url', 'read_evidence', 'fact_check', 'deep_research', 'kb_search', 'search_conversations', 'list_my_messages', 'read_conversation', 'delete_conversations',

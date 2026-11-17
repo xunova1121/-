@@ -109,7 +109,7 @@ describe('画图类请求调对工具（2026-11-17 复查）', () => {
     // 同批新增“先想表达什么”放在最前，工具分工紧随其后
     expect(DIAGRAM_PLANNING.indexOf('【先选对工具】')).toBeGreaterThan(DIAGRAM_PLANNING.indexOf('【先想表达什么】'));
     expect(DIAGRAM_PLANNING.indexOf('【先选对工具】')).toBeLessThan(400);
-    for (const word of ['create_flowchart', 'export_diagram', 'build_architecture', 'create_architecture_package', '内部步骤', '时序图、甘特图、ER图']) expect(DIAGRAM_PLANNING).toContain(word);
+    for (const word of ['create_flowchart', 'export_diagram', 'build_architecture', 'create_architecture_package', '内部步骤', 'create_chart', '暂不支持']) expect(DIAGRAM_PLANNING).toContain(word);
   });
   it('流程图结果进入成果索引，主文件和源稿都能找到', async () => {
     const { recordWorkAttempt, listWorkRecords } = await import('../src/agent/workLedger.js');

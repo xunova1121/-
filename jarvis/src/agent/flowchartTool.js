@@ -5,7 +5,7 @@ import { renderVisualScene } from './visualSceneRaster.js';
 import { throwControl } from '../core/networkRequest.js';
 
 const str = { type: 'string' };
-export const FLOWCHART_DESCRIPTION = '先想清楚要表达什么，能删就删：一张图最好不超过9个节点、12条线，超了拆成总览加分图；只给1～2个最关键步骤加focus。画流程图、业务流程图、审批流程、泳道图（跨部门/跨角色流程）、思维导图时用这个；架构图（分层系统结构）用create_diagram。只给节点、连线和泳道，坐标由程序算：判断节点（type=decision）至少两个出口，出口label写条件（是/否、通过/退回）；回头的线（退回、循环）自动从侧面虚线绕开。泳道图给lanes并给每个节点写lane。节点文字≤40字、连线文字≤12字，超了会报错要求精简，不截字。交付PNG、可编辑SVG、原生可编辑PPTX（PowerPoint自带流程图形状）和.flow.json源稿；改图用source_path加完整的nodes/edges/lanes重出。回执里crossings是连线交叉数、checks是结构问题，交付时如实说明。时序图、甘特图、ER图暂不支持，不要硬画成流程图。';
+export const FLOWCHART_DESCRIPTION = '先想清楚要表达什么，能删就删：一张图最好不超过9个节点、12条线，超了拆成总览加分图；只给1～2个最关键步骤加focus。画流程图、业务流程图、审批流程、泳道图（跨部门/跨角色流程）、思维导图时用这个；架构图（分层系统结构）用create_diagram。只给节点、连线和泳道，坐标由程序算：判断节点（type=decision）至少两个出口，出口label写条件（是/否、通过/退回）；回头的线（退回、循环）自动从侧面虚线绕开。泳道图给lanes并给每个节点写lane。节点文字≤40字、连线文字≤12字，超了会报错要求精简，不截字。交付PNG、可编辑SVG、原生可编辑PPTX（PowerPoint自带流程图形状）和.flow.json源稿；改图用source_path加完整的nodes/edges/lanes重出。回执里crossings是连线交叉数、checks是结构问题，交付时如实说明。时序图、甘特图、ER图等用create_chart。';
 
 export function createFlowchartTool(ctx = {}) {
   return {
@@ -15,7 +15,8 @@ export function createFlowchartTool(ctx = {}) {
       type: 'object', additionalProperties: false,
       properties: {
         title: { type: 'string', description: '图标题，≤40字' },
-        kind: { type: 'string', enum: ['flow', 'swimlane', 'mindmap'], description: 'flow普通流程图；swimlane泳道图（需lanes）；mindmap思维导图（从中心主题向右展开）' },
+        kind: { type: 'string', enum: ['flow', 'swimlane', 'mindmap', 'tree', 'org', 'state', 'steps', 'loop'], description: 'flow流程图；swimlane泳道图（需lanes）；mindmap思维导图；tree树形分解；org组织架构（无箭头）；state状态图（连线label写触发条件）；steps步骤图（带序号，可不给edges）；loop循环/飞轮（3–8个环节，可不给edges，center写中心主题）' },
+        center: { type: 'string', description: 'loop循环图中心文字，≤12字' },
         direction: { type: 'string', enum: ['TB', 'LR'], description: 'TB自上而下（默认）；LR从左到右（步骤多、思维导图用）' },
         theme: { type: 'string', enum: ['blue', 'gray', 'green'], description: '配色，默认blue' },
         lanes: { type: 'array', maxItems: 8, items: { type: 'object', additionalProperties: false, properties: { id: str, title: { type: 'string', description: '角色/部门，≤16字' } }, required: ['id', 'title'] } },
