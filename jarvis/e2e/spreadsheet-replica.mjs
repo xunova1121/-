@@ -10,6 +10,7 @@ import * as ws from '../src/agent/workspace.js';
 import { createDocumentGenerateTool } from '../src/agent/documentGenerateTool.js';
 import { normalizeTableReplica,makeReplicaWorkbook,inspectReplicaWorkbook } from '../src/agent/spreadsheetReplica.js';
 import { tableGridEvidence } from '../src/agent/imageRegion.js';
+import { readImageMetadata } from '../src/agent/imageMetadata.js';
 import { serverCanvasRenderer } from '../server/canvasImageText.mjs';
 import { renderOffice,officeRenderAvailable } from '../server/officeRender.mjs';
 import { presentationOverview } from '../server/presentationOverview.mjs';
@@ -55,6 +56,8 @@ try {
     calls++;assert.equal(args.maxTransientRetries,0);assert.equal(args.maxWebSearches,0);assert.equal(args.allowWebSearch,false);
     if(calls===1){assert.equal(args.images.length,1);return JSON.stringify(raw);}
     assert.equal(args.images.length,2);assert.notEqual(args.images[0].data,args.images[1].data);
+    const image=args.images[1],size=await readImageMetadata(new Blob([Buffer.from(image.data,'base64')],{type:image.mime}));
+    check('视觉复核取得2000px单页真实打印图而非缩略总览',Math.max(size.width,size.height)===2000&&size.width/size.height<1.5);
     return JSON.stringify({columns:37,rows:29,merges:d.cells.filter(c=>c.rs>1||c.cs>1).length,printedTextExact:true,clearedOnlyRequested:true,layoutMatches:true,issues:[]});
    }});
   const receipt=await tool.run({format:'xlsx',source_path:sourcePath,path:target,content:'',requirements:FRAME_REQUEST},{rawRequestText:FRAME_REQUEST,retrieval:{consume:kind=>{assert.equal(kind,'model');budget++;}},checkpoint:r=>receipts.push(r)});
@@ -84,7 +87,7 @@ try {
    page.cleanup();
   } finally {await task.destroy();}
   await fs.writeFile(path.join(output,turn?'rotated.pdf':'upright.pdf'),new Uint8Array(await pdf.arrayBuffer()));
-  const overview=await presentationOverview(pdf);await fs.writeFile(path.join(output,turn?'rotated-preview.png':'upright-preview.png'),new Uint8Array(await overview.sheets[0].blob.arrayBuffer()));
+  const overview=await presentationOverview(pdf,{singlePage:true});await fs.writeFile(path.join(output,turn?'rotated-preview.png':'upright-preview.png'),new Uint8Array(await overview.sheets[0].blob.arrayBuffer()));
   await fs.writeFile(path.join(output,turn?'rotated-report.json':'upright-report.json'),JSON.stringify({receipt,report},null,2));
  }
  // 非考勤的多级检验单也沿用同协议，防止把37列硬编码进生产工具。

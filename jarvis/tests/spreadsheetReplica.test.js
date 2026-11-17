@@ -139,6 +139,7 @@ describe('还原流程真实失败与预算边界',()=>{
   ctx.visionLlm.mockResolvedValueOnce(JSON.stringify(attendanceReplica())).mockResolvedValueOnce(JSON.stringify({columns:37,rows:29,merges:d.cells.filter(c=>c.rs>1||c.cs>1).length,printedTextExact:false,clearedOnlyRequested:true,layoutMatches:false,issues:['日期与原图不符']}));
   const receipt=await restoreSpreadsheet(ctx,{sourcePath:'input.png',path:'review.xlsx',requirements:FRAME_REQUEST});
   expect(receipt).toContain('日期与原图不符');expect(receipt).toContain('待核对稿');expect(ctx.visionLlm).toHaveBeenCalledTimes(2);
+  expect(ctx.presentationOverview).toHaveBeenCalledWith(expect.any(Blob),expect.objectContaining({singlePage:true}));
   expect(await(await ws.readBlob('input.png')).arrayBuffer()).toEqual(await source.arrayBuffer());
  });
  it('核对阶段预算/取消不被吞成普通成功，已经写出的文件保留',async()=>{

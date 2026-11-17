@@ -175,7 +175,7 @@ async function compareReplica(ctx, blob, source, design, execution) {
     const rendered=await ctx.officeRender(blob,'xlsx',{signal});
     if(!rendered?.available) return {...result,issues:['当前端无法生成真实Excel打印预览']};
     result.pdf=rendered.blob; result.render='rendered';
-    const overview=await ctx.presentationOverview(rendered.blob,{signal});
+    const overview=await ctx.presentationOverview(rendered.blob,{signal,singlePage:true});
     result.pages=overview.pages;
     if(overview.pages!==1 || overview.sheets?.length!==1) return {...result,state:'failed',issues:['原单张表被拆成多页或没有实际页面']};
     const images=[source,await imageData(overview.sheets[0].blob,{detail:'high'})];

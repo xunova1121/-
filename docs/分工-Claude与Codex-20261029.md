@@ -1,6 +1,6 @@
 # Claude / Codex 分工（2026-10-29，用户确认：难的 Claude 做，其余 Codex 做）
 
-<!-- 2026-11-17 Codex：用户明确批准图片表格还原开发并发版。仅增加Excel照图还原专用链路（真实原图→有界网格/合并/原文结构→原生Excel→读回与真实Office图像对照），通过create_document的source_path进入，不再套Markdown台账。必要接缝documentGenerateTool/documentToolProfile、通用图片几何、executionReview/reviewOutcome还原回执守护、既有PDF总览与对应单元/真实文件回归；普通Excel公式/四种样式、海报、账号/分享、旧预算、签名和三端门禁保持。用户照片在会话可见但无本地原图字节时，合成夹具和手工核对样张不得冒充实际服务商识别验收。 -->
+<!-- 2026-11-17 Codex：用户明确批准图片表格还原开发并发版。仅增加Excel照图还原专用链路（真实原图→有界网格/合并/原文结构→原生Excel→读回与真实Office图像对照），通过create_document的source_path进入，不再套Markdown台账。必要接缝documentGenerateTool/documentToolProfile、通用图片几何、executionReview/reviewOutcome还原回执守护、既有PDF总览的单页2000px分支与对应单元/真实文件回归；普通Excel公式/四种样式、海报、账号/分享、旧预算、签名和三端门禁保持。用户照片在会话可见但无本地原图字节时，合成夹具和手工核对样张不得冒充实际服务商识别验收。 -->
 
 <!-- 2026-11-17 Codex：本轮修复同海报试排多张预览及云端源文件（0）。必要接缝为transcript/toolbox/remoteTask、panels/workspaceView、文件读取适配和对应回归；同任务更新而不删除历史，云端目录只取元数据、点击才读取原文件，禁止用本机同名文件代替云端文件。保留账号隔离、分享及原渲染门禁；增加本机只有PNG时的真实浏览器与SVG/PPTX下载验证。 -->
 

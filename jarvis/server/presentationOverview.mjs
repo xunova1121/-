@@ -6,10 +6,10 @@ import path from 'node:path';
 import {contactSheet} from './presentationContactSheet.mjs';
 import {inspectRenderedPdf} from '../src/agent/pdfQuality.js';
 import {throwControl} from '../src/core/networkRequest.js';
-function raster(dir,pages,signal) {
+function raster(dir,pages,signal,scale=1000) {
   signal?.throwIfAborted();
   return new Promise((resolve,reject)=>{
-    const child=spawn('pdftoppm',['-f','1','-l',String(pages),'-scale-to','1000','-png','input.pdf','page'],{cwd:dir,stdio:'ignore'});
+    const child=spawn('pdftoppm',['-f','1','-l',String(pages),'-scale-to',String(scale),'-png','input.pdf','page'],{cwd:dir,stdio:'ignore'});
     let settled=false;
     const finish=error=>{if(settled)return;settled=true;clearTimeout(timer);signal?.removeEventListener('abort',abort);if(error){child.kill('SIGKILL');reject(error);}else resolve();};
     const abort=()=>finish(signal.reason||new DOMException('Aborted','AbortError'));
@@ -20,19 +20,22 @@ function raster(dir,pages,signal) {
     if(signal?.aborted)abort();
   });
 }
-export async function presentationOverview(pdf,{signal}={}) {
+export async function presentationOverview(pdf,{signal,singlePage=false}={}) {
   const check=await inspectRenderedPdf(pdf,{signal});
+  if(singlePage && check.pages!==1)throw new Error('原单张表被拆成多页，未通过单页打印核对');
   if(check.pages>40)throw new Error('真实PPT总览最多40页，请分批；未以抽样冒充全页检查');
   const dir=await mkdtemp(path.join(os.tmpdir(),'jarvis-ppt-overview-'));
   try {
     await writeFile(path.join(dir,'input.pdf'),new Uint8Array(await pdf.arrayBuffer()));
-    await raster(dir,check.pages,signal);
+    // 密集表格用独立2000px页面，不放入六页缩略总览；旧PPT路径保持原尺度。
+    await raster(dir,check.pages,signal,singlePage?2000:1000);
     const files=(await readdir(dir)).filter(file=>/^page-\d+\.png$/.test(file)).sort((a,b)=>Number(a.match(/\d+/)[0])-Number(b.match(/\d+/)[0]));
     if(files.length!==check.pages)throw new Error('真实PDF栅格页数不一致');
     const pages=[];let total=0;
     for(const file of files){signal?.throwIfAborted();total+=(await stat(path.join(dir,file))).size;if(total>30e6)throw new Error('PPT总览图片超过30MB');pages.push(new Blob([await readFile(path.join(dir,file))],{type:'image/png'}));}
     const sheets=[];
-    for(let start=0;start<pages.length;start+=6){
+    if(singlePage)sheets.push({blob:pages[0],pages:[1]});
+    else for(let start=0;start<pages.length;start+=6){
       const group=pages.slice(start,start+6);
       const blob=await contactSheet(group,start+1,{signal});
       sheets.push({blob,pages:group.map((_,i)=>start+i+1)});
