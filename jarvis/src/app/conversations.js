@@ -10,6 +10,7 @@ import { openingSuggestions, followUpSuggestions } from '../core/suggest.js';
 import { toPlainText } from '../core/markdown.js';
 import { stripEmotionTags } from '../../shared/emotionTag.js';
 import * as ws from '../agent/workspace.js';
+import { createWorkspaceFiles } from './workspaceFiles.js';
 import * as agentMemory from '../agent/memory.js';
 import * as sessionsApi from '../agent/sessions.js';
 import { $, DESKTOP, COMPACT, toast } from './env.js';
@@ -302,12 +303,19 @@ export function createConversations(app) {
     }
     const name = title.replace(/[\\/:*?"<>|]/g, '').slice(0, 40) || '对话';
     try {
+      // 2026-11-17 用户：手机导出后打开报 404——以前总写进本机存储，服务器模式的工作区却读服务器。
+      // 现在跟随当前运行位置写（服务器模式写服务器工作区，本机模式写本机），工作区里能直接打开和下载。
+      const target = createWorkspaceFiles(app)();
+      const save = async (file, data) => {
+        const result = await target.write(file, data instanceof Blob ? data : new Blob([data], { type: ws.MIME[ws.ext(file)] || 'text/plain' }));
+        return result?.path || ws.normalize(file);
+      };
       let path;
-      if (kind === 'md') path = (await ws.write(`导出/${name}.md`, md)).path;
+      if (kind === 'md') path = await save(`导出/${name}.md`, md);
       else {
         const { generate } = await import('../agent/docs.js');
         const out = await generate('docx', { title, content: md.replace(/^# .*\n/, '') });
-        path = (await ws.write(`导出/${name}.${out.ext}`, out.blob)).path;
+        path = await save(`导出/${name}.${out.ext}`, out.blob);
       }
       app.panels.refreshFiles();
       toast(`已导出到工作区：${path}`);

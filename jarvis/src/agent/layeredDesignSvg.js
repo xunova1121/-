@@ -40,6 +40,11 @@ export function chartLabelNodes(node) {
 }
 export function designLayerMarkup(node, assets, font = DESIGN_FONT) {
   const { x, y, w, h } = node, esc = escapeDesignXml;
+  if (node.type === 'shape' && node.fade) {
+    // 图文融合渐变带：从透明过渡到下方底色，不画边框
+    const stops = node.fade.stops.map(([o, a]) => `<stop offset="${f(o)}" stop-color="${node.fill}" stop-opacity="${f(a)}"/>`).join('');
+    return `<defs><linearGradient id="fade-${node.id}" x1="0" y1="0" x2="0" y2="1">${stops}</linearGradient></defs><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="url(#fade-${node.id})"/>`;
+  }
   if (node.type === 'shape') return `<rect x="${x}" y="${y}" width="${w}" height="${h}"${node.radius ? ` rx="${node.radius}"` : ''} fill="${node.fill}"${node.stroke ? ` stroke="${node.stroke}"` : ''}/>`;
   if (node.type === 'icon') return `<g transform="translate(${x} ${y}) scale(${f(w / 24)} ${f(h / 24)})">${designIconMarkup(node.icon, node.color)}</g>`;
   if (node.type === 'image') {

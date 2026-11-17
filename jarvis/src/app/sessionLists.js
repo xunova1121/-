@@ -18,6 +18,7 @@ export function createSessionLists(app) {
         if (id === app.session.id) app.switchTo(sessionsApi.create());
       },
       settings: app.settings,
+      onExport: (id, kind) => app.exportSession(id, kind),
       onSaveChange: (on) => {
         app.setSetting('saveSessions', on);
         if (on) app.persistSession();

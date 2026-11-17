@@ -287,6 +287,7 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
       if (group.files.length > 1) for (const file of group.files) formats.append(action(file.path.split('/').pop(), () => openFile(file.path)));
       if (group.poster) {
         for (const [label, entries] of [['源文件', group.poster.sourceFiles], ['历史稿', group.poster.historyFiles]]) {
+          if (!entries.length) continue; // 没有以前的成品就不显示“历史稿（0）”
           const detail = element('details', { className: 'ws-poster-files' }, element('summary', { textContent: label + `（${entries.length}）` }));
           detail.onclick = event => event.stopPropagation();
           for (const file of entries) {

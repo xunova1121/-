@@ -28,6 +28,7 @@ export async function rememberDesignTask(sessionId, receipt, request, { signal }
     historyStep: Number(receipt.delivery.primaryPath.match(/\/attempt-(\d+)\//)?.[1]) || 1,
     historyPrefix: receipt.delivery.historyPrefix,
     sourceAliases: (receipt.delivery.sourceAliases || []).slice(0, 3),
+    previousVersions: (receipt.delivery.previousVersions || []).filter(p => typeof p === 'string' && p.length <= 400 && p.startsWith(receipt.delivery.historyPrefix)).slice(-8),
     request: inherited ? previous.request : raw,
     illustrated: wantsIllustratedPoster(request) || inherited && previous.illustrated === true,
     quality: receipt.delivery.quality, updatedAt: Date.now() });
@@ -47,7 +48,8 @@ export async function recallDesignTask(sessionId, text, { history = [], signal }
   if (workspace() !== captured || identity() !== owner) return null;
   return { ...record, request: String(record.request || '').slice(0, 1800), title: String(record.title || '').slice(0, 160),
     historyStep: Number(record.primaryPath.match(/\/attempt-(\d{1,9})\//)?.[1]) || 1,
-    sourceAliases: (Array.isArray(record.sourceAliases) ? record.sourceAliases : []).filter(p => typeof p === 'string' && p.length <= 400).slice(0, 3) };
+    sourceAliases: (Array.isArray(record.sourceAliases) ? record.sourceAliases : []).filter(p => typeof p === 'string' && p.length <= 400).slice(0, 3),
+    previousVersions: (Array.isArray(record.previousVersions) ? record.previousVersions : []).filter(p => typeof p === 'string' && p.length <= 400 && p.startsWith(record.historyPrefix)).slice(-8) };
 }
 export async function designTaskRequirement(text, options) {
   if (options.isolated) return text;

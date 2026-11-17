@@ -85,6 +85,7 @@ export async function recordWorkAttempt({ tool, args = {}, output = '', ok, sess
     files,
     ...(delivery && { artifactKind: 'poster', deliveryId: delivery.id, historyPrefix: delivery.historyPrefix,
       sourceFiles: (Array.isArray(delivery.sourceFiles) ? delivery.sourceFiles : []).filter(p => typeof p === 'string' && p.length <= 400 && (p.startsWith(delivery.historyPrefix) || sourceAliases.includes(p))).slice(0, 8), sourceAliases,
+      previousVersions: (Array.isArray(delivery.previousVersions) ? delivery.previousVersions : []).filter(p => typeof p === 'string' && p.length <= 400 && p.startsWith(delivery.historyPrefix) && p.endsWith('.png') && p !== delivery.primaryPath).slice(-8),
       attempts: Math.min(3, Number(delivery.attempts) || 1), quality: delivery.quality === 'complete' ? 'complete' : 'needs_review' }),
     status: generationStatus,
     ...(!ok && /^(?:ARCHITECTURE_|DIAGRAM_|SVG_)/.test(failure?.code || '') && {

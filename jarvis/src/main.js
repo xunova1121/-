@@ -166,6 +166,7 @@ app.initShortcuts();
 // 调试 / 自动化测试入口
 window.__jarvis = {
   machine: app.machine,
+  exportSession: (id, kind) => app.exportSession(id, kind),
   get agents() {
     return app.agents;
   },

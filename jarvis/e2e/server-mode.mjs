@@ -65,6 +65,28 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('#transcript .msg.agent').length > 0, null, { timeout: 10000 }).catch(() => {});
   check('刷新页面后，对话从服务器取回', await page.locator('#transcript .msg.user').count() >= 1);
 
+  // 2026-11-17 用户：手机导出 md/Word 后打开报 404（以前写进本机存储，工作区读服务器）。导出必须写进服务器工作区并能下载
+  const exported = await page.evaluate(async () => {
+    const app = window.__jarvis, client = window.__jarvisServerClient;
+    await app.exportSession(app.sessionId, 'md');
+    await app.exportSession(app.sessionId, 'docx');
+    const list = await client.listFiles();
+    const paths = list.map((f) => f.path).filter((p) => p.startsWith('导出/'));
+    const sizes = [];
+    for (const p of paths) sizes.push((await client.download(p)).size);
+    return { paths, sizes };
+  });
+  check('服务器模式导出Markdown和Word写进服务器工作区且能下载', exported.paths.some((p) => p.endsWith('.md')) && exported.paths.some((p) => p.endsWith('.docx')) && exported.sizes.every((n) => n > 0), JSON.stringify(exported));
+  await page.evaluate(() => window.__jarvis.showPanel('sessions'));
+  await page.waitForSelector('.session');
+  check('电脑对话面板有“导出”按钮，可选Word/Markdown/复制', await page.evaluate(() => {
+    const b = document.querySelector('.session .session-export-btn');
+    if (!b) return false;
+    b.click();
+    const labels = [...document.querySelectorAll('.session-export button')].map((x) => x.textContent);
+    return labels.join('|') === '导出为 Word|导出为 Markdown|复制全部内容';
+  }));
+
   // 发任务后马上刷新（模拟手机切走 / App 被关）：任务在服务器上照样做完，再打开能看到结果
   await page.evaluate(() => { document.body.classList.add('side-closed'); document.body.classList.remove('side-open'); });
   await page.fill('#prompt', '再介绍一下你自己');

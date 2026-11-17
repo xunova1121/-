@@ -112,11 +112,15 @@ try {
     }, { files: browserFiles, record: records[0] });
     await page.waitForFunction(() => document.querySelectorAll('#file-list li.ws-result').length === 1);
     check(`${width}px：30份历史文件默认只显示一张成品`, await page.locator('#file-list li.ws-result').count() === 1);
-    check(`${width}px：源文件和历史稿默认折叠`, await page.locator('.ws-poster-files').count() === 2 && await page.locator('.ws-poster-files[open]').count() === 0);
+    // 2026-11-17 用户：做海报产出那么多历史稿。同一轮的试排/过程文件不再列为“历史稿”（原断言为“历史稿（32）”可展开）
+    check(`${width}px：同轮试排不列为历史稿，只剩源文件一个折叠项`, await page.locator('.ws-poster-files').count() === 1 && await page.locator('.ws-poster-files[open]').count() === 0 && await page.getByText(/^历史稿/).count() === 0);
     await page.getByText('源文件（3）', { exact: true }).click();
     check(`${width}px：展开可见原PPTX/SVG/JSON，点击未误开主图`, await page.locator('.ws-poster-files[open] button').count() === 3);
-    await page.getByText('历史稿（32）', { exact: true }).click();
-    check(`${width}px：历史试排和手机校验图仍可查看`, await page.locator('.ws-poster-files').nth(1).locator('button').count() === 32);
+    await page.getByText('显示过程文件', { exact: true }).click();
+    await page.waitForFunction(() => document.querySelectorAll('#file-list li.ws-result').length > 1);
+    check(`${width}px：试排和手机校验文件没删，打开“显示过程文件”仍可查看`, await page.locator('#file-list li.ws-result').count() >= 31);
+    await page.getByText('显示过程文件', { exact: true }).click();
+    await page.waitForFunction(() => document.querySelectorAll('#file-list li.ws-result').length === 1);
     check(`${width}px：主卡片无横向溢出`, await page.locator('#file-list').evaluate(n => n.scrollWidth <= n.clientWidth + 1));
     await page.evaluate(async ({ files, record, previous }) => {
       const db = await new Promise((resolve, reject) => { const r = indexedDB.open('jarvis'); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });

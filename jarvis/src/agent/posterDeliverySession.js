@@ -1,4 +1,4 @@
-/** 同一任务试排稿私存，默认交付一张成品；旧文件不删除、不覆盖。 */
+/** 同一任务试排稿私存，默认交付一张成品；旧文件不删除、不覆盖。工作区“历史稿”只列以前交付过的完整成品（delivery.previousVersions），试排过程文件不列。 */
 import * as ws from './workspace.js';
 import { scopedState } from './store.js';
 import { wantsIllustratedPoster } from './posterContent.js';
@@ -26,7 +26,7 @@ export function withPosterDelivery(tool, ctx, factory) {
     let task = groups.get(groupKey);
     if (!task) {
       if (groups.size >= 12) throw failure('本轮海报数量已达12张，请分批制作');
-      task = { id: crypto.randomUUID(), attempts: 0, corrections: 0, calls: 0, rich: false, tail: Promise.resolve(), last: null, signatures: new Map(), sourceAliases: [] };
+      task = { id: crypto.randomUUID(), attempts: 0, corrections: 0, calls: 0, rich: false, tail: Promise.resolve(), last: null, signatures: new Map(), sourceAliases: [], versions: [] };
       groups.set(groupKey, task);
     }
     // 排字不是批量出方案；同轮重复/改名不产生另一组公开成果。
@@ -44,6 +44,8 @@ export function withPosterDelivery(tool, ctx, factory) {
         task.calls = previous.historyStep || 0;
         task.rich ||= previous.illustrated === true;
         task.sourceAliases = [...(previous.sourceAliases || [])];
+        task.carried = true; // task.last 来自以前的回合（用户要求改稿），被替换时才算一版历史稿
+        task.versions = (previous.previousVersions || []).filter(p => typeof p === 'string' && p.startsWith(previous.historyPrefix)).slice(-8);
         task.last = { kind: 'poster', status: previous.quality === 'complete' ? 'complete' : 'partial', files: [], designPath: previous.sourcePath,
           delivery: { id: previous.deliveryId, primaryPath: previous.primaryPath, historyPrefix: previous.historyPrefix,
             title: previous.title, quality: previous.quality, sourceFiles: [previous.sourcePath], attempts: 0, retryAllowed: true } };
@@ -111,6 +113,11 @@ export function withPosterDelivery(tool, ctx, factory) {
       receipt.guidance = '一次处理preflight.issues中的全部问题；若缺空间请重新构图，不删字/改小字/逐项盲试。不要换工具绕过预算，或让用户反复回继续。默认只展示delivery.primaryPath；技术通过不证明事实或审美，未通过项如实说明。';
       // 后续失败不能把已有可交付稿替换为空；仍向模型说明本次失败。
       if (png && (!task.last || receipt.status === 'complete' || task.last.status !== 'complete')) {
+        // 历史稿只记“以前回合交付过的完整成品”（用户要求改稿前的那张）；同一轮里的试排、待核验的候选都不算（2026-11-17 用户：做海报为什么产出那么多历史稿）
+        const replaced = task.carried && task.last?.status === 'complete' ? task.last.delivery?.primaryPath : null;
+        task.carried = false;
+        if (replaced && replaced !== png.path && !task.versions.includes(replaced)) task.versions = [...task.versions, replaced].slice(-8);
+        receipt.delivery.previousVersions = [...task.versions];
         task.last = structuredClone(receipt);
         const blob = await ws.readBlob(png.path);
         assertCurrent();
@@ -123,7 +130,7 @@ export function withPosterDelivery(tool, ctx, factory) {
         ctx.onFileChanged?.(png.path);
         ctx.onImage?.(URL.createObjectURL(blob), png.path);
       } else if (task.last) {
-        receipt.delivery = { ...task.last.delivery, sourceAliases: [...task.sourceAliases], attempts: task.attempts, corrections: task.corrections,
+        receipt.delivery = { ...task.last.delivery, previousVersions: [...task.versions], sourceAliases: [...task.sourceAliases], attempts: task.attempts, corrections: task.corrections,
           retryAllowed: task.attempts < MAX_ATTEMPTS && task.corrections < MAX_CORRECTIONS };
         receipt.previousDelivery = '本次试排未替换上一份成品，当前展示仍为上一稿；不能称本次修改成功';
       }

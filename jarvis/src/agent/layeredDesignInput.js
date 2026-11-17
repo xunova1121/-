@@ -43,6 +43,16 @@ function normalizeLayer(node, canvas, fitText = true) {
     out.role = node.role;
   }
   out.radius = finite(node.radius ?? 0, 0, Math.min(w, h) / 2, '圆角');
+  // 图文融合渐变带（layeredDesignFusion.js）：自上而下 2–4 个色标，偏移和不透明度都在0–1、偏移递增
+  if (type === 'shape' && node.fade !== undefined) {
+    const stops = node.fade?.stops;
+    if (!Array.isArray(stops) || stops.length < 2 || stops.length > 4) throw designError('渐变带需2–4个色标');
+    out.fade = { stops: stops.map(([offset, opacity], i) => {
+      const o = finite(offset, 0, 1, '渐变位置'), a = finite(opacity, 0, 1, '渐变不透明度');
+      if (i && o < stops[i - 1][0]) throw designError('渐变色标需从上到下递增');
+      return [o, a];
+    }) };
+  }
   if (type === 'text') {
     out.text = boundedText(node.text);
     out.fontSize = finite(node.fontSize ?? 32, 12, 300, '字号');

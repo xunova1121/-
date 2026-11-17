@@ -75,7 +75,7 @@ export function catalogGroups(files, { items = {}, query = '', view = 'recent', 
     const key = stem + '\0' + (meta.project || '');
     if (!groups.has(key))
       groups.set(key, { key, title: meta.title || poster?.displayTitle || poster?.title || stem.split('/').pop(), project: meta.project || '', favorite: false, mtime: 0, files: [], source: null,
-        ...(poster && { poster: { sourceFiles: files.filter(f => poster.sourceFiles?.includes(f.path)), historyFiles: files.filter(f => f.path.startsWith(poster.historyPrefix) && f.path !== file.path && !poster.sourceFiles?.includes(f.path)), quality: poster.quality } }) });
+        ...(poster && { poster: { sourceFiles: files.filter(f => poster.sourceFiles?.includes(f.path)), historyFiles: files.filter(f => f.path !== file.path && (poster.previousVersions || []).includes(f.path)), quality: poster.quality } }) });
     const group = groups.get(key);
     group.files.push(file);
     group.favorite ||= Boolean(meta.favorite);

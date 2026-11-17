@@ -70,7 +70,11 @@ it('不同试排最多3次，后续失败不抹去已成功的成果索引和历
   const groups = catalogGroups(await ws.list(), { records });
   expect(groups).toHaveLength(1);
   expect(groups[0].title).toBe('稿件1');
-  expect(groups[0].poster.historyFiles).toHaveLength(4);
+  // 2026-11-17 用户反馈“做海报产出那么多历史稿”：同一轮的试排不再列为历史稿（原断言为4个试排文件）；试排文件仍保留不删，只在“处理文件”里看得到
+  expect(groups[0].poster.historyFiles).toEqual([]);
+  const trial = (await ws.list()).filter(f => f.path.startsWith(records[0].historyPrefix) && f.path.includes('/attempt-1/'));
+  expect(trial).toHaveLength(4);
+  expect(catalogGroups(await ws.list(), { records, process: true }).length).toBeGreaterThan(1);
 });
 it('明确多张海报、新一轮任务及另一账号均独立，不合并用户指定作品', async () => {
   const tool = fixture(), scope = {};
@@ -111,4 +115,27 @@ it('指定源稿名称已存在时另存，不能覆盖旧稿；归组仍只有�
   const grouped = catalogGroups(await ws.list(), { records: [record] });
   expect(grouped).toHaveLength(2);
   expect(grouped.find(g => g.poster).poster.sourceFiles.some(f => f.path === result.designPath)).toBe(true);
+});
+it('历史稿只列以前回合交付过的成品：改稿后列出上一版PNG，同轮试排不列', async () => {
+  await collection('sessions').put({ id: 'poster-session', messages: [] });
+  const tool = fixture();
+  const record = async output => recordWorkAttempt({ tool: 'make_poster', args: {}, output, ok: true, sessionId: 'poster-session', scope: {}, callId: 'x' });
+  const first = JSON.parse(await tool.run({ title: '初稿' }, { executionScope: {}, sessionId: 'poster-session', rawRequestText: '做一张海报' }));
+  const trial = JSON.parse(await tool.run({ title: '初稿二' }, { executionScope: {}, sessionId: 'poster-session', rawRequestText: '做一张海报' }));
+  expect(trial.delivery.previousVersions).toEqual([]);
+  // 新一轮：用户要求改稿，沿用上一轮的作品
+  const revisionScope = {};
+  const a = JSON.parse(await tool.run({ title: '改稿甲' }, { executionScope: revisionScope, sessionId: 'poster-session', rawRequestText: '只改标题' }));
+  expect(a.delivery.id).toBe(trial.delivery.id);
+  expect(a.delivery.previousVersions).toEqual([trial.delivery.primaryPath]);
+  // 同一轮里再试排一次：上一版仍只有一张，不把本轮试排算进去
+  const b = JSON.parse(await tool.run({ title: '改稿乙' }, { executionScope: revisionScope, sessionId: 'poster-session', rawRequestText: '只改标题' }));
+  expect(b.delivery.previousVersions).toEqual([trial.delivery.primaryPath]);
+  await record(JSON.stringify(b));
+  const records = (await listWorkRecords({ kind: 'image' })).items;
+  expect(records[0].previousVersions).toEqual([trial.delivery.primaryPath]);
+  const poster = catalogGroups(await ws.list(), { records }).find(g => g.poster);
+  expect(poster.files.map(f => f.path)).toEqual([b.delivery.primaryPath]);
+  expect(poster.poster.historyFiles.map(f => f.path)).toEqual([trial.delivery.primaryPath]);
+  expect(first.delivery.primaryPath).not.toBe(trial.delivery.primaryPath);
 });

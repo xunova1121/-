@@ -388,6 +388,11 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 .session:hover .session-actions, .session:focus-within .session-actions, .session.current .session-actions { opacity: 1; }
 .session-actions .x-btn.on { color: var(--warn); }
 .session-actions .x-btn.danger { color: var(--bad); font-size: 11px; }
+/* 2026-11-17：电脑导出改为写字按钮 + 小菜单（Word / Markdown / 复制） */
+.session-actions .session-export-btn { font-size: 12px; padding: 0 6px; width: auto; }
+.session-export { display: flex; flex-direction: column; gap: 2px; position: absolute; right: 8px; top: 100%; z-index: 20; padding: 4px; border-radius: 8px; background: var(--panel, #fff); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18); }
+.session-export .x-btn { width: auto; text-align: left; padding: 6px 10px; font-size: 13px; white-space: nowrap; }
+.session { position: relative; }
 @media (hover: none) { .session-actions { opacity: 1; } }
 
 /* ---- 定时任务 ---- */

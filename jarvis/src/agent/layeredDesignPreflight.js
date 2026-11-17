@@ -2,6 +2,7 @@
 import { normalizeLayerDesign, fitDesignText, designError } from './layeredDesignInput.js';
 import { planLayerDesign } from './layeredDesignLayout.js';
 import { designTextMinimum } from './layeredDesignPresentation.js';
+import { fuseLayerDesign } from './layeredDesignFusion.js';
 
 const overlapsX = (a, b) => Math.min(a.x + a.w, b.x + b.w) > Math.max(a.x, b.x) + 0.01;
 const contains = (a, b) => a.x <= b.x && a.x + a.w >= b.x + b.w && a.y <= b.y && a.y + a.h >= b.y + b.h;
@@ -53,9 +54,13 @@ export function prepareFreeLayerDesign(input, defaultSize) {
     if (Object.keys(changes).length) adjustments.push({ id: node.id, changes });
     Object.assign(node, candidate);
   }
+  // 2026-11-17 用户：海报像硬拼的。适配字号后再做图文融合：大图下沿加渐变过渡、同列段落统一间距（见 layeredDesignFusion.js）
+  const fusion = fuseLayerDesign(draft);
   try {
-    return { design: normalizeLayerDesign(draft), preflight: { status: 'passed', adjustments,
-      basis: '仅在现有空白和卡片范围内适配文字；原文、坐标、画幅和素材未改，不代表视觉审美通过' } };
+    return { design: normalizeLayerDesign(draft), preflight: { status: 'passed', adjustments, ...(fusion.length && { fusion }),
+      basis: fusion.length
+        ? '在现有空白和卡片范围内适配文字；为图文融合在大图下沿加了渐变过渡、把同列段落按统一间距重排；原文、字号、画幅和素材未改，不代表视觉审美通过'
+        : '仅在现有空白和卡片范围内适配文字；原文、坐标、画幅和素材未改，不代表视觉审美通过' } };
   } catch (error) {
     if (error.kind === 'input') error.adjustments = adjustments;
     throw error;

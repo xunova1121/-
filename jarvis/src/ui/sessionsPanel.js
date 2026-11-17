@@ -15,7 +15,7 @@ const el = (tag, props = {}, ...kids) => {
 /**
  * @param {{ getCurrentId: () => string, onOpen: (id: string) => void, onNew: () => void, onDeleted: (id: string) => void, settings: object, onSaveChange: (on: boolean) => void }} o
  */
-export function initSessionsPanel({ getCurrentId, onOpen, onNew, onDeleted, settings, onSaveChange }) {
+export function initSessionsPanel({ getCurrentId, onOpen, onNew, onDeleted, settings, onSaveChange, onExport }) {
   let query = '';
   let timer = 0;
 
@@ -80,7 +80,22 @@ export function initSessionsPanel({ getCurrentId, onOpen, onNew, onDeleted, sett
           input.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') done(); if (e.key === 'Escape') refresh(); });
           input.addEventListener('blur', done);
         }),
-        btn('⇩', '导出为 Markdown', () => saveFile(new Blob([sessions.toMarkdown(s)], { type: 'text/markdown' }), `${s.title}.md`)),
+        // 2026-11-17 用户：电脑上找不到导出——以前只有悬停才出现的“⇩”且只能存Markdown到浏览器下载。
+        // 改为写字的“导出”按钮，与手机同一流程：Word / Markdown 存进工作区“导出”文件夹并打开，或复制全文。
+        onExport
+          ? btn('导出', '导出这段对话', (b) => {
+              const old = b.parentElement.querySelector('.session-export');
+              if (old) return old.remove();
+              const pick = (kind) => { menu.remove(); onExport(s.id, kind); };
+              const menu = el('div', { className: 'session-export', role: 'menu' },
+                ...[['docx', '导出为 Word'], ['md', '导出为 Markdown'], ['copy', '复制全部内容']].map(([kind, label]) => {
+                  const item = el('button', { type: 'button', className: 'x-btn', textContent: label, role: 'menuitem' });
+                  item.addEventListener('click', (e) => { e.stopPropagation(); pick(kind); });
+                  return item;
+                }));
+              b.after(menu);
+            }, 'session-export-btn')
+          : btn('⇩', '导出为 Markdown', () => saveFile(new Blob([sessions.toMarkdown(s)], { type: 'text/markdown' }), `${s.title}.md`)),
         btn('✕', '删除', async (b) => {
           if (b.dataset.c !== '1') { b.dataset.c = '1'; b.textContent = '确认'; b.classList.add('danger'); setTimeout(() => { b.dataset.c = ''; b.textContent = '✕'; b.classList.remove('danger'); }, 3000); return; }
           // 先放回收站，7 天内能恢复（见 sessions.trash）

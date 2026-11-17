@@ -37,6 +37,23 @@ function chart(pptx, slide, node, font) {
   for (const p of g.points) slide.addShape(pptx.ShapeType.ellipse, { x: inch(p.x - 3), y: inch(p.y - 3), w: inch(6), h: inch(6), fill: { color: node.color.slice(1) }, line: { transparency: 100 }, objectName: `layer-${node.id}-point` });
   chartLabelNodes(node).forEach(label => text(slide, label, font));
 }
+/** PPT没有原生透明渐变接口：用24条逐渐变实的色带近似图文融合渐变，每条都是可编辑形状 */
+function fadeBands(slide, pptx, node) {
+  const bands = 24, stops = node.fade.stops;
+  const at = (t) => {
+    for (let i = 1; i < stops.length; i++) if (t <= stops[i][0]) {
+      const [o0, a0] = stops[i - 1], [o1, a1] = stops[i];
+      return o1 === o0 ? a1 : a0 + ((t - o0) / (o1 - o0)) * (a1 - a0);
+    }
+    return stops.at(-1)[1];
+  };
+  for (let i = 0; i < bands; i++) {
+    const alpha = at((i + 0.5) / bands);
+    if (alpha <= 0.01) continue;
+    slide.addShape(pptx.ShapeType.rect, { x: inch(node.x), y: inch(node.y + (node.h * i) / bands), w: inch(node.w), h: inch(node.h / bands + 0.5),
+      fill: { color: node.fill.slice(1), transparency: Math.round((1 - alpha) * 100) }, line: { color: node.fill.slice(1), transparency: 100 }, objectName: `layer-${node.id}-band-${i}` });
+  }
+}
 export async function composeLayeredPptx(design, assets) {
   const PptxGenJS = (await import('pptxgenjs')).default;
   const pptx = new PptxGenJS();
@@ -48,6 +65,7 @@ export async function composeLayeredPptx(design, assets) {
   for (const node of design.layers) {
     const box = { x: inch(node.x), y: inch(node.y), w: inch(node.w), h: inch(node.h), objectName: `layer-${node.id}` };
     if (node.type === 'text') text(slide, node, font);
+    else if (node.type === 'shape' && node.fade) fadeBands(slide, pptx, node);
     else if (node.type === 'shape') slide.addShape(node.radius ? pptx.ShapeType.roundRect : pptx.ShapeType.rect, { ...box, radius: inch(node.radius), rectRadius: inch(node.radius), fill: { color: node.fill.slice(1) }, line: { color: (node.stroke || node.fill).slice(1), transparency: node.stroke ? 0 : 100 } });
     else if (node.type === 'icon') slide.addImage({ ...box, data: dataSvg(`<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 24 24">${designIconMarkup(node.icon, node.color)}</svg>`) });
     else if (node.type === 'image') {
