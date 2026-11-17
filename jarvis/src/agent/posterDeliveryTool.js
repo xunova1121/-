@@ -16,6 +16,7 @@ import { deliverLayeredDesign } from './layeredDesignDelivery.js';
 import { CANVAS_TEXT_PROPERTIES, usesCanvasText } from './imageTextInput.js';
 import { deliverCanvasText } from './imageTextDelivery.js';
 import { sketchPosters } from './posterSketch.js';
+import { deliverAiPoster, AI_POSTER_LIMITS } from './aiPoster.js';
 import { CONCEPT_SCHEMA } from './layeredDesignSchema.js';
 
 const SIZES = { 竖版: [1080, 1920], 横版: [1920, 1080], 方形: [1440, 1440], 朋友圈封面: [1440, 1080], 小红书: [1024, 1536] };
@@ -172,6 +173,9 @@ export function createPosterDeliveryTool(ctx = {}) {
         background_color: { type: 'string' },
         theme: { type: 'string', description: '兼容已有配色名称；明确颜色参数优先' },
         path: { type: 'string', description: '成品路径，三种文件共用名称，如海报/秋季养生汤.png' },
+        ai_full: { type: 'object', additionalProperties: false, description: `AI整图出稿：宣传类、字少的海报（标题+最多${AI_POSTER_LIMITS.lines}条短要点，全部文字≤${AI_POSTER_LIMITS.chars}字）优先用它——画面和文字由画图模型一次画出，图文一体更好看；程序把图里的字读回逐条核对，写错会重画一次，仍不对就标待核对、改用design程序排字。赛程、名单、数据表等信息多的不要用`,
+          properties: { prompt: { type: 'string', description: '画面描述：主体、场景、风格、配色、构图（不要写文字内容，文字放texts）' }, size: { type: 'string', description: '如1024x1536竖版、1536x1024横版' },
+            texts: { type: 'object', additionalProperties: false, properties: { title: { type: 'string', description: '主标题≤16字' }, subtitle: { type: 'string', description: '≤24字' }, lines: { type: 'array', maxItems: 5, items: { type: 'string', description: '每条≤24字' } }, footer: { type: 'string', description: '≤30字' } }, required: ['title'] } }, required: ['texts'] },
         sketches: { type: 'array', maxItems: 3, description: '可选：正式出图前交2–3个不同构思的草图比较（每个含concept和layers，图片层先写位置和detail，不必先生图）。程序用真实字体渲染、图片位置画灰色占位，检查重叠和手机字号，再像设计师一样比较选优并给改法；不算试排、不是交付物。之后再生图并用design出正式稿',
           items: { type: 'object', additionalProperties: false, properties: { concept: CONCEPT_SCHEMA, palette: LAYERED_PROPERTIES.design.properties.palette, layers: LAYERED_PROPERTIES.design.properties.layers }, required: ['layers'] } }
       },
@@ -180,6 +184,8 @@ export function createPosterDeliveryTool(ctx = {}) {
     },
     run: async (input = {}, { signal, progress, checkpoint, retrieval, requiresRichVisual, posterAttempt, beginPosterAttempt, designReviewBlocking } = {}) => {
       if (!input || typeof input !== 'object' || Array.isArray(input)) throw inputError('海报参数必须是对象');
+      // AI整图出稿 + 逐字核对（aiPoster.js）：宣传类、字少的海报
+      if (input.ai_full !== undefined) return deliverAiPoster(input, ctx, { signal, progress, beginPosterAttempt });
       // 草图对比：不出正式稿、不算试排（posterSketch.js）
       if (input.sketches !== undefined) {
         const [width, height] = dimensions(input);
