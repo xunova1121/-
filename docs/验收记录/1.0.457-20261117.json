@@ -1,0 +1,159 @@
+{
+  "version": "1.0.457",
+  "build": "5bf5bc6048d3d5c0815c6ba23e40d7a1ec3b7932",
+  "frozen": "cc906e2e66992a390fc416f026e61db2ceec1fc4",
+  "publishedUtc": "2026-11-17T04:12:19Z",
+  "release": "https://github.com/xunova1121/weiyang-release/releases/tag/desktop-v1.0.457",
+  "workflow": {
+    "id": 44012174398,
+    "url": "https://github.com/xunova1121/-/actions/runs/44012174398",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "id": 133801538568,
+        "name": "清理旧的构建产物",
+        "conclusion": "success"
+      },
+      {
+        "id": 133801540271,
+        "name": "同步现有安装包到公开仓库",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 133801588037,
+        "name": "建草稿发布",
+        "conclusion": "success"
+      },
+      {
+        "id": 133801646161,
+        "name": "打包 (windows-latest)",
+        "conclusion": "success"
+      },
+      {
+        "id": 133801646201,
+        "name": "发布前完整验证",
+        "conclusion": "success"
+      },
+      {
+        "id": 133801646254,
+        "name": "打包安卓 App",
+        "conclusion": "success"
+      },
+      {
+        "id": 133812268706,
+        "name": "发布到 Releases",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "checks": [
+    "完整正式CI成功且构建提交一致",
+    "源和公开两仓正式稳定发布",
+    "公开latest指向本版",
+    "两仓七件资源名称尺寸和摘要一致",
+    "实际下载六件资源逐字节摘要符合公开清单",
+    "服务器更新索引版本和摘要对应真实归档",
+    "服务器1000项冻结清单及999原样源文件完整一致",
+    "归档root属主且服务账号可读，版本正确",
+    "实际公开APK仍使用原证书",
+    "实际APK包名与新版版本号正确",
+    "实际APK客户端含云端源文件和预览去重修复",
+    "APK实际代码包含图片表格专用还原及回读验收",
+    "Windows包具有实际PE入口和原生渲染依赖",
+    "Windows实际后端包含预检和新折行协议",
+    "Windows实际后端包含图片表格原生还原和单页高清复核",
+    "Windows实际ASAR版本及云端文件和预览修复正确",
+    "Windows实际ASAR包含图片表格专用还原",
+    "Windows更新索引包含实际安装器SHA512",
+    "两个固定latest入口均指向实际新版索引"
+  ],
+  "assets": [
+    {
+      "name": "Jarvis-1.0.457-android.apk",
+      "size": 18753117,
+      "digest": "sha256:92089b66bcb743bb5616024853a654b47e853fd877d2510ab9697880ae153c32"
+    },
+    {
+      "name": "Jarvis-1.0.457-win-x64.zip",
+      "size": 193730098,
+      "digest": "sha256:6d68b856d62ef2c2dd88e43312836c0db7f2c78a247f8a0c26c659e65da5b7dc"
+    },
+    {
+      "name": "jarvis-server-1.0.457.tar.gz",
+      "size": 28651802,
+      "digest": "sha256:a690723d2fdf57a0213dbaf4d30807de844b7b15b04fcadc82a1c186f4c82f98"
+    },
+    {
+      "name": "jarvis-server-latest.json",
+      "size": 136,
+      "digest": "sha256:1fac95136341fe7d7b51f5dec9ccd9f9169fa477e82ad74201740f6fb7e79e2f"
+    },
+    {
+      "name": "Jarvis-Setup-1.0.457.exe",
+      "size": 152879713,
+      "digest": "sha256:67dc0e653050267d86f2b7a4dfee4f3e1cc9280779989230dcc4b095d959a188"
+    },
+    {
+      "name": "Jarvis-Setup-1.0.457.exe.blockmap",
+      "size": 162256,
+      "digest": "sha256:8a3dc0c6f472329e167f9d1a904b5c1d5ea39577f2662a6413456b7ab1f313ad"
+    },
+    {
+      "name": "latest.yml",
+      "size": 347,
+      "digest": "sha256:153e70292d33c12e9e6e5ba2184bab3e15f2c75c2a6443809097084f518f20f4"
+    }
+  ],
+  "runtimeManifestFiles": 1000,
+  "actualSourceFiles": 999,
+  "permissionEntries": 1176,
+  "apkCertificate": "56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6",
+  "serverDeployed": false,
+  "providerTested": false,
+  "deviceTested": false,
+  "unitTestFiles": 478,
+  "unitTestsPassed": 4177,
+  "spreadsheetReplicaChecks": 25,
+  "sourcePhotoTested": false,
+  "claudeReviewed": false,
+  "heldCandidate": {
+    "version": "1.0.456",
+    "runId": 44010131266,
+    "published": false,
+    "reason": "密集表格复核使用缩略总览，替换为2000px实际单页后重新完整发版"
+  },
+  "localGate": {
+    "passed": 28,
+    "failed": 7,
+    "skipped": 7,
+    "allGreen": false,
+    "failures": [
+      "完整单元测试：旧Origin null测试外部example.com请求5000ms超时，其他4176通过",
+      "四格式结构编辑：Office实际页数缺失",
+      "四种Excel样式：Office实际页数缺失",
+      "手机版界面：等待超时",
+      "海报单份交付：真实交付断言失败",
+      "海报同稿闭环：新一轮同稿断言失败",
+      "网页单文件：等待超时"
+    ],
+    "note": "保留原断言；本机脚本始于456源码，后续读入高清修正，不能当最终同冻结的全量验收。正式457 CI在固定源码上全部原门禁通过。"
+  },
+  "publishedBeijing": "2026-11-17T12:12:19+08:00",
+  "syntheticSamples": [
+    {
+      "name": "upright.pdf",
+      "sha256": "fdb50eecef715d8770b7bc57519d387c7f6bbcb2894a16cbae3b710b62c30701",
+      "bytes": 55302
+    },
+    {
+      "name": "还原-正向原图.xlsx",
+      "sha256": "8f34a89d7aafb5276dbeb82f672e8696576716a8115d030a2a3c83d8cf1f9122",
+      "bytes": 10748
+    },
+    {
+      "name": "upright-preview.png",
+      "sha256": "5f64cff85a2829108691fe69922eec95dde5fda49dbfb413528ed7411dfd6201",
+      "bytes": 115057
+    }
+  ]
+}
