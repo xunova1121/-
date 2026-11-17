@@ -41,6 +41,11 @@ export function reviewOutcome(report, { interrupted = false, nativeSearchCalls =
     warnings.push('文档仍有未解决的生成或排版检查问题。');
     partial = true;
   }
+  const replica = report.artifacts?.filter(item => item.replica).at(-1);
+  if (replica && (replica.replica !== 'complete' || replica.stale || replica.visual !== 'passed' || replica.sourceGrid !== 'matched')) {
+    warnings.push('Excel已保存为待核对稿，原图与实际打印页面尚未完整核对通过。');
+    partial = true;
+  }
   const failures = report.failures?.filter(tool => tool !== 'code_run' || !explainedRepositoryFailure(report, answer));
   if (failures?.length) warnings.push(`这些操作没成功：${[...new Set(failures)].map((tool) => TOOL_NAMES[tool] || tool).join('、')}，相关结果仍需核对。`);
   // 回答是在反问缺的信息（“你想查哪个城市？”）：还没开始查，不算查询失败

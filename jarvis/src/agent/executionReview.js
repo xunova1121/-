@@ -16,6 +16,7 @@ import { completedDeliverySteps } from './deliveryCompletion.js';
 import { priceComparisonIssues } from './priceComparison.js';
 import { reconcileAnswerIssues, conflictingNumbers, weatherConflicts } from './numberReconcile.js';
 import { createSourceEvidence } from './sourceEvidence.js';
+import { tableReplicaRequest, replicaAnswerIssues } from './spreadsheetReplica.js';
 /** 问的是数字类事实（几条、多少、排第几、里程、人口……）：交付前查同一回答里有没有前后不一致的数 */
 const NUMERIC_FACT = /多少|几条|几个|几座|第几|排名|排第|里程|人口|面积|总量|规模|金额|营收|产量|占比/;
 
@@ -180,6 +181,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
       ...(data.designHash && { designHash: String(data.designHash).slice(0, 90) }),
       ...(data.consistency && { consistency: String(data.consistency).slice(0, 40) }),
       ...(data.visual && { visual: ['passed', 'failed'].includes(data.visual) ? data.visual : 'not_checked' }),
+      ...(data.replica && { replica: data.replica === 'complete' ? 'complete' : 'partial', sourceGrid: data.sourceGrid === 'matched' ? 'matched' : 'not_checked' }),
       ...(data.business && { business: data.business === 'source_excerpts_matched' ? data.business : 'not_checked' }),
       errors: Math.max(0, Number(data.errors) || 0),
       slides: Number.isSafeInteger(data.slides) ? data.slides : null,
@@ -308,6 +310,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     if (result.codeExecution === 'not_run') issues.push('已修改代码但没有实际运行记录；先运行适用测试，无法执行就明确未验证');
     if (result.artifacts.some(item => item.format === 'svg' && !['poster', 'visual_demo'].includes(item.kind) && (item.visual !== 'passed' || item.business !== 'passed'))) issues.push('架构图按实际回执交付；摘录匹配不等于业务全面核实，未完成视觉检查要说明，不要为补状态重复生成');
     if (result.artifacts.some((item) => item.errors > 0)) issues.push('文档仍有生成器报告的问题，不能宣称排版或公式全部通过');
+    if (tableReplicaRequest(request) && (lastDocument()?.replica !== 'complete' || lastDocument()?.stale)) issues.push('照图还原尚未取得完整对照回执。已有Excel按待核对稿交付，不能用普通台账、静态0错误或反复付费重生成冒充还原完成');
     if (result.failures.length)
       issues.push('本轮这些操作失败后没有成功补做：' + [...new Set(result.failures)].join('、') + '；补做只指重试失败的这一步（不能改做用户这次没要求的别的事），没补救的在回答里一句话说明，不要为此重新读取已交付的文件');
     return issues.length ? '交付回执核对：' + issues.join('；') + '。不要重复操作或编造测试通过。' : '';
@@ -326,6 +329,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
     answerIssues.push(...posterAnswerIssues(text, mediaDelivery(request, receipts.filter(receipt => receipt.version === version))));
     answerIssues.push(...visualSceneAnswerIssues(text, mediaDelivery(request, receipts.filter(receipt => receipt.version === version))));
     answerIssues.push(...imageDeliveryAnswerIssues(text, mediaDelivery(request, receipts.filter(receipt => receipt.version === version))));
+    answerIssues.push(...replicaAnswerIssues(request, text, lastDocument()));
     // 数字定案（用户 2026-11-05：南京地铁 611 / 757 / 556.8 公里同时出现）：用了定案就只用主数字；没定案时查明显的前后不一致
     answerIssues.push(...(numberDecisions.length ? reconcileAnswerIssues(text, numberDecisions) : numericLookup() ? conflictingNumbers(text) : []));
     if (weatherAsked()) answerIssues.push(...weatherConflicts(text));
@@ -347,6 +351,7 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   const guardsAnswer = () => {
     const rules = answerConstraints(request);
     const delivered = mediaDelivery(request, receipts.filter(receipt => receipt.version === version));
+    if (tableReplicaRequest(request)) return true;
     if (delivered?.kind === 'image' && (delivered.actual || delivered.sizeMatch === false || delivered.formatMatch === false)) return true;
     return numberDecisions.length > 0 || numericLookup() || weatherAsked() || ['poster', 'visual_demo'].includes(taskContract(request).media?.kind) || lastDocument()?.format === 'pptx' || visualEvidence.active() || (styleRequests(request).length > 0 && Boolean(lastDocument())) || rules.noTime || rules.literals.length > 0 || rules.todayNews || rules.care || rules.priceComparison || Boolean(concreteSourceRequirement(request)) || taskContract(request).calculation || report().calculation === 'failed';
   };

@@ -366,6 +366,8 @@ jobs:
         run: node e2e/share-return.mjs "$RUNNER_TEMP/jarvis-e2e/share-return"
       - name: 验证四种Excel样式、公式筛选与真实PDF
         run: node e2e/spreadsheet-styles.mjs "$RUNNER_TEMP/jarvis-e2e/spreadsheet-styles"
+      - name: 验证图片表格网格合并、原文留空、旋转照片与真实Excel打印
+        run: node e2e/spreadsheet-replica.mjs "$RUNNER_TEMP/jarvis-e2e/spreadsheet-replica"
       - name: 验证文档场景模板、精确修改及真实PDF逐页检查
         run: node e2e/document-quality.mjs "$RUNNER_TEMP/jarvis-e2e/documents"
       - name: 验证只排版正文保留与真实Word、PDF读回

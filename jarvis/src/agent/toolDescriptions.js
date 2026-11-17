@@ -1,6 +1,6 @@
 /** 仅缩短本程序工具的模型说明，不改变名称、参数、执行器或第三方MCP协议。 */
 const DESCRIPTIONS = Object.freeze({
-  create_document: '按完整requirements生成Office/PDF文件并读回检查。正文用Markdown，参考材料传原文件；回执中的渲染或视觉未检查不能当通过。',
+  create_document: '按完整requirements生成Office/PDF并读回。照图片还原Excel用source_path原图、content空，保留合并/列宽；其他正文用Markdown。渲染或视觉未检查不能当通过。',
   write_long_document: '长文档按大纲分节写作、统一审查并返工一次。完整task和material_files保留要求与原材料，outline_only只交大纲。',
   write_professional_document: '重要文档先按授权免费调研，再底稿、推演、起草与审查。传完整原话和原文件；用户禁止联网或仅用材料时research=false，不编造缺失证据。',
   fact_check: '逐项查证多个对象或用户明确要求的核验，items名称原样保留。核对实际原文引用，官方正文可单源核实，其他按来源与冲突分级；普通单一问题先搜索。',

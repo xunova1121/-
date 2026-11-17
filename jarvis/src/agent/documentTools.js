@@ -10,6 +10,7 @@ import { throwControl } from '../core/networkRequest.js';
 import { createProfessionalDocumentTools } from './professionalDocumentTools.js';
 import { mediaRequirement } from './actionDelivery.js';
 import { formattingOnly } from './documentPreservation.js';
+import { tableReplicaRequest } from './spreadsheetReplica.js';
 
 /** 文档工具入口只组装，具体制作、修改、计划和验收各自独立。 */
 export function createDocumentTools(ctx) {
@@ -20,6 +21,9 @@ export function createDocumentTools(ctx) {
     run: async (...args) => {
       try {
         const request = String(args[1]?.rawRequestText || args[0]?.requirements || '');
+        if (/^(write_long_document|write_professional_document)$/.test(tool.name) && args[0]?.format === 'xlsx' && tableReplicaRequest(request)) {
+          throw Object.assign(new Error('照图还原Excel请用create_document绑定source_path原图、content空；不能用普通专业台账重排'), { code: 'TABLE_REPLICA_SOURCE', kind: 'input' });
+        }
         if (/^(write_long_document|write_professional_document)$/.test(tool.name) && (args[0]?.format || 'docx') === 'docx' && formattingOnly(request)) {
           throw Object.assign(new Error('只排版任务请用create_document绑定用户原文；不进入长文重写或专业起草流程'), { code: 'DOCUMENT_SOURCE', kind: 'validation' });
         }

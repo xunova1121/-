@@ -13,6 +13,7 @@ import { chooseDesign, DOC_KINDS, SHEET_KINDS } from './documentDesign.js';
 import { styleRequests, relativeTypography, lastStyle } from './styleCheck.js';
 import { ALL_STYLE_IDS, STYLE_NAMES } from './pptStyles.js';
 import { deliverDocument } from './documentDelivery.js';
+import { restoreSpreadsheet, tableReplicaRequest } from './spreadsheetReplica.js';
 import { selfCheck, lint, fixAfterBuild, reviewSlidesByImage } from './selfCheck.js';
 import { pickSheets, sheetSvg, rasterize } from './slidePreview.js';
 import { throwControl } from '../core/networkRequest.js';
@@ -53,7 +54,8 @@ export function createDocumentGenerateTool(ctx) {
   return {
     name: 'create_document',
     description: `生成 Office / 文档文件并保存到工作区；需要模板时先get_document_template。已有Word仅重排时用source_path保留原件结构，content可空；已有本工具生成的PPT补图时，format=pptx、source_path=原PPT、path=另存路径、content可空，requirements写配图要求；程序沿用底稿并最多两路批量配图，不要逐张调用generate_image或重写正文。粘贴原文可用source_requirement_id绑定，不改写正文。自己觉得不满意要重做时沿用同一个 path 覆盖，不要另起“_政企版”“_v2”这类新文件名（不然工作区里堆好几份几乎一样的稿子，用户分不清用哪份）。生成后自动检查文件结构、读回内容，可用时由本机LibreOffice生成真实PDF预览。结构/估算检查不等于Office视觉验收。排版自动完成（A4、标题样式、编号列表、带表头底色的表格、页码；Word / PDF 的二级标题有 3 个以上时自动加目录）。
-content 用 Markdown：
+图片/照片/截图还原Excel或只留表格框架：format=xlsx、source_path=工作区原图片路径、content=""、requirements填用户完整原话。程序独立识别网格/合并与原文并核对实际Office页面；不能抄成Markdown或套台账样式。先核对实际图片路径，缺原图不能拿旧错误Excel替代；不擅自更新年月。回执partial时说明具体未通过项，不声称一样。
+content 用 Markdown（图片还原Excel除外）：
 - docx / pdf / html：开头一个“# 文档标题”，正文用 ## 一级标题、### 二级标题、#### 三级标题；支持多级列表（缩进两个空格）、| 表格 |（:--: 居中、--: 右对齐）、**粗体**、*斜体*、~~删除线~~、[链接](https://…)、> 引用、代码块、--- 分隔线、单独一行 [分页]、![图注](工作区里的图片路径)
   招租、出租、招聘、启事、寻物、海报、宣传单这类贴出去的一页告示：kind 填 poster（不填也会自动认），字号按页面自动取最大、上下铺满一页、不加横线。用户说“字大点 / 小点 / 不要横线 / 铺满”时照原话调用，程序会换算成真实字号；改刚做好的文件时 path 用原文件路径直接覆盖，不要另起新文件名。交付后按回执里“读回实际”的字号回答，不要自己说“已加大”
 - pptx：每页用“## 页标题”。汇报、方案类的页标题写成一句观点（如“建设必要性：补齐告警到处置的人工断点”）；剧情、介绍、攻略类用简洁准确的标题，不硬写观点句。用户自己给了分段的，一段一页、顺序不变。设计风格用 style（不填自动选）。版式按内容自动选：
@@ -81,9 +83,9 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         title: str('文档标题'),
         font_size: { type: 'number', minimum: 8, maximum: 72, description: '正文/单元格字号，磅；用户明确原话优先' },
         title_font_size: { type: 'number', minimum: 8, maximum: 72, description: '标题字号，磅' },
-        content: str('Markdown 内容'),
+        content: str('Markdown 内容；图片还原Excel时填空字符串并绑定source_path原图'),
         source_requirement_id: str('只排版、内容不变时，绑定read_task_requirements中用户原文编号；不从助手旧稿重写正文'),
-        source_path: str('Word重排绑定原DOCX；PPT从Word制作时绑定原DOCX核对完整表格，补图绑定本工具制作的原PPT并另存；普通MD原文转Word也可绑定。其他跨格式材料用read_file读取后填content，不把原件重排参数用于PDF'),
+        source_path: str('图片还原Excel绑定原PNG/JPEG/WebP，保留网格/合并/固定原文，content可空；Word重排绑定原DOCX；PPT从Word制作绑定原DOCX，补图绑定本工具原PPT并另存；普通MD原文转Word也可绑定。其他材料先read_file，不把原件重排参数用于PDF'),
         theme: { type: 'string', enum: [...THEME_IDS, ...REPORT_THEME_IDS, ...TEMPLATE_THEME_IDS], description: '配色主题（政企汇报另有 tech-blue 科技蓝 / gov-red 政务红 / eco-green 生态绿；模板库另有 violet-glass 紫韵 / academic-blue 学术蓝），不填自动选' },
         style: { type: 'string', enum: ALL_STYLE_IDS, description: 'PPT 设计风格（构图不同，不只是颜色）：business 稳重商务（汇报、方案）/ minimal 简洁留白（产品、设计、品牌）/ story 叙事氛围（剧情、人物、历史、文化、旅行）/ data 数据报告（经营、财务、统计）/ report 政企汇报（项目路演、解决方案、政企/国企汇报：双色章节标题、标题下结论句、指标条、痛点四宫格、竖标签面板、左图右文、渐变封面结尾）。不填按用户要求和内容自动选' },
         print_friendly: { type: 'boolean', description: 'PPT 打印友好：政企汇报的封面、章节页、结尾页不用深色渐变，改白底（用户说要打印、黑白、省墨时用）' },
@@ -109,6 +111,9 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
     ) => {
       const { progress, signal, checkpoint, rawRequestText, requestText, executionScope, sessionId } = execution;
       path = await documentOutputPath(path, title, format, { signal });
+      if (format === 'xlsx' && (sourcePath && /\.(png|jpe?g|webp)$/i.test(sourcePath) || tableReplicaRequest(rawRequestText || requestText || requirements))) {
+        return restoreSpreadsheet(ctx, { sourcePath, path, requirements }, execution);
+      }
       let recipe = null;
       let tableSource = null;
       if (format === 'pptx' && sourcePath && /\.docx$/i.test(sourcePath)) {
