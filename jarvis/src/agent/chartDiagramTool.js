@@ -14,7 +14,7 @@ export const CHART_SHAPES = {
   scatter: 'points[{label?,x,y,size?}],xLabel,yLabel — 两个指标的关系/气泡', radar: 'axes[],series[{name,values[]}],max — 多维评分对比', heatmap: 'rows[],columns[],values[[...]],unit — 交叉表深浅',
   treemap: 'items[{label,value}],unit — 构成大小', waterfall: 'start{label,value},steps[{label,value}],endLabel,unit — 从期初到期末的增减', funnel: 'stages[{label,value}],unit — 转化漏斗',
   pyramid: 'levels[{label,note?}]（从塔尖到塔底）— 层级', venn: 'sets[{label,note?}]（2–3个）,overlap — 交集', sankey: 'nodes[{id,label}],links[{from,to,value}],unit — 流量去向',
-  quadrant: 'xAxis{low,high,label},yAxis{low,high,label},quadrants[右上,左上,左下,右下],items[{label,x,y(0–1),focus?}] — 两维定位', gantt: 'tasks[{label,start,end,group?,milestone?,progress?,focus?}],today? 日期写2026-03-15 — 项目排期',
+  quadrant: 'xAxis{low,high,label},yAxis{low,high,label},quadrants[右上,左上,左下,右下],items[{label,x,y(0–1),focus?}] — 两维定位', gantt: 'tasks[{label,start,end,group?,milestone?,progress?,focus?}],today? 日期写2026-03-15，精确到时刻写2026-11-17 19:35（两天内自动按小时排）— 项目排期/当天日程',
   timeline: 'events[{date,label,note?,focus?}] — 大事记', kanban: 'columns[{title,limit?,cards[{text,tag?,blocked?}]}] — 任务看板', matrix: 'rows[],columns[],cells[[yes/partial/no或短文字]] — 权限/功能对照',
   journey: 'stages[],rows[{label,cells[]}],emotion[-2..2]? — 用户旅程', blueprint: 'stages[],customer[],frontstage[],backstage[],support?[] — 服务蓝图（自动画可见线）', storymap: 'backbone[],releases[{label,items[[...]]}] — 故事地图',
   layers: 'layers[{title,items[],focus?}]（从上到下）— 分层堆叠', nested: 'root{title,note?,children[...]}（最多3层）— 包含/范围', sequence: 'participants[{id,label}],messages[{from,to,text,reply?,note?}] — 时序/交互顺序',

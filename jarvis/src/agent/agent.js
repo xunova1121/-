@@ -23,7 +23,7 @@ import { createDiagramRecovery } from './diagramRecovery.js';
 import { runArchitectureDirector } from './architectureDirector.js';
 import { asksDocumentStyles } from './documentStyleQuery.js';
 import { IMAGE_RECHECK, IMAGE_READING_RULES } from './imageReading.js';
-import { textPosterRequest, POSTER_GUIDANCE } from './posterRouting.js';
+import { textPosterRequest, POSTER_GUIDANCE, fixLinkLabels } from './posterRouting.js';
 import { posterFollowupRequirement } from './posterFollowup.js';
 import { designTaskRequirement } from './designTaskMemory.js';
 import { taskMethodContext, createTaskMethodsTool } from './taskMethods.js';
@@ -706,6 +706,10 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       // 只有“出现了用户禁止的内容 / 时间、非今日新闻”这类硬性违规才不展示原回答；“找医生说多了”这类写法问题改不好也照常给，
       // 不能把整段回答换成“请重新生成”（第二轮 30 题实测：产检解读整段被吞）
       const blocking = review.report().answerIssues.filter((issue) => !SOFT_ANSWER_RULES.has(rewriteRule(issue)));
+      const claims = review.report().answerIssues.filter((issue) => rewriteRule(issue) === 'delivery_claim');
+      if (claims.length && !blocking.length) {
+        held = fixLinkLabels(held).trimEnd() + '\n\n（交付核对：回答里有与实际文件回执不完全一致的说法，以文件空间里的实际文件和检查结果为准。' + claims.filter(c => /本次实际只生成了/.test(c)).map(c => c.split('；')[0]).join('；') + '）';
+      }
       if (blocking.length) held = safeNewsPartial(requirementText, held, now()) || (lookupDelivery.hasResults ? lookupDelivery.text() : '') || newsCandidateLinks(requirementText, review.newsCandidates()) || '本轮未能生成符合当前要求的答复，请重新生成。';
       if (review.report().styleIssues.length) held = held.trimEnd() + '\n\n' + review.styleCorrection();
       if (review.report().calculation === 'failed' && !(/工具没能计算[，,；;。\s]*以下按常识推算/.test(held) && !/已通过.*校验|校验(?:已)?通过|工具(?:已)?(?:验证|核验|计算)成功/.test(held))) held = '关键数值校验失败，请人工复核。';
@@ -858,10 +862,13 @@ export function callPurpose(convo = [], closing = false) {
   return 'answer';
 }
 /** 写法类核对（改不好也照常展示回答） */
-const SOFT_ANSWER_RULES = new Set(['care_deferral', 'number_consistency']);
+// delivery_claim：交付说法与文件回执不完全一致（链接名、格式数量、海报验收措辞）。改一次没改好时照常给回答并附核对提示，
+// 不再整段换成“请重新生成”（2026-11-17 用户：做海报整轮只回了这一句，已做出的候选稿也看不到说明）
+const SOFT_ANSWER_RULES = new Set(['care_deferral', 'number_consistency', 'delivery_claim']);
 /** 回答核对问题 → 规则名 */
 export function rewriteRule(issue = '') {
   const t = String(issue);
+  if (/链接文字|本次实际只生成了|海报没有对应成品|图文并茂缺少|程序排字不等于/.test(t)) return 'delivery_claim';
   if (/读回文件/.test(t)) return 'style_claim';
   if (/医生/.test(t)) return 'care_deferral';
   if (/时间或日期/.test(t)) return 'no_time';

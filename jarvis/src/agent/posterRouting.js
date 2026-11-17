@@ -72,7 +72,7 @@ export function posterAnswerIssues(text = '', media) {
   // 2026-11-17 用户反馈：链接写“海报/美国新闻-1117.png”，点开是内部试排目录的“海报.png”；第二版说三份都在，其实没有PPT
   issues.push(...linkLabelIssues(text));
   const formats = new Set((media.outputs || []).filter(o => o.readback === 'passed').map(o => o.format));
-  if (formats.size && !formats.has('pptx') && claims.some(line => /(?:PPTX?|ppt|幻灯片)/i.test(line) && !/(?:没有|未|不含|缺|没出)/.test(line) || /三份(?:都在|齐了|文件)/.test(line))) issues.push('本次实际只生成了' + [...formats].map(f => f.toUpperCase()).join('、') + '，没有PPT；按回执如实列出文件，不能说三份都在');
+  if (formats.size && !formats.has('pptx') && claims.some(line => /(?:PPTX?|ppt|幻灯片)/i.test(line) && /(?:已|都在|齐|生成了|交付|可编辑|可改|在这|如下)/.test(line) && !/(?:没|未|不|缺|待|还)/.test(line) || /三份(?:都在|齐了|文件)/.test(line))) issues.push('本次实际只生成了' + [...formats].map(f => f.toUpperCase()).join('、') + '，没有PPT；按回执如实列出文件，不能说三份都在');
   if (media.visual !== 'passed' && claims.some(line => /通过.{0,6}(?:视觉|看图).{0,8}(?:验收|核验|检查)|完成.{0,6}视觉验收|视觉(?:验收|检查)(?:已)?通过/.test(line))) issues.push('海报没有对应成品的视觉通过回执，不能把生成/读回成功称为视觉验收通过；如实说明视觉未验收');
   return issues;
 }
@@ -88,4 +88,16 @@ export function linkLabelIssues(text = '') {
     if (actual.split(/[\\/]/).pop() !== named[1]) issues.push(`链接文字写的是“${named[1]}”，实际指向“${actual.split(/[\\/]/).pop()}”；链接文字要写真实文件名或改成说明文字（如“海报PNG”），不能让用户点开发现不是同一个文件`);
   }
   return issues.slice(0, 3);
+}
+
+/** 链接文字写成了别的文件名：改成实际指向的文件名（重写一次仍没改好时兜底，不整段吞掉回答） */
+export function fixLinkLabels(text = '') {
+  return String(text).replace(/\[([^\]\n]{1,200})\]\(([^)\s]{1,600})\)/g, (all, label, target) => {
+    const named = /([^\s/\\]+\.(?:png|jpe?g|webp|svg|pptx|docx|xlsx|pdf|html|zip|json|md))\s*$/i.exec(label.replace(/`/g, ''));
+    if (!named || /^https?:/i.test(target)) return all;
+    let actual = target;
+    try { actual = decodeURI(target); } catch { /* 保留原样 */ }
+    const name = actual.split(/[\\/]/).pop();
+    return name === named[1] ? all : `[${name}](${target})`;
+  });
 }

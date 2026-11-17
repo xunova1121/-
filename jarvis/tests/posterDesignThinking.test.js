@@ -152,3 +152,18 @@ describe('交付回答如实列文件（2026-11-17 美国新闻海报回答）',
     expect(posterAnswerIssues('做好了，PNG和SVG两份；这版没有PPTX。', media)).toEqual([]);
   });
 });
+
+describe('交付说法对不上时不整段吞掉回答（2026-11-17：做海报整轮只回“本轮未能生成符合当前要求的答复”）', () => {
+  it('链接名、格式数量、海报验收措辞归为可放行的交付核对；链接名自动改成实际文件名', async () => {
+    const { rewriteRule } = await import('../src/agent/agent.js');
+    const { fixLinkLabels, posterAnswerIssues } = await import('../src/agent/posterRouting.js');
+    expect(rewriteRule('链接文字写的是“a.png”，实际指向“b.png”')).toBe('delivery_claim');
+    expect(rewriteRule('本次实际只生成了PNG、SVG，没有PPT；按回执如实列出文件')).toBe('delivery_claim');
+    expect(rewriteRule('“请医生评估 / 以医生为准”这类提醒出现了3次')).toBe('care_deferral');
+    expect(fixLinkLabels('见[海报/美国新闻.png](.workflows/posters/x/attempt-2/%E6%B5%B7%E6%8A%A5.png)和[官网](https://a.com/x.png)')).toBe('见[海报.png](.workflows/posters/x/attempt-2/%E6%B5%B7%E6%8A%A5.png)和[官网](https://a.com/x.png)');
+    const media = { kind: 'poster', outputs: [{ format: 'png', readback: 'passed' }, { format: 'svg', readback: 'passed' }], visual: 'passed' };
+    // 如实说没有/还没有 PPT 的不算错
+    for (const ok of ['PNG和SVG已生成，PPTX还没生成', 'PPT这次没出', '可编辑的PPTX待修复后再给']) expect(posterAnswerIssues(ok, media)).toEqual([]);
+    expect(posterAnswerIssues('PNG、SVG、PPTX都已生成', media).join('')).toContain('没有PPT');
+  });
+});

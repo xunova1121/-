@@ -106,3 +106,23 @@ describe('画图请求调对工具', () => {
     expect(ppt.has('create_document')).toBe(true);
   });
 });
+
+describe('甘特图精确到分钟（2026-11-17：今晚赛程按小时排，原来只认到“天”）', () => {
+  it('两天内的带时刻任务按半小时/小时刻度排，条上写起止时刻，竖线标“现在”', () => {
+    const theme = themeOf('blue');
+    const scene = CHART_TYPES.gantt({ title: '今晚赛程', today: '2026-11-17 20:05', tasks: [
+      { label: '中国U19 vs 韩国U19', start: '2026-11-17 19:35', end: '2026-11-17 21:25' },
+      { label: '中国男足 vs 巴林', start: '2026-11-17 20:00', end: '2026-11-17 21:50', focus: true }] }, theme);
+    const t = scene.items.filter(i => i.t === 'text').flatMap(i => i.rows).join('|');
+    for (const w of ['20:00', '21:00', '19:35–21:25', '20:00–21:50', '现在']) expect(t).toContain(w);
+    const bars = scene.items.filter(i => i.t === 'rect' && i.h === 18);
+    expect(bars[1].x).toBeGreaterThan(bars[0].x);
+    expect(() => CHART_TYPES.gantt({ title: 't', tasks: [{ label: 'a', start: '今晚8点', end: '2026-11-17 21:00' }] }, theme)).toThrow(/19:30/);
+  });
+  it('只写日期的旧用法不变：结束日当天算在内，按周刻度', () => {
+    const scene = CHART_TYPES.gantt(CHART_SAMPLES.gantt.data, themeOf('blue'));
+    const t = scene.items.filter(i => i.t === 'text').flatMap(i => i.rows).join('|');
+    expect(t).toContain('3/1–3/15');
+    expect(t).toContain('今天');
+  });
+});

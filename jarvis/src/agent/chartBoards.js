@@ -8,24 +8,28 @@ const list = (v, what, min, max) => { if (!Array.isArray(v) || v.length < min ||
 const label = (v, what, max = 30) => { const s = typeof v === 'string' ? v.trim() : typeof v === 'number' ? String(v) : ''; if (!s) throw sceneError(`${what}不能为空`); if ([...s].length > max) throw sceneError(`${what}“${s.slice(0, 10)}…”超过${max}字，请精简`); return s; };
 const optional = (v, what, max) => (v === undefined || v === null || v === '' ? '' : label(v, what, max));
 const DAY = 86400000;
+// 支持精确到分钟（2026-11-17 用户：今晚赛程按小时排，甘特图只认到“天”画不了）
 function date(v, what) {
-  const m = /^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/.exec(String(v || '').trim());
-  if (!m) throw sceneError(`${what}要写成2026-03-15或2026-03这样的日期`);
-  const d = Date.UTC(+m[1], +m[2] - 1, m[3] ? +m[3] : 1);
+  const m = /^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?(?:[ T](\d{1,2}):(\d{2}))?$/.exec(String(v || '').trim());
+  if (!m) throw sceneError(`${what}要写成日期，如2026-03-15、2026-03，精确到时刻写2026-03-15 19:30`);
+  const d = Date.UTC(+m[1], +m[2] - 1, m[3] ? +m[3] : 1, m[4] ? +m[4] : 0, m[5] ? +m[5] : 0);
   if (Number.isNaN(d)) throw sceneError(`${what}不是有效日期`);
   return d;
 }
 const md = t => { const d = new Date(t); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`; };
+const hm = t => { const d = new Date(t); return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`; };
+const hasTime = v => /\d:\d{2}$/.test(String(v || '').trim());
 
 export function ganttChart(data, theme) {
   const tasks = list(data.tasks, '任务tasks', 1, 40).map((t, i) => {
-    const start = date(t?.start, `第${i + 1}个任务的开始`), end = t?.milestone ? start : date(t?.end, `第${i + 1}个任务的结束`);
+    const start = date(t?.start, `第${i + 1}个任务的开始`), end = t?.milestone ? start : date(t?.end, `第${i + 1}个任务的结束`), timed = hasTime(t?.start) || hasTime(t?.end);
     if (end < start) throw sceneError(`任务“${t.label}”结束早于开始`);
     const progress = t?.progress === undefined ? null : Number(t.progress);
     if (progress !== null && !(progress >= 0 && progress <= 1)) throw sceneError('进度progress需在0到1之间');
-    return { label: label(t?.label, `第${i + 1}个任务名`, 20), group: optional(t?.group, '分组', 12), start, end: end + (t?.milestone ? 0 : DAY), milestone: t?.milestone === true, progress, focus: t?.focus === true };
+    return { label: label(t?.label, `第${i + 1}个任务名`, 20), group: optional(t?.group, '分组', 12), start, end: end + (t?.milestone || timed ? 0 : DAY), timed, milestone: t?.milestone === true, progress, focus: t?.focus === true };
   });
-  const lo = Math.min(...tasks.map(t => t.start)), hi = Math.max(...tasks.map(t => t.end)), days = Math.max(1, (hi - lo) / DAY);
+  const lo = Math.min(...tasks.map(t => t.start)), hi = Math.max(...tasks.map(t => t.end)), days = Math.max(1 / 24, (hi - lo) / DAY), hourly = tasks.some(t => t.timed) && (hi - lo) <= 2 * DAY;
+  const when = t => (hourly ? hm(t) : md(t));
   const labelW = Math.min(260, Math.max(120, ...tasks.map(t => textWidth(t.label, 13) + (t.group ? 0 : 0)))) + 24, width = Math.max(900, labelW + Math.min(1400, days * 6) + 60);
   const items = [], top = titleBlock(items, data.title, data.subtitle, theme, { w: width - 80 }), x = 40 + labelW, w = width - x - 40, row = 32;
   const X = t => x + (t - lo) / (hi - lo || DAY) * w;
@@ -33,6 +37,7 @@ export function ganttChart(data, theme) {
   // 刻度：跨度大按月，小按周
   const ticks = [];
   if (days > 75) { const d = new Date(lo); for (let t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1); t <= hi; t = Date.UTC(new Date(t).getUTCFullYear(), new Date(t).getUTCMonth() + 1, 1)) if (t >= lo) ticks.push([t, `${new Date(t).getUTCFullYear() % 100}年${new Date(t).getUTCMonth() + 1}月`]); }
+  else if (hourly) { const step = (hi - lo) <= 6 * 3600000 ? 1800000 : 3600000; for (let t = Math.ceil(lo / step) * step; t <= hi; t += step) ticks.push([t, hm(t)]); }
   else for (let t = lo; t <= hi; t += 7 * DAY) ticks.push([t, md(t)]);
   for (const [t, name] of ticks) { items.push({ t: 'line', x1: X(t), y1: top + 22, x2: X(t), y2: top + 30 + rowCount * row, stroke: theme.rule }); items.push(textItem(name, X(t) + 4, top, { size: 12, color: theme.muted })); }
   // 分组单独占一行标题，不压在任务名上
@@ -44,14 +49,14 @@ export function ganttChart(data, theme) {
     const y = top + 30 + li * row;
     if (i % 2 === 0) items.push({ t: 'rect', x: 40, y, w: width - 80, h: row, fill: theme.panel });
     items.push(textItem(t.label, t.group ? 60 : 48, y + 7, { size: 13, color: theme.ink, weight: t.focus ? 700 : 400 }));
-    if (t.milestone) { const cx = X(t.start); items.push({ t: 'polygon', points: [[cx, y + 6], [cx + 10, y + 16], [cx, y + 26], [cx - 10, y + 16]], fill: theme.accent }); const right = cx + 60 < width - 40; items.push(textItem(md(t.start), right ? cx + 14 : cx - 14, y + 8, { size: 11, color: theme.muted, anchor: right ? 'start' : 'end' })); return; }
+    if (t.milestone) { const cx = X(t.start); items.push({ t: 'polygon', points: [[cx, y + 6], [cx + 10, y + 16], [cx, y + 26], [cx - 10, y + 16]], fill: theme.accent }); const right = cx + 60 < width - 40; items.push(textItem(when(t.start), right ? cx + 14 : cx - 14, y + 8, { size: 11, color: theme.muted, anchor: right ? 'start' : 'end' })); return; }
     const bx = X(t.start), bw = Math.max(4, X(t.end) - bx);
     items.push({ t: 'rect', x: bx, y: y + 7, w: bw, h: row - 14, r: 3, fill: t.focus ? theme.accent : theme.accentTint, stroke: theme.accent, sw: 1 });
     if (t.progress !== null) items.push({ t: 'rect', x: bx, y: y + 7, w: bw * t.progress, h: row - 14, r: 3, fill: theme.accent, opacity: 0.75 });
-    const tag = `${md(t.start)}–${md(t.end - DAY)}${t.progress !== null ? ` · ${Math.round(t.progress * 100)}%` : ''}`;
+    const tag = `${when(t.start)}–${hourly || t.timed ? when(t.end) : md(t.end - DAY)}${t.progress !== null ? ` · ${Math.round(t.progress * 100)}%` : ''}`;
     items.push(textItem(tag, bx + bw + 6 + textWidth(tag, 11) > width - 40 ? bx - 6 : bx + bw + 6, y + 9, { size: 11, color: theme.muted, anchor: bx + bw + 6 + textWidth(tag, 11) > width - 40 ? 'end' : 'start' }));
   });
-  if (data.today) { const t = date(data.today, '今天today'); if (t >= lo && t <= hi) { items.push({ t: 'line', x1: X(t), y1: top + 22, x2: X(t), y2: top + 30 + rowCount * row, stroke: theme.bad, sw: 1.5, dash: '4 3' }); items.push(textItem('今天', X(t), top + 30 + rowCount * row + 4, { size: 11, color: theme.bad, anchor: 'middle' })); } }
+  if (data.today) { const t = date(data.today, '今天today'); if (t >= lo && t <= hi) { items.push({ t: 'line', x1: X(t), y1: top + 22, x2: X(t), y2: top + 30 + rowCount * row, stroke: theme.bad, sw: 1.5, dash: '4 3' }); items.push(textItem(hourly ? '现在' : '今天', X(t), top + 30 + rowCount * row + 4, { size: 11, color: theme.bad, anchor: 'middle' })); } }
   return { width, height: top + 30 + rowCount * row + 36, items };
 }
 
