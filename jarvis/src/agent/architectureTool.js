@@ -23,7 +23,7 @@ export function createArchitecturePlanTool(ctx) {
   return {
     name: 'plan_architecture',
     description:
-      '重要架构图先生成业务关系底稿：逐对象明确类型、职责、输入输出，区分包含/支撑/数据流/业务流/反馈。材料仅明确应用级集成而未给方向或数据时，用integration无向集成，只连system/application/capability且必须有真实引用，不能补造数据或依赖方向。每个对象和每条关系都必须有evidenceId，或显式assumption（可配basisEvidenceId，integration除外）；事实和推导不得混填。需求用编号可省略text，程序沿用原文；概括放职责。失败先读issues清单，再用draftPath/corrections续改，不重发全部数组。首次先用prepare_architecture_evidence读取相关采购章节，sources沿用回执，逐项引用evidenceId，不手抄source/excerpt；旧手填参数仍兼容。完整规划须读完相关范围，原始需求逐项映射，关系不确定须写假设；不会自动判定业务正确。已有底稿的技术性审查未完成交create_diagram恢复一次，不要重建；业务failed才按具体意见修正。回执给路径及短审查状态，用read_file按需读，不把原文塞进对话。',
+      '【内部步骤】属于严格架构流程（build_architecture）的中间环节，只在其回执或审查意见明确要求时调用；普通画图用create_diagram，流程图用create_flowchart。重要架构图先生成业务关系底稿：逐对象明确类型、职责、输入输出，区分包含/支撑/数据流/业务流/反馈。材料仅明确应用级集成而未给方向或数据时，用integration无向集成，只连system/application/capability且必须有真实引用，不能补造数据或依赖方向。每个对象和每条关系都必须有evidenceId，或显式assumption（可配basisEvidenceId，integration除外）；事实和推导不得混填。需求用编号可省略text，程序沿用原文；概括放职责。失败先读issues清单，再用draftPath/corrections续改，不重发全部数组。首次先用prepare_architecture_evidence读取相关采购章节，sources沿用回执，逐项引用evidenceId，不手抄source/excerpt；旧手填参数仍兼容。完整规划须读完相关范围，原始需求逐项映射，关系不确定须写假设；不会自动判定业务正确。已有底稿的技术性审查未完成交create_diagram恢复一次，不要重建；业务failed才按具体意见修正。回执给路径及短审查状态，用read_file按需读，不把原文塞进对话。',
     input_schema: { ...object(
       {
         draftPath: { ...text(400), description: '上次失败回执里的输入草稿；恢复时仅填draftPath和corrections，仍重新核原件' },

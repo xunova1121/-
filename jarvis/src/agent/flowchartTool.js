@@ -5,7 +5,7 @@ import { renderVisualScene } from './visualSceneRaster.js';
 import { throwControl } from '../core/networkRequest.js';
 
 const str = { type: 'string' };
-export const FLOWCHART_DESCRIPTION = '画流程图、业务流程图、审批流程、泳道图（跨部门/跨角色流程）、思维导图时用这个；架构图（分层系统结构）用create_diagram。只给节点、连线和泳道，坐标由程序算：判断节点（type=decision）至少两个出口，出口label写条件（是/否、通过/退回）；回头的线（退回、循环）自动从侧面虚线绕开。泳道图给lanes并给每个节点写lane。节点文字≤40字、连线文字≤12字，超了会报错要求精简，不截字。交付PNG、可编辑SVG、原生可编辑PPTX（PowerPoint自带流程图形状）和.flow.json源稿；改图用source_path加完整的nodes/edges/lanes重出。回执里crossings是连线交叉数、checks是结构问题，交付时如实说明。时序图、甘特图、ER图暂不支持，不要硬画成流程图。';
+export const FLOWCHART_DESCRIPTION = '先想清楚要表达什么，能删就删：一张图最好不超过9个节点、12条线，超了拆成总览加分图；只给1～2个最关键步骤加focus。画流程图、业务流程图、审批流程、泳道图（跨部门/跨角色流程）、思维导图时用这个；架构图（分层系统结构）用create_diagram。只给节点、连线和泳道，坐标由程序算：判断节点（type=decision）至少两个出口，出口label写条件（是/否、通过/退回）；回头的线（退回、循环）自动从侧面虚线绕开。泳道图给lanes并给每个节点写lane。节点文字≤40字、连线文字≤12字，超了会报错要求精简，不截字。交付PNG、可编辑SVG、原生可编辑PPTX（PowerPoint自带流程图形状）和.flow.json源稿；改图用source_path加完整的nodes/edges/lanes重出。回执里crossings是连线交叉数、checks是结构问题，交付时如实说明。时序图、甘特图、ER图暂不支持，不要硬画成流程图。';
 
 export function createFlowchartTool(ctx = {}) {
   return {
@@ -20,7 +20,7 @@ export function createFlowchartTool(ctx = {}) {
         theme: { type: 'string', enum: ['blue', 'gray', 'green'], description: '配色，默认blue' },
         lanes: { type: 'array', maxItems: 8, items: { type: 'object', additionalProperties: false, properties: { id: str, title: { type: 'string', description: '角色/部门，≤16字' } }, required: ['id', 'title'] } },
         nodes: { type: 'array', maxItems: 60, items: { type: 'object', additionalProperties: false, properties: {
-          id: str, text: { type: 'string', description: '≤40字' }, type: { type: 'string', enum: FLOW_TYPES, description: 'start开始、end结束、process步骤、decision判断、io输入输出、document文档、subprocess子流程、data数据' }, lane: { type: 'string', description: '泳道id' } }, required: ['id', 'text'] } },
+          id: str, text: { type: 'string', description: '≤40字' }, type: { type: 'string', enum: FLOW_TYPES, description: 'start开始、end结束、process步骤、decision判断、io输入输出、document文档、subprocess子流程、data数据' }, lane: { type: 'string', description: '泳道id' }, focus: { type: 'boolean', description: '重点步骤，最多2个，用强调色描边' } }, required: ['id', 'text'] } },
         edges: { type: 'array', maxItems: 120, items: { type: 'object', additionalProperties: false, properties: { from: str, to: str, label: { type: 'string', description: '≤12字，判断出口必填' } }, required: ['from', 'to'] } },
         source_path: { type: 'string', description: '修改已有.flow.json；本次给的字段整体替换原字段' },
         path: { type: 'string', description: '输出路径（不含或含扩展名），如 流程图/请假审批' }
@@ -73,7 +73,7 @@ export function createFlowchartTool(ctx = {}) {
         kind: 'flowchart', status: png && !errors.length ? (checks.issues.length ? 'needs_review' : 'complete') : 'partial',
         title: flow.title, flowKind: flow.flowKind, direction: flow.direction, width: layout.width, height: layout.height,
         nodes: flow.nodes.length, edges: flow.edges.length, lanes: flow.lanes.length, files, primaryPath: png?.path || null, sourcePath: files[0].path,
-        checks: { status: checks.status, issues: checks.issues, crossings: checks.crossings, backEdges: checks.backEdges }, fontCheck, visual: 'not_checked', errors,
+        checks: { status: checks.status, issues: checks.issues, advice: checks.advice, crossings: checks.crossings, backEdges: checks.backEdges }, fontCheck, visual: 'not_checked', errors,
         notes: ['坐标、连线由程序计算；文字未删减', checks.crossings ? `有${checks.crossings}处连线交叉，可调整节点顺序或拆图` : '连线无交叉', '未做看图审美核验，交付时不能说视觉已验收']
       });
     }

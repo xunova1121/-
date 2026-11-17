@@ -65,7 +65,7 @@ export function createArchitectureRevisionTool(ctx) {
   const patch = (key, required) => ({ type: 'array', maxItems: 30, items: { type: 'object', properties: { ...properties[key].items.properties, ...(key !== 'entities' && { index: { type: 'integer', minimum: 0, maximum: 99 } }) }, required, additionalProperties: false } });
   return {
     name: 'revise_architecture_plan',
-    description: '根据架构审查具体意见定点修改已有底稿；保留未改对象、证据与原稿，修订另存新稿并重新严格审查。entities按id，relations/requirements按旧稿数组index；删除仅支持显式对象/关系，不能删除需求绕过覆盖。无实质修改不能反复审到通过。技术not_checked优先create_diagram恢复，不重建。',
+    description: '【内部步骤】属于严格架构流程（build_architecture）的中间环节，只在其回执或审查意见明确要求时调用；普通画图用create_diagram，流程图用create_flowchart。根据架构审查具体意见定点修改已有底稿；保留未改对象、证据与原稿，修订另存新稿并重新严格审查。entities按id，relations/requirements按旧稿数组index；删除仅支持显式对象/关系，不能删除需求绕过覆盖。无实质修改不能反复审到通过。技术not_checked优先create_diagram恢复，不重建。',
     input_schema: { type: 'object', properties: {
       architecturePath: { type: 'string', maxLength: 400 }, reason: { type: 'string', minLength: 1, maxLength: 240 },
       changes: { type: 'object', properties: {

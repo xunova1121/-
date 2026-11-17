@@ -46,6 +46,7 @@ export function normalizeFlowchart(raw) {
   const nodes = raw.nodes.map((node, i) => {
     const type = FLOW_TYPES.includes(node?.type) ? node.type : kind === 'mindmap' ? 'process' : 'process';
     const out = { id: idOf(node?.id, `第${i + 1}个节点`), text: text(node?.text, FLOW_LIMITS.text, '节点文字'), type };
+    if (node?.focus === true) out.focus = true;
     if (lanes.length) {
       if (!lanes.some(lane => lane.id === node.lane)) throw flowError(`节点${out.id}要写所属泳道lane（${lanes.map(l => l.id).join('/')}）`);
       out.lane = node.lane;
@@ -53,6 +54,8 @@ export function normalizeFlowchart(raw) {
     return out;
   });
   if (new Set(nodes.map(n => n.id)).size !== nodes.length) throw flowError('节点id不能重复');
+  // 重点只强调1～2个（借鉴 diagram-design：强调色用在5个节点上等于没有强调）
+  if (nodes.filter(n => n.focus).length > 2) throw flowError('focus重点节点最多2个：先想清楚这张图最想让人看到哪一步');
   const byId = new Map(nodes.map(n => [n.id, n]));
   if (!Array.isArray(raw.edges) || !raw.edges.length || raw.edges.length > FLOW_LIMITS.edges) throw flowError(`需要1–${FLOW_LIMITS.edges}条连线（edges）`);
   const edges = raw.edges.map((edge, i) => {
@@ -161,7 +164,17 @@ export function layoutFlowchart(flow) {
   const detour = back.size ? 48 : 0;
   const width = Math.ceil(LR ? mainTotal + margin : crossCursor + margin + detour);
   const height = Math.ceil(LR ? crossCursor + margin + detour : mainTotal + margin);
-  const edges = flow.edges.map((e, i) => route(boxes.get(e.from), boxes.get(e.to), { LR, back: back.has(i), outer: LR ? height - margin / 2 - detour / 2 : width - margin / 2 - detour / 2, edge: e, boxes, gap: gapMain }));
+  const outer = LR ? height - margin / 2 - detour / 2 : width - margin / 2 - detour / 2;
+  const routeAll = ends => flow.edges.map((e, i) => route(boxes.get(e.from), boxes.get(e.to), { ...ends[i], back: back.has(i), outer, LR, edge: e, boxes, gap: gapMain }));
+  // 先排一遍；有分支改从目标侧面进入时，按实际进入的边重新分配连接点再排一遍
+  let routed = routeAll(attachments(flow, boxes, back, LR));
+  const actual = new Map(routed.map((e, i) => [i, e.endSide]).filter(([i, side]) => side !== undefined && side !== null && side !== routed[i].plannedEnd));
+  if (actual.size) {
+    // 第二遍只重排其它连线（让出被占的连接点），改走侧面的分支保留第一遍的走法
+    const second = routeAll(attachments(flow, boxes, back, LR, actual));
+    routed = second.map((edge, i) => (actual.has(i) ? routed[i] : edge));
+  }
+  const edges = separateParallel(routed.map(({ plannedEnd, endSide, ...edge }) => edge));
   const laneRects = flow.lanes.map(l => {
     const lb = laneBox.get(l.id), mainFrom = margin + titleH, mainTo = height - margin / 2;
     return { ...l, ...(LR ? { x: margin / 2, y: lb.start, w: width - margin, h: lb.span } : { x: lb.start, y: mainFrom, w: lb.span, h: mainTo - mainFrom }) };
@@ -177,30 +190,112 @@ function blocked(p, q, boxes, skip) {
 const pathBlocked = (pts, boxes, skip) => pts.slice(1).some((q, k) => blocked(pts[k], q, boxes, skip));
 
 /**
- * 直角折线：顺向连线在“靠近目标的空隙”或“紧贴源节点的空隙”拐弯，选不穿过其它节点的那条；
- * 回头的线（退回、循环）从外侧通道绕回。
+ * 连接点（借鉴 diagram-design 的连线规则，MIT 许可，思路重写）：
+ *   - 同一个节点同一条边上有多条线，各自分开接（按另一端的位置排序，均分在边上），不挤在一个点；
+ *   - 判断节点：最顺的那个出口从下方（横排从右方）出，其余出口从左右（横排从上下）两个尖角出，分支一眼可分；
+ *   - 菱形、圆角终点只在靠近中间的一段上取点，保证点落在图形边上。
  */
-function route(a, b, { LR, back, outer, edge, boxes, gap }) {
-  let pts;
-  const all = [...boxes.values()], skip = [a, b];
-  if (!back) {
-    if (LR) {
-      const sx = a.x + a.w, sy = a.y + a.h / 2, tx = b.x, ty = b.y + b.h / 2;
-      const options = Math.abs(sy - ty) < 1 ? [[[sx, sy], [tx, ty]]] : [tx - gap / 2, sx + gap / 2, (sx + tx) / 2].map(m => [[sx, sy], [m, sy], [m, ty], [tx, ty]]);
-      pts = options.find(o => !pathBlocked(o, all, skip)) || options[0];
-    } else {
-      const sx = a.x + a.w / 2, sy = a.y + a.h, tx = b.x + b.w / 2, ty = b.y;
-      const options = Math.abs(sx - tx) < 1 ? [[[sx, sy], [tx, ty]]] : [ty - gap / 2, sy + gap / 2, (sy + ty) / 2].map(m => [[sx, sy], [sx, m], [tx, m], [tx, ty]]);
-      pts = options.find(o => !pathBlocked(o, all, skip)) || options[0];
-    }
-  } else if (LR) {
-    const sx = a.x + a.w / 2, sy = a.y + a.h, tx = b.x + b.w / 2, ty = b.y + b.h;
-    pts = [[sx, sy], [sx, outer], [tx, outer], [tx, ty]];
-  } else {
-    const sx = a.x + a.w, sy = a.y + a.h / 2, tx = b.x + b.w, ty = b.y + b.h / 2;
-    pts = [[sx, sy], [outer, sy], [outer, ty], [tx, ty]];
+const SIDE = { bottom: [0, 1], top: [0, -1], right: [1, 0], left: [-1, 0] };
+function sidePoint(box, side, f, type) {
+  const span = type === 'decision' ? [0.3, 0.7] : type === 'start' || type === 'end' ? [0.25, 0.75] : [0.12, 0.88];
+  const t = span[0] + (span[1] - span[0]) * f;
+  if (type === 'decision') {
+    const dip = Math.abs(1 - 2 * t);
+    if (side === 'bottom') return [box.x + box.w * t, box.y + box.h - box.h / 2 * dip];
+    if (side === 'top') return [box.x + box.w * t, box.y + box.h / 2 * dip];
+    if (side === 'right') return [box.x + box.w - box.w / 2 * dip, box.y + box.h * t];
+    return [box.x + box.w / 2 * dip, box.y + box.h * t];
   }
-  return { ...edge, back, points: pts.map(([x, y]) => [round(x), round(y)]) };
+  if (side === 'bottom') return [box.x + box.w * t, box.y + box.h];
+  if (side === 'top') return [box.x + box.w * t, box.y];
+  if (side === 'right') return [box.x + box.w, box.y + box.h * t];
+  return [box.x, box.y + box.h * t];
+}
+function attachments(flow, boxes, back, LR, endOverride = new Map()) {
+  const types = new Map(flow.nodes.map(n => [n.id, n.type]));
+  const center = id => { const b = boxes.get(id); return [b.x + b.w / 2, b.y + b.h / 2]; };
+  const ends = flow.edges.map((e, i) => {
+    if (back.has(i)) return { startSide: LR ? 'bottom' : 'right', endSide: LR ? 'bottom' : 'right' };
+    return { startSide: LR ? 'right' : 'bottom', endSide: LR ? 'left' : 'top' };
+  });
+  for (const node of flow.nodes.filter(n => n.type === 'decision')) {
+    const outs = flow.edges.map((e, i) => ({ e, i })).filter(({ e, i }) => e.from === node.id && !back.has(i));
+    if (outs.length < 2) continue;
+    const [cx, cy] = center(node.id), axis = LR ? 1 : 0, main = LR ? 0 : 1;
+    // 离得最近（步数最少）的分支走下方（横排走右方）；同样近时选正对着的；其余从侧面尖角出
+    const score = o => Math.abs(center(o.e.to)[main] - (LR ? cx : cy)) * 4 + Math.abs(center(o.e.to)[axis] - (LR ? cy : cx));
+    const straight = outs.reduce((best, o) => (score(o) < score(best) ? o : best));
+    for (const o of outs) if (o !== straight) {
+      const after = center(o.e.to)[axis] >= (LR ? cy : cx);
+      ends[o.i].startSide = LR ? (after ? 'bottom' : 'top') : (after ? 'right' : 'left');
+    }
+  }
+  for (const [i, side] of endOverride) ends[i].endSide = side;
+  // 按（节点, 边）分组均分
+  const groups = new Map();
+  flow.edges.forEach((e, i) => {
+    for (const [id, side, other, key] of [[e.from, ends[i].startSide, e.to, 'start'], [e.to, ends[i].endSide, e.from, 'end']]) {
+      const k = id + '|' + side;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push({ i, other, key, side, id });
+    }
+  });
+  for (const list of groups.values()) {
+    const along = s => (s === 'top' || s === 'bottom' ? 0 : 1);
+    list.sort((p, q) => center(p.other)[along(p.side)] - center(q.other)[along(q.side)]);
+    list.forEach((item, k) => { ends[item.i][item.key] = sidePoint(boxes.get(item.id), item.side, list.length === 1 ? 0.5 : (k + 1) / (list.length + 1), types.get(item.id)); });
+  }
+  return ends;
+}
+
+/** 直角折线：按出入方向选拐点，选不穿过其它节点的那条；回头的线从外侧通道绕回 */
+function route(a, b, { start, end, startSide, endSide, LR, back, outer, edge, boxes, gap }) {
+  const all = [...boxes.values()], skip = [a, b];
+  const [sx, sy] = start, [tx, ty] = end, ds = SIDE[startSide], de = SIDE[endSide];
+  let options;
+  if (back) {
+    options = [LR ? [start, [sx, outer], [tx, outer], end] : [start, [outer, sy], [outer, ty], end]];
+  } else if (ds[0] === 0 && de[0] === 0) {
+    options = Math.abs(sx - tx) < 1 ? [[start, end]] : [ty - gap / 2, sy + gap / 2, (sy + ty) / 2].map(m => [start, [sx, m], [tx, m], end]);
+  } else if (ds[1] === 0 && de[1] === 0) {
+    options = Math.abs(sy - ty) < 1 ? [[start, end]] : [tx - gap / 2, sx + gap / 2, (sx + tx) / 2].map(m => [start, [m, sy], [m, ty], end]);
+  } else if (ds[0] !== 0) {
+    // 从左右尖角横着出：能直接拐进目标上边就拐；挡住了就沿外侧空白通道绕到目标侧面进入
+    const by = b.y + b.h / 2, lo = Math.min(sy, by) - 4, hi = Math.max(sy, by) + 4;
+    const near = all.filter(x => x !== a && x.y < hi && x.y + x.h > lo);
+    const X = ds[0] > 0 ? Math.max(sx, ...near.map(x => x.x + x.w)) + 20 : Math.min(sx, ...near.map(x => x.x)) - 20;
+    const side = [ds[0] > 0 ? b.x + b.w : b.x, by]; side.side = ds[0] > 0 ? 'right' : 'left';
+    options = [...((tx - sx) * ds[0] > 8 ? [[start, [tx, sy], end]] : []), [start, [X, sy], [X, by], side], [start, [sx + ds[0] * 16, sy], [sx + ds[0] * 16, ty - gap / 2], [tx, ty - gap / 2], end]];
+  } else {
+    const bx = b.x + b.w / 2, lo = Math.min(sx, bx) - 4, hi = Math.max(sx, bx) + 4;
+    const near = all.filter(x => x !== a && x.x < hi && x.x + x.w > lo);
+    const Y = ds[1] > 0 ? Math.max(sy, ...near.map(x => x.y + x.h)) + 20 : Math.min(sy, ...near.map(x => x.y)) - 20;
+    const side = [bx, ds[1] > 0 ? b.y + b.h : b.y]; side.side = ds[1] > 0 ? 'bottom' : 'top';
+    options = [...((ty - sy) * ds[1] > 8 ? [[start, [sx, ty], end]] : []), [start, [sx, Y], [bx, Y], side], [start, [sx, sy + ds[1] * 16], [tx - gap / 2, sy + ds[1] * 16], [tx - gap / 2, ty], end]];
+  }
+  const pts = options.find(o => back || !pathBlocked(o, all, skip)) || options[0];
+  // 绕到目标侧面进入时记下实际进入的边，供第二遍重新分配连接点
+  return { ...edge, back, plannedEnd: endSide, endSide: pts.at(-1).side || endSide, points: pts.map(([x, y]) => [round(x), round(y)]) };
+}
+
+/** 不同连线的中段如果叠在同一条水平/竖直线上且有重合，后面的错开12像素，不让两条线叠成一条 */
+function separateParallel(edges) {
+  const taken = [];
+  for (const edge of edges) {
+    const pts = edge.points;
+    for (let k = 1; k < pts.length - 2; k++) {
+      const [p, q] = [pts[k], pts[k + 1]], horizontal = Math.abs(p[1] - q[1]) < 0.5, at = horizontal ? p[1] : p[0];
+      const lo = Math.min(horizontal ? p[0] : p[1], horizontal ? q[0] : q[1]), hi = Math.max(horizontal ? p[0] : p[1], horizontal ? q[0] : q[1]);
+      let shift = 0;
+      while (taken.some(t => t.horizontal === horizontal && Math.abs(t.at - (at + shift)) < 6 && t.lo < hi - 1 && t.hi > lo + 1) && shift < 48) shift += 12;
+      if (shift) {
+        const i = horizontal ? 1 : 0;
+        p[i] = round(p[i] + shift); q[i] = round(q[i] + shift);
+      }
+      taken.push({ horizontal, at: at + shift, lo, hi });
+    }
+  }
+  return edges;
 }
 
 /** 连线交叉数（只算不同连线的线段相交，共享端点不算） */
@@ -218,7 +313,7 @@ export function countCrossings(edges) {
 }
 
 function shapeSvg(node, box, theme) {
-  const { x, y, w, h } = box, stroke = `stroke="${theme.border}" stroke-width="1.5"`;
+  const { x, y, w, h } = box, stroke = node.focus ? `stroke="${theme.accent}" stroke-width="3"` : `stroke="${theme.border}" stroke-width="1.5"`;
   const fill = node.type === 'start' ? theme.start : node.type === 'end' ? theme.end : node.type === 'decision' ? theme.decision : theme.fill;
   if (node.type === 'start' || node.type === 'end') return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${h / 2}" fill="${fill}" ${stroke}/>`;
   if (node.type === 'decision') return `<polygon points="${x + w / 2},${y} ${x + w},${y + h / 2} ${x + w / 2},${y + h} ${x},${y + h / 2}" fill="${fill}" ${stroke}/>`;
@@ -239,7 +334,9 @@ function arrowHead([px, py], [x, y], color) {
 }
 /** 连线文字放在第一段折线的中点旁，避开节点 */
 export function labelPosition(edge) {
-  const [a, b] = edge.points.length > 2 ? [edge.points[1], edge.points[2]] : [edge.points[0], edge.points[1]];
+  // 放在第一段够长（≥36像素）的线上，避免两个分支的标签挤在同一处
+  const k = edge.points.slice(1).findIndex((q, i) => Math.hypot(q[0] - edge.points[i][0], q[1] - edge.points[i][1]) >= 36);
+  const [a, b] = k >= 0 ? [edge.points[k], edge.points[k + 1]] : [edge.points[0], edge.points[1]];
   return { x: round((a[0] + b[0]) / 2), y: round((a[1] + b[1]) / 2) };
 }
 
@@ -305,7 +402,7 @@ export async function composeFlowchartPptx(flow, layout = layoutFlowchart(flow))
   for (const node of flow.nodes) {
     const box = layout.boxes.get(node.id);
     const fill = node.type === 'start' ? theme.start : node.type === 'end' ? theme.end : node.type === 'decision' ? theme.decision : theme.fill;
-    slide.addText(node.text, { shape: shapeOf(node.type), x: inch(box.x), y: inch(box.y), w: inch(box.w), h: inch(box.h), fill: { color: c(fill) }, line: { color: c(theme.border), width: 1 },
+    slide.addText(node.text, { shape: shapeOf(node.type), x: inch(box.x), y: inch(box.y), w: inch(box.w), h: inch(box.h), fill: { color: c(fill) }, line: { color: c(node.focus ? theme.accent : theme.border), width: node.focus ? 2.25 : 1 },
       fontSize: 11, fontFace: font, color: c(theme.ink), align: 'center', valign: 'middle', margin: 2, objectName: `node-${node.id}` });
   }
   return pptx.write({ outputType: 'blob' });
@@ -321,5 +418,11 @@ export function checkFlowchart(flow, layout) {
   }
   for (const node of flow.nodes.filter(n => n.type === 'end')) if (flow.edges.some(e => e.from === node.id)) issues.push({ code: 'FLOW_END_HAS_OUTPUT', id: node.id, message: `结束节点“${node.text}”不应再有出去的连线` });
   if (flow.flowKind !== 'mindmap' && !flow.nodes.some(n => n.type === 'start')) issues.push({ code: 'FLOW_NO_START', message: '流程图建议用type=start标出起点' });
-  return { status: issues.length ? 'needs_review' : 'passed', issues, crossings: countCrossings(layout.edges), backEdges: layout.back.size };
+  // 密度建议（借鉴 diagram-design：一张图超过9个节点、12条线，读者就需要人讲解了）：只提示拆图，不判失败
+  const advice = [];
+  const limit = flow.flowKind === 'mindmap' ? 15 : 9;
+  if (flow.nodes.length > limit || flow.edges.length > 12)
+    advice.push({ code: 'FLOW_TOO_DENSE', message: `本图${flow.nodes.length}个节点、${flow.edges.length}条连线，超过一张图好读的上限（${limit}个节点、12条线）；建议拆成一张总览加几张分图，或合并总是一起出现的步骤` });
+  if (!flow.nodes.some(n => n.focus) && flow.nodes.length >= 6) advice.push({ code: 'FLOW_NO_FOCUS', message: '可以用focus标出1～2个最关键的步骤，读者一眼知道重点' });
+  return { status: issues.length ? 'needs_review' : 'passed', issues, advice, crossings: countCrossings(layout.edges), backEdges: layout.back.size };
 }

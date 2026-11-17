@@ -11,6 +11,7 @@ export const strictArchitecture = (text) => STRICT_ARCHITECTURE.test(String(text
 
 export const DIAGRAM_PLANNING =
   // 2026-11-17 复查：画图工具分工写在最前面，避免流程图被画成分层架构图、模型在6个架构工具里选错
+  '【先想表达什么】有判断分支→流程图；跨部门/角色交接→泳道图；一个主题向外展开→思维导图；系统由哪些部分组成、怎么分层→架构图；上下级→组织架构图。能用表格或三句话说清就不画图。' +
   '【先选对工具】流程图、业务流程图、审批流、泳道图、思维导图→create_flowchart（有判断分支和流转箭头），不要用本工具。' +
   '分层的系统/业务/技术/部署架构图、组织架构图→本工具create_diagram（默认就用它，一次出图）。' +
   '改已有.diagram.json或换格式→export_diagram。用户明确要“逐条核对原文需求/严格审查”→build_architecture（自动读文件、审查、出图，失败只用jobPath续跑）。' +

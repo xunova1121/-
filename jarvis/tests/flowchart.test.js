@@ -106,7 +106,9 @@ describe('画图类请求调对工具（2026-11-17 复查）', () => {
   });
   it('画图说明最前面写清各工具分工', async () => {
     const { DIAGRAM_PLANNING } = await import('../src/agent/diagramPlanning.js');
-    expect(DIAGRAM_PLANNING.startsWith('【先选对工具】')).toBe(true);
+    // 同批新增“先想表达什么”放在最前，工具分工紧随其后
+    expect(DIAGRAM_PLANNING.indexOf('【先选对工具】')).toBeGreaterThan(DIAGRAM_PLANNING.indexOf('【先想表达什么】'));
+    expect(DIAGRAM_PLANNING.indexOf('【先选对工具】')).toBeLessThan(400);
     for (const word of ['create_flowchart', 'export_diagram', 'build_architecture', 'create_architecture_package', '内部步骤', '时序图、甘特图、ER图']) expect(DIAGRAM_PLANNING).toContain(word);
   });
   it('流程图结果进入成果索引，主文件和源稿都能找到', async () => {
@@ -117,4 +119,53 @@ describe('画图类请求调对工具（2026-11-17 复查）', () => {
     const records = (await listWorkRecords({ kind: 'diagram' })).items;
     expect(records[0].files).toEqual(expect.arrayContaining(['流程/索引.png', '流程/索引.flow.json', '流程/索引.pptx']));
   }, 60000);
+});
+
+describe('借鉴 diagram-design 的设计规矩（MIT，思路重写）', () => {
+  const branches = () => normalizeFlowchart(leave());
+  it('同一节点同一边的多条连线各自分开接，间距≥8像素；判断的两个分支从不同方向出', () => {
+    const flow = branches(), layout = layoutFlowchart(flow);
+    const points = new Map();
+    layout.edges.forEach(e => {
+      for (const [id, p] of [[e.from, e.points[0]], [e.to, e.points.at(-1)]]) { if (!points.has(id)) points.set(id, []); points.get(id).push(p); }
+    });
+    for (const list of points.values()) for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++)
+      expect(Math.hypot(list[i][0] - list[j][0], list[i][1] - list[j][1])).toBeGreaterThanOrEqual(8);
+    const [yes, no] = ['是', '否'].map(label => layout.edges.find(e => e.label === label).points[0]);
+    expect(yes[0] !== no[0] && yes[1] !== no[1]).toBe(true);
+    expect(checkFlowchart(flow, layout).crossings).toBe(0);
+  });
+  it('不同连线不叠成一条：中段水平/竖直线不重合', () => {
+    const layout = layoutFlowchart(branches()), segs = [];
+    layout.edges.forEach((e, i) => e.points.slice(1).forEach((q, k) => segs.push({ i, a: e.points[k], b: q })));
+    for (const s of segs) for (const t of segs) {
+      if (s.i >= t.i) continue;
+      const h = s.a[1] === s.b[1] && t.a[1] === t.b[1] && Math.abs(s.a[1] - t.a[1]) < 1;
+      const v = s.a[0] === s.b[0] && t.a[0] === t.b[0] && Math.abs(s.a[0] - t.a[0]) < 1;
+      const [k, j] = h ? [0, 0] : [1, 1];
+      if (h || v) expect(Math.min(Math.max(s.a[k], s.b[k]), Math.max(t.a[j], t.b[j])) - Math.max(Math.min(s.a[k], s.b[k]), Math.min(t.a[j], t.b[j]))).toBeLessThanOrEqual(1);
+    }
+  });
+  it('重点最多2个并用强调色；超过9个节点提示拆图，不判失败', () => {
+    const base = leave();
+    const focused = normalizeFlowchart({ ...base, nodes: base.nodes.map(n => (n.id === 'b' ? { ...n, focus: true } : n)) });
+    expect(composeFlowchartSvg(focused)).toContain('stroke="#2563EB" stroke-width="3"');
+    expect(() => normalizeFlowchart({ ...base, nodes: base.nodes.map((n, i) => (i < 3 ? { ...n, focus: true } : n)) })).toThrow(/最多2个/);
+    const many = { title: '长流程', nodes: Array.from({ length: 11 }, (_, i) => ({ id: 'n' + i, text: '第' + i + '步', type: i ? i === 10 ? 'end' : 'process' : 'start' })), edges: Array.from({ length: 10 }, (_, i) => ({ from: 'n' + i, to: 'n' + (i + 1) })) };
+    const flow = normalizeFlowchart(many), checks = checkFlowchart(flow, layoutFlowchart(flow));
+    expect(checks.status).toBe('passed');
+    expect(checks.advice.map(a => a.code)).toEqual(['FLOW_TOO_DENSE', 'FLOW_NO_FOCUS']);
+  });
+  it('画图说明先问要表达什么；严格流程的内部工具标明不单独用；海报自审带“AI味”清单', async () => {
+    const { DIAGRAM_PLANNING } = await import('../src/agent/diagramPlanning.js');
+    expect(DIAGRAM_PLANNING.startsWith('【先想表达什么】')).toBe(true);
+    const { createTools } = await import('../src/agent/tools.js');
+    const tools = createTools({});
+    for (const name of ['plan_architecture', 'prepare_architecture_evidence', 'revise_architecture_plan']) expect(tools.find(t => t.name === name).description.startsWith('【内部步骤】')).toBe(true);
+    const { reviewLayeredDesign } = await import('../src/agent/layeredDesignQuality.js');
+    const { planLayerDesign } = await import('../src/agent/layeredDesignLayout.js');
+    let system = '';
+    await reviewLayeredDesign({ visionLlm: async ({ system: s }) => { system = s; return '{}'; } }, planLayerDesign({ title: 't', design: { layout: 'free', layers: [{ id: 'title', type: 'text', text: 't', x: 80, y: 80, w: 600, h: 100, fontSize: 60 }] } }), new Blob([new Uint8Array(4)], { type: 'image/png' }));
+    for (const word of ['暗底配青紫发光', '所有卡片一模一样', '超大圆角']) expect(system).toContain(word);
+  });
 });

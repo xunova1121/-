@@ -13,7 +13,7 @@ export const architectureSourceSchema = {
 export function createArchitectureEvidenceTool(ctx = {}) {
   return {
     name: 'prepare_architecture_evidence',
-    description: '首次先用catalog:true及sources:[{path}]取得真实章节编号，可query按标题筛选；选择编号后用sources:[{path,sectionId}]读取证据。不猜章节/摘录，不靠offset+1重扫整份文件。目录不是正文。首次架构图先从选定原文件/唯一章节提取连续原文证据编号，不调用模型。sources回填plan_architecture，逐对象/关系/需求只引用evidenceId，无需手抄source/excerpt。分页/关键词查询只返回部分片段，不等于模型已看完全部；完整规划要读完相关范围。材料变化后重新取号，不能靠编号绕过业务审查。',
+    description: '【内部步骤】属于严格架构流程（build_architecture）的中间环节，只在其回执或审查意见明确要求时调用；普通画图用create_diagram，流程图用create_flowchart。首次先用catalog:true及sources:[{path}]取得真实章节编号，可query按标题筛选；选择编号后用sources:[{path,sectionId}]读取证据。不猜章节/摘录，不靠offset+1重扫整份文件。目录不是正文。首次架构图先从选定原文件/唯一章节提取连续原文证据编号，不调用模型。sources回填plan_architecture，逐对象/关系/需求只引用evidenceId，无需手抄source/excerpt。分页/关键词查询只返回部分片段，不等于模型已看完全部；完整规划要读完相关范围。材料变化后重新取号，不能靠编号绕过业务审查。',
     input_schema: { type: 'object', properties: {
       sources: architectureSourceSchema,
       catalog:{type:'boolean',description:'只读程序目录，不调用模型；query筛目录标题，offset/limit为目录分页'},
