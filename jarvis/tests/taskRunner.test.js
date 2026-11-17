@@ -500,3 +500,27 @@ describe('失败的步骤随回答存进对话（下一句问“为啥失败”�
     expect(reply.failures[0].error).toContain('分栏层需2～4个节点');
   });
 });
+
+describe('引导在原任务收尾时才送到（2026-11-17 用户：选了引导没有效果）', () => {
+ it('回答已写完时送到的引导不丢：原任务结束后接着开一轮处理，不重复记这句话，结束事件里带上新任务编号', async () => {
+  const seen = [];
+  const runner = createTaskRunner({ getConfig: mockCfg, makeAdapter: () => ({ adapter: { stream: async ({ messages, onText }) => {
+    seen.push(messages.map(m => typeof m.content === 'string' ? m.content : '').join('\n'));
+    const text = seen.length === 1 ? '原任务的回答' : '已按补充调整';
+    onText?.(text); return { text, toolCalls: [], stop: 'end_turn' };
+  } }, model: 'm' }) });
+  const a = await runner.start({ sessionId: 'late-note', text: '写一段介绍' });
+  // 回答提交后（模型循环已结束、还没收尾）立刻发来引导
+  let sent = null;
+  runner.subscribe(a.id, e => { if (e.type === 'diagnostic' && e.phase === 'answer_committed' && !sent) sent = runner.start({ sessionId: 'late-note', targetTaskId: a.id, text: '改成三句话' }); });
+  await until(() => runner.get(a.id)?.status === 'done');
+  expect((await sent).joined).toBe(true);
+  const final = runner.events(a.id).find(e => e.type === 'task_state' && e.status === 'done');
+  expect(final.followupTaskId).toBeTruthy();
+  await until(() => runner.get(final.followupTaskId)?.status === 'done');
+  expect(seen.at(-1)).toContain('改成三句话');
+  const messages = (await sessions.get('late-note')).messages;
+  expect(messages.filter(m => m.content === '改成三句话')).toHaveLength(1);
+  expect(messages.at(-1)).toMatchObject({ role: 'assistant', content: '已按补充调整' });
+ });
+});

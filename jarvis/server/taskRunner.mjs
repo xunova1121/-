@@ -488,12 +488,19 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     }).catch((e) => console.error(`[任务] ${task.id} 回答没存上：${e?.stack || e}`));
     task.status = stopped ? 'stopped' : error ? 'error' : 'done';
     task.endedAt = now();
+    // 回答已写完、收尾时才送到的引导/补充（模型没来得及读）：不丢，接着开一轮处理（2026-11-17 用户：选了引导没有效果）
+    const leftover = task.status === 'done' ? task.inbox.splice(0) : [];
+    let followupTaskId = null;
+    if (leftover.length) {
+      try { followupTaskId = (await inTask(task, () => api.start({ sessionId: task.sessionId, text: leftover.join('\n'), carried: true })))?.id || null; }
+      catch (e) { console.warn(`[任务] ${task.id} 收尾时的补充没能接着处理：${e?.message || e}`); }
+    }
     // 记一笔用时，方便查“为什么慢”：journalctl -u jarvis 能看到
     const sec = (t) => (t && task.startedAt ? `${((t - task.startedAt) / 1000).toFixed(1)}s` : '—');
     console.log(`[任务] ${task.id} ${task.status}：排队 ${task.startedAt ? ((task.startedAt - task.createdAt) / 1000).toFixed(1) : '—'}s，首字 ${sec(task.firstTextAt)}，共 ${sec(task.endedAt)}，工具 ${usedTools.length} 次${error ? `，出错：${error.slice(0, 120)}` : ''}`);
     task.error = error;
     task.errorType = errorType;
-    record(task, { type: 'task_state', status: task.status, timing, ...(task.review?.outcome && { outcome: task.review.outcome }), ...(error && { error, errorKind: errorType }), ...(task.status === 'done' && { text, toolCalls }), files: [...task.files] });
+    record(task, { type: 'task_state', status: task.status, timing, ...(followupTaskId && { followupTaskId }), ...(task.review?.outcome && { outcome: task.review.outcome }), ...(error && { error, errorKind: errorType }), ...(task.status === 'done' && { text, toolCalls }), files: [...task.files] });
     console.log(`[任务耗时] ${task.id} ${JSON.stringify(timing)}`);
     task.listeners.clear();
     task.images = [];
@@ -556,9 +563,9 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     }
   }
 
-  return {
+  const api = {
     /** @returns {Promise<{ id: string, sessionId: string }>} */
-    async start({ sessionId = null, text, images = [], voice = false, requestId = null, targetTaskId = null, evaluationId = null, evaluationAuthorization = null, agentId = null, agentForm = null }) {
+    async start({ sessionId = null, text, images = [], voice = false, requestId = null, targetTaskId = null, evaluationId = null, evaluationAuthorization = null, agentId = null, agentForm = null, carried = false }) {
       text = String(text ?? '').trim();
       if (!text) throw Object.assign(new Error('任务内容是空的'),{status:400});
       if (text.length>20000) throw Object.assign(new Error('任务内容太长'),{status:400});
@@ -595,7 +602,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
           const archive=session.recoveryCheckpoints||[];const {evidence:_,...kept}=previous; // 旧版检查点里带着网页正文：归档时去掉，只留最近 5 次
           session.recoveryCheckpoints=[...archive.filter(x=>x.key!==key).map(({evidence,...record})=>record),{key,...kept}].slice(-5);
         }
-        session.messages.push({role:'user',content:text,ts:now()});session.updatedAt=now();
+        // carried：原任务快结束时才送到的补充，原话已经记进对话，接着处理时不再重复记一条
+        if(!carried)session.messages.push({role:'user',content:text,ts:now()});session.updatedAt=now();
         // 只有评测程序明确带了 evaluationId 的才按评测隔离；用户本人在评测会话里发的话照常读记忆（用户 2026-10-30：误进评测会话后“不知道我是谁”）
         if (!busy && userAccess && ([...tasks.values()].filter(t => visible(t) && ['queued','running'].includes(t.status)).length >= 20 || tasks.size >= 1000)) throw Object.assign(new Error('任务过多，请等待已有任务完成'), { status: 429 });
         const task=busy||{id:uid('t'),userId:userAccess?.current() || 'owner',sessionId:id,evaluationId:evaluationId?evaluationScope:null,...(evaluationAuthorization && { evaluationAuthorization: { id: evaluationAuthorization.id } }),text,status:'queued',seq:0,events:[],listeners:new Set(),files:new Set(),inbox:[],notes:[],images,voice:Boolean(voice),ctrl:new AbortController(),createdAt:now(),checkpoint:{text,notes:[],steps:[],inFlight:[],files:[],status:'queued',createdAt:now()}};
@@ -656,4 +664,5 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       }
     }
   };
+  return api;
 }

@@ -8,6 +8,7 @@ import { createAdapter as lookupAdapter } from '../llm/config.js';
 import { MOBILE } from '../config.js';
 import { remoteTurnImages } from '../core/imageFollowup.js';
 import { checkpointEvent } from '../../shared/taskCheckpoint.js';
+import * as sessionsApi from '../agent/sessions.js';
 import { stripEmotionTags } from '../../shared/emotionTag.js';
 import { createAdapter, providerById } from '../llm/config.js';
 import { TASKS, fallbackRoutes, isSmallTalk } from '../llm/router.js';
@@ -182,7 +183,8 @@ export function createTurn(app) {
       }
     }
     if (expectedTurn) app.rememberTurn('user', text, thumbs.length ? { thumbs } : {}, turn.session);
-    if (!expectedTurn) reply(`收到，做完手上这一步就看这句话（${turnStatus(turn, now())}）。`);
+    // 点“引导”送达的也给回执（以前只显示自己那句话，看起来像没反应）
+    reply(`收到，做完手上这一步就按这句调整（${turnStatus(turn, now())}）。`);
     return true;
   }
   /** 切到别的对话：正在干的任务转到后台接着做 */
@@ -624,6 +626,14 @@ export function createTurn(app) {
         for (const text of left) app.messageQueue?.enqueue(text, { files: [], echo: false, target: turn.session, client: turn.queueScope });
       if (!turn.remote) for (const text of left) app.messageQueue?.enqueue(text, { files: [], echo: false, target: turn.session, client: turn.queueScope });
       app.messageQueue?.finished(turn, canSend && !(left.length && turn.remote));
+      // 服务器模式：原任务收尾时才送到的引导，服务器会接着开一轮处理；这里接上它的进度，不让人以为没反应
+      if (turn.remote && canSend && app.followServerTask)
+        sessionsApi
+          .get(turn.session.id)
+          .then((fresh) => {
+            if (fresh?.taskId && fresh.taskId !== turn.remoteId && app.session?.id === fresh.id && !app.active) app.followServerTask(fresh);
+          })
+          .catch(() => {});
     }
   }
 
