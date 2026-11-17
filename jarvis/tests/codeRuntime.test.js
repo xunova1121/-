@@ -5,7 +5,7 @@ import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { CODE_RUNTIME_REQUIRED, validateCodeRuntimeManifest, checkCodeRuntime } from '../evals/code-runtime.mjs';
-import { prepareRuntime } from '../evals/architecture-runtime-fetch.mjs';
+import { prepareRuntime, RUNTIME_MAX_FILES, validateRuntimeManifest } from '../evals/architecture-runtime-fetch.mjs';
 import { generateCodeRuntimeManifest } from '../scripts/code-runtime-manifest.mjs';
 
 async function fixture(entry = 'export async function main(){throw new Error("不应调用模型入口")};') {
@@ -76,3 +76,55 @@ it('最终清单只取真实已提交源码；固定git版本、逐文件摘要�
     await f.close();
   }
 });
+
+it('扩容后的清单仍有1500项上限，并核验末尾文件的路径、哈希和原字节限制', async () => {
+  const f = await fixture();
+  try {
+    const emptyHash = createHash('sha256').update('').digest('hex');
+    const files = [...f.manifest.files];
+    while (files.length < RUNTIME_MAX_FILES) files.push({ path: `src/capacity-${files.length}.js`, bytes: 0, sha256: emptyHash });
+    const manifest = { ...f.manifest, files };
+    expect(RUNTIME_MAX_FILES).toBe(1500);
+    expect(validateCodeRuntimeManifest(manifest)).toBe(manifest);
+    expect(() => validateRuntimeManifest({ ...manifest, files: [...files, { path: 'src/over-limit.js', bytes: 0, sha256: emptyHash }] })).toThrow();
+    for (const change of [{ path: '../outside.js' }, { path: files[0].path }, { sha256: 'invalid' }, { bytes: 20e6 + 1 }]) {
+      expect(() => validateCodeRuntimeManifest({ ...manifest, files: [...files.slice(0, -1), { ...files.at(-1), ...change }] })).toThrow();
+    }
+    expect(() =>
+      validateCodeRuntimeManifest({ ...manifest, files: files.map((file, index) => ({ ...file, bytes: index < 6 ? 20e6 : file.bytes })) })
+    ).toThrow();
+  } finally {
+    await f.close();
+  }
+});
+
+it('1005个已提交模块能完整生成清单和准备运行目录，末尾文件篡改仍拒绝', async () => {
+  const f = await fixture();
+  const git = (...args) =>
+    execFileSync('git', args, { cwd: f.root, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
+  try {
+    const extra = 1005 - f.manifest.files.length;
+    await fs.mkdir(path.join(f.app, 'src/capacity'), { recursive: true });
+    for (let index = 0; index < extra; index++) await fs.writeFile(path.join(f.app, `src/capacity/module-${index}.js`), `export const value = ${index};\n`);
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.name', 'Fixture');
+    git('config', 'user.email', 'fixture@example.invalid');
+    git('add', '.');
+    git('commit', '-qm', 'capacity fixture [skip ci]');
+    const manifest = await generateCodeRuntimeManifest(f.app);
+    expect(manifest.files).toHaveLength(1005);
+    const prepared = path.join(f.root, 'prepared');
+    expect(
+      await prepareRuntime(manifest, f.app, prepared, {
+        fetchFile: () => {
+          throw new Error('全部源码应从本机逐字节复用');
+        }
+      })
+    ).toMatchObject({ reused: 1005, downloaded: 0 });
+    expect(await checkCodeRuntime(manifest, prepared)).toMatchObject({ files: 1005, modelRequested: false });
+    await fs.appendFile(path.join(prepared, manifest.files.at(-1).path), '\n// tampered');
+    await expect(checkCodeRuntime(manifest, prepared)).rejects.toMatchObject({ code: 'CODE_RUNTIME_HASH' });
+  } finally {
+    await f.close();
+  }
+}, 60000);

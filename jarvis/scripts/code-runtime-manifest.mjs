@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { validateCodeRuntimeManifest } from '../evals/code-runtime.mjs';
+import { RUNTIME_MAX_FILES } from '../evals/architecture-runtime-fetch.mjs';
 
 export async function generateCodeRuntimeManifest(cwd = process.cwd()) {
   const git = (args, options = {}) => execFileSync('git', args, { cwd, ...options });
@@ -20,7 +21,7 @@ export async function generateCodeRuntimeManifest(cwd = process.cwd()) {
     .split('\0')
     .filter(Boolean);
   const selected = names.filter((name) => !/runtime-manifest\.json$/.test(name));
-  if (selected.length > 1000) throw new Error('代码清单超过1000文件');
+  if (selected.length > RUNTIME_MAX_FILES) throw new Error(`代码清单超过${RUNTIME_MAX_FILES}文件`);
   const files = [];
   for (const name of selected) {
     const bytes = git(['show', 'HEAD:jarvis/' + name], { maxBuffer: 20_000_000 });

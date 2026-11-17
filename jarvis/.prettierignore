@@ -10,3 +10,9 @@
 # 2026-11-17 复审：改到哪个再纳入哪个（逐个加白名单）
 !src/agent/
 !src/agent/spreadsheetReplica.js
+!evals/
+!evals/architecture-runtime-fetch.mjs
+!scripts/
+!scripts/code-runtime-manifest.mjs
+!tests/
+!tests/codeRuntime.test.js
