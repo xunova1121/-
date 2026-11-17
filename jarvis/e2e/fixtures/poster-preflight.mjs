@@ -39,6 +39,7 @@ export function preflightPosterInput(asset = '素材/结构示意.png') {
   text('footer', '材料：第三方 Claude Fable 5.1 Markdown，官方来源未核实。\n本页为设计方法示例，标签是结构概括，不作为产品规则。\n文字由程序排版；配图为示意，不能代替原文核查。', 64, 2300, 952, 100, 34, { role: 'caption', color: '#284967' });
   // 故意没有顶层title：真实标题已在title文字层，不能再让模型为重复字段浪费一次调用。
   return { width: 1080, height: 2560, dataMode: 'provided', source: '用户提供的第三方Markdown；本页是设计方法示例，官方来源未核实',
-    design: { layout: 'free', reading: 'phone', palette: { background: '#FAFBFD', ink: '#173454', muted: '#284967', accent: '#185BB5', card: '#EAF0F9' },
+    // 2026-11-17 起新自由稿须写构思（design.concept），夹具补上；断言不变
+    design: { layout: 'free', reading: 'phone', concept: { idea: '四层提示词结构一图讲清', relation: 'interleave', focus: '结构示意图' }, palette: { background: '#FAFBFD', ink: '#173454', muted: '#284967', accent: '#185BB5', card: '#EAF0F9' },
       assets: [{ id: 'structure', path: asset }], layers } };
 }
