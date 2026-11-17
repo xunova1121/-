@@ -30,3 +30,19 @@ export function posterCompositionIssues(design) {
   return sameColumn && !linked && hero.h >= design.height * 0.25 && hero.y + hero.h <= firstY + 4 && firstY >= design.height * 0.34
     ? [{ code: 'DESIGN_DETACHED_ILLUSTRATION', field: hero.id, message: '主图独占上方，下方连续同宽文字卡片；请按栏目关联配图并重排，不能仅凭有图认定图文融合。' }] : [];
 }
+
+/**
+ * 先想后做（2026-11-17 用户反馈的美国新闻海报：没写构思直接套“上图下面板”；三大指数涨跌这种数据没用图表）。
+ *   - requireConcept：新自由稿必须写 design.concept（创意和图文关系）；
+ *   - 正文里有3个以上百分比（涨跌幅、占比等）却没有图表图层：要求用 chart 图层由程序画，不只堆数字。
+ */
+export function designThinkingIssues(design, { requireConcept = false } = {}) {
+  const issues = [];
+  if (requireConcept && !(design.concept?.idea && design.concept?.relation))
+    issues.push({ code: 'DESIGN_CONCEPT_MISSING', field: 'design.concept', message: '先写构思再排图层：design.concept至少给idea（一句话创意）和relation（按内容选的图文关系），不要直接套上图下面板' });
+  const text = design.layers.filter(n => n.type === 'text').map(n => n.text).join('\n');
+  const percents = text.match(/[+-]?\d+(?:\.\d+)?\s*[%％]/g) || [];
+  if (percents.length >= 3 && !design.layers.some(n => n.type === 'chart'))
+    issues.push({ code: 'DESIGN_DATA_NEEDS_CHART', field: 'layers', message: `正文有${percents.length}个百分比数据，请至少用一个chart图层（分类对比用chartType=bar并写unit）由程序画出来，数字照原文，不只堆在文字里` });
+  return issues;
+}

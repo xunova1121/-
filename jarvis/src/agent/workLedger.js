@@ -8,7 +8,7 @@ const sessions = collection('sessions');
 const INDEX = 'work-ledger-v1';
 export const WORK_RECORD_LIMIT = 4096;
 const TOOLS =
-  /^(make_poster|create_visual_demo|sing_song|generate_image|generate_video|prepare_architecture_evidence|revise_architecture_plan|create_architecture_package|plan_architecture|create_diagram|export_diagram|create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet)$/;
+  /^(make_poster|create_visual_demo|sing_song|generate_image|generate_video|prepare_architecture_evidence|revise_architecture_plan|create_architecture_package|plan_architecture|create_diagram|create_flowchart|export_diagram|create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet)$/;
 const scopes = new WeakMap();
 const ledgerState = scopedState('kv', () => ({ tail: Promise.resolve(), pending: 0 }));
 
@@ -60,7 +60,10 @@ export async function recordWorkAttempt({ tool, args = {}, output = '', ok, sess
   ]
     .slice(0, 12)
     .map((match) => match[0]);
-  const paths = delivery ? [delivery.primaryPath] : [...new Set([...(media?.files || []), ...(typeof args.path === 'string' ? [args.path] : []), ...candidates])];
+  // 流程图：主文件是PNG，源稿和可编辑格式在回执files里
+  let flowFiles = [];
+  if (tool === 'create_flowchart') { try { flowFiles = (JSON.parse(String(output).slice(0, 24000)).files || []).map(f => f.path).filter(p => typeof p === 'string'); } catch { /* 无结构回执不索引 */ } }
+  const paths = delivery ? [delivery.primaryPath] : flowFiles.length ? flowFiles : [...new Set([...(media?.files || []), ...(typeof args.path === 'string' ? [args.path] : []), ...candidates])];
   const files = [];
   for (const path of paths.slice(0, 12)) {
     if (path.length <= 400 && (await workspace.exists(path))) files.push(path);
@@ -78,7 +81,7 @@ export async function recordWorkAttempt({ tool, args = {}, output = '', ok, sess
           ? 'image'
           : tool === 'generate_video'
             ? 'video'
-            : /^(prepare_architecture_evidence|revise_architecture_plan|create_architecture_package|plan_architecture|create_diagram|export_diagram)$/.test(tool)
+            : /^(prepare_architecture_evidence|revise_architecture_plan|create_architecture_package|plan_architecture|create_diagram|create_flowchart|export_diagram)$/.test(tool)
               ? 'diagram'
               : 'document',
     title: String(delivery?.title || args.title || files[0]?.split('/').pop() || tool).slice(0, 160),

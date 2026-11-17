@@ -5,6 +5,12 @@ import { isPhoneRequest } from '../../shared/phoneControl.js';
 import { textPosterRequest, POSTER_TOOLS } from './posterRouting.js';
 import { visualSceneRequest, VISUAL_SCENE_TOOLS } from './visualSceneRouting.js';
 
+// 画图类请求（2026-11-17 复查：“业务图/泳道图/思维导图”调不出画图工具，架构图请求还混进了海报工具）
+export const DIAGRAM_REQUEST = /架构图|拓扑图|部署图|组织架构|业务架构|技术架构|系统架构|关系图|业务图|流程图|泳道图|审批流|思维导图|脑图|时序图|ER图|E-R图|甘特图|数据流图|结构图/i;
+const DIAGRAM_TOOLS = ['create_flowchart', 'create_diagram', 'export_diagram', 'render_diagram', 'build_architecture', 'read_task_method', 'verify_delivery', 'read_file', 'list_files', 'find_files', 'read_document_structure', 'preview'];
+// 交互演示：不说“大屏”也要能调出 Demo 工具
+const DEMO_REQUEST = /(?:交互|演示|展示|原型)[^。！？\n]{0,8}(?:Demo|页面|原型)|产品原型|(?:做|生成|制作)[^。！？\n]{0,8}Demo/i;
+
 const BASIC = ['execution_capabilities', 'read_task_requirements', 'read_tool_result', 'review_task', 'need_more_time', 'request_capable_model'];
 const MEMORY = ['recall', 'read_memory', 'remember', 'kb_search', 'search_conversations', 'read_conversation', 'list_my_messages', 'list_work_records'];
 const FILES = ['find_files', 'search_in_files', 'list_files', 'read_file', 'write_file', 'edit_file', 'preview', 'run_javascript', 'run_project_tests'];
@@ -22,8 +28,11 @@ export function taskToolCore(intent, text, { images = [], computerTask = false, 
   if (isPhoneRequest(value)) { add(['phone_devices', 'phone_action', 'get_current_time', 'time_calc']); return names; }
   if (textPosterRequest(value)) { add(POSTER_TOOLS); return names; }
   if (intent?.category === 'code') { add(CODE_TASK_CORE); add(FILES); return names; }
-  if (/Word|Excel|PPT|文档|表格|幻灯片|\.docx|\.xlsx|\.pptx/i.test(value)) return DOCUMENT_TASK_CORE;
-  if (/架构图|流程图|关系图|拓扑图|生成图片|画图|图片|唱歌|歌曲|视频/.test(value)) return CORE;
+  // PPT/Word 里要放架构图、流程图：文档工具 + 画图工具一起给，图由画图工具出，不让PPT工具用文字凑
+  if (/Word|Excel|PPT|文档|表格|幻灯片|\.docx|\.xlsx|\.pptx/i.test(value)) return DIAGRAM_REQUEST.test(value) ? new Set([...DOCUMENT_TASK_CORE, ...DIAGRAM_TOOLS]) : DOCUMENT_TASK_CORE;
+  if (DIAGRAM_REQUEST.test(value)) { add(DIAGRAM_TOOLS); return names; }
+  if (DEMO_REQUEST.test(value)) { add(VISUAL_SCENE_TOOLS); return names; }
+  if (/生成图片|画图|图片|唱歌|歌曲|视频/.test(value)) return CORE;
   if (/招投标|招标|中标|采购公告|股东|股权|工商|查企业|查公司|对外投资/.test(value)) add(['search_tenders', 'read_tender_notice', 'lookup_company', 'time_calc', ...SEARCH]);
   if (/天气|温度|下雨|气温/.test(value)) add(['get_weather', 'get_current_time', ...SEARCH]);
   else if (/股价|行情|金价|汇率|大盘|美股|港股|油价|股票/.test(value)) add(['get_market_quote', 'get_stock_kline', 'verify_numbers', 'time_calc', 'list_holdings', 'holding_profit', ...SEARCH]);

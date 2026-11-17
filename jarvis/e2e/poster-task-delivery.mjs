@@ -23,7 +23,7 @@ const checks = [];
 const check = (label, pass) => { checks.push({ label, pass: Boolean(pass) }); console.log(`${pass ? '✓' : '✗'} ${label}`); assert.ok(pass, label); };
 let visionCalls = 0;
 const ctx = { renderVisualScene, visionLlm: async () => { visionCalls++; return JSON.stringify({ copyMatches: true, readable: true, noOverlap: true, visualsPresent: true, relatedToTopic: true, integrated: true, issues: [] }); } };
-const input = { title: '市场观察', width: 1080, height: 1920, dataMode: 'provided', source: '固定验收夹具，不代表真实行情', asOf: '2026-11-13', design: { layout: 'free', reading: 'phone',
+const input = { title: '市场观察', width: 1080, height: 1920, dataMode: 'provided', source: '固定验收夹具，不代表真实行情', asOf: '2026-11-13', design: { layout: 'free', reading: 'phone', concept: { idea: '三大指数一眼对比，配图点明市场情绪', relation: 'interleave', focus: '指数涨跌' }, // 2026-11-17 起新自由稿须写构思
   palette: { background: '#F5F7FB', ink: '#15243E', muted: '#415574', accent: '#2354C7', card: '#FFFFFF' }, layers: [
     { id: 'eyebrow', type: 'text', text: 'MARKET BRIEF · 数据对比', x: 70, y: 70, w: 940, h: 70, fontSize: 36, role: 'caption' },
     { id: 'title', type: 'text', text: '美股三大指数速览', x: 70, y: 190, w: 940, h: 130, fontSize: 76, weight: 700, role: 'heading' },

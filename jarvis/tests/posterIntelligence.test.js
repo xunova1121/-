@@ -15,7 +15,8 @@ beforeEach(async () => {
   useBackend(null);
   for (const name of ['files', 'kv', 'sessions']) await collection(name).clear();
 });
-const input = (title = '新闻海报') => ({ title, width: 512, height: 768, design: { layout: 'free', layers: [
+// 2026-11-17 起新自由稿须写构思（design.concept），夹具补上；断言不变
+const input = (title = '新闻海报') => ({ title, width: 512, height: 768, design: { layout: 'free', concept: { idea: '大字标题直给要点', relation: 'type-led' }, layers: [
   { id: 'title', type: 'text', text: title, x: 40, y: 40, w: 430, h: 160, fontSize: 40, color: '#111111', role: 'heading' }
 ] } });
 // 真实PNG容器，文字与视觉仍为协议夹具；实际字体/成品由独立E2E验证。

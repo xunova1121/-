@@ -82,7 +82,7 @@ describe('出图后设计自审', () => {
     expect(visionLlm.mock.calls[0][0].prompt).toContain('晨光里的产房窗');
     expect(visionLlm.mock.calls[0][0].system).toContain('cohesive');
     expect(report.status).toBe('passed'); // 设计意见不改变原来的成品核验结论
-    expect(report.design).toEqual({ hierarchy: true, cohesive: false, balanced: true, concept: null, suggestions: ['标题压到照片暗部'] });
+    expect(report.design).toEqual({ hierarchy: true, cohesive: false, balanced: true, distinctive: null, concept: null, suggestions: ['标题压到照片暗部'] });
   });
   it('没返回design对象时不编造', async () => {
     const report = await reviewLayeredDesign({ visionLlm: async () => JSON.stringify({ copyMatches: true, readable: true, noOverlap: true, issues: [] }) }, design, png);
@@ -108,4 +108,47 @@ describe('设计自审轮数', () => {
     expect(receipt.notes.some(n => n.includes('设计自审仍有可改进处'))).toBe(true);
     expect(receipt.designReview.suggestions).toEqual(['标题放大并下移到视觉中心']);
   }, 90000);
+});
+
+describe('先想后做的硬要求（2026-11-17 美国新闻海报：没构思直接套上图下面板，指数涨跌没用图表）', () => {
+  it('交付会话里新自由稿没写构思：出图前就退回，不算试排；写了构思正常出图', async () => {
+    const { designThinkingIssues } = await import('../src/agent/posterContent.js');
+    const d = planLayerDesign({ title: 't', design: { layout: 'free', layers: layers.slice(1) } });
+    expect(designThinkingIssues(d, { requireConcept: true }).map(i => i.code)).toEqual(['DESIGN_CONCEPT_MISSING']);
+    expect(designThinkingIssues(d)).toEqual([]);
+    const tool = createPosterDeliveryTool({ renderVisualScene });
+    const scope = {};
+    const missing = JSON.parse(await tool.run({ title: '产科医生怎么选', path: '构思/无.png', design: { layout: 'free', palette: { background: '#F4EFE6' }, layers: [
+      { id: 'title', type: 'text', text: '产科医生怎么选', x: 80, y: 200, w: 920, h: 140, fontSize: 96, weight: 700, color: '#1D2430', role: 'heading' }] } }, { executionScope: scope }));
+    expect(missing.errors.map(e => e.code)).toContain('DESIGN_CONCEPT_MISSING');
+    expect(missing.delivery.attempts).toBe(0);
+    expect(missing.files.some(f => f.format === 'png')).toBe(false);
+  }, 90000);
+  it('正文有3个以上百分比却没有图表：要求用chart图层；有图表就不提', async () => {
+    const { designThinkingIssues } = await import('../src/agent/posterContent.js');
+    const text = { id: 'body', type: 'text', text: '道指跌1.41%、标普500跌1.92%、纳指跌2.49%', x: 80, y: 400, w: 920, h: 120, fontSize: 40, color: '#111111' };
+    const plain = planLayerDesign({ title: 't', design: { layout: 'free', layers: [text] } });
+    expect(designThinkingIssues(plain).map(i => i.code)).toEqual(['DESIGN_DATA_NEEDS_CHART']);
+    const charted = planLayerDesign({ title: 't', design: { layout: 'free', layers: [text, { id: 'chart', type: 'chart', chartType: 'bar', unit: '%', x: 80, y: 600, w: 920, h: 400,
+      points: [{ label: '道指', value: -1.41 }, { label: '标普500', value: -1.92 }, { label: '纳指', value: -2.49 }] }] } });
+    expect(designThinkingIssues(charted)).toEqual([]);
+  });
+  it('设计自审要求判断是否模板化', async () => {
+    const visionLlm = vi.fn(async () => JSON.stringify({ copyMatches: true, readable: true, noOverlap: true, issues: [], design: { distinctive: false, suggestions: ['去掉大面板，改图文穿插'] } }));
+    const d = planLayerDesign({ title: '产科医生怎么选', design: { layout: 'free', concept, layers: layers.slice(1) } });
+    const report = await reviewLayeredDesign({ visionLlm }, d, new Blob([new Uint8Array(4)], { type: 'image/png' }));
+    expect(visionLlm.mock.calls[0][0].system).toContain('distinctive');
+    expect(report.design.distinctive).toBe(false);
+  });
+});
+
+describe('交付回答如实列文件（2026-11-17 美国新闻海报回答）', () => {
+  it('链接文字写的文件名必须是实际指向的文件；格式按回执说', async () => {
+    const { posterAnswerIssues, linkLabelIssues } = await import('../src/agent/posterRouting.js');
+    expect(linkLabelIssues('[海报/美国新闻-1117.png](.workflows/posters/a/attempt-2/海报.png)')).toHaveLength(1);
+    expect(linkLabelIssues('[海报.png](.workflows/posters/a/attempt-2/%E6%B5%B7%E6%8A%A5.png) [海报PNG](x/海报.png) [官网](https://a.com/b.png)')).toEqual([]);
+    const media = { kind: 'poster', outputs: [{ format: 'png', readback: 'passed' }, { format: 'svg', readback: 'passed' }], visual: 'passed' };
+    expect(posterAnswerIssues('做好了，PNG、SVG、PPTX 三份都在。', media).join('')).toContain('没有PPT');
+    expect(posterAnswerIssues('做好了，PNG和SVG两份；这版没有PPTX。', media)).toEqual([]);
+  });
 });

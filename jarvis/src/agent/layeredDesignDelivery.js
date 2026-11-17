@@ -13,6 +13,7 @@ import { assertPosterPng } from './posterDeliveryTool.js';
 import { throwControl } from '../core/networkRequest.js';
 import { posterContent, posterCompositionIssues } from './posterContent.js';
 import { protectOverlayText } from './layeredDesignScrim.js';
+import { designThinkingIssues } from './posterContent.js';
 
 function assetsReceipt(design, assets) {
   return design.layers.filter(n => n.type === 'image').map(node => {
@@ -65,11 +66,13 @@ export async function deliverLayeredDesign(input, ctx = {}, options = {}, demo =
     options = { ...options, requiresRichVisual: true };
   }
   const { base, release } = await claimLayerOutputBase(input, design, signal);
-  try { return await deliverLoadedDesign({ design, assets, base, preflight }, ctx, options, demo); }
+  // 新自由稿（海报交付会话内）必须先写构思（2026-11-17 用户：要有独立思考；实际出现直接套“上图下面板”）
+  const requireConcept = Boolean(options.posterAttempt && !input.source_path && Array.isArray(input.design?.layers));
+  try { return await deliverLoadedDesign({ design, assets, base, preflight, requireConcept }, ctx, options, demo); }
   finally { release(); }
 }
 
-async function deliverLoadedDesign({ design, assets, base, preflight }, ctx, options, demo) {
+async function deliverLoadedDesign({ design, assets, base, preflight, requireConcept = false }, ctx, options, demo) {
   const { signal, progress, checkpoint } = options;
   // 叠加版式：压在照片上的字按真实像素量，看不清才加局部遮罩（layeredDesignScrim.js）
   let overlay;
@@ -93,6 +96,10 @@ async function deliverLoadedDesign({ design, assets, base, preflight }, ctx, opt
     receipt.compositionIssues = posterCompositionIssues(design);
     receipt.errors.push(...receipt.compositionIssues.map(issue => ({ ...issue, phase: 'composition' })));
   }
+  // 构思与数据图表：出图前就提出，不算一次试排（posterAttempt 下有错误会在渲染前返回）
+  const thinking = designThinkingIssues(design, { requireConcept });
+  receipt.errors.push(...thinking.map(issue => ({ ...issue, phase: 'composition' })));
+  receipt.compositionIssues = [...(receipt.compositionIssues || []), ...thinking];
   if (receipt.contentCheck?.status === 'failed') receipt.errors.push({ code: 'DESIGN_ILLUSTRATION_MISSING', phase: 'composition', message: '图文并茂需实际主题图片或有来源图表，图标/数字卡片不能代替。源稿保留；不编造时间走势，不自动付费重画。' });
   const issues = [
     ...(receipt.presentation.failed || []).map(item => ({ code: 'DESIGN_PRESENTATION_UNREADABLE', ...item,

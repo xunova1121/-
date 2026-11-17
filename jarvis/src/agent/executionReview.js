@@ -1,5 +1,5 @@
 import { presentationAnswerIssues } from './presentationReceipt.js';
-import { posterAnswerIssues } from './posterRouting.js';
+import { posterAnswerIssues, linkLabelIssues } from './posterRouting.js';
 import { visualSceneAnswerIssues } from './visualSceneRouting.js';
 import { repositoryReceipt, repositoryRepair, repositoryDeliveryIssue, correctRepositoryLinks, repositoryTextStream } from './codeRepositoryReview.js';
 import { IMAGE_RECHECK } from './imageReading.js';
@@ -326,7 +326,10 @@ export function createExecutionReview(goal = '', { visual = false } = {}) {
   const checkAnswer = (text, now) => {
     selectedNews = new Set((String(text).match(/https?:\/\/[^\s)）\]，。]+/g) || []).filter(url => newsOriginals.has(url)));
     answerIssues = [...answerConstraintIssues(request, text, now), ...priceComparisonIssues(request, text), ...presentationAnswerIssues(request, text, lastDocument())];
-    answerIssues.push(...posterAnswerIssues(text, mediaDelivery(request, receipts.filter(receipt => receipt.version === version))));
+    const delivered = mediaDelivery(request, receipts.filter(receipt => receipt.version === version));
+    answerIssues.push(...posterAnswerIssues(text, delivered));
+    // 链接文字写成文件名时必须是实际文件（海报已在 posterAnswerIssues 里查）
+    if (delivered?.kind !== 'poster') answerIssues.push(...linkLabelIssues(text));
     answerIssues.push(...visualSceneAnswerIssues(text, mediaDelivery(request, receipts.filter(receipt => receipt.version === version))));
     answerIssues.push(...imageDeliveryAnswerIssues(text, mediaDelivery(request, receipts.filter(receipt => receipt.version === version))));
     answerIssues.push(...replicaAnswerIssues(request, text, lastDocument()));
