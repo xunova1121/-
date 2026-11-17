@@ -2,3 +2,8 @@
 export function posterArtifactId(path) {
   return typeof path === 'string' ? path.match(/^\.workflows\/posters\/([a-f0-9-]{36})\/attempt-\d+\/[^/]+(?<!\.phone)\.png$/i)?.[1] || '' : '';
 }
+
+/** 用尝试编号排序，而非下载完成顺序；慢到的旧稿不能盖住新稿。 */
+export function posterArtifactAttempt(path) {
+  return posterArtifactId(path) ? Number(path.match(/\/attempt-(\d+)\//)[1]) : 0;
+}

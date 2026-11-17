@@ -126,7 +126,7 @@ export function createToolbox(app) {
         onFileChanged,
         imageGen: (o) => generateImage(app.llmConfig, { ...o, gateway: app.gateway, download: app.fetchViaGateway() }),
         imageEdit: (o) => editImage(app.llmConfig, { ...o, gateway: app.gateway, download: app.fetchViaGateway() }),
-        onImage: (src) => out()?.image?.(src),
+        onImage: (src, path) => out()?.image?.(src, undefined, path),
         onSportsScores: (value) => {
           // 无所属轮次的后台整理不能把赛程挂到此刻正在显示的另一条回答。
           if (!turn) return;

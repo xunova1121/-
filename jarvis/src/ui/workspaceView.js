@@ -9,7 +9,7 @@ const element = (tag, properties = {}, ...children) => {
 };
 
 /** 只渲染前50组，逐次追加50组；选择最多200组、管理标记最多2000路径，缓存一份30秒来源索引。 */
-export function initWorkspaceView({ list, refresh, toast, openFile, getScope, getRecords, onOpenSession, onRenameWorkRecord, onRemoveWorkRecord }) {
+export function initWorkspaceView({ list, refresh, toast, openFile, getScope, getWorkspace = () => workspace, getRecords, onOpenSession, onRenameWorkRecord, onRemoveWorkRecord }) {
   let view = 'recent';
   let showProcess = false;
   let project = '';
@@ -88,6 +88,7 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
     cachedSources = { scope, path, revision, at: Date.now(), items: records };
     return records;
   }
+  // 保留既有收藏/项目标记的键；云端读取方式不迁移本机已有元数据。
   const scopeNow = () => getScope() + ':' + workspace.mode() + ':' + (workspace.folderName() || '');
   function assertScope(scope) {
     if (scope !== scopeNow()) throw Object.assign(new Error('工作区来源已改变，请重新打开成果管理'), { code: 'WORKSPACE_CHANGED', kind: 'input' });
@@ -180,7 +181,7 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
         manager.close();
       })
     );
-    if (view === 'trash' && workspace.mode() === 'virtual') {
+    if (view === 'trash' && getWorkspace().mode() === 'virtual') {
       const confirmDelete = element('input', { type: 'checkbox' });
       const permanent = scopedAction('永久删除文件', async () => {
         if (!confirmDelete.checked) return;
@@ -288,7 +289,11 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
         for (const [label, entries] of [['源文件', group.poster.sourceFiles], ['历史稿', group.poster.historyFiles]]) {
           const detail = element('details', { className: 'ws-poster-files' }, element('summary', { textContent: label + `（${entries.length}）` }));
           detail.onclick = event => event.stopPropagation();
-          for (const file of entries) detail.append(action(file.path.split('/').slice(-2).join(' / '), () => { assertScope(scope); return openFile(file.path); }));
+          for (const file of entries) {
+            const button = action(workspace.ext(file.path).toUpperCase() + ' · ' + file.path.split('/').slice(-2).join(' / '), () => { assertScope(scope); return openFile(file.path); });
+            button.title = file.path;
+            detail.append(button);
+          }
           formats.append(detail);
         }
         formats.prepend(element('span', { textContent: group.poster.quality === 'complete' ? '成品海报' : '候选海报 · 待核验' }));

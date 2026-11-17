@@ -22,6 +22,7 @@ it('下载失败不留下已完成标志；同路径再次通知可以真正取�
   expect(turn.files.has(path)).toBe(true);
   expect(bubble.fileLink).toHaveBeenCalledWith(path, app.openInWorkspace);
   expect(bubble.image).toHaveBeenCalledTimes(1);
+  expect(bubble.image).toHaveBeenCalledWith(expect.stringMatching(/^blob:/), undefined, path);
 });
 it('同一路径在途请求合并，下载成功后才登记并展示', async () => {
   const { app, turn, remote } = fixture();

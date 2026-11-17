@@ -140,7 +140,7 @@ export function createRemoteTask(app) {
         app.panels.refreshFiles();
         const out = turn?.bubble ?? app.liveBubble;
         // 服务器画的图、做的视频：和本机一样直接显示在回答里
-        if (/^images\/.+\.(png|jpe?g|webp|gif)$/i.test(actual) || posterArtifactId(actual)) out?.image?.(URL.createObjectURL(blob));
+        if (/^images\/.+\.(png|jpe?g|webp|gif)$/i.test(actual) || posterArtifactId(actual)) out?.image?.(URL.createObjectURL(blob), undefined, actual);
         else if (/^videos\/.+\.(mp4|webm|mov)$/i.test(path)) out?.video?.(URL.createObjectURL(blob));
         if (!/^skills\//.test(path)) {
           out?.fileLink?.(actual, app.openInWorkspace);

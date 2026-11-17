@@ -4,7 +4,7 @@
  */
 import { imageButton, previewWorkspaceImage, showImagePreview } from './imagePreview.js';
 import { PROCESS_FILE } from './workspaceCatalog.js';
-import { posterArtifactId } from '../../shared/posterArtifactPath.js';
+import { posterArtifactId, posterArtifactAttempt } from '../../shared/posterArtifactPath.js';
 import { createSportsCard } from './sportsCard.js';
 import { createMarketCard } from './marketCard.js';
 import { mergeMarketSnapshots } from '../../shared/marketSnapshot.js';
@@ -373,6 +373,7 @@ export class Transcript {
     this.root.append(el);
     this.#scroll();
     let raw = text;
+    const generatedImages = new Map();
     // 文字与工具卡片按时间顺序交替出现：每段文字一个独立的 body
     let cur = body;
     let curRaw = text;
@@ -694,7 +695,11 @@ export class Transcript {
         if (PROCESS_FILE.test(path) && !deliveryId) return;
         if (!files) { files = document.createElement('div'); files.className = 'file-links'; el.append(files); }
         if ([...files.children].some((b) => b.dataset.path === path)) return;
-        if (deliveryId) for (const previous of [...files.children]) if (previous.dataset.deliveryId === deliveryId) previous.remove();
+        if (deliveryId) {
+          const previous = [...files.querySelectorAll('.file-link')].find(b => b.dataset.deliveryId === deliveryId);
+          if (previous && posterArtifactAttempt(previous.dataset.path) > posterArtifactAttempt(path)) return;
+          previous?.remove();
+        }
         const name = path.split('/').pop();
         const ext = (name.match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase();
         const b = Object.assign(document.createElement('button'), { type: 'button', className: 'file-link', title: `在工作区打开 ${path}` });
@@ -707,9 +712,23 @@ export class Transcript {
         self.#scroll();
       },
       /** 生成的图片：显示在当前文字段之前 */
-      image(src, alt = '生成的图片') {
+      image(src, alt = '生成的图片', path = '') {
+        const deliveryId = posterArtifactId(path);
+        const key = deliveryId || path || src;
+        const previous = generatedImages.get(key);
+        const release = url => { if (url?.startsWith('blob:')) URL.revokeObjectURL(url); };
+        if (previous && posterArtifactAttempt(previous.dataset.path) > posterArtifactAttempt(path)) {
+          if (previous.src !== src) release(src);
+          return;
+        }
         const img = Object.assign(document.createElement('img'), { src, alt, className: 'gen-image', loading: 'lazy' });
-        el.insertBefore(img, cur);
+        img.dataset.path = path;
+        if (deliveryId) img.dataset.deliveryId = deliveryId;
+        if (previous) {
+          previous.replaceWith(img);
+          if (previous.src !== src) release(previous.src);
+        } else el.insertBefore(img, cur);
+        generatedImages.set(key, img);
         self.#scroll();
       },
       video(src) {

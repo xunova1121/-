@@ -481,6 +481,8 @@ jobs:
           node e2e/settings-navigation.mjs "$RUNNER_TEMP/jarvis-e2e/settings-navigation"
       - name: 验证海报单份交付、图文证据、分类图表与真实Office及文件空间
         run: node e2e/poster-task-delivery.mjs "$RUNNER_TEMP/jarvis-e2e/poster-task-delivery"
+      - name: 验证海报云端源文件、下载字节和聊天重复预览
+        run: node e2e/poster-cloud-delivery.mjs "$RUNNER_TEMP/jarvis-e2e/poster-cloud-delivery"
       - name: 验证海报参数纠正、跨轮同稿与聊天主图实际打开下载
         run: node e2e/poster-intelligence.mjs "$RUNNER_TEMP/jarvis-e2e/poster-intelligence"
       - name: 验证自由海报全部预检、文字适配与真实PNG和Office交付
@@ -555,7 +557,12 @@ jobs:
       - name: 写发布说明
         run: |
           cat > release-notes.md <<'NOTES'
-          ## 本版修复 · 海报预检与文字自动适配
+          ## 本版修复 · 海报重复预览与云端源文件
+          - 同一海报试排多次，在对话中只更新一张最新预览；重复通知和慢到的旧稿不会多贴或覆盖新稿。不同任务与独立配图分别保留，不删除历史文件。
+          - 服务器模式的工作区读取当前服务器完整目录，修复手机只有主PNG时“源文件（0）”的问题。SVG、可编辑PPTX和源稿按需打开/下载，保持原始字节；无需重新生成旧海报。
+          - 读取、下载与分享跟随当前运行端，不误用本机同名文件；保留账号隔离和本地目录恢复。补充真实HTTP、手机/PC浏览器、下载摘要与Office打开检查。用户原文件和真机尚未验收，发布不代表已代部署服务器。
+
+          ## 保留上一版 · 海报预检与文字自动适配
           - 修复自由海报依次报缺标题、英文/数字/页脚放不下，尚未出图就耗尽纠正次数的问题。独立错误集中报告，模型回执保留具体图层与最小高度、字号，原2000字符上限不变。
           - 新自由稿及完整重新构图会在安全空白内适配字号与行高，保留原文、图片、坐标和明确画幅；不会越过卡片、底图或下方内容。局部修改与原图Canvas填字保持原约定，也可选择严格框尺寸。
           - 已有唯一标题文字层可复用准确标题；长英文按单词/下划线折行，中文短尾行适度匀排，数字、单位与全文保持完整。原4次参数纠正和3次实际渲染上限不扩大。

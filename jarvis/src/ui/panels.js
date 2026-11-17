@@ -26,7 +26,7 @@ const el = (tag, props = {}, ...kids) => {
   return e;
 };
 
-export function initPanels({ toast, getGateway, onConfigChange, getHistory, settings, onReflect, onAutoMemory, searchFetch, getWorkRecords, getWorkspaceScope = () => 'local', onOpenSession, onRenameWorkRecord, onRemoveWorkRecord }) {
+export function initPanels({ toast, getGateway, onConfigChange, getHistory, settings, onReflect, onAutoMemory, searchFetch, getWorkRecords, getWorkspaceScope = () => 'local', getWorkspace = () => ws, onOpenSession, onRenameWorkRecord, onRemoveWorkRecord }) {
   const fresh = new Set();
   let current = null; // 当前预览的文件
   let objectUrls = [];
@@ -48,7 +48,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   function syncListVisibility() { workspaceView.setHidden(wsTab !== 'files' || fileListHidden); $('#file-list').hidden = wsTab !== 'files' || fileListHidden; controls.hidden = wsTab !== 'files'; hideFiles.textContent = fileListHidden ? '展开文件列表' : '隐藏文件列表'; hideFiles.setAttribute('aria-expanded',String(!fileListHidden)); }
   hideFiles.onclick = () => { fileListHidden = !fileListHidden; try { localStorage.setItem('jarvis.files.hidden',String(fileListHidden)); } catch {} syncListVisibility(); };
   search.oninput = () => { fileQuery = search.value; refreshFiles(); };
-  const workspaceView = initWorkspaceView({ list: $('#file-list'), refresh: () => refreshFiles(), toast, openFile: path => openFile(path), getScope: getWorkspaceScope, getRecords: getWorkRecords, onOpenSession, onRenameWorkRecord, onRemoveWorkRecord });
+  const workspaceView = initWorkspaceView({ list: $('#file-list'), refresh: () => refreshFiles(), toast, openFile: path => openFile(path), getScope: getWorkspaceScope, getWorkspace, getRecords: getWorkRecords, onOpenSession, onRenameWorkRecord, onRemoveWorkRecord });
   controls.append(search, workspaceView.control, categories, el('div',{className:'ws-sort-note'},counter,hideFiles)); $('#file-list').before(controls);
   syncListVisibility();
 
@@ -70,16 +70,17 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     list.setAttribute('aria-busy', 'true');
     list.inert = true;
     $('.ws-batch').inert = true;
-    const mode = ws.mode();
-    $('#ws-mode').textContent = mode === 'folder' ? `本地：${ws.folderName()}` : '浏览器内';
+    const source = getWorkspace();
+    const mode = source.mode();
+    $('#ws-mode').textContent = mode === 'server' ? '云服务器' : mode === 'folder' ? `本地：${ws.folderName()}` : '浏览器内';
     $('#ws-mode').classList.toggle('on', mode === 'folder');
-    const restore = await ws.restoreFolder().catch(() => null);
+    const restore = await source.restoreFolder().catch(() => null);
     const btn = $('#btn-folder');
-    btn.hidden = !ws.canUseFolders();
+    btn.hidden = !source.canUseFolders();
     btn.textContent = mode === 'folder' ? '断开文件夹' : restore?.pending ? `恢复连接「${restore.pending}」` : '连接本地文件夹';
     btn.dataset.pending = restore?.pending ? '1' : '';
     let files;
-    try { files = await ws.list(); } catch (e) { files = []; toast(`读取工作区失败：${e.message}`); }
+    try { files = await source.list(); } catch (e) { if (e.code === 'WORKSPACE_CHANGED') return; files = []; toast(`读取工作区失败：${e.message}`); }
     if (generation !== fileRefresh) return;
     const total = files.length;
     const result = await workspaceView.render(files, { category: fileCategory, query: fileQuery, fresh, current, isCurrent: () => generation === fileRefresh });
@@ -103,7 +104,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   });
 
   /** 网页预览：把同目录引用的 css / js 内联进去，在无同源权限的沙箱 iframe 里运行 */
-  async function inlineAssets(path, html) {
+  async function inlineAssets(path, html, source = getWorkspace()) {
     const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/') + 1) : '';
     const resolve = (ref) => { try { return ws.normalize(dir + ref); } catch { return null; } };
     const replaceAsync = async (str, re, fn) => {
@@ -115,18 +116,26 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     };
     html = await replaceAsync(html, /<link\b[^>]*href=["'](?!https?:|\/\/)([^"']+\.css)["'][^>]*>/gi, async (m, ref) => {
       const p = resolve(ref);
-      return p && (await ws.exists(p)) ? `<style>${await ws.readText(p)}</style>` : m;
+      return p && (await source.exists(p)) ? `<style>${await source.readText(p)}</style>` : m;
     });
     html = await replaceAsync(html, /<script\b([^>]*)src=["'](?!https?:|\/\/)([^"']+\.m?js)["']([^>]*)><\/script>/gi, async (m, a, ref, b) => {
       const p = resolve(ref);
-      return p && (await ws.exists(p)) ? `<script${a}${b}>${(await ws.readText(p)).replace(/<\/script/gi, '<\\/script')}</script>` : m;
+      return p && (await source.exists(p)) ? `<script${a}${b}>${(await source.readText(p)).replace(/<\/script/gi, '<\\/script')}</script>` : m;
     });
     return html;
   }
 
   let docxFit = null;
+  let previewGeneration = 0;
   addEventListener('resize', () => docxFit?.());
   async function openFile(path) {
+    const generation = ++previewGeneration;
+    const source = getWorkspace();
+    const scope = getWorkspaceScope();
+    const visible = () => {
+      if (generation !== previewGeneration || scope !== getWorkspaceScope()) return false;
+      try { source.check?.(); return true; } catch { return false; }
+    };
     current = path;
     docxFit = null;
     fresh.delete(path);
@@ -140,14 +149,17 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     $('#btn-v-pdf').hidden = !['html', 'htm', 'md'].includes(e);
     $('#btn-v-open').hidden = !['html', 'htm', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(e);
     try {
-      const blob = await ws.readBlob(path);
+      const blob = await source.readBlob(path);
+      if (!visible()) return;
       if (e === 'html' || e === 'htm') {
-        const source = await inlineAssets(path, await blob.text());
-        body.replaceChildren(el('iframe', { sandbox: htmlPreviewSandbox(source), srcdoc: source, title: path }));
+        const html = await inlineAssets(path, await blob.text(), source);
+        if (!visible()) return;
+        body.replaceChildren(el('iframe', { sandbox: htmlPreviewSandbox(html), srcdoc: html, title: path }));
       } else if (e === 'md') {
         const div = el('div', { className: 'msg agent' });
         const inner = el('div', { className: 'body' });
         renderBlocks(inner, await blob.text());
+        if (!visible()) return;
         div.append(inner);
         body.replaceChildren(div);
       } else if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(e)) {
@@ -165,16 +177,24 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
         body.replaceChildren(host);
         try {
           const view = await renderDocx(blob, host);
+          if (!visible()) return;
           docxFit = view.fit;
         } catch {
-          body.replaceChildren(el('pre', { textContent: (await parseFile(blob, path)).text }));
+          const parsed = await parseFile(blob, path);
+          if (!visible()) return;
+          body.replaceChildren(el('pre', { textContent: parsed.text }));
         }
       } else if (ws.isText(path)) {
-        body.replaceChildren(el('pre', { textContent: await blob.text() }));
+        const text = await blob.text();
+        if (!visible()) return;
+        body.replaceChildren(el('pre', { textContent: text }));
       } else {
-        body.replaceChildren(el('pre', { textContent: (await parseFile(blob, path)).text }));
+        const parsed = await parseFile(blob, path);
+        if (!visible()) return;
+        body.replaceChildren(el('pre', { textContent: parsed.text || '此文件没有可提取的文字，请下载原文件查看版式。' }));
       }
     } catch (err) {
+      if (!visible()) return;
       body.replaceChildren(el('pre', { textContent: `无法预览：${err.message}` }));
     }
     $('#panel').scrollTop = 0;
@@ -182,7 +202,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   }
 
   async function download(path) {
-    const msg = await saveFile(await ws.readBlob(path), path.split('/').pop());
+    const msg = await saveFile(await getWorkspace().readBlob(path), path.split('/').pop());
     if (MOBILE) toast(msg);
   }
 
@@ -190,25 +210,31 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   // 安卓 App：“分享”才弹系统分享面板（下载只保存，不再自动跳去别的应用）
   if (canShareFile()) {
     $('#btn-v-share').hidden = false;
-    $('#btn-v-share').addEventListener('click', () => current && ws.readBlob(current).then((blob) => shareFile(blob, current.split('/').pop())).then(toast, (e) => toast(e.message)));
+    $('#btn-v-share').addEventListener('click', () => {
+      const path = current;
+      if (path) getWorkspace().readBlob(path).then(blob => shareFile(blob, path.split('/').pop())).then(toast, e => toast(e.message));
+    });
   }
   $('#btn-v-open').addEventListener('click', async () => {
     if (!current) return;
-    let blob = await ws.readBlob(current);
-    if (/\.html?$/i.test(current)) blob = new Blob([await inlineAssets(current, await blob.text())], { type: 'text/html' });
+    const path = current, source = getWorkspace();
+    let blob = await source.readBlob(path);
+    if (/\.html?$/i.test(path)) blob = new Blob([await inlineAssets(path, await blob.text(), source)], { type: 'text/html' });
     window.open(URL.createObjectURL(blob), '_blank', 'noopener');
   });
   // 导出 PDF：桌面版直接转成 PDF 文件存进工作区；网页版和安卓在无脚本的隐藏 iframe 里排版后调用浏览器打印（选“另存为 PDF”）
   $('#btn-v-pdf').addEventListener('click', async () => {
     if (!current) return;
-    let html = await ws.readText(current);
-    if (/\.md$/i.test(current)) html = htmlDocument(current.replace(/^.*\/|\.md$/g, ''), html, { printable: true });
+    const path = current;
+    const source = getWorkspace();
+    let html = await source.readText(path);
+    if (/\.md$/i.test(path)) html = htmlDocument(path.replace(/^.*\/|\.md$/g, ''), html, { printable: true });
     html = html.replace(/<script[\s\S]*?<\/script>/gi, '');
     const desktop = globalThis.window?.jarvisDesktop;
     if (desktop) {
       try {
-        const { base64 } = await desktop.invoke('printToPdf', { html: await inlineAssets(current, html) });
-        const w = await ws.write(current.replace(/\.(html?|md)$/i, '') + '.pdf', new Blob([Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))], { type: 'application/pdf' }));
+        const { base64 } = await desktop.invoke('printToPdf', { html: await inlineAssets(path, html, source) });
+        const w = await source.write(path.replace(/\.(html?|md)$/i, '') + '.pdf', new Blob([Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))], { type: 'application/pdf' }));
         toast(`已导出 ${w.path}`);
         refreshFiles();
       } catch (e) { toast(`导出 PDF 失败：${e.message}`); }
@@ -224,7 +250,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   $('#btn-v-kb').addEventListener('click', async () => {
     if (!current) return;
     try {
-      const blob = await ws.readBlob(current);
+      const blob = await getWorkspace().readBlob(current);
       const text = ws.isText(current) && !/\.html?$/i.test(current) ? await blob.text() : (await parseFile(blob, current)).text;
       const d = await kb.addDocument({ name: current.split('/').pop(), text, source: 'workspace' });
       toast(`已加入知识库：${d.name}（${d.chunks} 段）`);

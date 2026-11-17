@@ -1,4 +1,6 @@
 import { listWorkRecords, renameWorkRecord, removeWorkRecord } from '../agent/workLedger.js';
+import { createWorkspaceFiles } from './workspaceFiles.js';
+import { userStorageSuffix } from '../core/userStorage.js';
 /**
  * 右侧（手机上是整页）面板：切换面板，以及各面板的创建——工作区 / 知识库 / 记忆、声音、模型分工、模型选择、
  * 本地模型、MCP 连接、技能。
@@ -66,10 +68,11 @@ export function createPanels(app) {
     getGateway: () => app.gateway,
     searchFetch: () => app.fetchViaGateway(),
     getHistory: () => app.history,
+    getWorkspace: createWorkspaceFiles(app),
     getWorkRecords: (options) => (app.server ? app.server.listWorkRecords(options) : listWorkRecords(options)),
     onRenameWorkRecord: (id, title) => (app.server ? app.server.renameWorkRecord(id, title) : renameWorkRecord(id, title)),
     onRemoveWorkRecord: (id) => (app.server ? app.server.removeWorkRecord(id) : removeWorkRecord(id)),
-    getWorkspaceScope: () => (app.server ? 'server:' + app.server.base : 'local'),
+    getWorkspaceScope: () => (app.server ? 'server:' + app.server.base : 'local') + userStorageSuffix(),
     onOpenSession: async (id) => {
       await app.openSession(id);
       app.closeSide();
