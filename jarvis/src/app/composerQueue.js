@@ -5,8 +5,24 @@ import { initMessageQueuePanel } from '../ui/messageQueuePanel.js';
 import { toast } from './env.js';
 
 /** 队列只在当前设备内存中存在，绑定登录客户端与原会话；重启后不自动重发不明状态的请求。 */
+/** 排队内容在本机存储里的账号标识：服务器地址+用户编号（不含登录令牌）；本机模式用本机工作区标识 */
+export function queueStorageKey(scope) {
+  if (typeof scope === 'string') return scope;
+  if (scope?.base) return `server:${scope.base}:${scope.account?.userId || ''}`;
+  return null;
+}
+
+function localQueueStorage() {
+  try {
+    return globalThis.localStorage || null;
+  } catch {
+    return null;
+  }
+}
+
 export function createComposerQueue(app, form) {
-  const queue = createMessageQueue();
+  // 2026-11-17 复审：手机后台被杀时排队消息会丢；存到本机，回来后在同一账号同一会话恢复（暂停，不自动发）
+  const queue = createMessageQueue({ storage: localQueueStorage(), keyOf: queueStorageKey });
   const scope = () => app.server || `local:${ws.mode()}:${ws.folderName() || ''}`;
   let preparing = null;
   const current = () => queue.list(scope(), app.session?.id).map((row) => ({ ...row, busy: preparing === row.id }));
@@ -58,6 +74,8 @@ export function createComposerQueue(app, form) {
   }
 
   function refresh() {
+    const count = queue.restore(scope());
+    if (count) toast(`上次还有 ${count} 条消息没发出，已放回待发列表（已暂停），点“继续”发送或逐条取消`);
     panel.refresh();
   }
 

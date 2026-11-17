@@ -49,7 +49,6 @@ const quote = (a) => (/\s/.test(a) ? `"${a}"` : a);
  * @param {{ getGateway: () => object|null, toast: (t: string) => void, onChange?: (servers: any[]) => void }} o
  */
 export function initMcpPanel({ getGateway, toast, onChange }) {
-  const root = $('#mcp-section');
   let servers = [];
   let editing = null;
   let polling = null;

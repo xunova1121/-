@@ -7,3 +7,6 @@
 
 !src/app/doc/
 !src/app/doc/*.js
+# 2026-11-17 复审：改到哪个再纳入哪个（逐个加白名单）
+!src/agent/
+!src/agent/spreadsheetReplica.js

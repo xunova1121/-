@@ -44,7 +44,6 @@ import { imageColumn, tagPanels, labelRows } from './pptReportPanels.js';
 
 const W = 13.333;
 const H = 7.5;
-const FONT = '微软雅黑';
 const NUM_ITEM = /^(?!(?:\*\*)?\d{1,2}\s*[：:]\s*\d{2}(?!\d))(?:\*\*)?([-+]?\d[\d,.]*(?:\s*[/／]\s*\d[\d,.]*)?\s*(?:%|万亿元|亿元|万元|千元|万亿|亿|万|千|元|个月|个|家|人次|人|倍|天|小时|分钟|分|项|台|套|支|次|集|章|回|段|件|部|篇|位|名|条|座|种|场|平方公里|公顷|公里|亩|吨|路|块|秒)?)(?:\*\*)?(?:\s*[：:]\s*|\s+|(?<=[场支个家人倍项台套次件部篇位名条座种元万亿千顷里亩吨路块秒])(?=[\u4e00-\u9fff]))(.+)$/;
 /** 以日期开头的一条：“10-19 支架到货”“11月1日：初验”“2026年3月 上线”“第 3 周：联调” */
 const DATE_ITEM = /^(?:\*\*)?(\d{1,2}\s*[-月]\s*\d{1,2}\s*日?|\d{4}\s*[-./年]\s*\d{1,2}(?:\s*[-./月]\s*\d{1,2}\s*日?)?\s*月?|\d{1,2}\s*月(?:上旬|中旬|下旬|底|初)?|第\s*\d+\s*(?:周|月|季度))(?:\*\*)?(?:\s*[：:]\s*|\s+)(.{2,})$/;
@@ -311,7 +310,6 @@ export function ignoredLayout(slide, kind) {
 
 function autoLayout(slide, { first = false, last = false } = {}) {
   const bs = slide.blocks;
-  const has = (t) => bs.some((b) => b.type === t);
   const lines = bs.flatMap(blockLines).flatMap((l) => l.split('\n')).map((l) => l.trim()).filter(Boolean);
   if (first && !bs.length) return 'cover';
   if (END.test(slide.title.trim()) && (last || lines.length <= 2)) return 'end';

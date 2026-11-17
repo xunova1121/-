@@ -23,5 +23,25 @@ export default [
       'no-restricted-globals': ['error', 'history', 'prompt', 'status', 'name', 'event', 'close', 'open', 'stop', 'parent', 'top', 'self', 'length', 'origin', 'screen', 'confirm', 'alert', 'print', 'find', 'blur', 'focus', 'closed', 'frames', 'opener', 'external', 'menubar', 'toolbar', 'scroll'],
       'no-use-before-define': ['error', { functions: false, classes: false, variables: false }]
     }
+  },
+  // 2026-11-17 复审：以前只查 src/app 和 main.js，src/agent、server 等大部分新代码从没被检查过。
+  // 这里对其余全部源码查同一批“会让程序跑错”的问题；格式（Prettier）范围不变。
+  {
+    files: ['src/**/*.js', 'server/**/*.{js,mjs}', 'shared/**/*.js', 'scripts/**/*.{js,mjs}'],
+    ignores: ['src/main.js', 'src/app/**'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      // Vite 构建时替换的开关（见 vite.config.js define）
+      globals: { ...globals.browser, ...globals.node, __STANDALONE__: 'readonly', __MOBILE__: 'readonly' }
+    },
+    rules: {
+      'no-undef': 'error',
+      'no-const-assign': 'error',
+      'no-redeclare': 'error',
+      'no-dupe-keys': 'error',
+      'no-import-assign': 'error',
+      'no-unused-vars': ['error', { args: 'none', caughtErrors: 'none', varsIgnorePattern: '^_', ignoreRestSiblings: true }]
+    }
   }
 ];

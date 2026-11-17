@@ -1,4 +1,4 @@
-import { sportsWindow, inSportsWindow, inferSportsWindow } from './sportsWindow.js';
+import { sportsWindow, inferSportsWindow } from './sportsWindow.js';
 import { parseMoment, momentInfo } from './timeMoment.js';
 import { throwControl } from '../core/networkRequest.js';
 import { fetchZhibo8, zhibo8Result } from './sportsZhibo8.js';
@@ -84,8 +84,6 @@ const invalid = (message) => Object.assign(new Error(message), { name: 'Validati
 export const beijingDate = (ms) => new Date(ms + BEIJING_MS).toISOString().slice(0, 10);
 /** 北京时间的“时:分” */
 const beijingClock = (ms) => new Date(ms + BEIJING_MS).toISOString().slice(11, 16);
-const WEEK = '日一二三四五六';
-const weekday = (date) => `周${WEEK[new Date(`${date}T00:00:00Z`).getUTCDay()]}`;
 
 function checkDate(value, now) {
   try { value = momentInfo(parseMoment(value, now)).date; }

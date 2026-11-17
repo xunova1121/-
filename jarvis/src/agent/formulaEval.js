@@ -202,7 +202,7 @@ export function evaluateWorkbook(sheets) {
       while (['=', '<>', '<', '>', '<=', '>='].includes(peek()?.v)) {
         const op = toks[p++].v;
         const a = scalar(v); const b = scalar(concat());
-        v = { '=': a == b, '<>': a != b, '<': a < b, '>': a > b, '<=': a <= b, '>=': a >= b }[op]; // eslint-disable-line eqeqeq
+        v = { '=': a == b, '<>': a != b, '<': a < b, '>': a > b, '<=': a <= b, '>=': a >= b }[op];
       }
       return v;
     }

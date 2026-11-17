@@ -38,3 +38,31 @@ it('有界队列只存附件路径；拒绝超长问题和超量附件，不偷�
   expect(() => queue.add({ ...target, text: '第十一条' })).toThrow('10');
   expect(queue.list('local', 'one')).toHaveLength(10);
 });
+
+it('2026-11-17 复审：排队消息存本机，重启后同账号同会话恢复且先暂停；不存令牌，别的账号不串', async () => {
+  const { queueStorageKey } = await import('../src/app/composerQueue.js').catch(() => ({}));
+  const keyOf = queueStorageKey || (scope => (typeof scope === 'string' ? scope : scope?.base ? `server:${scope.base}:${scope.account?.userId || ''}` : null));
+  const memory = new Map();
+  const storage = { getItem: k => memory.get(k) ?? null, setItem: (k, v) => memory.set(k, String(v)) };
+  const owner = { base: 'https://srv.example', account: { userId: 'u1', token: 'secret-token' } };
+  const other = { base: 'https://srv.example', account: { userId: 'u2', token: 'other-token' } };
+  const before = createMessageQueue({ storage, keyOf });
+  before.add({ scope: owner, sessionId: 's1', text: '第一件事', files: [{ path: '图片/a.png', image: true }] });
+  before.add({ scope: owner, sessionId: 's1', text: '第二件事' });
+  before.add({ scope: other, sessionId: 's1', text: '别人的事' });
+  before.remove(owner, 's1', before.list(owner, 's1')[1].id);
+  expect([...memory.values()].join('')).not.toContain('secret-token');
+
+  // 模拟 App 被杀：新建队列，只从本机存储恢复
+  const after = createMessageQueue({ storage, keyOf });
+  const ownerAgain = { base: 'https://srv.example', account: { userId: 'u1' } };
+  expect(after.restore(ownerAgain)).toBe(1);
+  expect(after.restore(ownerAgain)).toBe(0);
+  const [row] = after.list(ownerAgain, 's1');
+  expect(row).toMatchObject({ text: '第一件事', paused: true, files: [{ path: '图片/a.png', image: true }] });
+  expect(after.take(ownerAgain, 's1')).toBeNull();
+  expect(after.list(ownerAgain, 's2')).toEqual([]);
+  // 别的账号的排队消息仍在存储里，等它自己登录再恢复
+  const third = createMessageQueue({ storage, keyOf });
+  expect(third.restore({ base: 'https://srv.example', account: { userId: 'u2' } })).toBe(1);
+});
