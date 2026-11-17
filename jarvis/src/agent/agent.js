@@ -555,7 +555,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     };
     const releaseHeld = () => {
       if (!holding || !held) return;
-      if (!checkedText || !ACK_ONLY.test(held.trim()) && !repeats(checkedText, held)) showText(held);
+      if (!checkedText || !ACK_ONLY.test(held.trim()) && !repeats(checkedText, held) && !metaReply(held)) showText(held);
       held = '';
     };
     // 阶段超时仍保留合规半成品；不能因新增缓冲把旧恢复路径变成空答后重跑。
@@ -688,7 +688,9 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     if (guardedAnswer && !r.toolCalls.length && r.stop !== 'pause_turn') {
       const issues = review.checkAnswer(held, now());
       const canCheckNumbers = availableTools.some(tool => /^(?:verify_numbers|time_calc|run_javascript|run_python)$/.test(tool.name));
-      if (issues.length && answerRepairs < 1 && !closing && !signal?.aborted && cur.adapter.kind !== 'mock' && (!review.report().calculationIssue || canCheckNumbers)) {
+      // 只是链接名/格式数量这类交付说法对不上：程序直接改正并附提示，不再让模型重写（重写时模型会回“已修正，上一版……”，主回答反而丢了）
+      const onlyClaims = issues.length && issues.every(issue => rewriteRule(issue) === 'delivery_claim');
+      if (issues.length && !onlyClaims && answerRepairs < 1 && !closing && !signal?.aborted && cur.adapter.kind !== 'mock' && (!review.report().calculationIssue || canCheckNumbers)) {
         answerRepairs++;
         // 评测统计：这次重写是哪条核对规则触发的（只记规则名，不记回答）
         emit({ type: 'diagnostic', phase: 'answer_rewrite', rules: [...new Set(issues.map(rewriteRule))] });
@@ -839,6 +841,17 @@ function repeats(before, after) {
   let same = 0;
   while (same < a.length && same < b.length && a[same] === b[same]) same++;
   return a.includes(b) || same >= Math.min(b.length, 60) || same / b.length >= 0.6;
+}
+/**
+ * 收尾核对后模型写出的“自言自语”：英文思考过程、回应系统核对、“无补充”等，不给用户看
+ * （2026-11-18 用户实测：甘特图回答末尾出现一大段英文“The user is asking… I'll output nothing”）
+ */
+export function metaReply(text = '') {
+  const t = String(text).trim();
+  if (!t) return true;
+  if (/系统(?:自动)?核对|auto-?check|system (?:message|note)|不要再写任何字|^（?无补充）?$|没有(?:需要|要)补(?:充|的)/i.test(t)) return true;
+  const latin = (t.match(/[A-Za-z]/g) || []).length, han = (t.match(/[\u4e00-\u9fff]/g) || []).length;
+  return latin > 80 && latin > han * 2 && /\b(?:the user|I'll|I should|I need to|Let me|Actually)\b/.test(t);
 }
 /** 只回了一句“收到 / 好的” */
 const ACK_ONLY = /^(?:收到|好的|好|明白|了解|OK|ok|嗯)[。！!.]?$/;

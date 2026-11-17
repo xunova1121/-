@@ -75,8 +75,8 @@ export function withPosterDelivery(tool, ctx, factory) {
       try {
         const output = await factory(silent).run({ ...input, path: `${historyPrefix}attempt-${call}/${filename}.png` }, {
           ...options, posterInternal: true, posterAttempt: true, requiresRichVisual: rich, beginPosterAttempt, checkpoint: undefined,
-          // 设计自审最多两轮：第1、2次试排不达标会要求再排，第3次只提示
-          designReviewBlocking: () => task.attempts < MAX_ATTEMPTS
+          // 设计自审最多一轮（2026-11-18 用户实测：两轮自审加对比度不过，把3次试排全用完，只剩候选稿）：只有第1次试排不达标会要求再排
+          designReviewBlocking: () => task.attempts < 2
         });
         receipt = JSON.parse(output);
       } catch (error) {

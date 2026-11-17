@@ -96,3 +96,26 @@ export async function protectOverlayText(design, { compose, raster, signal } = {
   return { status: failed === null ? 'not_checked' : failed.length ? 'failed' : 'passed', level: level_,
     scrims: groups.map((group, i) => ({ id: ids[i], image: group.image.id, text: group.items.map(item => item.node.id) })) };
 }
+
+/**
+ * 纯色底上的文字看不清（2026-11-18 用户实测：首卡标题对比度3.95低于4.5，整张海报卡在“待核验”、试排次数用完）：
+ * 按去字渲染的真实像素量，不达标就把这段文字换成能看清的颜色——依次试调色板正文色、深灰、白色，
+ * 选第一个达标的；只改颜色，不改原文、字号、位置。压在图片上的文字由 protectOverlayText 处理，这里跳过。
+ */
+export async function fixTextContrast(design, { compose, raster, signal } = {}) {
+  const overlay = new Set(overlayTexts(design).map(c => c.node));
+  const solid = design.layers.filter(n => n.type === 'text' && n.text.trim() && !overlay.has(n)).map(node => ({ node, rows: textRows(node) }));
+  if (!solid.length) return { status: 'skipped', recolored: [] };
+  const result = await raster(withoutText(compose(design)), { signal });
+  throwControl(null, signal);
+  const image = await decodePngRgba(new Uint8Array(await result.blob.arrayBuffer()));
+  if (!image || image.width !== design.width || image.height !== design.height) return { status: 'not_checked', recolored: [] };
+  const recolored = [], failed = [];
+  for (const { node, rows } of solid) {
+    if (measureTextContrast(image, rows, node.color).ok) continue;
+    const pick = [design.palette.ink, '#111111', '#FFFFFF'].find(color => color !== node.color && measureTextContrast(image, rows, color).ok);
+    if (pick) { recolored.push({ id: node.id, from: node.color, to: pick }); node.color = pick; }
+    else failed.push(node.id);
+  }
+  return { status: failed.length ? 'failed' : 'passed', recolored, ...(failed.length && { failed }) };
+}

@@ -12,7 +12,7 @@ import { renderVisualScene } from './visualSceneRaster.js';
 import { assertPosterPng } from './posterDeliveryTool.js';
 import { throwControl } from '../core/networkRequest.js';
 import { posterContent, posterCompositionIssues } from './posterContent.js';
-import { protectOverlayText } from './layeredDesignScrim.js';
+import { protectOverlayText, fixTextContrast } from './layeredDesignScrim.js';
 import { designThinkingIssues } from './posterContent.js';
 
 function assetsReceipt(design, assets) {
@@ -78,6 +78,10 @@ async function deliverLoadedDesign({ design, assets, base, preflight, requireCon
   let overlay;
   try { overlay = await protectOverlayText(design, { compose: d => composeLayeredSvg(d, assets), raster: ctx.renderVisualScene || renderVisualScene, signal }); }
   catch (error) { throwControl(error, signal); overlay = { status: 'not_checked', scrims: [] }; }
+  // 纯色底上看不清的字：自动换成能看清的颜色（只改颜色）
+  let recolor = { status: 'skipped', recolored: [] };
+  try { recolor = await fixTextContrast(design, { compose: d => composeLayeredSvg(d, assets), raster: ctx.renderVisualScene || renderVisualScene, signal }); }
+  catch (error) { throwControl(error, signal); }
   const source = new Blob([JSON.stringify(design, null, 2)], { type: 'application/json' });
   if (source.size > DESIGN_LIMITS.source) throw designError('归一化源稿超过180KB，请拆版');
   progress?.('正在编排独立文字、图标、图片与内容卡片…');
@@ -89,6 +93,7 @@ async function deliverLoadedDesign({ design, assets, base, preflight, requireCon
       guidance: '可以自由构图：design.layout=free配合layers逐个指定文字/图片/图标的坐标。换结构用source_path+design，保留palette与原素材；局部改字用changes。无需手改SVG。' },
     notes: ['同一分层源稿生成各格式；文字不由生图模型画，图标为独立矢量对象', '文案原样保留，不证明文案中的事实或错别字已被编辑校正', '4K仅表示导出画布；素材放大倍率单独记录，未自动付费重画/放大'], errors: [] };
   if (overlay.status !== 'skipped') receipt.overlayText = overlay;
+  if (recolor.recolored.length) { receipt.recolored = recolor.recolored; receipt.notes.push(`纯色底上看不清的${recolor.recolored.length}段文字已自动换成能看清的颜色（${recolor.recolored.map(r => r.id).join('、')}）；原文、字号和位置未改`); }
   if (overlay.scrims.length) receipt.notes.push(`文字压在照片上、按真实像素量看不清的${overlay.scrims.length}处，已在字后加局部渐变遮罩（不透明度${overlay.level}）；未改原文、字号和位置`);
   checkGeometry(design, svg, receipt);
   if (options.requiresRichVisual) receipt.contentCheck = posterContent(design);

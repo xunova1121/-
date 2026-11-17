@@ -139,7 +139,7 @@ it('历史稿只列以前回合交付过的成品：改稿后列出上一版PNG�
   expect(poster.poster.historyFiles.map(f => f.path)).toEqual([trial.delivery.primaryPath]);
   expect(first.delivery.primaryPath).not.toBe(trial.delivery.primaryPath);
 });
-it('设计自审最多两轮：第1、2次试排可要求重排，第3次只提示', async () => {
+it('设计自审最多一轮：只有第1次试排可要求重排，之后只提示（2026-11-18 由两轮改为一轮）', async () => {
   const seen = [];
   const factory = inner => withPosterDelivery({ posterLifecycle: false, run: async (input, options) => {
     seen.push(options.designReviewBlocking());
@@ -148,5 +148,5 @@ it('设计自审最多两轮：第1、2次试排可要求重排，第3次只提�
   } }, inner, factory);
   const tool = factory({}), scope = {};
   for (const title of ['一', '二', '三']) await tool.run({ title }, { executionScope: scope });
-  expect(seen).toEqual([true, true, false]);
+  expect(seen).toEqual([true, false, false]);
 });
