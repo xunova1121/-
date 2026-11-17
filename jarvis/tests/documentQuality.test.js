@@ -95,7 +95,8 @@ describe('真实产物检查与半成品', () => {
   });
   it('格式损坏与过大包有类型，不返回成功', async () => {
     await expect(inspectDocument(new Blob(['bad']), '损坏.docx')).rejects.toMatchObject({ code: 'DOCUMENT_PACKAGE' });
-    await expect(openOfficePackage({ byteLength: 21e6 })).rejects.toMatchObject({ code: 'DOCUMENT_SIZE' });
+    // 2026-11-17 上限由20MB对齐上传上限50MB（原断言为21MB被拒）；超过50MB仍拒绝
+    await expect(openOfficePackage({ byteLength: 51e6 })).rejects.toMatchObject({ code: 'DOCUMENT_SIZE' });
   });
   it('渲染出错仍保留文件与报告，真实转换状态标失败', async () => {
     const result = await tool('create_document', {

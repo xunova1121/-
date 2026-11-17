@@ -7,7 +7,7 @@ const invalid=message=>Object.assign(new Error(message),{code:'DOCUMENT_NAVIGATI
 export async function readCurrentDocument(file,{signal}={}){
  throwControl(null,signal);
  const path=ws.normalize(file),blob=await ws.readBlob(path);
- if(blob.size>10e6)throw invalid('文件超过10MB，请先拆分原件');
+ if(blob.size>50e6)throw invalid('文件超过50MB，请先拆分原件');
  const parsed=await parseFile(blob,path,{limit:Infinity,signal});throwControl(null,signal);
  if(parsed.chars>1e6)throw invalid('正文超过100万字符，请先拆分原件');
  return {path,text:parsed.text,hash:await diagramDigest(blob),ranges:[]};
@@ -25,7 +25,7 @@ export function createDocumentNavigation({readBlob=ws.readBlob,parse=parseFile,n
  const cache=new Map();
  async function read(file,{signal}={}){
   throwControl(null,signal);const path=ws.normalize(file),blob=await readBlob(path);
-  if(blob.size>10e6)throw invalid('文件超过10MB，请先拆分原件');
+  if(blob.size>50e6)throw invalid('文件超过50MB，请先拆分原件');
   const hash=await diagramDigest(blob);throwControl(null,signal);
   for(const [key,item] of cache)if(now()-item.at>180000)cache.delete(key);
   const old=cache.get(path);let entry;

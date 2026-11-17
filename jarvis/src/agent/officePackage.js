@@ -3,7 +3,8 @@ import { documentError } from './documentPlan.js';
 /** 外来Office限20MB压缩/80MB展开、3000个部件，避免模板/检查解压无限增长。 */
 export async function openOfficePackage(input) {
   const data = input instanceof Blob ? await input.arrayBuffer() : input;
-  if (!data || data.byteLength > 20e6) throw documentError('Office文件超过20MB限制', 'DOCUMENT_SIZE');
+  // 与上传上限对齐（2026-11-17 用户：大文件读不完整）；正文仍限100万字
+  if (!data || data.byteLength > 50e6) throw documentError('Office文件超过50MB限制', 'DOCUMENT_SIZE');
   const JSZip = (await import('jszip')).default;
   let zip;
   try {

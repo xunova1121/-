@@ -20,7 +20,10 @@ export function createTurnInputs(app) {
     if (MOBILE && (app.historyViewEnd !== null || $('#transcript').querySelectorAll('.msg').length >= app.visibleHistory().limit)) app.replayTranscript();
     const files = queuedFiles ?? app.attachments.splice(0);
     if (!queuedFiles) app.renderAttachments();
-    const userText = files.length ? `${text}\n\n[已上传到工作区：${files.map((f) => f.path).join('、')}]` : text;
+    // 压缩包标一句怎么打开，模型不会把它当普通文件去读
+    const userText = files.length
+      ? `${text}\n\n[已上传到工作区：${files.map((f) => (/\.(zip|tar|tgz|gz|rar|7z)$/i.test(f.path) ? `${f.path}（压缩包，用open_archive打开）` : f.path)).join('、')}]`
+      : text;
     const imgs = files.filter((f) => f.image).map((f) => f.image);
     const thumbs = files.filter((f) => f.image).map((f) => ({ src: f.image.thumb, path: f.path }));
     if (echo) app.transcript.add('user', userText, Date.now(), { thumbs }); // echo=false：这句话之前已经显示并记下了

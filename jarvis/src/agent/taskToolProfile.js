@@ -13,7 +13,7 @@ const DEMO_REQUEST = /(?:交互|演示|展示|原型)[^。！？\n]{0,8}(?:Demo|
 
 const BASIC = ['execution_capabilities', 'read_task_requirements', 'read_tool_result', 'review_task', 'need_more_time', 'request_capable_model'];
 const MEMORY = ['recall', 'read_memory', 'remember', 'kb_search', 'search_conversations', 'read_conversation', 'list_my_messages', 'list_work_records'];
-const FILES = ['find_files', 'search_in_files', 'list_files', 'read_file', 'write_file', 'edit_file', 'preview', 'run_javascript', 'run_project_tests'];
+const FILES = ['find_files', 'search_in_files', 'list_files', 'read_file', 'digest_document', 'open_archive', 'write_file', 'edit_file', 'preview', 'run_javascript', 'run_project_tests'];
 const SEARCH = ['web_search', 'fetch_url', 'read_evidence', 'fetch_json', 'reconcile_numbers'];
 
 /** 只决定先展示哪些 schema；所有工具仍可通过目录发现、按名字直接调用，权限边界不变。 */

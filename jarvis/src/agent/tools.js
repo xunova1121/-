@@ -72,9 +72,11 @@ import { createArchitecturePlanTool } from './architectureTool.js';
 import { createDiagramTool } from './diagramTool.js';
 import { createFlowchartTool } from './flowchartTool.js';
 import { createChartTool } from './chartDiagramTool.js';
+import { digestDocument } from './documentDigest.js';
+import { listArchive, extractArchive, safeEntryPath } from './archiveReader.js';
 import { createInspectImageTool } from './inspectImage.js';
 import { createRenderDiagramTool, diagramPreview } from './diagramReview.js';
-import { createExportDiagramTool } from './diagramExport.js';
+import { createExportDiagramTool, diagramDigest } from './diagramExport.js';
 import { assertImageExtension, imageFormat } from './imageFormat.js';
 
 const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
@@ -532,7 +534,7 @@ export function createTools(ctx) {
     },
     {
       name: 'read_file',
-      description: '读取原文件。长Word/PDF先用view=sections取得程序生成的目录与sectionId，或用query定位，再以sectionId读相关原文；不要猜章节名或反复顺序翻整份文件。正文分页2万字，95%以上重叠范围不重复发送；目录和片段不代表全文已读。代码文本原样返回，图片直接查看。',
+      description: '读取原文件。压缩包用open_archive；要通读长文档全部内容用digest_document。长Word/PDF先用view=sections取得程序生成的目录与sectionId，或用query定位，再以sectionId读相关原文；不要猜章节名或反复顺序翻整份文件。正文分页2万字，95%以上重叠范围不重复发送；目录和片段不代表全文已读。代码文本原样返回，图片直接查看。',
       input_schema: S({ path: str('文件路径'), offset: { type: 'integer', minimum: 0, description: '正文/关键词的字符起点；sectionId存在时为该范围内偏移' }, view:{type:'string',enum:['text','sections']},query:{type:'string',maxLength:120},sectionId:{type:'string',maxLength:120},recover:{type:'boolean',description:'仅在旧工具结果已过期且确需原文时恢复该页；每个重叠范围最多恢复一次，不能用offset加1绕过'},catalogOffset:{type:'integer',minimum:0,maximum:1000},limit:{type:'integer',minimum:1,maximum:20} }, ['path']),
       run: async ({ path, offset = 0,...options }, { signal } = {}) => {
         let blob = await ws.readBlob(path);
@@ -552,6 +554,35 @@ export function createTools(ctx) {
         }
         if (ws.isText(path)&&!options.query&&!options.sectionId&&options.view!=='sections') return fileSegment(await blob.text(), offset);
         return fileAccess.read({path,offset,...options},{signal});
+      }
+    },
+    {
+      name: 'digest_document',
+      description: '通读全文：长文档（标书、合同、报告、制度、长PDF等）要全面分析、逐条核对、总结全部要点时用。程序按章节切段，由辅助模型逐段做笔记（照抄数字、条款号），汇总成“通读笔记”存进工作区并返回预览；回执写明已读几段、哪段失败。之后用read_file读笔记全文，引用前按笔记里标注的位置读原文核对。普通提问照旧用read_file按目录定位，不必通读。',
+      input_schema: S({ path: str('文档路径（Word/PDF/PPT/Excel/文本）'), focus: str('可选：这次特别关注什么，如“付款条件和违约责任”') }, ['path']),
+      run: async ({ path, focus = '' }, { signal, progress } = {}) => {
+        const result = await digestDocument({ path, focus, signal, onProgress: progress, llm: ctx.helperLlm ?? ctx.llm ?? null,
+          readText: async (file) => {
+            if (ws.isText(file)) { const blob = await ws.readBlob(file); if (blob.size > 50e6) throw new Error('文件超过50MB，请先拆分'); return { text: await blob.text(), hash: await diagramDigest(blob) }; }
+            const doc = await navigation.read(file, { signal });
+            return { text: doc.text, hash: doc.hash };
+          } });
+        ctx.onFileChanged?.(result.notesPath);
+        return JSON.stringify({ ...result, coverage: `${result.done}/${result.segments}`, next: result.failed.length ? `第${result.failed.join('、')}段没读成，回答时说明，必要时用read_file按笔记里标注的位置读原文` : '用read_file读笔记全文后回答；引用数字、条款前按标注位置读原文核对' });
+      }
+    },
+    {
+      name: 'open_archive',
+      description: '打开压缩包（zip、tar、tar.gz）：action=list列出里面的文件；action=extract解压到工作区同名文件夹，之后用read_file/digest_document读里面的文件。中文文件名不乱码；最多500个文件、合计300MB；有密码、rar/7z会如实说明打不开。包里还有压缩包时会标出，需要再打开一次。',
+      input_schema: S({ path: str('压缩包路径'), action: { type: 'string', enum: ['list', 'extract'] }, only: { type: 'array', items: { type: 'string' }, maxItems: 500, description: '只解压这些文件（list里的原名），不给就全部' } }, ['path']),
+      run: async ({ path, action = 'list', only }, { signal } = {}) => {
+        if (action === 'extract') {
+          const r = await extractArchive(path, { only, signal, onFileChanged: ctx.onFileChanged });
+          return JSON.stringify({ kind: r.kind, folder: r.folder, extracted: r.written.length, files: r.written.slice(0, 200), skipped: r.skipped.slice(0, 50), nested: r.written.filter(f => f.nested).map(f => f.path), note: '已解压到工作区；读文件时用这里的路径' });
+        }
+        const { kind, entries } = await listArchive(await ws.readBlob(path), path, { signal });
+        const files = entries.filter(e => !e.dir);
+        return JSON.stringify({ kind, files: files.length, totalSize: files.reduce((n, e) => n + e.size, 0), entries: files.slice(0, 300).map(e => ({ name: e.name, size: e.size, ...(safeEntryPath(e.name) ? {} : { unsafe: true }) })), more: Math.max(0, files.length - 300) });
       }
     },
     {
