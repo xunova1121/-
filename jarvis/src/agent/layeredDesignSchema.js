@@ -14,6 +14,11 @@ const layerFields = {
   unit: str,
   detail: str, group: str, category: str, decorative: { type: 'boolean' }
 };
+// 设计构思（2026-11-17 用户：希望未央有独立思考，不按固定几种样式）：先想清楚再排图层
+export const CONCEPT_SCHEMA = { type: 'object', additionalProperties: false, description: '先写构思再排图层：一句话创意、图文关系（按内容选，不套固定版式）、第一眼看什么、气质。出图后的设计自审会核对是否实现了构思',
+  properties: { idea: { type: 'string', description: '一句话画面创意，如“产房窗外的晨光，象征新生”' },
+    relation: { type: 'string', enum: ['top-image', 'overlay', 'split', 'interleave', 'type-led', 'collage', 'frame', 'other'], description: 'top-image上图下文；overlay满版大图压字；split左右/上下分栏；interleave图文穿插；type-led大字为主图做点缀；collage拼贴；frame图片做框/画中画' },
+    focus: { type: 'string', description: '第一眼要看到什么（标题/主图/某个数字）' }, mood: { type: 'string', description: '气质，如温暖专业、热烈、安静克制' } } };
 export const LAYERED_PROPERTIES = {
   dataMode: { type: 'string', enum: ['demo', 'provided'], description: '默认明确演示；provided需source，仅说明用户提供，不证明已联网核实' },
   source: { type: 'string', description: '文案/数据来源；原样保留，不虚构事实' },
@@ -23,6 +28,7 @@ export const LAYERED_PROPERTIES = {
     type: 'object', additionalProperties: false,
     description: '新稿优先使用。按内容构图；layout只是起稿，layers可完全自由排版。source_path+design可重新构图/换画幅，默认复用原栏目和素材；改字用changes。精确文字独立排字，图片用工作区无字素材。',
     properties: {
+      concept: CONCEPT_SCHEMA,
       text_fit: { type: 'string', enum: ['auto', 'strict'], description: '新自由稿/完整重新构图默认auto：安全空白内适配字号/行高，原文、坐标、素材和画幅不变；strict严格保留框尺寸。source_path+changes局部修改不自动重排。一次处理preflight.issues全部问题，不逐项试错。' },
       eyebrow: { type: 'string', description: '可选栏目/品牌眉题' },
       layout: { type: 'string', enum: ['editorial', 'magazine', 'campaign', 'timeline', 'newspaper', 'celebration', 'dashboard', 'free'], description: 'magazine栏目配图交错编排，用sections.asset关联素材；editorial主次编排；campaign宣传；timeline时间轴；newspaper报纸分栏；free自由坐标。只换色不是换版式。' },

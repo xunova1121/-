@@ -1,5 +1,6 @@
 /** 先从真实像素寻找重复浅色长卡槽；不够明确才用一次有界视觉定位，不靠固定模板猜坐标。 */
 import { canvasRegion } from './imageTextInput.js';
+import { flatRegion } from './canvasSlotPlan.js';
 import { imageData } from './imageRegion.js';
 import { withWebDeadline } from './retrievalBudget.js';
 import { throwControl } from '../core/networkRequest.js';
@@ -73,7 +74,7 @@ export function pixelTextRegions(frame, expected) {
   return { regions, confidence: 0.84, candidateCount: boxes.length };
 }
 
-export async function locateImageText({ spec, entries, blob, frame, ctx, signal, retrieval }) {
+export async function locateImageText({ spec, entries, blob, frame, ctx, signal, retrieval, plan }) {
   const count = entries.filter((e) => !e.role || e.role === 'slot').length;
   const supplied = (spec.regions || []).map((r, i) => canvasRegion(r, i));
   const protections = (spec.protected || []).map((r, i) => canvasRegion(r, i, true));
@@ -92,6 +93,18 @@ export async function locateImageText({ spec, entries, blob, frame, ctx, signal,
         confidence: pixels.regions.length && !explicitSlots.length ? pixels.confidence : 1
       }
     };
+  // 先排版后生图（canvasSlotPlan.js）：像素没找齐卡片时，核对生图前算好的位置是否真是平整留白；全部平整才采用
+  if (plan && !supplied.length) {
+    const planned = plan.regions.map((r, i) => canvasRegion(r, i));
+    const fits = planned.filter((r) => r.role === 'slot').length === count &&
+      entries.every((e) => !e.role || e.role === 'slot' || planned.some((r) => r.role === e.role));
+    if (fits && frame && planned.every((r) => flatRegion(frame, r)))
+      return {
+        regions: planned,
+        protected: [...protections, ...(plan.subject ? [canvasRegion(plan.subject, protections.length, true)] : [])],
+        detection: { method: 'plan+pixels', confidence: 0.9 }
+      };
+  }
   if (!ctx.visionLlm) return { regions, protected: protections, detection: { method: 'needs_layout', confidence: 0 } };
   try {
     throwControl(null, signal);

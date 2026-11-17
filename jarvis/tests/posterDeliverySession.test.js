@@ -139,3 +139,14 @@ it('历史稿只列以前回合交付过的成品：改稿后列出上一版PNG�
   expect(poster.poster.historyFiles.map(f => f.path)).toEqual([trial.delivery.primaryPath]);
   expect(first.delivery.primaryPath).not.toBe(trial.delivery.primaryPath);
 });
+it('设计自审最多两轮：第1、2次试排可要求重排，第3次只提示', async () => {
+  const seen = [];
+  const factory = inner => withPosterDelivery({ posterLifecycle: false, run: async (input, options) => {
+    seen.push(options.designReviewBlocking());
+    const saved = await ws.write(input.path, new Blob(['png']));
+    return JSON.stringify({ kind: 'poster', status: 'partial', files: [{ path: saved.path, format: 'png', readback: 'passed', structure: 'passed', render: 'passed' }], errors: [{ code: 'DESIGN_LAYOUT_NEEDS_WORK' }] });
+  } }, inner, factory);
+  const tool = factory({}), scope = {};
+  for (const title of ['一', '二', '三']) await tool.run({ title }, { executionScope: scope });
+  expect(seen).toEqual([true, true, false]);
+});

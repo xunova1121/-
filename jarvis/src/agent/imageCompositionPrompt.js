@@ -5,6 +5,8 @@ import { visualSceneRequest } from './visualSceneRouting.js';
 export function compositionToolArgs(toolName, args, requirementText) {
   if (toolName !== 'generate_image' || !args || typeof args !== 'object' || Array.isArray(args)) return args;
   if (directModelTextRequest(requirementText)) return args.purpose === 'poster_art' ? { ...args, purpose: 'general' } : args;
+  // 卡槽底图（poster_slots）本身就是给程序填字用的无字底图，保留其版式计划，不改成poster_art
+  if (args.purpose === 'poster_slots') return args;
   return textPosterRequest(requirementText) || visualSceneRequest(requirementText) ? { ...args, purpose: 'poster_art' } : args;
 }
 

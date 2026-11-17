@@ -17,7 +17,8 @@ const failure = message => Object.assign(new Error(message), { code: 'POSTER_TAS
 export function withPosterDelivery(tool, ctx, factory) {
   const core = tool.run;
   return { ...tool, run: async (input = {}, options = {}) => {
-    if (!options.executionScope || options.posterInternal) return core(input, options);
+    // 草图对比不出正式稿，不进试排计数和历史
+    if (!options.executionScope || options.posterInternal || input.sketches !== undefined) return core(input, options);
     const captured = states(), workspaceId = ws.mode() + ':' + ws.folderName();
     if (!captured.has(options.executionScope)) captured.set(options.executionScope, new Map());
     const groups = captured.get(options.executionScope);
@@ -73,7 +74,9 @@ export function withPosterDelivery(tool, ctx, factory) {
       let receipt;
       try {
         const output = await factory(silent).run({ ...input, path: `${historyPrefix}attempt-${call}/${filename}.png` }, {
-          ...options, posterInternal: true, posterAttempt: true, requiresRichVisual: rich, beginPosterAttempt, checkpoint: undefined
+          ...options, posterInternal: true, posterAttempt: true, requiresRichVisual: rich, beginPosterAttempt, checkpoint: undefined,
+          // 设计自审最多两轮：第1、2次试排不达标会要求再排，第3次只提示
+          designReviewBlocking: () => task.attempts < MAX_ATTEMPTS
         });
         receipt = JSON.parse(output);
       } catch (error) {

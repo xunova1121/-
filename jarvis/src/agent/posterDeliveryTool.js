@@ -15,6 +15,8 @@ import { LAYERED_PROPERTIES, usesLayeredDesign } from './layeredDesignSchema.js'
 import { deliverLayeredDesign } from './layeredDesignDelivery.js';
 import { CANVAS_TEXT_PROPERTIES, usesCanvasText } from './imageTextInput.js';
 import { deliverCanvasText } from './imageTextDelivery.js';
+import { sketchPosters } from './posterSketch.js';
+import { CONCEPT_SCHEMA } from './layeredDesignSchema.js';
 
 const SIZES = { 竖版: [1080, 1920], 横版: [1920, 1080], 方形: [1440, 1440], 朋友圈封面: [1440, 1080], 小红书: [1024, 1536] };
 const inputError = message => Object.assign(new Error(message), { name: 'ValidationError', code: 'INVALID_POSTER', kind: 'input' });
@@ -169,19 +171,26 @@ export function createPosterDeliveryTool(ctx = {}) {
         panel_color: { type: 'string', description: '文字区底色，如浅米白#FFF8EC' },
         background_color: { type: 'string' },
         theme: { type: 'string', description: '兼容已有配色名称；明确颜色参数优先' },
-        path: { type: 'string', description: '成品路径，三种文件共用名称，如海报/秋季养生汤.png' }
+        path: { type: 'string', description: '成品路径，三种文件共用名称，如海报/秋季养生汤.png' },
+        sketches: { type: 'array', maxItems: 3, description: '可选：正式出图前交2–3个不同构思的草图比较（每个含concept和layers，图片层先写位置和detail，不必先生图）。程序用真实字体渲染、图片位置画灰色占位，检查重叠和手机字号，再像设计师一样比较选优并给改法；不算试排、不是交付物。之后再生图并用design出正式稿',
+          items: { type: 'object', additionalProperties: false, properties: { concept: CONCEPT_SCHEMA, palette: LAYERED_PROPERTIES.design.properties.palette, layers: LAYERED_PROPERTIES.design.properties.layers }, required: ['layers'] } }
       },
       required: [],
       additionalProperties: false
     },
-    run: async (input = {}, { signal, progress, checkpoint, retrieval, requiresRichVisual, posterAttempt, beginPosterAttempt } = {}) => {
+    run: async (input = {}, { signal, progress, checkpoint, retrieval, requiresRichVisual, posterAttempt, beginPosterAttempt, designReviewBlocking } = {}) => {
       if (!input || typeof input !== 'object' || Array.isArray(input)) throw inputError('海报参数必须是对象');
+      // 草图对比：不出正式稿、不算试排（posterSketch.js）
+      if (input.sketches !== undefined) {
+        const [width, height] = dimensions(input);
+        return JSON.stringify(await sketchPosters(input, ctx, { signal, retrieval, width, height }));
+      }
       if (usesCanvasText(input)) return deliverCanvasText(input.size !== undefined ? { ...input, ...Object.fromEntries(['width', 'height'].map((key, i) => [key, dimensions(input)[i]])) } : input, ctx, { signal, progress, checkpoint, retrieval, requiresRichVisual, beginPosterAttempt });
       if (usesLayeredDesign(input)) {
         const resize = !input.source_path || input.design && (input.size !== undefined || input.width !== undefined || input.height !== undefined);
         const [width, height] = resize ? dimensions(input) : [];
         const autoPosterHeight = !input.source_path && input.width === undefined && input.height === undefined && input.size === undefined;
-        return deliverLayeredDesign(resize ? { ...input, width, height } : input, ctx, { signal, progress, checkpoint, retrieval, requiresRichVisual, posterAttempt, beginPosterAttempt, autoPosterHeight });
+        return deliverLayeredDesign(resize ? { ...input, width, height } : input, ctx, { signal, progress, checkpoint, retrieval, requiresRichVisual, posterAttempt, beginPosterAttempt, autoPosterHeight, designReviewBlocking });
       }
       input = await posterDesignInput(input, signal);
       if (typeof input.title !== 'string' || !input.title.trim()) throw inputError('海报要有主标题');

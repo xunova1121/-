@@ -39,7 +39,7 @@ function reflowInput(input, previous) {
     width: input.width ?? previous.width, height: input.height ?? previous.height, dataMode: input.dataMode ?? previous.dataMode,
     source: input.source ?? previous.source, asOf: input.asOf ?? previous.asOf,
     font_family: input.font_family ?? previous.fontFamily,
-    design: { ...spec, reading: spec.reading ?? previous.reading, palette: { ...previous.palette, ...spec.palette }, assets, ...(!spec.layers && { sections: spec.sections || sections }) } };
+    design: { ...spec, concept: spec.concept ?? previous.concept, reading: spec.reading ?? previous.reading, palette: { ...previous.palette, ...spec.palette }, assets, ...(!spec.layers && { sections: spec.sections || sections }) } };
 }
 export async function loadLayerDesign(input, { signal, defaultSize, autoHeight = false } = {}) {
   throwControl(null, signal);

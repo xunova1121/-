@@ -6,6 +6,7 @@ import { normalizePosterBackground } from './posterCompositionInput.js';
 import { imageFingerprint } from './visualEvidence.js';
 import { canvasEntries, normalizeCanvasDesign, canvasError } from './imageTextInput.js';
 import { locateImageText } from './imageTextRegions.js';
+import { validSlotPlan } from './canvasSlotPlan.js';
 import { throwControl } from '../core/networkRequest.js';
 const claims = scopedState('files', () => new Set());
 const suffixes = ['canvas.json', 'png', 'pptx', 'html', 'zip', 'phone.png'];
@@ -101,7 +102,20 @@ export async function loadCanvasText(input, ctx, renderer, { signal, retrieval, 
     const inspected = await renderer.inspect(canonicalBlob, { signal });
     if (inspected.width !== meta.width || inspected.height !== meta.height)
       throw canvasError('真实解码尺寸与原图不一致');
+    // 同名 .slots.json 是生图前算好的卡槽计划（generate_image purpose=poster_slots 写入）
+    let plan = null;
+    if (!previous && spec.regions === undefined) {
+      const planPath = imagePath.replace(/\.[^./]+$/, '.slots.json');
+      try {
+        if (planPath !== imagePath && (await ws.exists(planPath)))
+          plan = validSlotPlan(JSON.parse(await (await ws.readBlob(planPath)).text()), meta.width, meta.height);
+      } catch (error) {
+        throwControl(error, signal);
+        plan = null;
+      }
+    }
     located = await locateImageText({
+      plan,
       spec,
       entries,
       blob: canonicalBlob,

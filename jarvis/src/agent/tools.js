@@ -1,6 +1,7 @@
 import { formatSearchHit } from './qianfanSearch.js';
 import { createTodayNewsTool } from './todayNews.js';
 import { imageCompositionPrompt } from './imageCompositionPrompt.js';
+import { planCanvasSlots, parseImageSize, slotImagePrompt } from './canvasSlotPlan.js';
 import { connectLookupTools } from './lookup/operations.js';
 import { createPublicJsonTool } from './publicJson.js';
 import { legacyDocumentTool } from './legacyDocumentTool.js';
@@ -332,9 +333,12 @@ export function createTools(ctx) {
     {
       name: 'generate_image',
       description: '画图 / 生成图片（海报底图、插画、头像、配图等）：用服务商的画图模型（如 gpt-image）按描述生成一张图片，保存到工作区并显示在对话里。用户说“画一张… / 做个…的图片 / 生成图片”时使用。描述先明确主体、构图、风格、光线和必须保留/避免的内容。图片明确要求写上中文/黑体字，或海报/封面需要准确的标题、文案、日期时，优先复用已有底图；否则只生成“不要任何文字”的底图，再make_poster程序排字，交付最终PNG和可编辑SVG/PPTX，不能只交底图或让用户自己导出。用户明确要求模型直接画字时照要求处理并如实核对。修改或参考已有图必须传referencePaths，不能只凭文字重画冒充原图编辑；精确架构图用create_diagram。',
-      input_schema: S({ prompt: str('写主体、构图、用途、风格；精确文字海报只画场景和主体，不画文字、空卡片或UI框；文字交make_poster；改图写保留和修改范围'), purpose: { type: 'string', enum: ['general', 'poster_art'], description: '海报/图文Demo的无字视觉素材必须选poster_art，程序追加禁文字和空占位卡片要求；用户明确要求模型画整张带字图选general' }, size: str('标准尺寸或auto；GPT Image 2可用16倍数的自定义尺寸，如1536x864'), quality: { type: 'string', enum: ['auto', 'low', 'medium', 'high'] }, outputFormat: { type: 'string', enum: ['png', 'jpeg', 'webp'] }, background: { type: 'string', enum: ['auto', 'opaque', 'transparent'] }, referencePaths: { type: 'array', maxItems: 3, items: { type: 'string' }, description: '参考/编辑已有图片时必须传真实工作区原图路径；不传表示从零创作' } }, ['prompt']),
-      run: async ({ prompt: imagePrompt, purpose, size, referencePaths = [], quality, outputFormat, background }, { signal, retrieval } = {}) => {
+      input_schema: S({ prompt: str('写主体、构图、用途、风格；精确文字海报只画场景和主体，不画文字、空卡片或UI框；文字交make_poster；改图写保留和修改范围'), purpose: { type: 'string', enum: ['general', 'poster_art', 'poster_slots'], description: '海报/图文Demo的无字视觉素材必须选poster_art，程序追加禁文字和空占位卡片要求；用户明确要求模型画整张带字图选general' }, text_slots: { type: 'object', additionalProperties: false, description: 'purpose=poster_slots时必填：之后要填进卡片的真实文案。程序先按字数算好标题区、每张卡片和主体的位置写进生图要求，生成后另存同名.slots.json，make_poster用canvas填字时按计划核对卡片', properties: { header: { type: 'object', additionalProperties: false, properties: { title: { type: 'string' }, body: { type: 'string' } }, required: ['title'] }, entries: { type: 'array', maxItems: 12, items: { type: 'object', additionalProperties: false, properties: { title: { type: 'string' }, body: { type: 'string' } }, required: ['title'] } }, footer: { type: 'string' } }, required: ['entries'] }, size: str('标准尺寸或auto；GPT Image 2可用16倍数的自定义尺寸，如1536x864'), quality: { type: 'string', enum: ['auto', 'low', 'medium', 'high'] }, outputFormat: { type: 'string', enum: ['png', 'jpeg', 'webp'] }, background: { type: 'string', enum: ['auto', 'opaque', 'transparent'] }, referencePaths: { type: 'array', maxItems: 3, items: { type: 'string' }, description: '参考/编辑已有图片时必须传真实工作区原图路径；不传表示从零创作' } }, ['prompt']),
+      run: async ({ prompt: imagePrompt, purpose, text_slots: textSlots, size, referencePaths = [], quality, outputFormat, background }, { signal, retrieval } = {}) => {
         if (!ctx.imageGen) throw new Error('当前环境不能画图');
+        // 卡槽底图先排版后生图：按真实文案算好位置写进要求（canvasSlotPlan.js）
+        const slotPlan = purpose === 'poster_slots' ? planCanvasSlots(textSlots, ...parseImageSize(size)) : null;
+        if (slotPlan && !size) size = `${slotPlan.width}x${slotPlan.height}`;
         const images = [];
         for (const path of referencePaths) {
           const blob = await ws.readBlob(path);
@@ -343,11 +347,18 @@ export function createTools(ctx) {
         }
         if (images.length && !ctx.imageEdit) throw Object.assign(new Error('当前线路未提供原图编辑能力，不能把重新生成冒充编辑'), { code: 'IMAGE_EDIT_UNAVAILABLE', kind: 'capability' });
         const options = Object.fromEntries(Object.entries({ quality, outputFormat, background }).filter(([, value]) => value !== undefined));
-        const r = await (images.length ? ctx.imageEdit : ctx.imageGen)({ prompt: imageCompositionPrompt(imagePrompt, purpose), images, ...(size && { size }), signal, beforeRequest: () => retrieval?.consume('model'), ...options });
+        const r = await (images.length ? ctx.imageEdit : ctx.imageGen)({ prompt: slotPlan ? slotImagePrompt(imagePrompt, slotPlan) : imageCompositionPrompt(imagePrompt, purpose), images, ...(size && { size }), signal, beforeRequest: () => retrieval?.consume('model'), ...options });
         const ext = /jpe?g/.test(r.blob.type) ? 'jpg' : /webp/.test(r.blob.type) ? 'webp' : 'png';
         await assertImageExtension('image.' + ext, r.blob);
         const name = String(imagePrompt).replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 16) || 'image';
-        return JSON.stringify(await deliverGeneratedImage(r, { path: `images/${name}-${Date.now().toString(36)}.${ext}`, signal, onFileChanged: ctx.onFileChanged, onImage: ctx.onImage }));
+        const delivered = await deliverGeneratedImage(r, { path: `images/${name}-${Date.now().toString(36)}.${ext}`, signal, onFileChanged: ctx.onFileChanged, onImage: ctx.onImage });
+        if (slotPlan) {
+          const planPath = delivered.path.replace(/\.[^./]+$/, '.slots.json');
+          await ws.write(planPath, new Blob([JSON.stringify(slotPlan, null, 2)], { type: 'application/json' }));
+          Object.assign(delivered, { slotsPath: planPath, slots: slotPlan.regions.map(r => r.id),
+            next: `用make_poster填字：background_path=${delivered.path}，canvas.header/entries/footer与text_slots同顺序；程序会按计划核对卡片，不用自己传regions` });
+        }
+        return JSON.stringify(delivered);
       }
     },
     {

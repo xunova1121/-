@@ -2,15 +2,21 @@
 import { composeLayeredSvg, designLayerMarkup, escapeDesignXml, designIconMarkup, designFont } from './layeredDesignSvg.js';
 import { applyDesignState } from './layeredDesignQuality.js';
 import { luminanceHex } from './posterContrast.js';
+import { wrapParagraphs } from './posterComposition.js';
 
 const esc = escapeDesignXml;
 const safeJson = value => JSON.stringify(value).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+/** 手机卡片里文字和底色对比不够时换成黑/白，网页和预览共用 */
+export function readableOn(color, background) {
+  const a = luminanceHex(color), b = luminanceHex(background);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) >= 4.5 ? color : b > 0.179 ? '#000000' : '#FFFFFF';
+}
+const mobileRole = node => node.id === 'title' ? 'title' : /-value$/.test(node.id) ? 'value' : /-title$/.test(node.id) ? 'heading' : 'body';
 function mobileLayer(node, assets, background, font) {
-  const a = luminanceHex(node.color), b = luminanceHex(background);
-  const readable = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) >= 4.5 ? node.color : b > 0.179 ? '#000000' : '#FFFFFF';
+  const readable = readableOn(node.color, background);
   const attrs = `data-node="${node.id}" data-category="${esc(node.category)}"`;
   if (node.type === 'text') {
-    const role = node.id === 'title' ? 'title' : /-value$/.test(node.id) ? 'value' : /-title$/.test(node.id) ? 'heading' : 'body';
+    const role = mobileRole(node);
     return `<p ${attrs} class="mobile-${role}" style="color:${readable}">${esc(node.text)}</p>`;
   }
   if (node.type === 'image') return `<img ${attrs} class="mobile-image" src="${assets.get(node.asset).data}" alt="${esc(node.detail || '视觉素材')}"/>`;
@@ -18,7 +24,8 @@ function mobileLayer(node, assets, background, font) {
   if (node.type === 'chart') return `<svg ${attrs} class="mobile-chart" viewBox="0 0 600 280" role="img" aria-label="${esc(node.detail || '趋势图')}">${designLayerMarkup({ ...node, x: 0, y: 0, w: 600, h: 280, color: readable }, assets, font)}</svg>`;
   return '';
 }
-function mobileView(design, assets) {
+/** 手机卡片分组：网页和手机预览共用同一分组，预览才能代表网页 */
+export function mobileGroups(design) {
   const groups = new Map();
   for (const node of design.layers.filter(n => !n.decorative && n.type !== 'shape')) {
     const group = ['title', 'eyebrow', 'subtitle'].includes(node.id) ? 'design-intro' : node.group;
@@ -27,9 +34,51 @@ function mobileView(design, assets) {
   }
   return [...groups.entries()].map(([group, nodes]) => {
     const card = design.layers.find(n => n.type === 'shape' && n.group === group);
-    const fill = card?.fill || design.palette.background;
-    return `<article class="mobile-group" data-group="${esc(group)}" style="background:${fill}">${nodes.map(n => mobileLayer(n, assets, fill, designFont(design.fontFamily))).join('')}</article>`;
-  }).join('');
+    return { group, nodes, fill: card?.fill || design.palette.background };
+  });
+}
+function mobileView(design, assets) {
+  return mobileGroups(design).map(({ group, nodes, fill }) =>
+    `<article class="mobile-group" data-group="${esc(group)}" style="background:${fill}">${nodes.map(n => mobileLayer(n, assets, fill, designFont(design.fontFamily))).join('')}</article>`).join('');
+}
+/**
+ * Demo 手机卡片布局的预览图（2026-11-17：手机/电脑两个宽度都要自审）。按网页同样的分组、字号（CSS 像素×2）、
+ * 卡片内边距排出来，用同一字体渲染；它是排版预览，不是真实浏览器截图。
+ */
+export function mobileCardsPreviewSvg(design, assets) {
+  const k = 2, width = 390 * k, pad = 18 * k, inner = 20 * k, cardW = width - pad * 2, textW = cardW - inner * 2;
+  const sizes = { title: 30, heading: 20, value: 48, body: 16 }, font = designFont(design.fontFamily);
+  let y = pad;
+  const parts = [];
+  for (const { nodes, fill } of mobileGroups(design)) {
+    const content = [];
+    let cy = inner;
+    for (const node of nodes) {
+      if (node.type === 'text') {
+        const size = sizes[mobileRole(node)] * k, rows = wrapParagraphs(node.text, size, textW) || [node.text];
+        const color = readableOn(node.color, fill), weight = mobileRole(node) === 'body' ? 400 : 700;
+        cy += size * 0.5;
+        rows.forEach((row, i) => content.push(`<text x="${inner}" y="${cy + size * (1.05 + i * 1.45)}" font-family="${font}" font-size="${size}" font-weight="${weight}" fill="${color}" xml:space="preserve">${esc(row)}</text>`));
+        cy += rows.length * size * 1.45 + size * 0.5;
+      } else if (node.type === 'image') {
+        const asset = assets.get(node.asset), h = asset ? textW * asset.height / asset.width : textW * 0.56;
+        if (asset) content.push(`<image x="${inner}" y="${cy}" width="${textW}" height="${h}" preserveAspectRatio="xMidYMid slice" href="${asset.data}"/>`);
+        cy += h + 8 * k;
+      } else if (node.type === 'chart') {
+        const h = textW * 280 / 600;
+        content.push(`<g transform="translate(${inner} ${cy}) scale(${textW / 600})">${designLayerMarkup({ ...node, x: 0, y: 0, w: 600, h: 280, color: readableOn(node.color, fill) }, assets, font)}</g>`);
+        cy += h + 8 * k;
+      } else if (node.type === 'icon') {
+        content.push(`<g transform="translate(${inner} ${cy}) scale(${28 * k / 24})">${designIconMarkup(node.icon, node.color)}</g>`);
+        cy += 28 * k + 8 * k;
+      }
+    }
+    const h = cy + inner;
+    parts.push(`<g transform="translate(${pad} ${y})"><rect x="0" y="0" width="${cardW}" height="${h}" rx="${16 * k}" fill="${fill}"/>${content.join('')}</g>`);
+    y += h + 14 * k;
+  }
+  const height = Math.ceil(y + pad);
+  return { width, height, svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect x="0" y="0" width="${width}" height="${height}" fill="${design.palette.background}"/>${parts.join('')}</svg>` };
 }
 async function pngData(blob) {
   if (!blob) return null;

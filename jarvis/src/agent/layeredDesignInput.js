@@ -125,9 +125,19 @@ export function normalizeLayerDesign(raw, { fitText = true } = {}) {
   if (raw.fontFamily !== undefined && !['sans', 'serif'].includes(raw.fontFamily)) throw designError('字体请选择sans黑体或serif宋体');
   if (raw.reading !== undefined && !['phone', 'desktop'].includes(raw.reading)) throw designError('阅读场景需为phone或desktop');
   return { kind: 'layered-design', version: 1, title, width, height, palette, layers, dataMode, source, asOf: boundedText(raw.asOf || '', 100), fontFamily: raw.fontFamily || 'sans',
+    ...(raw.concept !== undefined && raw.concept !== null && { concept: normalizeConcept(raw.concept) }),
     ...(raw.illustrated === true && { illustrated: true }),
     ...(raw.reading !== undefined && { reading: raw.reading }),
     assets: normalizeAssets(raw.assets), states: normalizeStates(raw.states, layers, canvas) };
+}
+const RELATIONS = ['top-image', 'overlay', 'split', 'interleave', 'type-led', 'collage', 'frame', 'other'];
+/** 设计构思只是说明，不影响排版；超长截断，未知图文关系记为other，不因此拒稿 */
+export function normalizeConcept(raw) {
+  if (typeof raw !== 'object' || Array.isArray(raw)) throw designError('设计构思concept需为对象');
+  const out = {};
+  for (const [key, max] of [['idea', 160], ['focus', 80], ['mood', 40]]) if (typeof raw[key] === 'string' && raw[key].trim()) out[key] = boundedText([...raw[key].trim()].slice(0, max).join(''), max);
+  if (raw.relation !== undefined) out.relation = RELATIONS.includes(raw.relation) ? raw.relation : 'other';
+  return out;
 }
 function normalizeAssets(assets = []) {
   if (!Array.isArray(assets) || assets.length > 4) throw designError('素材数量不能超过4');

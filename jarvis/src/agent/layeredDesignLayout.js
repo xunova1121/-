@@ -237,7 +237,7 @@ export function planLayerDesign(input, defaultSize = [1080, 1920], normalization
     else ({ editorial, campaign, celebration, dashboard })[layout](b, input, sections);
     footer(b, input);
   }
-  return normalizeLayerDesign({ ...input, width, height, palette, assets, layers: b.layers, states: spec.states, fontFamily: input.font_family || 'sans', reading: spec.reading || (width > height ? 'desktop' : 'phone') }, normalization);
+  return normalizeLayerDesign({ ...input, width, height, palette, assets, layers: b.layers, states: spec.states, concept: spec.concept, fontFamily: input.font_family || 'sans', reading: spec.reading || (width > height ? 'desktop' : 'phone') }, normalization);
 }
 
 /** 未指定尺寸的新竖稿可在写文件前增加高度；明确画幅、原稿和横版绝不悄悄改变。 */
