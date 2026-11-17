@@ -52,6 +52,14 @@ it('文件夹同名另存后，按钮使用实际保存路径', async () => {
   await remote.pullServerFile(path, turn);
   expect(bubble.fileLink).toHaveBeenCalledWith('海报/今日新闻 (2).png', app.openInWorkspace);
 });
+it('云端工作区不把本机缓存重命名路径当成服务器原路径', async () => {
+  const { app, turn, remote, bubble } = fixture();
+  app.panels.workspaceMode = () => 'server';
+  mocks.write.mockResolvedValue({ path: '海报/今日新闻 (2).png' });
+  await remote.pullServerFile(path, turn);
+  expect(bubble.fileLink).toHaveBeenCalledWith(path, app.openInWorkspace);
+  expect(bubble.image).toHaveBeenCalledWith(expect.stringMatching(/^blob:/), undefined, path);
+});
 it('在途文件有界，超过上限不登记完成也不触发额外下载', async () => {
   const { app, turn, remote } = fixture();
   turn.pendingFiles = new Map(Array.from({ length: 32 }, (_, i) => [String(i), Promise.resolve()]));

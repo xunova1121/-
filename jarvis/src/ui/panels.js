@@ -564,6 +564,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
 
   return {
     refreshFiles,
+    workspaceMode: () => getWorkspace().mode(),
     openFile,
     markFresh(path) { fresh.add(path); },
     refreshKb,

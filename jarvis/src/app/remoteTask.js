@@ -139,11 +139,13 @@ export function createRemoteTask(app) {
         app.panels.markFresh(actual);
         app.panels.refreshFiles();
         const out = turn?.bubble ?? app.liveBubble;
+        // 本机文件夹可能把缓存另存为“(2)”，云端工作区仍按服务器原路径打开。
+        const presented = app.panels.workspaceMode?.() === 'server' ? path : actual;
         // 服务器画的图、做的视频：和本机一样直接显示在回答里
-        if (/^images\/.+\.(png|jpe?g|webp|gif)$/i.test(actual) || posterArtifactId(actual)) out?.image?.(URL.createObjectURL(blob), undefined, actual);
+        if (/^images\/.+\.(png|jpe?g|webp|gif)$/i.test(presented) || posterArtifactId(presented)) out?.image?.(URL.createObjectURL(blob), undefined, presented);
         else if (/^videos\/.+\.(mp4|webm|mov)$/i.test(path)) out?.video?.(URL.createObjectURL(blob));
         if (!/^skills\//.test(path)) {
-          out?.fileLink?.(actual, app.openInWorkspace);
+          out?.fileLink?.(presented, app.openInWorkspace);
         }
       } catch (e) {
         turn?.files.delete(path);
