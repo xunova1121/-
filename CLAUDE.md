@@ -1,8 +1,8 @@
 # 未央（WEIYANG AI，原名贾维斯）开发约定
 
-> **当前状态（2026-11-17，Codex 协助 Claude 发布）**：正式版 1.0.459 已三端发布，包含海报/Demo“先想后做”、导出404与历史稿整理；发布清单容量问题已修复，原完整门禁、公开安装包及安卓原签名核验通过，详见 [`协助Claude海报发版验收`](docs/协助Claude海报发版验收-20261117.md)。
-> 仍未验收：真实模型构思/审美与卡槽留白服从性、用户原照片/原稿、安卓和 Windows 真机、用户服务器实际更新；手机卡片自审预览为近似布局。
-> 待办：DeepSeek Harness 借鉴（交 Codex，见 [`交接给Codex-DeepSeekHarness借鉴与联动`](docs/交接给Codex-DeepSeekHarness借鉴与联动-20261112.md)）；DNS 检查后固定连接地址（需 undici）；HTML 模板海报（清单待用户批准）；架构图真实服务器实测（[`2026-10-29 交接`](docs/交接给Claude-架构实测失败与未发布改动-20261029.md)）。
+> **当前状态（2026-11-17，Claude 发布）**：正式版 1.0.460 已三端发布，原签名核对通过。本版新增流程图（含泳道/思维导图/树/组织/状态/步骤/循环）与 26 种图表、通读全文、打开压缩包（zip/tar）、Word 默认清爽版、海报配图留字位与构思必填，修复“引导没效果”，详见 [`今日改动与发布记录`](docs/Claude-1.0.460发布记录-20261117.md)。
+> 仍未验收：真实模型的构思/选图/通读质量、生图留白服从性、真实中文压缩包与大标书、用户原稿、安卓和 Windows 真机、用户服务器实际更新。
+> 待办：DeepSeek Harness 借鉴（交 Codex，见 [`交接给Codex-DeepSeekHarness借鉴与联动`](docs/交接给Codex-DeepSeekHarness借鉴与联动-20261112.md)）；DNS 检查后固定连接地址（需 undici）；rar/7z 解压与长工具中途可打断（待用户定）；架构图真实服务器实测（[`2026-10-29 交接`](docs/交接给Claude-架构实测失败与未发布改动-20261029.md)）。
 > 以前的开头说明已挪到 [`docs/交接历史-CLAUDE开头存档.md`](docs/交接历史-CLAUDE开头存档.md)。
 
 个人 AI 智能体。界面上的名字叫“未央”；代码、数据目录、环境变量（JARVIS_*）、安装包文件名里的 jarvis / Jarvis 保持不变（改了会丢用户数据、断自动更新）。已确认形象在 `src/ui/mascot-approved.webp`，运行 `node scripts/make-icons.mjs` 从首格生成 `src/ui/logo.svg` 和电脑、安卓16张图标，`--check`只读核对像素一致性。代码在 `jarvis/`：网页界面（Vite）、本机网关（`server/`）、Windows 桌面版（`desktop/`，Electron）、安卓 App（`android/`，Capacitor）。
