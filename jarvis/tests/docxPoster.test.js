@@ -77,12 +77,14 @@ describe('“字大点 / 小点”换算成真实字号', () => {
 });
 
 describe('“不要横线”', () => {
-  it('普通文档默认有装饰横线；说了不要就一条都没有', async () => {
+  it('普通文档默认清爽版没有横线；明确要横线才有（2026-11-17 用户：原为默认有、说不要才没有）', async () => {
     const md = '# 工作说明\n\n## 一、背景\n\n正文内容。\n\n---\n\n## 二、安排\n\n正文内容。';
-    const before = await measureDocx((await generate('docx', { title: '工作说明', content: md, kind: 'report' })).blob);
-    const after = await measureDocx((await generate('docx', { title: '工作说明', content: md, kind: 'report', noRules: true })).blob);
-    expect(before.rules).toBeGreaterThan(0);
-    expect(after.rules).toBe(0);
+    const decorated = await measureDocx((await generate('docx', { title: '工作说明', content: md, kind: 'report', noRules: false })).blob);
+    const plain = await measureDocx((await generate('docx', { title: '工作说明', content: md, kind: 'report' })).blob);
+    const explicit = await measureDocx((await generate('docx', { title: '工作说明', content: md, kind: 'report', noRules: true })).blob);
+    expect(decorated.rules).toBeGreaterThan(0);
+    expect(plain.rules).toBe(0);
+    expect(explicit.rules).toBe(0);
   });
 });
 
@@ -103,4 +105,22 @@ describe('保存的字号偏好不能挡住“大点 / 小点”（第一轮 30 
     expect(r.typography.body.size).toBe(14);
     expect(r.typography.title.size).toBe(28);
   });
+});
+
+describe('Word 默认清爽版（2026-11-17 用户：不需要标题横线和框）', () => {
+  it('真实工具：默认无横线；说“保留横线/加色条”才加；公文红头红线照常保留，说不要横线才去掉', async () => {
+    const { createDocumentGenerateTool } = await import('../src/agent/documentGenerateTool.js');
+    const ws = await import('../src/agent/workspace.js');
+    const tool = createDocumentGenerateTool({});
+    const md = '# 方案说明\n\n## 一、背景\n\n正文内容。\n\n## 二、安排\n\n正文内容。';
+    await tool.run({ format: 'docx', path: '清爽/默认.docx', content: md }, { rawRequestText: '写一份方案说明的Word' });
+    expect((await measureDocx(await ws.readBlob('清爽/默认.docx'))).rules).toBe(0);
+    await tool.run({ format: 'docx', path: '清爽/装饰.docx', content: md }, { rawRequestText: '写一份方案说明的Word，标题保留横线' });
+    expect((await measureDocx(await ws.readBlob('清爽/装饰.docx'))).rules).toBeGreaterThan(0);
+    const notice = '# 关于开展安全检查的通知\n\n各部门：\n\n正文。\n\n县应急管理局\n\n2026 年 10 月 17 日';
+    await tool.run({ format: 'docx', path: '清爽/公文.docx', content: notice, issuer: '某某县应急管理局' }, { rawRequestText: '写一份红头通知' });
+    expect((await measureDocx(await ws.readBlob('清爽/公文.docx'))).rules).toBe(1);
+    await tool.run({ format: 'docx', path: '清爽/公文无线.docx', content: notice, issuer: '某某县应急管理局' }, { rawRequestText: '写一份红头通知，不要横线' });
+    expect((await measureDocx(await ws.readBlob('清爽/公文无线.docx'))).rules).toBe(0);
+  }, 60000);
 });

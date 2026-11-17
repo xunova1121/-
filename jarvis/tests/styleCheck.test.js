@@ -40,10 +40,17 @@ describe('量 Word 实际字号和线条', () => {
   it('读不了的文件返回 null，不当成做到了', async () => {
     expect(await measureDocx(new Blob(['不是 Word']))).toBeNull();
   });
-  it('现在的生成器给一般文档标题下加装饰横线：量得出来', async () => {
-    const { blob } = await makeDocx({ title: '王家园门面房出租', content: '现有门面房对外出租。\n\n房屋面积：120平方米', theme: THEMES.business });
+  it('明确要装饰横线时生成器给一般文档标题下加横线：量得出来', async () => {
+    // 2026-11-17 用户：Word 默认清爽版。原测试按“默认有横线”写，改为明确要横线；默认无横线另见下一条
+    const { blob } = await makeDocx({ title: '王家园门面房出租', content: '现有门面房对外出租。\n\n房屋面积：120平方米', theme: THEMES.business, noRules: false });
     const f = await measureDocx(blob);
     expect(f.rules).toBeGreaterThan(0);
+    expect(f.body).toBeGreaterThan(0);
+  });
+  it('默认清爽版：一般文档标题没有横线和色块框', async () => {
+    const { blob } = await makeDocx({ title: '王家园门面房出租', content: '# 门面房出租\n\n## 一、基本情况\n\n现有门面房对外出租。\n\n房屋面积：120平方米', theme: THEMES.business });
+    const f = await measureDocx(blob);
+    expect(f.rules).toBe(0);
     expect(f.body).toBeGreaterThan(0);
   });
 });

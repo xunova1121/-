@@ -168,7 +168,9 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       // 用户说“字大点 / 小点 / 铺满 / 不要横线”：换算成真实的字号和排法（见 styleCheck.js），改完由读回核对确认
       const asks = ['docx','pptx','xlsx'].includes(format) ? styleRequests(rawRequestText || goal) : [];
       if (format === 'docx' && asks.some((a) => a.id === 'fill') && design.kind === 'general' && String(content).replace(/\s/g, '').length <= 400) design.kind = 'poster';
-      const noRules = asks.some((a) => a.id === 'noRule');
+      // 2026-11-17 用户：Word 不需要标题横线和框，默认清爽版。只有明确要“保留/加横线、色条、装饰线”才加
+      const keepRules = format === 'docx' && /(?:保留|加上?|要|需要|带|加个|加一?条)[^，。；\n]{0,6}(?:横线|分割线|分隔线|底线|色条|装饰线|标题线)/.test(rawRequestText || goal) && !asks.some((a) => a.id === 'noRule');
+      const noRules = !keepRules;
       let scale = 0;
       if (asks.some((a) => a.id === 'bigger' || a.id === 'smaller'))
         ({ typography, scale } = relativeTypography(typography, asks, { kind: design.kind, previous: await lastStyle(sessionId, executionScope), format, request: rawRequestText || goal, explicit: typographyFromText(rawRequestText || goal) }));
@@ -225,6 +227,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
           pictureLayout: 'aesthetic',
           typography,
           noRules,
+          officialRule: !asks.some((a) => a.id === 'noRule'),
           scale,
           expectedSlides,
           maxSlides,

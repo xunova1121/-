@@ -45,7 +45,7 @@ const font = (key) => {
  * @param {Uint8Array|ArrayBuffer} [o.template]  用户的 .docx 模板：沿用其样式
  * @returns {Promise<{ blob: Blob, info: { toc: boolean, images: number, missingImages: string[], headings: number } }>}
  */
-export async function makeDocx({ title, content, theme, cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, template = null, layout = 'report', issuer = '', docNo = '', kind = '', typography = {}, noRules = false, scale = 0 }) {
+export async function makeDocx({ title, content, theme, cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, template = null, layout = 'report', issuer = '', docNo = '', kind = '', typography = {}, noRules = true, officialRule = true, scale = 0 }) {
   typography = normalizeTypography(typography);
   const d = await import('docx');
   const {
@@ -321,7 +321,8 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
       titleBlock.push(
         new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 0, after: docNo ? 360 : 120, line: PT(org.length > 10 ? 30 : 36) * 10 + 120, lineRule: LineRuleType.EXACT }, children: [new TextRun({ text: /文件$/.test(org) ? org : `${org}文件`, size: PT(org.length > 10 ? 30 : 36), color: 'C00000', font: font('xiaobiaosong'), characterSpacing: org.length <= 6 ? 60 : 0 })] }),
         ...(docNo ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 120 }, children: [new TextRun({ text: docNo, size: PT(16), font: bodyFont })] })] : []),
-        new Paragraph({ ...(!noRules && { border: { bottom: { style: BorderStyle.SINGLE, size: 18, color: 'C00000', space: 1 } } }), spacing: { after: 480 }, children: [] })
+        // 红头分隔线是公文格式，不是装饰：默认清爽版也保留，只有用户明确说不要横线才去掉
+        new Paragraph({ ...(officialRule && { border: { bottom: { style: BorderStyle.SINGLE, size: 18, color: 'C00000', space: 1 } } }), spacing: { after: 480 }, children: [] })
       );
     }
     titleBlock.push(new Paragraph({ heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER, children: [new TextRun(docTitle)] }));
@@ -349,7 +350,7 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
   // 设计样式：一级标题是浅底色条 + 左边深色粗边；二级标题下面一条细线
   // 文种不同，标题的样子不同：方案是浅底色条；报告、纪要是一道底线；制度的“第一章”居中
   const ruled = { border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: C.primary, space: 5 } } };
-  const h1Look = official ? {} : K === 'policy' ? { alignment: AlignmentType.CENTER } : brief || K === 'report' || K === 'minutes' ? (noRules ? {} : ruled) : { border: { left: { style: BorderStyle.SINGLE, size: 36, color: C.primary, space: 8 } }, shading: { type: ShadingType.CLEAR, fill: C.soft, color: 'auto' }, indent: { left: 160 } };
+  const h1Look = official ? {} : K === 'policy' ? { alignment: AlignmentType.CENTER } : noRules ? {} : brief || K === 'report' || K === 'minutes' ? ruled : { border: { left: { style: BorderStyle.SINGLE, size: 36, color: C.primary, space: 8 } }, shading: { type: ShadingType.CLEAR, fill: C.soft, color: 'auto' }, indent: { left: 160 } };
   const h2Look = official || noRules ? {} : { border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'D5DCE6', space: 2 } } };
   const H2font = official ? font(theme.fonts.h2) : headFont;
   const H3font = official ? font(theme.fonts.h3) : headFont;

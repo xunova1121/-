@@ -150,7 +150,7 @@ describe('第三轮 30 题：今日新闻保住标了今天的条目；重排原
     const { makeDocx } = await import('../src/agent/docxWriter.js');
     const { THEMES } = await import('../src/agent/themes.js');
     const { measureDocx } = await import('../src/agent/styleCheck.js');
-    const { blob } = await makeDocx({ title: '工作说明', content: '# 工作说明\n\n## 一、背景\n\n正文内容。\n\n---\n\n## 二、安排\n\n正文内容。', theme: THEMES.business, kind: 'report' });
+    const { blob } = await makeDocx({ title: '工作说明', content: '# 工作说明\n\n## 一、背景\n\n正文内容。\n\n---\n\n## 二、安排\n\n正文内容。', theme: THEMES.business, kind: 'report', noRules: false }); // 2026-11-17 默认改清爽版：此处明确要横线来测“去横线”
     expect((await measureDocx(blob)).rules).toBeGreaterThan(0);
     const after = await measureDocx(await withoutParagraphRules(blob));
     expect(after.rules).toBe(0);
