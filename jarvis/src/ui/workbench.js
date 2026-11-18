@@ -1,5 +1,6 @@
 import './workbench.css';
 import * as sessions from '../agent/sessions.js';
+import { loadHistory, HISTORY_REFRESH_MS } from './historyList.js';
 import { initWorkspaceNavigation } from './workbenchNavigation.js';
 import { toolLabel } from './transcript.js';
 import { initWeiyangShell } from './weiyangShell.js';
@@ -66,7 +67,10 @@ export function initWorkbench({showPanel,newSession,openSession,getSession,getRu
  initWorkbenchAgents({rail,top,agents,closePanel});
  // 正在回答的对话在“最近对话”里转圈
  let running='';function paint(){const cur=getSession?.()?.id;for(const b of history.querySelectorAll('.wb-chat')){b.classList.toggle('current',b.dataset.id===cur);const on=!!running&&b.dataset.id===running;b.classList.toggle('running',on);if(on)b.setAttribute('aria-busy','true');else b.removeAttribute('aria-busy');}}
- let shown='';function markRunning(){const id=getRunning?.()||'',cur=getSession?.()?.id||'';if(cur!==shown){shown=cur;paint();}if(id===running)return;running=id;paint();if(id&&![...history.querySelectorAll('.wb-chat')].some(b=>b.dataset.id===id)){last='';refresh().catch(()=>{});}}// 新对话还没出现在列表里：重新读一次列表
- let last='';async function refresh(){if(document.hidden)return;let rows;try{rows=await sessions.list();}catch(error){history.replaceChildren(node('p',error.status===401?'登录已失效，请到设置重新登录。':'历史对话暂不可用，请稍后重试。'));last='';return;}const signature=JSON.stringify(rows.map(s=>[s.id,s.title,s.updatedAt]));if(signature===last)return;last=signature;history.replaceChildren();for(const s of rows.slice(0,4)){const b=node('button',null,'wb-chat');b.dataset.id=s.id;b.append(node('i',null,'wb-run'),node('span',s.title||'未命名对话'));b.title=s.title;b.onclick=()=>{openSession(s.id);closePanel();setView(false);};history.append(b);}if(!rows.length)history.append(node('p','开始对话后，记录会保存在这里。'));more.hidden=rows.length<=4;paint();}refresh();const timer=setInterval(()=>refresh().catch(()=>{}),3000);window.addEventListener('pagehide',()=>clearInterval(timer));
+ let shown='';function markRunning(){const id=getRunning?.()||'',cur=getSession?.()?.id||'';if(cur!==shown){shown=cur;paint();}if(id===running)return;const finished=running&&!id;running=id;paint();if(finished){last='';refresh().catch(()=>{});}if(id&&![...history.querySelectorAll('.wb-chat')].some(b=>b.dataset.id===id)){last='';refresh().catch(()=>{});}}// 新对话还没出现在列表里：重新读一次列表
+ // 读不到列表时保留上次的（historyList.js）：原来一次超时就把整栏清空成“暂不可用”，看着像对话全没了
+ let last='',shownRows=null;async function refresh(){if(document.hidden)return;const got=await loadHistory({list:()=>sessions.list(),cached:()=>sessions.cachedList(),shown:()=>shownRows});if(!got.rows){history.replaceChildren(node('p',got.hint));last='';shownRows=null;more.hidden=true;return;}const rows=got.rows;const signature=JSON.stringify([got.stale,...rows.map(s=>[s.id,s.title,s.updatedAt])]);if(signature===last)return;last=signature;shownRows=rows;history.replaceChildren();if(got.stale)history.append(node('p',got.hint,'wb-history-stale'));for(const s of rows.slice(0,4)){const b=node('button',null,'wb-chat');b.dataset.id=s.id;b.append(node('i',null,'wb-run'),node('span',s.title||'未命名对话'));b.title=s.title;b.onclick=()=>{openSession(s.id);closePanel();setView(false);};history.append(b);}if(!rows.length)history.append(node('p','开始对话后，记录会保存在这里。'));more.hidden=rows.length<=4;paint();}refresh();const timer=setInterval(()=>refresh().catch(()=>{}),HISTORY_REFRESH_MS);window.addEventListener('pagehide',()=>clearInterval(timer));
+ // 切回窗口时马上刷新一次（不再靠 3 秒一次的轮询）
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh().catch(()=>{});});window.addEventListener('focus',()=>refresh().catch(()=>{}));
  const runTimer=setInterval(markRunning,400);window.addEventListener('pagehide',()=>clearInterval(runTimer));
 }

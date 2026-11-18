@@ -90,9 +90,9 @@ export function initServerPanel({ getLlmConfig, toast, reload = () => location.r
     try {
       const before = await client().updateInfo().catch(() => ({}));
       await client().requestUpdate();
-      say('已让服务器检查更新：有新版会自动安装，期间服务重启 1–3 分钟，做到一半的任务会标成“没完成”');
-      // 每 5 秒看一次，最多 6 分钟（重启那会儿连不上是正常的）
-      for (let i = 0; i < 72; i++) {
+      say('已让服务器检查更新：有新版会自动安装，服务重启 1–3 分钟；有任务在做时先等它做完再重启（最多等 15 分钟）');
+      // 每 5 秒看一次，最多 20 分钟（可能要等任务做完；重启那会儿连不上是正常的）
+      for (let i = 0; i < 240; i++) {
         await new Promise((r) => setTimeout(r, 5000));
         const u = await client().updateInfo().catch(() => null);
         if (!u) { $('#server-version').textContent = '服务器正在重启…'; continue; }

@@ -628,6 +628,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       return visible(t) && { id: t.id, sessionId: t.sessionId, evaluationId: t.evaluationId || null, text: t.text, status: t.status, seq: t.seq, files: [...t.files], error: t.error || '', errorKind: t.errorType || '', review: t.review ?? null, timing: t.timing.snapshot(), createdAt: t.createdAt, startedAt: t.startedAt ?? null, endedAt: t.endedAt ?? null };
     },
     list() { return [...tasks.keys()].map((id) => this.get(id)).filter(Boolean); },
+    /** 全部用户正在做或排队的任务数（只给服务器自身用：自动更新据此等任务做完再重启，不返回任何内容） */
+    activeCount() { return [...tasks.values()].filter((t) => t.status === 'running' || t.status === 'queued').length; },
     events(id, after = 0) { const t = tasks.get(id); return visible(t) ? t.events.filter(e => e.seq > after) : null; },
     subscribe(id, fn) {
       const t = tasks.get(id);

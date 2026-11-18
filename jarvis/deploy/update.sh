@@ -79,6 +79,16 @@ fi
 if ! echo "$SHA  $PKG" | sha256sum -c --status; then
   rm -f "$PKG"; status error "下载的安装包校验不对（可能没下完整），已删掉，稍后再试" "$CUR"; exit 1
 fi
+# 有任务在做就先等（服务器每 5 秒刷新一次 tasks-busy；超过 30 秒没刷新说明服务没在跑，不用等）：
+# 原来一点“立即更新”就重启，正在做的任务全断，电脑和手机一起掉线（2026-11-18 用户日志）。最多等 15 分钟，到点照常安装
+BUSY="$DATA/tasks-busy"
+WAIT_MAX="${JARVIS_UPDATE_WAIT:-900}"; POLL="${JARVIS_UPDATE_POLL:-15}"
+waited=0
+while [[ -f "$BUSY" ]] && (( $(date +%s) - $(stat -c %Y "$BUSY" 2>/dev/null || echo 0) < 30 )) && (( waited < WAIT_MAX )); do
+  status waiting "新版 $VER 已下载好，等 $(tr -dc 0-9 < "$BUSY") 个正在做的任务完成后再安装（最多等 $((WAIT_MAX / 60)) 分钟）" "$CUR"
+  sleep "$POLL"; waited=$((waited + POLL))
+done
+(( waited >= WAIT_MAX )) && echo "[$(now)] 等了 $((WAIT_MAX / 60)) 分钟任务仍未做完，照常安装"
 status installing "正在安装 $VER（服务会重启，大约 1–3 分钟）" "$CUR"
 rm -rf "$WORK/pkg" && mkdir -p "$WORK/pkg"
 tar -xzf "$PKG" -C "$WORK/pkg" jarvis-server/deploy/install.sh --strip-components=2

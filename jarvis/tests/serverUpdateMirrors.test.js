@@ -40,3 +40,33 @@ describe.skipIf(!hasBash)('代码仓库改私密后的更新地址',()=>{
     expect(tries.every(u=>!u.includes('weiyang-release'))).toBe(true);
   });
 });
+// 2026-11-18 用户：电脑老是掉线——日志显示三次都是点“立即更新服务器”后马上重启，正在做的任务全断
+describe.skipIf(!hasBash)('有任务在做时自动更新先等',()=>{
+  const run=({busyAgeSec=null,clearAfterMs=null}={})=>{
+    const t=fs.mkdtempSync(path.join(os.tmpdir(),'jarvis-upd-'));
+    for(const d of ['bin','base/current','base/data','pkg/jarvis-server/deploy'])fs.mkdirSync(path.join(t,d),{recursive:true});
+    fs.writeFileSync(path.join(t,'base/current/VERSION'),'1.0.9\n');
+    fs.writeFileSync(path.join(t,'pkg/jarvis-server/deploy/install.sh'),'#!/bin/bash\necho INSTALLED >> "$LOG"\n',{mode:0o755});
+    const tgz=path.join(t,'p.tar.gz');execFileSync('tar',['-czf',tgz,'-C',path.join(t,'pkg'),'jarvis-server']);
+    const sha=execFileSync('sha256sum',[tgz],{encoding:'utf8'}).slice(0,64);
+    fs.writeFileSync(path.join(t,'bin/curl'),`#!/bin/bash\nurl="\${@: -1}"\nout=""\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && out="$2"; shift; done\ncase "$url" in *latest.json) printf '{"version":"1.0.10","sha256":"${sha}"}' > "$out";; *) cp "${tgz}" "$out";; esac\n`,{mode:0o755});
+    const busy=path.join(t,'base/data/tasks-busy');
+    if(busyAgeSec!==null){fs.writeFileSync(busy,'2\n');const at=Date.now()/1000-busyAgeSec;fs.utimesSync(busy,at,at);}
+    const env={...process.env,PATH:`${path.join(t,'bin')}:${process.env.PATH}`,JARVIS_BASE:path.join(t,'base'),JARVIS_MIRRORS:'-',JARVIS_UPDATE_WAIT:'3',JARVIS_UPDATE_POLL:'1',LOG:path.join(t,'log')};
+    if(clearAfterMs)setTimeout(()=>fs.rmSync(busy,{force:true}),clearAfterMs);
+    const t0=Date.now();let out='';
+    try{out=execFileSync('bash',[path.join(ROOT,'deploy/update.sh')],{env,encoding:'utf8'});}catch(e){out=String(e.stdout||'');}
+    const installed=fs.existsSync(path.join(t,'log'));fs.rmSync(t,{recursive:true,force:true});
+    return {out,installed,ms:Date.now()-t0};
+  };
+  it('有任务在做：先等，等满上限照常安装，并说清在等几个任务',()=>{
+    const r=run({busyAgeSec:0});
+    expect(r.out).toContain('等 2 个正在做的任务完成后再安装');
+    expect(r.out).toContain('照常安装');
+    expect(r.installed).toBe(true);
+    expect(r.ms).toBeGreaterThanOrEqual(2500);
+  },20000);
+  it('标记超过30秒没刷新（服务没在跑）不等；没有标记也不等',()=>{
+    for(const r of [run({busyAgeSec:120}),run()]){expect(r.out).not.toContain('正在做的任务');expect(r.installed).toBe(true);}
+  },20000);
+});

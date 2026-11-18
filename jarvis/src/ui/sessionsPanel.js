@@ -4,6 +4,7 @@
 import * as sessions from '../agent/sessions.js';
 import { saveFile } from './saveFile.js';
 import { groupByDay } from '../core/memoryStore.js';
+import { loadHistory } from './historyList.js';
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, props = {}, ...kids) => {
@@ -33,13 +34,18 @@ export function initSessionsPanel({ getCurrentId, onOpen, onNew, onDeleted, sett
     }) : [el('p', { className: 'empty', textContent: '回收站是空的。' })]));
   }
 
+  let lastShown = null;
   async function refresh() {
     refreshTrash();
-    const list = await sessions.search(query).catch(() => []);
-    const total = query ? (await sessions.list()).length : list.length;
+    // 读不到时用上次的列表并提示，不显示成“还没有保存的对话”（2026-11-18 用户：对话全没了）
+    const got = await loadHistory({ list: () => sessions.search(query), cached: () => (query ? null : sessions.cachedList?.()), shown: () => (query ? null : lastShown) });
+    const list = got.rows || [];
+    if (!query && !got.stale && got.rows) lastShown = list;
+    const total = query ? await sessions.list().then((r) => r.length).catch(() => list.length) : list.length;
     $('#session-count').textContent = `${total} 段`;
     $('#set-save-sessions').checked = settings.saveSessions !== false;
     const box = $('#session-list');
+    if (!got.rows) { box.replaceChildren(el('p', { className: 'empty', textContent: got.hint })); return; }
     if (!list.length) {
       box.replaceChildren(el('p', { className: 'empty', textContent: query ? '没有找到匹配的对话。' : '还没有保存的对话。开始聊天后会自动出现在这里。' }));
       return;
@@ -50,7 +56,7 @@ export function initSessionsPanel({ getCurrentId, onOpen, onNew, onDeleted, sett
       ...(pinned.length ? [{ key: 'pinned', label: '已钉住', items: pinned }] : []),
       ...groupByDay(rest.map((s) => ({ ...s, ts: s.updatedAt })))
     ];
-    box.replaceChildren(...groups.map((g) => el('section', { className: 'session-group' },
+    box.replaceChildren(...(got.stale ? [el('p', { className: 'empty', textContent: got.hint })] : []), ...groups.map((g) => el('section', { className: 'session-group' },
       el('h4', { textContent: g.label }),
       ...g.items.map(row))));
   }

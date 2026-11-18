@@ -196,6 +196,14 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
   const schedules = userService(() => createServerSchedules({ runner, active: () => security.users.active(currentUser()) }));
   // 启动时为每个有效身份恢复提醒；新建成员的定时器在首次请求时启动。
   if (autoSchedules) for (const id of security.users.ids()) runAsUser(id, () => schedules.start());
+  // 正在做任务时给自动更新留个标记（deploy/update.sh 看到就等任务做完再重启服务）：
+  // 原来点“立即更新服务器”会立刻重启，手机和电脑上正在做的任务一起断掉（2026-11-18 用户日志：三次掉线都是更新重启）
+  const busyFile = path.join(dataDir, 'tasks-busy');
+  const markBusy = () => {
+    const n = runner.activeCount?.() ?? 0;
+    try { if (n > 0) fs.writeFileSync(busyFile, `${n}\n`); else fs.rmSync(busyFile, { force: true }); } catch { /* 写不了不影响任务 */ }
+  };
+  if (!injected) { markBusy(); setInterval(markBusy, 5000).unref?.(); }
   const tenders = createTenderCenter({ dataDir, get: publicFetch, collector: tenderCollector, users: () => security.users.ids(), active: id => security.users.active(id) });
   if (autoTenderRefresh) tenders.start();
   let activePCModels = 0;
