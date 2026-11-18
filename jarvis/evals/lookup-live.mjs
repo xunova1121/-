@@ -417,6 +417,34 @@ function errorKind(error) {
   return "";
 }
 
+// shared/providers.js
+var PROVIDERS = [
+  { id: "mock", name: "\u5185\u7F6E\u6F14\u793A\uFF08\u79BB\u7EBF\uFF09", kind: "mock", baseURL: "", models: ["jarvis-demo"], needsKey: false, browser: true },
+  { id: "anthropic", name: "Anthropic Claude", kind: "anthropic", baseURL: "https://api.anthropic.com", models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"], keyUrl: "https://console.anthropic.com/", browser: true, webSearch: true },
+  { id: "openai", name: "OpenAI", kind: "openai", baseURL: "https://api.openai.com/v1", models: ["gpt-5", "gpt-5-mini", "gpt-4.1"], keyUrl: "https://platform.openai.com/api-keys", browser: true },
+  { id: "gemini", name: "Google Gemini", kind: "openai", baseURL: "https://generativelanguage.googleapis.com/v1beta/openai", models: ["gemini-2.5-pro", "gemini-2.5-flash"], keyUrl: "https://aistudio.google.com/apikey", browser: true },
+  { id: "deepseek", name: "DeepSeek \u6DF1\u5EA6\u6C42\u7D22", kind: "openai", baseURL: "https://api.deepseek.com/v1", models: ["deepseek-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"], keyUrl: "https://platform.deepseek.com/api_keys", browser: false },
+  { id: "qwen", name: "\u901A\u4E49\u5343\u95EE\uFF08\u963F\u91CC\u4E91\u767E\u70BC\uFF09", kind: "openai", baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", models: ["qwen-max", "qwen-plus", "qwen-turbo"], keyUrl: "https://bailian.console.aliyun.com/", browser: false },
+  { id: "moonshot", name: "Kimi\uFF08\u6708\u4E4B\u6697\u9762\uFF09", kind: "openai", baseURL: "https://api.moonshot.cn/v1", models: ["kimi-latest", "moonshot-v1-32k"], keyUrl: "https://platform.moonshot.cn/console/api-keys", browser: false },
+  { id: "zhipu", name: "\u667A\u8C31 GLM", kind: "openai", baseURL: "https://open.bigmodel.cn/api/paas/v4", models: ["glm-4.5", "glm-4-flash"], keyUrl: "https://open.bigmodel.cn/usercenter/apikeys", browser: false },
+  { id: "doubao", name: "\u8C46\u5305\uFF08\u706B\u5C71\u65B9\u821F\uFF09", kind: "openai", baseURL: "https://ark.cn-beijing.volces.com/api/v3", models: ["doubao-seed-1-6-250615"], keyUrl: "https://console.volcengine.com/ark", browser: false, note: "\u578B\u53F7\u5904\u53EF\u586B\u5199\u65B9\u821F\u63A7\u5236\u53F0\u91CC\u7684\u201C\u63A8\u7406\u63A5\u5165\u70B9 ID\u201D" },
+  { id: "siliconflow", name: "\u7845\u57FA\u6D41\u52A8 SiliconFlow", kind: "openai", baseURL: "https://api.siliconflow.cn/v1", models: ["deepseek-ai/DeepSeek-V3", "Qwen/Qwen2.5-72B-Instruct"], keyUrl: "https://cloud.siliconflow.cn/account/ak", browser: false },
+  { id: "openrouter", name: "OpenRouter\uFF08\u805A\u5408\uFF09", kind: "openai", baseURL: "https://openrouter.ai/api/v1", models: ["openai/gpt-5", "google/gemini-2.5-pro", "deepseek/deepseek-chat"], keyUrl: "https://openrouter.ai/keys", browser: true },
+  { id: "ollama", name: "Ollama\uFF08\u672C\u673A\u6A21\u578B\uFF09", kind: "openai", baseURL: "http://127.0.0.1:11434/v1", models: ["qwen3:8b", "qwen3:4b"], needsKey: false, browser: true, note: "\u6D4F\u89C8\u5668\u76F4\u8FDE\u9700\u4EE5 OLLAMA_ORIGINS=* \u542F\u52A8 Ollama\uFF1B\u7528\u5B8C\u6574\u7248\u7F51\u5173\u5219\u4E0D\u9700\u8981" },
+  // 多协议中转（如 TeamoRouter）：一个地址一个密钥，按模型名自动用原生格式——
+  // Claude → /v1/messages、GPT → /v1/responses（都能开模型自带的联网搜索），其他 → /v1/chat/completions
+  { id: "relay-multi", name: "\u591A\u534F\u8BAE\u4E2D\u8F6C\uFF08\u6309\u6A21\u578B\u7528\u539F\u751F\u683C\u5F0F\uFF0C\u5982 TeamoRouter\uFF09", kind: "multi", baseURL: "", models: ["gpt-6.1-sol", "claude-fable-5-1", "gemini-3.5-flash"], browser: true, custom: true, webSearch: true },
+  // 中转站的 Anthropic 原生接口（/v1/messages）：能用 Claude 和它的内置联网搜索（要看中转站是否支持）
+  { id: "claude-relay", name: "Claude \u4E2D\u8F6C\uFF08Anthropic \u539F\u751F\u683C\u5F0F\uFF09", kind: "anthropic", baseURL: "", models: ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"], browser: true, custom: true, webSearch: true },
+  { id: "custom", name: "\u81EA\u5B9A\u4E49\uFF08OpenAI \u517C\u5BB9\uFF09", kind: "openai", baseURL: "", models: [""], browser: true, custom: true },
+  // 有界的独立中转线路：同名模型也能分开保存地址、密钥和备用顺序。
+  ...Array.from({ length: 7 }, (_, index) => ({ id: `relay-${index + 2}`, name: `\u81EA\u5B9A\u4E49\u670D\u52A1\u5546 ${index + 2}\uFF08\u591A\u534F\u8BAE\uFF09`, kind: "multi", baseURL: "", models: [""], browser: true, custom: true, webSearch: true }))
+];
+function isPrivateHost(host) {
+  const h = host.replace(/^\[|\]$/g, "").toLowerCase();
+  return h === "localhost" || h.endsWith(".local") || h === "::1" || h === "0.0.0.0" || /^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^f[cd][0-9a-f]{2}:/.test(h) || /^fe80:/.test(h);
+}
+
 // src/llm/openai.js
 function retryAfterMs(value, now = Date.now()) {
   if (value == null || value === "") return 0;
@@ -495,34 +523,6 @@ async function webBody(response, maxBytes, signal) {
     offset += chunk.length;
   }
   return bytes;
-}
-
-// shared/providers.js
-var PROVIDERS = [
-  { id: "mock", name: "\u5185\u7F6E\u6F14\u793A\uFF08\u79BB\u7EBF\uFF09", kind: "mock", baseURL: "", models: ["jarvis-demo"], needsKey: false, browser: true },
-  { id: "anthropic", name: "Anthropic Claude", kind: "anthropic", baseURL: "https://api.anthropic.com", models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"], keyUrl: "https://console.anthropic.com/", browser: true, webSearch: true },
-  { id: "openai", name: "OpenAI", kind: "openai", baseURL: "https://api.openai.com/v1", models: ["gpt-5", "gpt-5-mini", "gpt-4.1"], keyUrl: "https://platform.openai.com/api-keys", browser: true },
-  { id: "gemini", name: "Google Gemini", kind: "openai", baseURL: "https://generativelanguage.googleapis.com/v1beta/openai", models: ["gemini-2.5-pro", "gemini-2.5-flash"], keyUrl: "https://aistudio.google.com/apikey", browser: true },
-  { id: "deepseek", name: "DeepSeek \u6DF1\u5EA6\u6C42\u7D22", kind: "openai", baseURL: "https://api.deepseek.com/v1", models: ["deepseek-chat", "deepseek-reasoner"], keyUrl: "https://platform.deepseek.com/api_keys", browser: false },
-  { id: "qwen", name: "\u901A\u4E49\u5343\u95EE\uFF08\u963F\u91CC\u4E91\u767E\u70BC\uFF09", kind: "openai", baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", models: ["qwen-max", "qwen-plus", "qwen-turbo"], keyUrl: "https://bailian.console.aliyun.com/", browser: false },
-  { id: "moonshot", name: "Kimi\uFF08\u6708\u4E4B\u6697\u9762\uFF09", kind: "openai", baseURL: "https://api.moonshot.cn/v1", models: ["kimi-latest", "moonshot-v1-32k"], keyUrl: "https://platform.moonshot.cn/console/api-keys", browser: false },
-  { id: "zhipu", name: "\u667A\u8C31 GLM", kind: "openai", baseURL: "https://open.bigmodel.cn/api/paas/v4", models: ["glm-4.5", "glm-4-flash"], keyUrl: "https://open.bigmodel.cn/usercenter/apikeys", browser: false },
-  { id: "doubao", name: "\u8C46\u5305\uFF08\u706B\u5C71\u65B9\u821F\uFF09", kind: "openai", baseURL: "https://ark.cn-beijing.volces.com/api/v3", models: ["doubao-seed-1-6-250615"], keyUrl: "https://console.volcengine.com/ark", browser: false, note: "\u578B\u53F7\u5904\u53EF\u586B\u5199\u65B9\u821F\u63A7\u5236\u53F0\u91CC\u7684\u201C\u63A8\u7406\u63A5\u5165\u70B9 ID\u201D" },
-  { id: "siliconflow", name: "\u7845\u57FA\u6D41\u52A8 SiliconFlow", kind: "openai", baseURL: "https://api.siliconflow.cn/v1", models: ["deepseek-ai/DeepSeek-V3", "Qwen/Qwen2.5-72B-Instruct"], keyUrl: "https://cloud.siliconflow.cn/account/ak", browser: false },
-  { id: "openrouter", name: "OpenRouter\uFF08\u805A\u5408\uFF09", kind: "openai", baseURL: "https://openrouter.ai/api/v1", models: ["openai/gpt-5", "google/gemini-2.5-pro", "deepseek/deepseek-chat"], keyUrl: "https://openrouter.ai/keys", browser: true },
-  { id: "ollama", name: "Ollama\uFF08\u672C\u673A\u6A21\u578B\uFF09", kind: "openai", baseURL: "http://127.0.0.1:11434/v1", models: ["qwen3:8b", "qwen3:4b"], needsKey: false, browser: true, note: "\u6D4F\u89C8\u5668\u76F4\u8FDE\u9700\u4EE5 OLLAMA_ORIGINS=* \u542F\u52A8 Ollama\uFF1B\u7528\u5B8C\u6574\u7248\u7F51\u5173\u5219\u4E0D\u9700\u8981" },
-  // 多协议中转（如 TeamoRouter）：一个地址一个密钥，按模型名自动用原生格式——
-  // Claude → /v1/messages、GPT → /v1/responses（都能开模型自带的联网搜索），其他 → /v1/chat/completions
-  { id: "relay-multi", name: "\u591A\u534F\u8BAE\u4E2D\u8F6C\uFF08\u6309\u6A21\u578B\u7528\u539F\u751F\u683C\u5F0F\uFF0C\u5982 TeamoRouter\uFF09", kind: "multi", baseURL: "", models: ["gpt-6.1-sol", "claude-fable-5-1", "gemini-3.5-flash"], browser: true, custom: true, webSearch: true },
-  // 中转站的 Anthropic 原生接口（/v1/messages）：能用 Claude 和它的内置联网搜索（要看中转站是否支持）
-  { id: "claude-relay", name: "Claude \u4E2D\u8F6C\uFF08Anthropic \u539F\u751F\u683C\u5F0F\uFF09", kind: "anthropic", baseURL: "", models: ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"], browser: true, custom: true, webSearch: true },
-  { id: "custom", name: "\u81EA\u5B9A\u4E49\uFF08OpenAI \u517C\u5BB9\uFF09", kind: "openai", baseURL: "", models: [""], browser: true, custom: true },
-  // 有界的独立中转线路：同名模型也能分开保存地址、密钥和备用顺序。
-  ...Array.from({ length: 7 }, (_, index) => ({ id: `relay-${index + 2}`, name: `\u81EA\u5B9A\u4E49\u670D\u52A1\u5546 ${index + 2}\uFF08\u591A\u534F\u8BAE\uFF09`, kind: "multi", baseURL: "", models: [""], browser: true, custom: true, webSearch: true }))
-];
-function isPrivateHost(host) {
-  const h = host.replace(/^\[|\]$/g, "").toLowerCase();
-  return h === "localhost" || h.endsWith(".local") || h === "::1" || h === "0.0.0.0" || /^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^f[cd][0-9a-f]{2}:/.test(h) || /^fe80:/.test(h);
 }
 
 // src/agent/newsFeeds.js
