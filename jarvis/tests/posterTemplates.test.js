@@ -57,3 +57,72 @@ describe('六套版式模板', () => {
     expect(POSTER_GUIDANCE).toContain('template版式模板');
   });
 });
+
+/** 2026-11-18 用户：模板都是图文分开的，要图文融合 → 沉浸式（A）+ 先排版后生图（B） */
+import { zonesOnImage, templateArtPrompt } from '../src/agent/posterTemplateArt.js';
+describe('沉浸式模板与先排版后生图', () => {
+  it.each(TEMPLATE_IDS)('%s 沉浸式：图铺满整张、由上到下压暗、卡片半透明、不重叠、手机可读', id => {
+    const input = templateDesignInput({ template: { ...TEMPLATE_SAMPLES[id], layout: 'immersive', image: '图/主视觉.png' } });
+    const { zones, ...rest } = input, d = planLayerDesign(rest);
+    const ids = d.layers.map(n => n.id), hero = d.layers.find(n => n.id === 'hero');
+    expect(ids).not.toContain('header-bg');
+    expect(hero).toMatchObject({ x: 0, y: 0, w: 1080, h: d.height });
+    expect(ids.indexOf('hero')).toBeLessThan(ids.indexOf('immersive-shade'));
+    expect(ids.indexOf('immersive-shade')).toBeLessThan(ids.indexOf('title'));
+    const shade = d.layers.find(n => n.id === 'immersive-shade').fade.stops;
+    expect(shade[0][1]).toBeLessThan(0.2);
+    expect(shade.at(-1)[1]).toBeGreaterThanOrEqual(0.85);
+    const glass = d.layers.filter(n => n.type === 'shape' && n.fade && n.fade.stops.every(s => s[1] > 0.6 && s[1] < 0.8));
+    expect(glass.length).toBeGreaterThan(0);
+    expect(checkLayerOverlap(d)).toMatchObject({ status: 'passed' });
+    expect(checkDesignPresentation(d).status).not.toBe('failed');
+    expect(zones.map(z => z.id)).toEqual(['title', 'content']);
+    expect(zones[1].y + zones[1].h).toBeCloseTo(1, 2);
+    expect(d.concept.relation).toBe('overlay');
+  });
+  it('留白区换算到配图坐标：画布更高时左右裁、更矮时上下裁', () => {
+    const z = [{ id: 'content', tone: 'dark', x: 0, y: 0.5, w: 1, h: 0.5 }];
+    expect(zonesOnImage(z, 1080, 2160, 1024, 1536)[0]).toMatchObject({ x: 0.125, w: 0.75, y: 0.5, h: 0.5 });
+    const short = zonesOnImage(z, 1080, 1350, 1024, 1536)[0];
+    expect(short.x).toBe(0);
+    // 画布 1.25 比 配图 1.5：可见 1.25/1.5 的高度，上下各裁掉一半余量
+    expect(short.y).toBeCloseTo((1 - 1.25 / 1.5) / 2 + 0.5 * 1.25 / 1.5, 3);
+    expect(short.h).toBeCloseTo(0.5 * 1.25 / 1.5, 3);
+    const p = templateArtPrompt('秋天的山谷', [{ id: 't', tone: 'dark', x: 0, y: 0.4, w: 1, h: 0.6 }]);
+    expect(p).toContain('版式留白');
+    expect(p).toContain('不要任何文字');
+  });
+  const fakeArt = prompts => async ({ prompt }) => {
+    prompts.push(prompt);
+    const c = createCanvas(1024, 1536), g = c.getContext('2d');
+    g.fillStyle = '#E8A05A'; g.fillRect(0, 0, 1024, 400); g.fillStyle = '#16161F'; g.fillRect(0, 400, 1024, 1136);
+    return { blob: new Blob([c.toBuffer('image/png')], { type: 'image/png' }) };
+  };
+  it('make_poster 填 image_prompt：先排版、按文字位置生成满版配图，再交付成品', async () => {
+    const prompts = [];
+    const tool = createPosterDeliveryTool({ renderVisualScene, imageGen: fakeArt(prompts) });
+    const r = JSON.parse(await tool.run({ template: { ...TEMPLATE_SAMPLES.event_promo, image_prompt: '秋日公园里的亲子集市，暖色黄昏' } }, { executionScope: {}, rawRequestText: '做一张亲子市集海报' }));
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain('版式留白');
+    expect(prompts[0]).toContain('秋日公园');
+    expect(r.errors).toEqual([]);
+    expect(r.status).toBe('complete');
+    expect(r.templateArt).toMatchObject({ status: 'generated' });
+    expect(r.templateArt.clearAreas.areas.map(a => a.id)).toEqual(['title', 'content']);
+    expect(await ws.exists(r.templateArt.path)).toBe(true);
+    expect(r.notes.join('')).toContain('先排版后生图');
+  }, 120000);
+  it('配图生成失败：退回无图沉浸式版式照样出稿，并如实说明', async () => {
+    const tool = createPosterDeliveryTool({ renderVisualScene, imageGen: async () => { throw new Error('额度用完'); } });
+    const r = JSON.parse(await tool.run({ template: { ...TEMPLATE_SAMPLES.tips, image_prompt: '寒冬街头' } }, { executionScope: {}, rawRequestText: '做一张寒潮提醒海报' }));
+    expect(r.status).toBe('complete');
+    expect(r.templateArt).toMatchObject({ status: 'failed' });
+    expect(r.notes.join('')).toContain('额度用完');
+  }, 120000);
+});
+describe('沉浸式指引', () => {
+  it('海报指引说明 image_prompt 先排版后生图', () => {
+    expect(POSTER_GUIDANCE).toContain('template.image_prompt');
+    expect(POSTER_GUIDANCE).toContain('immersive');
+  });
+});

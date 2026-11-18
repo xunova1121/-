@@ -30,19 +30,30 @@ const arr = (v, what, min, max) => {
 };
 
 /** 排版器：从上往下放图层，记录当前高度 */
-function layout(style) {
-  const layers = [], c = TEMPLATE_STYLES[style] || TEMPLATE_STYLES.blue;
+const mix = (a, b, t) => '#' + [0, 2, 4].map(i => Math.round(parseInt(a.slice(1 + i, 3 + i), 16) * (1 - t) + parseInt(b.slice(1 + i, 3 + i), 16) * t).toString(16).padStart(2, '0')).join('').toUpperCase();
+/**
+ * immersive（沉浸式，图文融合，2026-11-18 用户：模板都是图文分开的）：一张图铺满整张海报并由上到下压暗，
+ * 标题直接压在图上，卡片做成半透明“毛玻璃”透出画面；配色整体换成深底浅字。
+ */
+function layout(style, immersive = false) {
+  const base = TEMPLATE_STYLES[style] || TEMPLATE_STYLES.blue;
+  const c = immersive ? { ...base, background: base.deep, ink: base.onDeep, muted: base.onDeepMuted, card: base.deep, tint: mix(base.deep, base.accent, 0.38) } : base;
+  // 沉浸式深底上，强调色做文字时提亮（原色做底块、圆点不变），保证压在画面和半透明卡片上也看得清
+  const accentText = immersive ? mix(base.accent, '#FFFFFF', 0.45) : base.accent;
+  const layers = [];
   let n = 0;
   const id = p => `${p}-${++n}`;
   const text = (key, value, x, y, w, size, o = {}) => {
     const rows = wrapParagraphs(value, size, w, { wordWrap: true });
     if (!rows) throw fail(`“${value.slice(0, 10)}…”在模板宽度内放不下`);
     const h = Math.ceil(rows.length * size * 1.4) + 2;
-    layers.push({ id: key, type: 'text', text: value, x, y, w, h, fontSize: size, minFontSize: size, weight: o.bold ? 700 : 400, color: o.color || c.ink, align: o.align || 'left', ...(o.role && { role: o.role }), ...(o.group && { group: o.group }) });
+    layers.push({ id: key, type: 'text', text: value, x, y, w, h, fontSize: size, minFontSize: size, weight: o.bold ? 700 : 400, color: immersive && o.color === c.accent ? accentText : o.color || c.ink, align: o.align || 'left', ...(o.role && { role: o.role }), ...(o.group && { group: o.group }) });
     return h;
   };
-  const rect = (x, y, w, h, fill, o = {}) => { layers.push({ id: o.id || id('shape'), type: 'shape', x, y, w, h, fill, radius: o.radius || 0, decorative: o.decorative !== false, ...(o.group && { group: o.group }), ...(o.fade && { fade: o.fade }) }); };
-  return { layers, c, id, text, rect };
+  // 沉浸式：卡片底（card/tint）做成半透明，透出后面的画面
+  const glass = immersive ? { stops: [[0, 0.74], [1, 0.74]] } : null;
+  const rect = (x, y, w, h, fill, o = {}) => { const fade = o.fade || (glass && (fill === c.card || fill === c.tint) ? glass : null); layers.push({ id: o.id || id('shape'), type: 'shape', x, y, w, h, fill, radius: o.radius || 0, decorative: o.decorative !== false, ...(o.group && { group: o.group }), ...(fade && { fade }) }); };
+  return { layers, c, id, text, rect, immersive, zones: [] };
 }
 
 /** 页头：有主视觉图就铺图并压暗底部，没有就用深色块加装饰光斑；返回页头高度 */
@@ -52,9 +63,12 @@ function header(L, { image, eyebrow, date, title, summary, minH = 560, align = '
   const titleRows = wrapParagraphs(title, 84, CW, { wordWrap: true }) || [];
   const summaryRows = summary ? wrapParagraphs(summary, 36, CW, { wordWrap: true }) || [] : [];
   const textH = 64 + 26 * 1.4 + 40 + titleRows.length * 84 * 1.4 + (summary ? 24 + summaryRows.length * 36 * 1.4 : 0) + 64;
-  const H = Math.ceil(Math.max(minH, image ? textH + 260 : textH));
-  rect(0, 0, W, H, c.deep, { id: 'header-bg' });
-  if (image) {
+  const H = Math.ceil(Math.max(L.immersive ? Math.max(minH, 820) : minH, image || L.immersive ? textH + 260 : textH));
+  if (L.immersive) {
+    // 沉浸式：页头不单独铺底，整张图在最底层（templateDesignInput 里补），这里只记下标题区给生图留位
+    L.zones.push({ id: 'title', x: 0, y: H - textH, w: W, h: textH, tone: 'dark' });
+  } else rect(0, 0, W, H, c.deep, { id: 'header-bg' });
+  if (L.immersive) { /* 画面与压暗层统一在最底层补 */ } else if (image) {
     layers.push({ id: 'hero', type: 'image', asset: 'hero', x: 0, y: 0, w: W, h: H, fit: 'cover', detail: '主视觉' });
     rect(0, 0, W, H, c.deep, { id: 'hero-shade', fade: { stops: [[0, 0.15], [0.45, 0.45], [1, 0.94]] } });
   } else {
@@ -240,19 +254,34 @@ export function templateDesignInput(input) {
   const build = TEMPLATES[spec.id];
   if (!build) throw fail(`请选择模板id：${TEMPLATE_IDS.join('/')}`);
   const style = TEMPLATE_STYLES[spec.style] ? spec.style : spec.id === 'event_promo' ? 'warm' : spec.id === 'data_report' ? 'dark' : spec.id === 'person_event' ? 'red' : 'blue';
-  const L = layout(style), content = spec.content || {};
+  const immersive = spec.layout === 'immersive';
+  const L = layout(style, immersive), content = spec.content || {};
   const image = typeof spec.image === 'string' && spec.image.trim() ? spec.image.trim() : null;
   const height = Math.max(1350, Math.ceil(build(content, L, image)));
   if (height > 4096) throw fail('内容太多，画布超过4096像素高；请减少条目或拆成两张');
+  if (immersive) {
+    // 满版画面在最底层，上面一层由上到下压暗（标题区和卡片区都落在暗部），再往上才是文字和半透明卡片
+    const contentTop = L.zones[0] ? L.zones[0].y + L.zones[0].h : 0;
+    const under = [
+      { id: 'immersive-bg', type: 'shape', x: 0, y: 0, w: W, h: height, fill: L.c.deep, radius: 0, decorative: true },
+      ...(image ? [{ id: 'hero', type: 'image', asset: 'hero', x: 0, y: 0, w: W, h: height, fit: 'cover', detail: '主视觉' }]
+        : [{ id: 'immersive-glow', type: 'shape', x: 0, y: 0, w: W, h: height, fill: L.c.accent, radius: 0, decorative: true, fade: { stops: [[0, 0.32], [0.45, 0.08], [1, 0]] } }]),
+      { id: 'immersive-shade', type: 'shape', x: 0, y: 0, w: W, h: height, fill: L.c.deep, radius: 0, decorative: true, fade: { stops: [[0, 0.1], [0.3, 0.42], [0.6, 0.72], [1, 0.9]] } }
+    ];
+    L.layers.unshift(...under);
+    L.zones.push({ id: 'content', x: 0, y: contentTop, w: W, h: height - contentTop, tone: 'dark' });
+  }
   const c = L.c, title = str(content.headline, '大标题', 30, true);
   return {
     title: input.title || title, width: W, height, font_family: 'sans', ...(input.path && { path: input.path }),
     design: {
       layout: 'free', text_fit: 'strict', reading: 'phone',
-      concept: { idea: `版式模板「${spec.id}」：${title}`, relation: image ? 'overlay' : 'type-led', focus: '标题', mood: style },
+      concept: { idea: `版式模板「${spec.id}」${immersive ? '（沉浸式图文融合）' : ''}：${title}`, relation: image || immersive ? 'overlay' : 'type-led', focus: '标题', mood: style },
       palette: { background: c.background, ink: c.ink, muted: c.muted, accent: c.accent, card: c.card },
       ...(image && { assets: [{ id: 'hero', path: image }] }),
       layers: L.layers
-    }
+    },
+    // 生图留位：画布比例的文字区（先排版后生图用）
+    zones: L.zones.map(z => ({ id: z.id, tone: z.tone, x: 0, y: Math.round(z.y / height * 1000) / 1000, w: 1, h: Math.round(Math.min(z.h, height - z.y) / height * 1000) / 1000 }))
   };
 }

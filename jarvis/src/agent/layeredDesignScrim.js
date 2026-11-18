@@ -62,7 +62,8 @@ function scrimLayer(design, group, n, level) {
   if (imageBottom - group.bottom < image.h * 0.25) bottom = imageBottom;
   if (group.top - image.y < image.h * 0.2) y = image.y;
   // 浅色字配深色遮罩，深色字配浅色遮罩；画布底色合适就用底色，跟整体配色一致
-  const light = luminanceHex(group.items[0].node.color) > 0.4, bg = design.palette.background;
+  // 按哪种底对比度更高来选：亮度 0.179 是黑底、白底对比相等的分界（2026-11-18：橙色字原按 0.4 分界被配了白遮罩，越遮越看不清）
+  const light = luminanceHex(group.items[0].node.color) > 0.179, bg = design.palette.background;
   const fill = light ? (luminanceHex(bg) < 0.08 ? bg : '#0B0D12') : (luminanceHex(bg) > 0.75 ? bg : '#FFFFFF');
   const span = bottom - y, fadeTop = y > image.y ? round(Math.min(0.7, (group.top - y) / span)) : 0;
   const fadeBottom = bottom < imageBottom ? round(Math.max(fadeTop, (group.bottom - y) / span)) : 1;
