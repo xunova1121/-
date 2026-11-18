@@ -17,6 +17,7 @@ import { CANVAS_TEXT_PROPERTIES, usesCanvasText } from './imageTextInput.js';
 import { deliverCanvasText } from './imageTextDelivery.js';
 import { sketchPosters } from './posterSketch.js';
 import { deliverAiPoster, AI_POSTER_LIMITS } from './aiPoster.js';
+import { templateDesignInput, TEMPLATE_IDS, TEMPLATE_GUIDE } from './posterTemplates.js';
 import { CONCEPT_SCHEMA } from './layeredDesignSchema.js';
 
 const SIZES = { 竖版: [1080, 1920], 横版: [1920, 1080], 方形: [1440, 1440], 朋友圈封面: [1440, 1080], 小红书: [1024, 1536] };
@@ -173,6 +174,8 @@ export function createPosterDeliveryTool(ctx = {}) {
         background_color: { type: 'string' },
         theme: { type: 'string', description: '兼容已有配色名称；明确颜色参数优先' },
         path: { type: 'string', description: '成品路径，三种文件共用名称，如海报/秋季养生汤.png' },
+        template: { type: 'object', additionalProperties: false, description: '版式模板：文字多的海报（新闻速览、人物事件、赛程、活动、数据播报、要点清单）优先用它——模型只选模板、填内容，版式/字号/间距/配色由设计好的模板按字数算，比自己摆坐标好看、一次就能过检查。可配一张无字主视觉图（先generate_image生成，image填路径）。content字段：' + TEMPLATE_GUIDE,
+          properties: { id: { type: 'string', enum: TEMPLATE_IDS }, style: { type: 'string', enum: ['blue', 'red', 'green', 'dark', 'warm'], description: '配色：blue新闻商务、red时政热点、green健康环保、dark科技数据、warm活动生活' }, image: { type: 'string', description: '可选：工作区无字主视觉图路径' }, content: { type: 'object', description: '按模板填写，字段见说明' } }, required: ['id', 'content'] },
         ai_full: { type: 'object', additionalProperties: false, description: `AI整图出稿：宣传类、字少的海报（标题+最多${AI_POSTER_LIMITS.lines}条短要点，全部文字≤${AI_POSTER_LIMITS.chars}字）优先用它——画面和文字由画图模型一次画出，图文一体更好看；程序把图里的字读回逐条核对，写错会重画一次，仍不对就标待核对、改用design程序排字。赛程、名单、数据表等信息多的不要用`,
           properties: { prompt: { type: 'string', description: '画面描述：主体、场景、风格、配色、构图（不要写文字内容，文字放texts）' }, size: { type: 'string', description: '如1024x1536竖版、1536x1024横版' },
             texts: { type: 'object', additionalProperties: false, properties: { title: { type: 'string', description: '主标题≤16字' }, subtitle: { type: 'string', description: '≤24字' }, lines: { type: 'array', maxItems: 5, items: { type: 'string', description: '每条≤24字' } }, footer: { type: 'string', description: '≤30字' } }, required: ['title'] } }, required: ['texts'] },
@@ -184,6 +187,8 @@ export function createPosterDeliveryTool(ctx = {}) {
     },
     run: async (input = {}, { signal, progress, checkpoint, retrieval, requiresRichVisual, posterAttempt, beginPosterAttempt, designReviewBlocking } = {}) => {
       if (!input || typeof input !== 'object' || Array.isArray(input)) throw inputError('海报参数必须是对象');
+      // 版式模板（posterTemplates.js）：模型只填内容，模板算版式，再走分层交付
+      if (input.template !== undefined) input = templateDesignInput(input);
       // AI整图出稿 + 逐字核对（aiPoster.js）：宣传类、字少的海报
       if (input.ai_full !== undefined) return deliverAiPoster(input, ctx, { signal, progress, beginPosterAttempt });
       // 草图对比：不出正式稿、不算试排（posterSketch.js）
