@@ -7,8 +7,9 @@ if [[ "${GITHUB_ACTIONS:-}" != true || "${RUNNER_OS:-}" != Linux ]]; then
   echo '非 GitHub Linux 构建机，不改软件源。'
   exit 0
 fi
-for source_file in /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+rules="$(dirname "${BASH_SOURCE[0]}")/ci-ubuntu-mirrors.sed"
+for source_file in /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
   if [[ -f "$source_file" ]]; then
-    sudo sed -i -E 's#https?://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)#https://archive.ubuntu.com/ubuntu/\1#g' "$source_file"
+    sudo sed -E -i -f "$rules" "$source_file"
   fi
 done
