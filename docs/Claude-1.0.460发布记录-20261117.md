@@ -31,3 +31,9 @@
 - 验证：lint 通过；单元测试 4349 全过；本机门禁 34 过 1 失败（已知本机浏览器差异 e2e/music-card.mjs:85），手机步骤其余部分单独跑 350 ✓。
 - 发布：run 44213095094（f3a15ed）。安卓打包第一次在装系统包（ffmpeg/中文字体）时镜像下载超时三次、未进入构建，重跑失败任务一次后全部成功。APK versionCode 462、v2 证书 56e3579b…363d6 一致；Windows 安装包 152967396 字节；服务器包 1195 项全部 root 属主、全员可读，sha256 与 jarvis-server-latest.json 一致，含 posterTemplateArt.js 与 backNavigation.js；latest.yml 与服务器清单均为 1.0.462。
 - 未验收：真实画图模型的留白遵守情况、安卓手势返回真机、Windows 真机。
+
+## 1.0.463（2026-11-18）
+- 沉浸式海报按用户给的豆包样张重排（豆包那张赛程配错/编造/漏掉多场，只学排版）；海报默认一张底图+程序排字、海报工具含图库搜图、生图要求改为铺满画面；过大配图缩小再嵌入（`layeredDesignAssetSize.js`）；遮罩插在覆盖范围内所有文字之下、按钮上的字交给换色。
+- 验证：lint 通过；单元测试 4362 全过；本机门禁 34 过 1 失败（已知 e2e/music-card.mjs:85 本机浏览器差异），手机步骤其余 350 ✓。
+- 发布：run 44231926722（f3b5be1）一次成功。APK versionCode 463、v2 证书 56e3579b…363d6 一致；Windows 安装包 152970811 字节；服务器包 1196 项全 root 属主、全员可读，sha256 与 jarvis-server-latest.json 一致，含 layeredDesignAssetSize.js；latest.yml 与服务器清单均为 1.0.463。
+- 未验收：真实图库搜图与真实照片效果；掉线问题待服务器日志确认。
