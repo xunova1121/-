@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadHistory, HISTORY_REFRESH_MS, STALE_HINT, LOGIN_HINT, EMPTY_HINT } from '../src/ui/historyList.js';
+import { loadHistory, HISTORY_REFRESH_MS, STALE_HINT, LOGIN_HINT, EMPTY_HINT, refreshInterval } from '../src/ui/historyList.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const timeout = () => Promise.reject(Object.assign(new Error('连服务器超时（5 秒没有回应）'), { kind: 'timeout' }));
@@ -24,6 +24,10 @@ describe('对话列表读不到时不清空', () => {
     const wb = fs.readFileSync(path.join(ROOT, 'src/ui/workbench.js'), 'utf8');
     const panel = fs.readFileSync(path.join(ROOT, 'src/ui/sessionsPanel.js'), 'utf8');
     expect(HISTORY_REFRESH_MS).toBeGreaterThanOrEqual(30000);
+    // 连服务器才降频；本机列表照旧 3 秒（e2e/pc-agent-navigation 直接写本机库后要很快出现在左栏）
+    expect(refreshInterval(true)).toBe(HISTORY_REFRESH_MS);
+    expect(refreshInterval(false)).toBe(3000);
+    expect(wb).toContain('refreshInterval(sessions.usingRemote())');
     expect(wb).toContain('loadHistory(');
     expect(wb).not.toContain('历史对话暂不可用');
     expect(wb).not.toMatch(/refresh\(\)\.catch\(\(\)=>\{\}\),3000\)/);

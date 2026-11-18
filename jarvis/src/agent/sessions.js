@@ -14,6 +14,8 @@ const TITLE_MAX = 24;
 /** 服务器模式：对话存在自己的服务器上（见 core/serverClient.js 的 remoteSessions），读写都交给它 */
 let remote = null;
 export function useRemote(r) { remote = r; }
+/** 现在是不是从服务器读对话（电脑左栏据此决定刷新频率） */
+export const usingRemote = () => Boolean(remote);
 
 /** 用第一句话做标题 */
 export function autoTitle(text) {
