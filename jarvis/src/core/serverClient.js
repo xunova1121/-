@@ -15,7 +15,7 @@ import { serverModelPreview } from './serverModelPreview.js';
  */
 import { errorKind } from './suggest.js';
 import { retryWait } from '../llm/openai.js';
-import { abortableFetch } from './abortableFetch.js';
+import { abortableFetch, withAbortSignals } from './abortableFetch.js';
 const KEY = 'jarvis.server.v1';
 const DEVICE_KEY = 'jarvis.server.device.v1';
 const migrations = new Map(); // 最多16台服务器，合并同一浏览器并发的旧登录换发。
@@ -441,7 +441,10 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
       if (failures >= limit) throw Object.assign(new Error('任务已提交，但暂时无法接收服务器进度；服务器可能继续运行，请稍后打开原对话查看。'), { code: 'TASK_OBSERVATION_LOST', kind: 'network' });
       if (fastRetry) continue;
       retryWake = new AbortController();
-      try { await sleep(retryMs[Math.min(failures - 1, retryMs.length - 1)], AbortSignal.any([waiting.signal, retryWake.signal])); }
+      try {
+        const delay = retryMs[Math.min(failures - 1, retryMs.length - 1)];
+        await withAbortSignals([waiting.signal, retryWake.signal], wake => sleep(delay, wake));
+      }
       catch (error) { if (signal?.aborted) throw aborted(); if (finalFailure || epoch === wakeEpoch) throw finalFailure || error; }
       finally { retryWake = null; }
     }

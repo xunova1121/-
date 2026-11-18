@@ -11,7 +11,7 @@ import { useBackend } from '../src/agent/store.js';
 const out = process.argv[2] || '/tmp/weiyang-server-resume';
 await mkdir(out, { recursive: true });
 const data = await mkdtemp(path.join(os.tmpdir(), 'weiyang-resume-'));
-let finishModel;
+let finishModel, eventStream;
 const requests = [], checks = [], errors = [], pendingConfig = [];
 const check = (label, ok) => { checks.push({ label, ok: Boolean(ok) }); console.log(`${ok ? '✓' : '✗'} ${label}`); if (!ok) throw Error(label); };
 const makeTaskAdapter = () => ({ model: 'resume-fixture-chat', adapter: { async stream(input) {
@@ -26,7 +26,11 @@ const server = createServer({ serverMode: mode, ollama: null });
 const mobile = createServer({ staticDir: path.resolve('dist-mobile'), ollama: null });
 for (const service of [server, mobile]) await new Promise(resolve => service.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
-server.on('request', req => { const url = new URL(req.url, base); requests.push({ path: url.pathname, method: req.method, after: Number(url.searchParams.get('after') || 0), at: Date.now() }); });
+server.on('request', (req, res) => {
+  const url = new URL(req.url, base);
+  if (req.method === 'GET' && url.pathname.endsWith('/events')) eventStream = res;
+  requests.push({ path: url.pathname, method: req.method, after: Number(url.searchParams.get('after') || 0), at: Date.now() });
+});
 const owner = createServerClient({ base, token: tokenFor('fixture-resume-password') });
 await owner.putConfig({ provider: 'custom', models: { custom: 'resume-fixture-chat' }, keys: { custom: 'FIXTURE_MODEL_SECRET' }, baseURLs: { custom: 'https://fixture.invalid/v1' }, pinModel: true });
 const member = await owner.createUser('恢复测试甲'), other = await owner.createUser('恢复测试乙');
@@ -39,6 +43,7 @@ try {
   await context.addInitScript(({ base, token, userId }) => {
     if (!localStorage.getItem('jarvis.server.v1')) localStorage.setItem('jarvis.server.v1', JSON.stringify({ url: base, token, userId, role: 'member', enabled: true }));
     localStorage.setItem('jarvis.settings.v1', JSON.stringify({ speechOutput: false, autoMemory: false, theme: 'day', teamMode: 'off' }));
+    Object.defineProperty(AbortSignal, 'any', { value: undefined, configurable: true });
     window.__resumeRejections = [];
     addEventListener('unhandledrejection', e => window.__resumeRejections.push(String(e.reason?.message || e.reason)));
   }, { base, token: login.token, userId: member.id });
@@ -70,9 +75,19 @@ try {
   resumeMs = resumed.at(-1).at - resumeAt;
   check('前台立即续接同一任务，不等10秒轮询或45秒失活', resumed.length === before + 1 && resumed.at(-1).after > 0 && resumeMs < 2500);
   check('前台/焦点双事件只续接一次，任务没有重复提交', requests.filter(r => r.path === '/api/tasks' && r.method === 'POST').length === 1);
+  // 切回前台后，真实 SSE 只收到心跳便结束。旧内核也应走重试，按上次序号继续读。
+  const lastResume = resumed.at(-1);
+  eventStream.end(': heartbeat\n\n');
+  const retryUntil = Date.now() + 10000;
+  const sameTaskReads = () => requests.filter(r => r.method === 'GET' && r.path === lastResume.path);
+  while (sameTaskReads().length <= resumed.length && Date.now() < retryUntil) await new Promise(resolve => setTimeout(resolve, 25));
+  check('旧WebView缺少AbortSignal.any时，首次续接中断后仍按原任务序号重试',
+    sameTaskReads().length === resumed.length + 1 && sameTaskReads().at(-1).after >= lastResume.after);
   finishModel();
   await page.waitForFunction(() => !document.querySelector('#transcript .msg.agent.streaming') && document.querySelector('#transcript')?.textContent.includes('恢复后收到结果。'));
   check('结果完整续回且旧段落不重复', (await page.locator('#transcript').innerText()).split('恢复前已有内容。').length === 2);
+  check('恢复并完成时只提交一次任务，也没有发出停止请求', requests.filter(r => r.path === '/api/tasks' && r.method === 'POST').length === 1 &&
+    !requests.some(r => r.method === 'POST' && r.path === lastResume.path.replace(/events$/, 'stop')));
   await page.screenshot({ path: path.join(out, 'resumed-task.png') });
 
   await context.route(base + '/api/server/config', route => new Promise(resolve => pendingConfig.push(async () => { await route.abort(); resolve(); })));

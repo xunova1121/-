@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createServerClient } from '../src/core/serverClient.js';
-import { abortableFetch } from '../src/core/abortableFetch.js';
+import { abortableFetch, withAbortSignals } from '../src/core/abortableFetch.js';
 import { waitForDocumentStyle } from '../e2e/wait-document-style.mjs';
 
 const response = (data = {}) => new Response(JSON.stringify(data));
@@ -94,6 +94,37 @@ describe('服务器读取诊断、重试与停止', () => {
       page.evaluate.mockReset().mockResolvedValue({ kind: 'http', httpStatus: 401 });
       await expect(waitForDocumentStyle(page)).rejects.toMatchObject({ status: 401, kind: 'api' });
       expect(page.evaluate).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+});
+
+describe('取消信号兼容与清理', () => {
+  it('先停止时保留原因，工作不会启动，已绑定的监听也会清理', async () => {
+    const first = new AbortController(), second = new AbortController();
+    const add = vi.spyOn(first.signal, 'addEventListener'), remove = vi.spyOn(first.signal, 'removeEventListener');
+    const reason = new Error('切换了工作区'), work = vi.fn();
+    second.abort(reason);
+    await expect(withAbortSignals([first.signal, second.signal], work)).rejects.toBe(reason);
+    expect(work).not.toHaveBeenCalled();
+    expect(remove).toHaveBeenCalledWith('abort', add.mock.calls[0][1]);
+  });
+
+  it('请求结束即释放监听和超时，截止前仍能从任一上游取消', async () => {
+    vi.useFakeTimers();
+    try {
+      const first = new AbortController(), second = new AbortController();
+      const remove = vi.spyOn(first.signal, 'removeEventListener');
+      const used = await withAbortSignals([first.signal, second.signal], s => s, 15000);
+      expect(remove).toHaveBeenCalledOnce();
+      const waitForAbort = s => new Promise(resolve => s.addEventListener('abort', () => resolve(s.reason), { once: true }));
+      const waiting = withAbortSignals([first.signal, second.signal], waitForAbort, 15000);
+      const reason = new Error('唤醒');
+      second.abort(reason);
+      expect(await waiting).toBe(reason);
+      const deadline = withAbortSignals([first.signal], waitForAbort, 15000);
+      await vi.advanceTimersByTimeAsync(15000);
+      expect(await deadline).toMatchObject({ name: 'TimeoutError' });
+      expect(used.aborted).toBe(false);
     } finally { vi.useRealTimers(); }
   });
 });
