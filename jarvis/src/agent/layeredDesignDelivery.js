@@ -197,8 +197,10 @@ async function deliverLoadedDesign({ design, assets, base, preflight, requireCon
   receipt.visual = receipt.visualReport.status;
   if (receipt.contentCheck) {
     const checks = receipt.visualReport.checks || {};
-    receipt.contentCheck.semantic = ['visualsPresent', 'relatedToTopic', 'integrated'].some(k => checks[k] === false) ? 'failed'
-      : ['visualsPresent', 'relatedToTopic', 'integrated'].every(k => checks[k] === true) ? 'passed' : 'not_checked';
+    const required = ['visualsPresent', 'relatedToTopic', 'integrated'];
+    if (design.layers.some(n => n.id === 'news-lead' && n.type === 'text')) required.push('leadClear');
+    receipt.contentCheck.semantic = required.some(k => checks[k] === false) ? 'failed'
+      : required.every(k => checks[k] === true) ? 'passed' : 'not_checked';
     if (receipt.contentCheck.semantic !== 'passed') receipt.errors.push({ code: 'DESIGN_ILLUSTRATION_UNVERIFIED', phase: 'visual', message: '图文并茂尚未通过实际成品复核，保留候选，不承诺验收通过' });
   }
   if (receipt.visual === 'failed') receipt.errors.push({ code: 'DESIGN_VISUAL_NEEDS_REVIEW', phase: 'visual' });

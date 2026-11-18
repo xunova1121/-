@@ -11,7 +11,7 @@ export function posterContent(design) {
     if (node.decorative || !['image', 'chart'].includes(node.type) || node.w * node.h < area * 0.025 || Math.min(node.w, node.h) < Math.min(design.width, design.height) * 0.1) return false;
     if (node.type === 'chart' && (!node.points?.length || !node.points.every(p => p.label.trim() && Number.isFinite(p.value)))) return false;
     // 被后置实色面板/图片完全盖住的素材不能充数。部分遮挡仍交实际PNG复核。
-    return !layers.slice(index + 1).some(n => ['shape', 'image'].includes(n.type) && n.x <= node.x && n.y <= node.y && n.x + n.w >= node.x + node.w && n.y + n.h >= node.y + node.h);
+    return !layers.slice(index + 1).some(n => ['shape', 'image'].includes(n.type) && (!n.fade || n.fade.stops.every(([, opacity]) => opacity === 1)) && n.x <= node.x && n.y <= node.y && n.x + n.w >= node.x + node.w && n.y + n.h >= node.y + node.h);
   });
   return { status: visuals.length ? 'passed' : 'failed', basis: '结构检查；图标、数字卡片及装饰不算主题配图或数据图表',
     visuals: visuals.map(n => ({ id: n.id, type: n.type, ...(n.type === 'chart' && { chartType: n.chartType || 'line', points: n.points.length }) })),
@@ -40,9 +40,20 @@ export function designThinkingIssues(design, { requireConcept = false } = {}) {
   const issues = [];
   if (requireConcept && !(design.concept?.idea && design.concept?.relation))
     issues.push({ code: 'DESIGN_CONCEPT_MISSING', field: 'design.concept', message: '先写构思再排图层：design.concept至少给idea（一句话创意）和relation（按内容选的图文关系），不要直接套上图下面板' });
-  const text = design.layers.filter(n => n.type === 'text').map(n => n.text).join('\n');
-  const percents = text.match(/[+-]?\d+(?:\.\d+)?\s*[%％]/g) || [];
-  if (percents.length >= 3 && !design.layers.some(n => n.type === 'chart'))
-    issues.push({ code: 'DESIGN_DATA_NEEDS_CHART', field: 'layers', message: `正文有${percents.length}个百分比数据，请至少用一个chart图层（分类对比用chartType=bar并写unit）由程序画出来，数字照原文，不只堆在文字里` });
+  // Unrelated stories may each cite a percentage. Only compare values within the same story.
+  const editorial = design.layers.some(n => n.id === 'news-lead');
+  const groups = new Map();
+  for (const node of design.layers) {
+    const group = editorial ? node.group : 'poster';
+    if (!groups.has(group)) groups.set(group, { percentages: 0, hasChart: false });
+    const evidence = groups.get(group);
+    if (node.type === 'text') evidence.percentages += (node.text.match(/[+-]?\d+(?:\.\d+)?\s*[%％]/g) || []).length;
+    if (node.type === 'chart') evidence.hasChart = true;
+  }
+  for (const [group, evidence] of groups) {
+    if (evidence.percentages >= 3 && !evidence.hasChart) {
+      issues.push({ code: 'DESIGN_DATA_NEEDS_CHART', field: editorial ? group : 'layers', message: `正文有${evidence.percentages}个百分比数据，请使用有来源、口径可比的原值作图；分类对比用chartType=bar并写unit` });
+    }
+  }
   return issues;
 }

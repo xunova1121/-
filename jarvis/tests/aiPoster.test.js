@@ -28,6 +28,13 @@ describe('AI整图出稿', () => {
     expect(compareTexts(['中国男足 vs 巴林', '20:00 开球'], '中国男足VS巴林\n20：00开球').status).toBe('passed');
     expect(compareTexts(['直播吧全程直播'], '直播吧全程直撥')).toEqual({ status: 'failed', missing: ['直播吧全程直播'] });
   });
+  it('时间分隔符、负号和小数点有含义，较长电话不能冒充正确号码', () => {
+    expect(compareTexts(['20:00'], '2000').status).toBe('failed');
+    expect(compareTexts(['-3.5%'], '35%').status).toBe('failed');
+    expect(compareTexts(['3.5%'], '-3.5%').status).toBe('failed');
+    expect(compareTexts(['电话12345'], '电话123456').status).toBe('failed');
+    expect(compareTexts(['２０：００', '−３．５％'], '20:00开场，变化-3.5%').status).toBe('passed');
+  });
   it('第一次有错字：带着修正要求重画一次，第二次全对就交付', async () => {
     const reads = ['今晚国足出战 中国男足vs巴林 20:00开球 直播吧全程直撥 赛程以官方为准', '今晚国足出战 中国男足vs巴林 20:00开球 直播吧全程直播 赛程以官方为准'];
     const imageGen = vi.fn(async () => ({ blob: png(), model: 'fixture' })), ocr = vi.fn(async () => ({ text: reads.shift(), model: 'ocr' }));

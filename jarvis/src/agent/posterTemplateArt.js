@@ -12,7 +12,7 @@ import { imageFormat } from './imageFormat.js';
 import { readImageMetadata } from './imageMetadata.js';
 import { imageCompositionPrompt } from './imageCompositionPrompt.js';
 import { clearAreaPrompt, checkClearAreas } from './posterClearAreas.js';
-import { templateDesignInput } from './posterTemplates.js';
+import { editorialNews, templateDesignInput } from './posterTemplates.js';
 import { throwControl } from '../core/networkRequest.js';
 
 const IMAGE_W = 1024, IMAGE_H = 1536;
@@ -42,22 +42,33 @@ export function templateArtPrompt(prompt, areas) {
 export async function templateWithArt(input, ctx, { signal, progress, raster } = {}) {
   const spec = input.template || {};
   const prompt = typeof spec.image_prompt === 'string' ? spec.image_prompt.trim() : '';
-  const wantArt = prompt && !(typeof spec.image === 'string' && spec.image.trim());
+  const edition = editorialNews(spec);
+  const leadIndex = (spec.content?.lead ?? 1) - 1;
+  const lead = edition && spec.content?.items?.[leadIndex];
+  const wantArt = prompt && !lead?.image && !(typeof spec.image === 'string' && spec.image.trim());
   const template = { ...spec, layout: wantArt || spec.layout === 'immersive' ? 'immersive' : spec.layout };
   delete template.image_prompt;
   const first = templateDesignInput({ ...input, template });
   if (!wantArt) return { input: first, art: null };
-  if (!ctx.imageGen) return { input: first, art: { status: 'skipped', note: '当前环境不能画图，按沉浸式版式出稿（深色渐变底，无配图）' } };
+  if (!ctx.imageGen) return { input: first, art: { status: 'skipped', note: edition ? '当前环境不能生成头条插画，保留已排好的新闻和已有配图' : '当前环境不能画图，按沉浸式版式出稿（深色渐变底，无配图）' } };
   const areas = zonesOnImage(first.zones, first.width, first.heroHeight || first.height);
   try {
-    progress?.('版式已排好，正在按文字位置生成满版配图（文字区留暗、主体让开）…');
-    const result = await ctx.imageGen({ prompt: templateArtPrompt(prompt, areas), size: `${IMAGE_W}x${IMAGE_H}`, outputFormat: 'png', signal });
+    progress?.(edition ? '正在为头条生成横向示意插画…' : '版式已排好，正在按文字位置生成满版配图（文字区留暗、主体让开）…');
+    const result = await ctx.imageGen({ prompt: edition ? imageCompositionPrompt(`为头条《${lead.title}》绘制横向编辑插画。主体居中，适合裁成宽幅，不画文字，不仿现场摄影。\n${prompt}`, 'poster_art') : templateArtPrompt(prompt, areas), size: edition ? '1536x1024' : `${IMAGE_W}x${IMAGE_H}`, outputFormat: 'png', signal });
     throwControl(null, signal);
     const format = result?.blob && await imageFormat(result.blob);
     if (!format || !['png', 'jpg', 'webp'].includes(format.ext)) throw new Error('画图服务返回的不是图片');
     const name = String(first.title || '海报').replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 24) || '海报';
-    const saved = await ws.write(`images/${name}-满版配图.${format.ext}`, result.blob);
+    const filename = edition ? `${name}-头条插画-${crypto.randomUUID()}` : `${name}-满版配图`;
+    const saved = await ws.write(`images/${filename}.${format.ext}`, result.blob);
     ctx.onFileChanged?.(saved.path);
+    if (edition) {
+      const items = template.content.items.map((item, i) => i === leadIndex ? { ...item, image: saved.path, image_credit: 'AI 示意插画' } : item);
+      const withLead = { ...template, content: { ...template.content, items } };
+      return { input: templateDesignInput({ ...input, template: withLead }), art: {
+        status: 'generated', path: saved.path, note: '已为头条生成示意插画，出处随图排版'
+      } };
+    }
     let check = null;
     try {
       const meta = await readImageMetadata(result.blob, { signal });
@@ -68,6 +79,6 @@ export async function templateWithArt(input, ctx, { signal, progress, raster } =
       note: '先排版后生图：' + (check?.status === 'failed' ? '配图有文字区没让够，已靠逐行对比度检查在字后补遮罩' : '配图按文字位置留了暗部') } };
   } catch (error) {
     throwControl(error, signal);
-    return { input: first, art: { status: 'failed', note: `配图生成失败（${String(error?.message || error).slice(0, 80)}），按沉浸式版式出稿（深色渐变底，无配图）` } };
+    return { input: first, art: { status: 'failed', note: `配图生成失败（${String(error?.message || error).slice(0, 80)}），${edition ? '保留已排好的新闻和已有配图' : '按沉浸式版式出稿（深色渐变底，无配图）'}` } };
   }
 }

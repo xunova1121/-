@@ -54,19 +54,22 @@ function designReview(value) {
 /** 有配置才做一次实际成品看图；独立预算、无联网/重试/自动收费重画，失败保留候选文件。 */
 export async function reviewLayeredDesign(ctx, design, png, { signal, retrieval, previewPng, previewKind, requiresRichVisual = false } = {}) {
   if (!ctx.visionLlm || !png || png.size > 12e6) return { status: 'not_checked', reason: '未配置视觉能力、未生成PNG或原图超过核验上限' };
+  const lead = design.layers.find(n => n.id === 'news-lead' && n.type === 'text');
+  const canReviewPreview = previewPng && png.size + previewPng.size <= 12e6;
+  if (lead && !canReviewPreview) return { status: 'not_checked', reason: '缺少可送审的手机整图预览，头条排版尚未验收' };
   try {
     const images = [await imageData(png, { detail: 'high' })];
-    if (previewPng && png.size + previewPng.size <= 12e6) images.push(await imageData(previewPng, { detail: 'high' }));
+    if (canReviewPreview) images.push(await imageData(previewPng, { detail: 'high' }));
     throwControl(null, signal);
     retrieval?.consume?.('model');
     const result = await withWebDeadline(activeSignal => ctx.visionLlm({
       system: '你是成品核验员。先从实际图片读取文字，再与给定文案对照；不因为给了正确文案就推断图片里正确。检查错别字、缺字、乱码、文字清晰度、裁切/遮挡和不当重叠。中文看不清或小字不可辨认必须用null，不可猜。若第二张存在，它是整张海报缩至手机宽度的真实预览，必须以它判断正文能否正常阅读，不能以放大原图可读代替。检查主视觉是否挤压正文、是否残留空卡片/占位框、是否上图下文生硬拼接，发现则写issues；不能仅凭没有重叠就称设计通过。只返回JSON：copyMatches/readable/noOverlap各为true、false或null，issues为最多6条简短问题。事实真实性不在本次像素核验范围内。另以资深设计师标准返回design对象：hierarchy第一眼能否看出主次（标题/主图/重点），cohesive图文是否融为一体、没有硬拼接缝或孤立色块，balanced留白、对齐、疏密是否得当，distinctive是否有自己的构思而不是常见模板或“AI味”（上图下大深色面板、背景素材堆砌抢戏、暗底配青紫发光、所有卡片一模一样、处处阴影、超大圆角、三张等宽卡片、强调色用在很多地方等于没有重点），concept是否实现给定构思（未给构思用null），各为true、false或null；suggestions最多4条具体改法（改哪个图层、往哪移、放大还是缩小、换什么图文关系），不建议删字或缩小正文。' + (previewKind === 'mobile_cards' ? '本次第二张不是整图缩放，而是交互Demo在手机上的卡片布局预览（按网页同样的分组和字号用同一字体排出，不是浏览器截图）；用它判断手机上是否好读、卡片顺序和配图是否合理，design各项要同时考虑电脑和手机两种宽度。' : '') + (requiresRichVisual ? '本任务要求图文并茂，另返回visualsPresent/relatedToTopic/integrated三个boolean或null：实际可见主题配图或有标签的数据图表、与主题有关、与文字有清楚关联且融合编排。数字卡片/装饰图标/空框不算配图；不相干图片或上图下文硬拼接不能通过；无法判断用null。' : ''),
-      prompt: '请检查此实际成品' + (previewPng ? '和整图手机缩放预览' : '') + (design.concept ? '；设计构思：' + JSON.stringify(design.concept) : '') + '；应有的准确文案：\n' + textNodes(design).map(n => `${n.id}：${n.text}`).join('\n'),
+      prompt: '请检查此实际成品' + (lead ? `，在手机预览中辨认头条《${lead.text}》，返回leadClear布尔值或null。逐项比对题图、栏目图与所属报道，错配写入issues。图表与图片的对应主题：${JSON.stringify(design.layers.filter(n => ['chart', 'image'].includes(n.type)).map(n => [n.group, n.detail]))}` : '') + (canReviewPreview ? '和整图手机缩放预览' : '') + (design.concept ? '；设计构思：' + JSON.stringify(design.concept) : '') + '；应有的准确文案：\n' + textNodes(design).map(n => `${n.id}：${n.text}`).join('\n'),
       images, signal: activeSignal, allowWebSearch: false, maxWebSearches: 0, maxTransientRetries: 0, maxPartialRetries: 0
     }), { signal, timeoutMs: 25000 });
     if (typeof result !== 'string' || result.length > 5000) return { status: 'not_checked', reason: '视觉回执无效' };
     const value = JSON.parse(result.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''));
-    const checks = Object.fromEntries(['copyMatches', 'readable', 'noOverlap', ...(requiresRichVisual ? ['visualsPresent', 'relatedToTopic', 'integrated'] : [])].map(k => [k, typeof value?.[k] === 'boolean' ? value[k] : null]));
+    const checks = Object.fromEntries(['copyMatches', 'readable', 'noOverlap', ...(lead ? ['leadClear'] : []), ...(requiresRichVisual ? ['visualsPresent', 'relatedToTopic', 'integrated'] : [])].map(k => [k, typeof value?.[k] === 'boolean' ? value[k] : null]));
     const validIssues = Array.isArray(value?.issues) && value.issues.every(s => typeof s === 'string');
     const issues = validIssues ? value.issues.slice(0, 6).map(s => s.slice(0, 160)) : null;
     const status = Object.values(checks).some(v => v === false) || issues?.length ? 'failed' : validIssues && Object.values(checks).every(v => v === true) ? 'passed' : 'not_checked';

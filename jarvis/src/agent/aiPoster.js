@@ -44,10 +44,25 @@ export function aiPosterPrompt(description, texts, fixes = []) {
 }
 
 /** 比对时去掉空白和常见标点差异（全角半角、引号、间隔号），只比文字本身 */
-export const normalizeText = s => String(s).normalize('NFKC').replace(/[\s「」『』“”"'‘’·•・,，。.、:：;；!！?？()（）【】\[\]<>《》\-—–_|/]/g, '').toLowerCase();
+export function normalizeText(text) {
+  const compact = String(text).normalize('NFKC').toLowerCase().replace(/\s/g, '').replace(/−/g, '-');
+  return compact.replace(/[「」『』“”"'‘’·•・,，。.、:：;；!！?？()（）【】\[\]<>《》\-—–_|/]/g, (mark, index) => {
+    const nextDigit = /\d/.test(compact.charAt(index + 1));
+    if (nextDigit && (mark === '-' || (/[.:/,]/.test(mark) && /\d/.test(compact.charAt(index - 1))))) return mark;
+    return '';
+  });
+}
 export function compareTexts(required, read) {
   const got = normalizeText(read);
-  const missing = required.filter(s => !got.includes(normalizeText(s)));
+  const missing = required.filter(s => {
+    const want = normalizeText(s);
+    for (let index = got.indexOf(want); index >= 0; index = got.indexOf(want, index + 1)) {
+      if (/^\d/.test(want) && /[\d.+-]/.test(got.charAt(index - 1))) continue;
+      if (/\d$/.test(want) && /[\d.]/.test(got.charAt(index + want.length))) continue;
+      return false;
+    }
+    return true;
+  });
   return { status: missing.length ? 'failed' : 'passed', missing };
 }
 

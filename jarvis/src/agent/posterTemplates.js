@@ -165,6 +165,99 @@ function numberedCards(L, items, y, { numbered = true } = {}) {
   return y;
 }
 
+// An editorial digest keeps every visual and source with the story it explains.
+export function editorialNews(spec) {
+  const content = spec.content || {};
+  return spec.id === 'news_brief' && (content.lead !== undefined ||
+    (Array.isArray(content.items) && (content.items.length > 6 ||
+      content.items.some(item => item?.topic || item?.image || item?.chart))));
+}
+
+function newsChart(chart, group, L, y) {
+  const title = str(chart.title, '图表标题', 30, true);
+  const source = str(chart.source, '图表来源', 80, true);
+  const points = arr(chart.points, '图表分类', 2, 6).map(p => {
+    if (!Number.isFinite(p?.value)) throw fail('新闻图表需要原始有限数值');
+    return { label: str(p.label, '图表分类名称', 10, true), value: p.value };
+  });
+  y += L.text(group + '-chart-title', title, M, y, CW, 36, { bold: true, group }) + 14;
+  const h = Math.max(280, points.length * 86);
+  L.layers.push({ id: group + '-chart', type: 'chart', chartType: 'bar', x: M, y, w: CW, h,
+    color: L.c.ink, unit: str(chart.unit, '图表单位', 8), points, detail: title, group });
+  y += h + 12;
+  return y + L.text(group + '-chart-source', source, M, y, CW, 26, { group, role: 'label', color: L.c.muted }) + 16;
+}
+
+function newsStory(item, index, lead, spec, L, y) {
+  const group = 'story-' + (index + 1);
+  const title = str(item?.title, '新闻标题', 30, true);
+  const detail = str(item.detail, '新闻说明', 100);
+  const source = str(item.source, '报道来源', 80);
+  const path = item.image || (lead && spec.image);
+  const sidePhoto = path && !lead;
+  const textWidth = sidePhoto ? 552 : CW;
+  const top = y;
+  let photoEnd = top;
+  y += L.text(lead ? 'news-lead' : group + '-title', title, M, y, textWidth, lead ? 76 : 42,
+    { bold: true, group, role: lead ? 'heading' : 'body' }) + 12;
+  if (path) {
+    const credit = str(item.image_credit, '配图出处（实拍来源、用户供图或生成示意）', 80, true);
+    let asset = L.assets.find(a => a.path === path);
+    if (!asset) {
+      if (L.assets.length >= 4) throw fail('单张新闻海报最多放四份配图素材');
+      asset = { id: group + '-photo', path };
+      L.assets.push(asset);
+    }
+    const x = sidePhoto ? M + textWidth + 32 : M;
+    const w = sidePhoto ? CW - textWidth - 32 : CW;
+    const h = sidePhoto ? 212 : 430;
+    const photoY = sidePhoto ? top : y;
+    L.layers.push({ id: group + '-image', type: 'image', asset: asset.id, fit: 'cover',
+      x, y: photoY, w, h, detail: title, group });
+    const captionY = photoY + h + 10;
+    photoEnd = captionY + L.text(group + '-credit', credit, x, captionY, w, 26, { group, role: 'label', color: L.c.muted }) + 12;
+    if (!sidePhoto) y = photoEnd;
+  }
+  if (detail) y += L.text(group + '-body', detail, M, y, textWidth, lead ? 38 : 34, { group }) + 10;
+  if (source) y += L.text(group + '-source', source, M, y, textWidth, 26, { group, role: 'label', color: L.c.muted }) + 8;
+  if (sidePhoto) y = Math.max(y, photoEnd);
+  if (item.chart) y = newsChart(item.chart, group, L, y + 8);
+  return y + 26;
+}
+
+function newsEdition(spec, L) {
+  const content = spec.content;
+  const items = arr(content.items, '新闻条目', 2, 8);
+  const lead = content.lead === undefined ? 1 : content.lead;
+  if (!Number.isInteger(lead) || lead < 1 || lead > items.length) throw fail('lead 应为头条在 items 中的序号（从 1 开始）');
+  const headline = str(content.headline, '刊名或总标题', 30, true);
+  const edition = [str(content.eyebrow, '栏目', 16), headline, str(content.date, '日期', 24)].filter(Boolean).join('  ·  ');
+  let y = 58 + L.text('masthead', edition, M, 58, CW, 34, { bold: true, role: 'label' }) + 24;
+  L.rect(M, y, CW, 4, L.c.ink);
+  y += 28;
+  const summary = str(content.summary, '导语', 60);
+  if (summary) y += L.text('summary-body', summary, M, y, CW, 34, { color: L.c.muted }) + 18;
+  const topics = new Map();
+  items.forEach((item, i) => {
+    const topic = str(item?.topic, '新闻分组', 14);
+    if (i === lead - 1) {
+      if (topic) y += L.text('lead-topic', topic, M, y, CW, 30, { bold: true, role: 'label', color: L.c.muted }) + 10;
+      y = newsStory(item, i, true, spec, L, y);
+    } else {
+      if (!topics.has(topic)) topics.set(topic, []);
+      topics.get(topic).push(i);
+    }
+  });
+  for (const [topic, indices] of topics) {
+    L.rect(M, y, CW, 2, L.c.muted);
+    y += 22;
+    if (topic) y += L.text('topic-' + (indices[0] + 1), topic, M, y, CW, 32, { bold: true, role: 'label', color: L.c.muted }) + 14;
+    for (const index of indices) y = newsStory(items[index], index, false, spec, L, y);
+  }
+  const credit = str(content.footer, '页脚', 80);
+  return credit ? footer(L, credit, y) : y + 28;
+}
+
 const TEMPLATES = {
   /** 新闻速览：页头大标题 + 带序号的新闻卡 + 来源页脚 */
   news_brief(content, L, image) {
@@ -296,7 +389,7 @@ const TEMPLATES = {
   }
 };
 export const TEMPLATE_IDS = Object.keys(TEMPLATES);
-export const TEMPLATE_GUIDE = 'news_brief新闻速览{date?,eyebrow?,headline,summary?,items[2–6]{title,detail?,source?},footer}；person_event人物事件{name,role?,headline,summary?,quote?,events[2–7]{date,text,focus?},facts?[≤4]{label,value},footer}；schedule赛程日程{date?,headline,summary?,groups[1–5]{name,rows[1–14]{time,text,note?,focus?}},footer}；event_promo活动宣传{headline,subtitle?,info[1–4]{label,value},highlights?[≤4],cta?,footer}；data_report数据播报{period?,headline,summary?,kpis[2–4]{label,value,change?},chart?{title,unit,points[{label,value}]},notes?[≤4],footer}；tips要点清单{headline,intro?,items[3–8]{title,detail?},footer}';
+export const TEMPLATE_GUIDE = 'news_brief新闻速览{date?,eyebrow?,headline,summary?,lead(头条序号从1起),items[2–8]{title,detail?,topic?,source?,image?(本地路径),image_credit?(有图必填),chart?{title,unit,source,points[{label,value}]}},footer?}；person_event人物事件{name,role?,headline,summary?,quote?,events[2–7]{date,text,focus?},facts?[≤4]{label,value},footer}；schedule赛程日程{date?,headline,summary?,groups[1–5]{name,rows[1–14]{time,text,note?,focus?}},footer}；event_promo活动宣传{headline,subtitle?,info[1–4]{label,value},highlights?[≤4],cta?,footer}；data_report数据播报{period?,headline,summary?,kpis[2–4]{label,value,change?},chart?{title,unit,points[{label,value}]},notes?[≤4],footer}；tips要点清单{headline,intro?,items[3–8]{title,detail?},footer}';
 
 /** 模板 → 分层设计稿输入（走 deliverLayeredDesign） */
 export function templateDesignInput(input) {
@@ -304,10 +397,12 @@ export function templateDesignInput(input) {
   const build = TEMPLATES[spec.id];
   if (!build) throw fail(`请选择模板id：${TEMPLATE_IDS.join('/')}`);
   const style = TEMPLATE_STYLES[spec.style] ? spec.style : spec.id === 'event_promo' ? 'warm' : spec.id === 'data_report' ? 'dark' : spec.id === 'person_event' ? 'red' : 'blue';
-  const immersive = spec.layout === 'immersive';
+  const edition = editorialNews(spec);
+  const immersive = !edition && spec.layout === 'immersive';
   const L = layout(style, immersive), content = spec.content || {};
   const image = typeof spec.image === 'string' && spec.image.trim() ? spec.image.trim() : null;
-  const height = Math.max(1350, Math.ceil(build(content, L, image)));
+  L.assets = [];
+  const height = Math.max(1350, Math.ceil(edition ? newsEdition(spec, L) : build(content, L, image)));
   if (height > 4096) throw fail('内容太多，画布超过4096像素高；请减少条目或拆成两张');
   if (immersive) {
     // 满版画面在最底层，上面一层由上到下压暗（标题区和卡片区都落在暗部），再往上才是文字和半透明卡片
@@ -329,9 +424,9 @@ export function templateDesignInput(input) {
     title: input.title || title, width: W, height, font_family: 'sans', ...(input.path && { path: input.path }),
     design: {
       layout: 'free', text_fit: 'strict', reading: 'phone',
-      concept: { idea: `版式模板「${spec.id}」${immersive ? '（沉浸式图文融合）' : ''}：${title}`, relation: image || immersive ? 'overlay' : 'type-led', focus: '标题', mood: style },
+      concept: edition ? { idea: '先读头条，再按话题浏览其他新闻，图表与来源随报道排版', focus: L.layers.find(n => n.id === 'news-lead').text, relation: 'interleave', mood: style } : { idea: `版式模板「${spec.id}」${immersive ? '（沉浸式图文融合）' : ''}：${title}`, relation: image || immersive ? 'overlay' : 'type-led', focus: '标题', mood: style },
       palette: { background: c.background, ink: c.ink, muted: c.muted, accent: c.accent, card: c.card },
-      ...(image && { assets: [{ id: 'hero', path: image }] }),
+      ...(edition ? { assets: L.assets } : image && { assets: [{ id: 'hero', path: image }] }),
       layers: L.layers
     },
     // 生图留位：画布比例的文字区（先排版后生图用）
