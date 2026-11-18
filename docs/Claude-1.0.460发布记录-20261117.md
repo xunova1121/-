@@ -28,5 +28,6 @@
 - 版式模板海报六套（`posterTemplates.js`，`make_poster.template`）；沉浸式图文融合（`layout:'immersive'`）与先排版后生图（`template.image_prompt`，`posterTemplateArt.js`）。
 - 1.0.461 实测修复：交付说法只改链接不让模型重写；收尾后的自言自语不显示；纯色底字自动换色；设计自审最多一轮；遮罩选色按 0.179 亮度分界（橙字不再配白遮罩）。
 - 安卓返回键 / 侧滑逐层返回（`src/mobile/backNavigation.js`），首页二次确认才退到后台。
-- 验证：lint 通过；单元测试 4349 全过；本机门禁结果与 CI 编号、核验见下方补记。
+- 验证：lint 通过；单元测试 4349 全过；本机门禁 34 过 1 失败（已知本机浏览器差异 e2e/music-card.mjs:85），手机步骤其余部分单独跑 350 ✓。
+- 发布：run 44213095094（f3a15ed）。安卓打包第一次在装系统包（ffmpeg/中文字体）时镜像下载超时三次、未进入构建，重跑失败任务一次后全部成功。APK versionCode 462、v2 证书 56e3579b…363d6 一致；Windows 安装包 152967396 字节；服务器包 1195 项全部 root 属主、全员可读，sha256 与 jarvis-server-latest.json 一致，含 posterTemplateArt.js 与 backNavigation.js；latest.yml 与服务器清单均为 1.0.462。
 - 未验收：真实画图模型的留白遵守情况、安卓手势返回真机、Windows 真机。
