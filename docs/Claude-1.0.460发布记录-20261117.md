@@ -37,3 +37,8 @@
 - 验证：lint 通过；单元测试 4362 全过；本机门禁 34 过 1 失败（已知 e2e/music-card.mjs:85 本机浏览器差异），手机步骤其余 350 ✓。
 - 发布：run 44231926722（f3b5be1）一次成功。APK versionCode 463、v2 证书 56e3579b…363d6 一致；Windows 安装包 152970811 字节；服务器包 1196 项全 root 属主、全员可读，sha256 与 jarvis-server-latest.json 一致，含 layeredDesignAssetSize.js；latest.yml 与服务器清单均为 1.0.463。
 - 未验收：真实图库搜图与真实照片效果；掉线问题待服务器日志确认。
+
+## 1.0.466（2026-11-18）
+- 电脑掉线、对话全没了：`src/ui/historyList.js` 读不到列表保留旧列表；左栏连服务器 30 秒刷新、本机 3 秒；`server/serverMode.mjs` 写 `data/tasks-busy`，`deploy/update.sh` 等任务做完再安装（最多 15 分钟）。用户服务器日志：当天 07:28/10:39/12:10 三次重启为“立即更新”触发的安装，14:30/14:32 为手动重启，无内存崩溃记录。
+- 本机门禁第一次发现左栏一律 30 秒导致 `e2e/pc-agent-navigation.mjs` 超时，改为按是否连服务器决定频率后 62/62 通过；第二次门禁 34 过 1 失败（已知 music-card 本机差异），手机其余 350 ✓；单元测试 4379 全过。
+- 发布：run 44282533593（5a549b2）一次成功。APK versionCode 466、v2 证书 56e3579b…363d6 一致；Windows 安装包 152978042 字节；服务器包 1197 项全 root 属主、全员可读，sha256 与清单一致，含 historyList.js 和带 tasks-busy 等待的 update.sh；两个更新入口均为 1.0.466。
