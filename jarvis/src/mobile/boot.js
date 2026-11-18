@@ -69,49 +69,12 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
       dispatchEvent(new CustomEvent('jarvis:foreground', { detail: { active: isActive } }));
       if (!isActive) globalThis.__jarvisTTS?.stop().catch(() => {});
     });
-    const { closeAgentOverlay } = await import('../ui/agentNavigation.js');
-    App.addListener('backButton', () => {
-      const picker = document.querySelector('.mp-sheet:not([hidden]) .x-btn');
-      if (picker) {
-        picker.click();
-        return;
-      }
-      const weather = document.querySelector('.weather-dialog[open]');
-      if (weather) {
-        weather.close();
-        return;
-      }
-      const image = document.querySelector('.image-preview[open]');
-      if (image) {
-        image.close();
-        return;
-      }
-      const companion = document.querySelector('.wy-companion[open]');
-      if (companion) {
-        companion.close();
-        return;
-      }
-      const phone = document.querySelector('.wy-phone[open]');
-      if (phone) { phone.close(); return; }
-      const studio = document.querySelector('.wy-library[open]');
-      if (studio) { studio.close(); return; }
-      if (document.querySelector('.composer-queue-menu:not([hidden])')) {
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-        return;
-      }
-      if (closeAgentOverlay()) return;
-      const b = document.body;
-      if (
-        b.classList.contains('workbench') &&
-        (b.classList.contains('weiyang-menu-open') || !b.classList.contains('side-closed') || b.classList.contains('wb-info-open'))
-      ) {
-        window.dispatchEvent(new Event('weiyang:back'));
-        return;
-      }
-      if (b.classList.contains('drawer-open')) return document.querySelector('.drawer-scrim')?.click();
-      if (b.classList.contains('side-open')) return document.getElementById('btn-side-back')?.click();
-      App.minimizeApp();
-    });
+    // 返回键 / 侧滑返回：逐层返回，首页二次确认才退到后台（规则见 backNavigation.js）
+    const { createBackNavigation } = await import('./backNavigation.js');
+    const { toast } = await import('../app/env.js');
+    const handleBack = createBackNavigation({ minimize: () => App.minimizeApp(), toast });
+    globalThis.__jarvisBack = handleBack;
+    App.addListener('backButton', () => { handleBack(); });
   } catch {
     /* 没有 App 插件 */
   }
