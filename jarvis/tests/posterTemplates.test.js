@@ -60,23 +60,36 @@ describe('六套版式模板', () => {
 
 /** 2026-11-18 用户：模板都是图文分开的，要图文融合 → 沉浸式（A）+ 先排版后生图（B） */
 import { zonesOnImage, templateArtPrompt } from '../src/agent/posterTemplateArt.js';
+/** 内容区开始的画布像素：content 留位的 y 是画面区比例 */
+const zonesStart = (zones, d) => zones.find(z => z.id === 'content').y * Math.min(d.height, 1620);
 describe('沉浸式模板与先排版后生图', () => {
   it.each(TEMPLATE_IDS)('%s 沉浸式：图铺满整张、由上到下压暗、卡片半透明、不重叠、手机可读', id => {
     const input = templateDesignInput({ template: { ...TEMPLATE_SAMPLES[id], layout: 'immersive', image: '图/主视觉.png' } });
     const { zones, ...rest } = input, d = planLayerDesign(rest);
     const ids = d.layers.map(n => n.id), hero = d.layers.find(n => n.id === 'hero');
     expect(ids).not.toContain('header-bg');
-    expect(hero).toMatchObject({ x: 0, y: 0, w: 1080, h: d.height });
+    // 画面按原比例放在上部（2:3 铺满宽约 1620 高），画布更矮时铺满整张
+    expect(hero).toMatchObject({ x: 0, y: 0, w: 1080, h: Math.min(d.height, 1620) });
     expect(ids.indexOf('hero')).toBeLessThan(ids.indexOf('immersive-shade'));
     expect(ids.indexOf('immersive-shade')).toBeLessThan(ids.indexOf('title'));
     const shade = d.layers.find(n => n.id === 'immersive-shade').fade.stops;
     expect(shade[0][1]).toBeLessThan(0.2);
-    expect(shade.at(-1)[1]).toBeGreaterThanOrEqual(0.85);
-    const glass = d.layers.filter(n => n.type === 'shape' && n.fade && n.fade.stops.every(s => s[1] > 0.6 && s[1] < 0.8));
-    expect(glass.length).toBeGreaterThan(0);
+    // 2026-11-18 用户对比豆包样张：内容区之前画面基本露出（≤0.25），进入内容区后平滑压到≥0.9；原断言为底部≥0.85、卡片0.6–0.8
+    expect(shade.at(-1)[1]).toBeGreaterThanOrEqual(0.9);
+    expect(shade.length).toBeLessThanOrEqual(4);
+    const before = shade.filter(([at]) => at * d.height <= zonesStart(zones, d));
+    expect(before.length).toBeGreaterThan(1);
+    expect(before.every(([, v]) => v <= 0.25)).toBe(true);
+    // 卡片/行底若有，一律半透明（0.4–0.6）
+    const glass = d.layers.filter(n => n.type === 'shape' && n.fade && n.fade.stops.every(s => s[1] > 0.4 && s[1] <= 0.6));
+    if (id !== 'schedule') expect(glass.length).toBeGreaterThan(0);
+    // 内容区的底块（卡片、行底）不能有实心深色挡住画面
+    const solidPanels = d.layers.filter(n => n.type === 'shape' && !n.fade && n.fill === d.palette.background && n.w > 400 && n.h > 40 && !n.id.startsWith('immersive'));
+    expect(solidPanels.map(n => n.id)).toEqual([]);
     expect(checkLayerOverlap(d)).toMatchObject({ status: 'passed' });
     expect(checkDesignPresentation(d).status).not.toBe('failed');
     expect(zones.map(z => z.id)).toEqual(['title', 'content']);
+    expect(input.heroHeight).toBe(Math.min(d.height, 1620));
     expect(zones[1].y + zones[1].h).toBeCloseTo(1, 2);
     expect(d.concept.relation).toBe('overlay');
   });
@@ -124,5 +137,13 @@ describe('沉浸式指引', () => {
   it('海报指引说明 image_prompt 先排版后生图', () => {
     expect(POSTER_GUIDANCE).toContain('template.image_prompt');
     expect(POSTER_GUIDANCE).toContain('immersive');
+  });
+});
+describe('沉浸式不丢页头内容', () => {
+  it.each(TEMPLATE_IDS)('%s：眉题/人名、日期仍在稿里', id => {
+    const t = TEMPLATE_SAMPLES[id], d = planLayerDesign((({ zones, heroHeight, ...x }) => x)(templateDesignInput({ template: { ...t, layout: 'immersive' } })));
+    const plain = planLayerDesign(templateDesignInput({ template: t }));
+    const words = l => l.layers.filter(n => n.type === 'text').map(n => n.text).join('|');
+    for (const n of plain.layers.filter(n => ['eyebrow', 'date'].includes(n.id))) expect(words(d)).toContain(n.text);
   });
 });

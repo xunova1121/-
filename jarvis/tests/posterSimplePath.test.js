@@ -89,3 +89,12 @@ describe('压图文字的遮罩不盖住别的字', () => {
     for (const s of r.scrims) expect(ids.indexOf(s.id)).toBeLessThan(firstText);
   }, 60000);
 });
+import { templateArtPrompt } from '../src/agent/posterTemplateArt.js';
+describe('融合底图要铺满画面', () => {
+  it('生图要求不再写“主体集中在上部”，指引说明上图下文的原因', () => {
+    const p = templateArtPrompt('夜晚足球场', []);
+    expect(p).toContain('场景铺满整个画面');
+    expect(p).not.toContain('主体集中在画面上部');
+    expect(POSTER_GUIDANCE).toContain('铺满整个画面的场景');
+  });
+});

@@ -35,7 +35,7 @@ export function zonesOnImage(zones, canvasW, canvasH, imageW = IMAGE_W, imageH =
 }
 
 export function templateArtPrompt(prompt, areas) {
-  return imageCompositionPrompt(String(prompt).trim() + '\n竖版满版海报背景，主体集中在画面上部，整体偏暗、下部可自然过渡到深色。', 'poster_art') + clearAreaPrompt(areas);
+  return imageCompositionPrompt(String(prompt).trim() + '\n竖版满版海报背景：场景铺满整个画面、从上到下都有内容（如俯视整片球场、整条街景、整个会场），不要只画在上半截、下半截留空或渐变成纯色；整体偏暗、细节柔和，文字会直接压在画面上。', 'poster_art') + clearAreaPrompt(areas);
 }
 
 /** 返回 { input: 带配图的模板输入, art: 回执说明 }；input 已是 templateDesignInput 的结果 */
@@ -48,7 +48,7 @@ export async function templateWithArt(input, ctx, { signal, progress, raster } =
   const first = templateDesignInput({ ...input, template });
   if (!wantArt) return { input: first, art: null };
   if (!ctx.imageGen) return { input: first, art: { status: 'skipped', note: '当前环境不能画图，按沉浸式版式出稿（深色渐变底，无配图）' } };
-  const areas = zonesOnImage(first.zones, first.width, first.height);
+  const areas = zonesOnImage(first.zones, first.width, first.heroHeight || first.height);
   try {
     progress?.('版式已排好，正在按文字位置生成满版配图（文字区留暗、主体让开）…');
     const result = await ctx.imageGen({ prompt: templateArtPrompt(prompt, areas), size: `${IMAGE_W}x${IMAGE_H}`, outputFormat: 'png', signal });

@@ -193,7 +193,7 @@ export function createPosterDeliveryTool(ctx = {}) {
       let templateArt = null;
       if (input.template !== undefined) {
         const built = await templateWithArt(input, ctx, { signal, progress, raster: ctx.renderVisualScene || renderVisualScene });
-        const { zones: _zones, ...designInput } = built.input;
+        const { zones: _zones, heroHeight: _heroHeight, ...designInput } = built.input;
         input = designInput; templateArt = built.art;
       }
       // AI整图出稿 + 逐字核对（aiPoster.js）：宣传类、字少的海报

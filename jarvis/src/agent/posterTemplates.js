@@ -30,6 +30,13 @@ const arr = (v, what, min, max) => {
 };
 
 /** 排版器：从上往下放图层，记录当前高度 */
+/** 沉浸式压暗：内容区开始之前画面基本露出，进入内容区约 12% 画布高度内平滑压到 0.9，无硬边 */
+const r3 = n => Math.round(n * 1000) / 1000;
+export function shadeStops(ct) {
+  const a = Math.max(0.12, Math.min(0.8, ct)), b = Math.min(0.97, a + 0.12);
+  // 色标最多4个：顶部轻压，内容区前一点开始过渡，进入内容区后压到 0.9
+  return [[0, 0.12], [r3(a - 0.12), 0.2], [r3(b), 0.92], [1, 0.97]];
+}
 const mix = (a, b, t) => '#' + [0, 2, 4].map(i => Math.round(parseInt(a.slice(1 + i, 3 + i), 16) * (1 - t) + parseInt(b.slice(1 + i, 3 + i), 16) * t).toString(16).padStart(2, '0')).join('').toUpperCase();
 /**
  * immersive（沉浸式，图文融合，2026-11-18 用户：模板都是图文分开的）：一张图铺满整张海报并由上到下压暗，
@@ -51,14 +58,16 @@ function layout(style, immersive = false) {
     return h;
   };
   // 沉浸式：卡片底（card/tint）做成半透明，透出后面的画面
-  const glass = immersive ? { stops: [[0, 0.74], [1, 0.74]] } : null;
-  const rect = (x, y, w, h, fill, o = {}) => { const fade = o.fade || (glass && (fill === c.card || fill === c.tint) ? glass : null); layers.push({ id: o.id || id('shape'), type: 'shape', x, y, w, h, fill, radius: o.radius || 0, decorative: o.decorative !== false, ...(o.group && { group: o.group }), ...(fade && { fade }) }); };
+  // 行底、卡片底一律半透明（含隔行的底色——原来隔行是实心深色，把画面挡死，看起来还是上图下文）
+  const glass = immersive ? { stops: [[0, 0.5], [1, 0.5]] } : null;
+  const rect = (x, y, w, h, fill, o = {}) => { const fade = o.fade || (glass && [c.card, c.tint, c.background].includes(fill) ? glass : null); layers.push({ id: o.id || id('shape'), type: 'shape', x, y, w, h, fill, radius: o.radius || 0, decorative: o.decorative !== false, ...(o.group && { group: o.group }), ...(fade && { fade }) }); };
   return { layers, c, id, text, rect, immersive, zones: [] };
 }
 
 /** 页头：有主视觉图就铺图并压暗底部，没有就用深色块加装饰光斑；返回页头高度 */
 function header(L, { image, eyebrow, date, title, summary, minH = 560, align = 'left' }) {
   const { c, text, rect, layers } = L;
+  if (L.immersive) return immersiveHeader(L, { eyebrow, date, title, summary });
   // 先量标题和导语占多高，页头至少容下它们
   const titleRows = wrapParagraphs(title, 84, CW, { wordWrap: true }) || [];
   const summaryRows = summary ? wrapParagraphs(summary, 36, CW, { wordWrap: true }) || [] : [];
@@ -90,10 +99,49 @@ function header(L, { image, eyebrow, date, title, summary, minH = 560, align = '
   if (summary) { y += 24; text('summary-body', summary, M, y, CW, 36, { color: c.onDeepMuted, align }); }
   return H;
 }
+/**
+ * 沉浸式页头（2026-11-18 用户对比豆包样张）：日期在上、标题居中大字用醒目色直接压在画面上方，
+ * 导语居中；下面留一段让画面露出来，再往下画面平滑压暗成底色、接内容，不画任何硬边。
+ */
+const POP = '#FFD54A';
+function immersiveHeader(L, { eyebrow, date, title, summary }) {
+  const { c, text } = L;
+  let y = 110;
+  const top = y;
+  // 眉题（人物事件里是人名）和日期合成标题上方一行，不丢内容
+  const kicker = [eyebrow, date].filter(Boolean).join(' · ');
+  if (kicker) y += text('date', kicker, M, y, CW, 40, { bold: true, color: POP, align: 'center', role: 'label' }) + 16;
+  y += text('title', title, M, y, CW, 104, { bold: true, color: POP, align: 'center', role: 'heading' });
+  if (summary) { y += 20; y += text('summary-body', summary, M, y, CW, 38, { color: c.onDeep, align: 'center' }); }
+  L.zones.push({ id: 'title', x: 0, y: top - 30, w: W, h: y - top + 60, tone: 'dark' });
+  L.contentTop = Math.ceil(y + 320);
+  return L.contentTop;
+}
 function footer(L, value, y) {
   const { c, text, rect } = L;
   rect(M, y, CW, 2, c.muted, { id: 'footer-rule' });
   return y + 22 + text('footer', value, M, y + 22, CW, 24, { color: c.muted, role: 'caption' }) + 56;
+}
+/** 沉浸式赛程：行不加框，时间与对阵直接用大字写在压暗的画面上；分组用胶囊标签，组间一条细线 */
+function scheduleImmersive(content, L, groups, y) {
+  const { c, text, rect } = L;
+  const SIZE = 42;
+  groups.forEach((g, gi) => {
+    if (gi) { rect(M, y, CW, 2, c.onDeepMuted, { id: `group-${gi + 1}-rule`, fade: { stops: [[0, 0.35], [1, 0.35]] } }); y += 34; }
+    const w = Math.min(CW, [...g.name].length * 44 + 72);
+    rect(M, y, w, 72, mix(c.accent, '#000000', 0.25), { id: `group-${gi + 1}-pill`, radius: 20 });
+    text(`group-${gi + 1}-title`, g.name, M + 28, y + 12, w - 48, 40, { bold: true, color: '#FFFFFF' });
+    y += 72 + 24;
+    g.rows.forEach((r, ri) => {
+      const key = `row-${gi + 1}-${ri + 1}`, noteW = r.note ? 200 : 0;
+      text(`${key}-label`, r.time, M, y, 170, SIZE, { bold: true, color: r.focus ? POP : c.onDeep, group: key });
+      const h = text(`${key}-body`, r.text, M + 190, y, CW - 190 - noteW, SIZE, { bold: true, color: r.focus ? POP : c.onDeep, group: key });
+      if (r.note) text(`${key}-note`, r.note, W - M - noteW, y + 8, noteW, 26, { color: c.onDeepMuted, align: 'right', role: 'label', group: key });
+      y += Math.max(h, SIZE * 1.4) + 18;
+    });
+    y += 30;
+  });
+  return footer(L, str(content.footer, '页脚（来源/时间）', 60) || '以官方公布为准', y + 10);
 }
 /** 带序号的卡片列表 */
 function numberedCards(L, items, y, { numbered = true } = {}) {
@@ -166,6 +214,7 @@ const TEMPLATES = {
     const { c, text, rect } = L;
     const groups = arr(content.groups, '分组groups', 1, 5).map((g, i) => ({ name: str(g?.name, `第${i + 1}组名`, 12, true), rows: arr(g?.rows, `第${i + 1}组rows`, 1, 14).map((r, j) => ({ time: str(r?.time, `第${j + 1}行时间`, 8, true), text: str(r?.text, `第${j + 1}行内容`, 24, true), note: str(r?.note, `第${j + 1}行备注`, 10), focus: r?.focus === true })) }));
     let y = header(L, { image, eyebrow: str(content.eyebrow, '栏目', 10) || '赛程', date: str(content.date, '日期', 20), title: str(content.headline, '大标题', 30, true), summary: str(content.summary, '导语', 60) }) + 40;
+    if (L.immersive) return scheduleImmersive(content, L, groups, y);
     groups.forEach((g, gi) => {
       rect(M, y + 8, 10, 40, c.accent, { id: `group-${gi + 1}-bar` });
       text(`group-${gi + 1}-title`, g.name, M + 28, y, CW - 28, 40, { bold: true }); y += 76;
@@ -262,12 +311,15 @@ export function templateDesignInput(input) {
   if (height > 4096) throw fail('内容太多，画布超过4096像素高；请减少条目或拆成两张');
   if (immersive) {
     // 满版画面在最底层，上面一层由上到下压暗（标题区和卡片区都落在暗部），再往上才是文字和半透明卡片
-    const contentTop = L.zones[0] ? L.zones[0].y + L.zones[0].h : 0;
+    const contentTop = L.contentTop ?? (L.zones[0] ? L.zones[0].y + L.zones[0].h : 0);
+    // 画面按原比例（2:3 竖图铺满宽度约 1620 高）放在上部，不再拉长铺满整张：拉长后草坪等主体落进内容区被压暗，
+    // 上面只剩看台（2026-11-18 对比豆包样张）；画布更矮时仍铺满整张
+    L.heroH = Math.min(height, Math.round(W * 1.5));
     const under = [
       { id: 'immersive-bg', type: 'shape', x: 0, y: 0, w: W, h: height, fill: L.c.deep, radius: 0, decorative: true },
-      ...(image ? [{ id: 'hero', type: 'image', asset: 'hero', x: 0, y: 0, w: W, h: height, fit: 'cover', detail: '主视觉' }]
+      ...(image ? [{ id: 'hero', type: 'image', asset: 'hero', x: 0, y: 0, w: W, h: L.heroH, fit: 'cover', detail: '主视觉' }]
         : [{ id: 'immersive-glow', type: 'shape', x: 0, y: 0, w: W, h: height, fill: L.c.accent, radius: 0, decorative: true, fade: { stops: [[0, 0.32], [0.45, 0.08], [1, 0]] } }]),
-      { id: 'immersive-shade', type: 'shape', x: 0, y: 0, w: W, h: height, fill: L.c.deep, radius: 0, decorative: true, fade: { stops: [[0, 0.1], [0.3, 0.42], [0.6, 0.72], [1, 0.9]] } }
+      { id: 'immersive-shade', type: 'shape', x: 0, y: 0, w: W, h: height, fill: L.c.deep, radius: 0, decorative: true, fade: { stops: shadeStops(contentTop / height) } }
     ];
     L.layers.unshift(...under);
     L.zones.push({ id: 'content', x: 0, y: contentTop, w: W, h: height - contentTop, tone: 'dark' });
@@ -283,6 +335,8 @@ export function templateDesignInput(input) {
       layers: L.layers
     },
     // 生图留位：画布比例的文字区（先排版后生图用）
-    zones: L.zones.map(z => ({ id: z.id, tone: z.tone, x: 0, y: Math.round(z.y / height * 1000) / 1000, w: 1, h: Math.round(Math.min(z.h, height - z.y) / height * 1000) / 1000 }))
+    // 留位按“画面所占区域”的比例（沉浸式画面只铺上部 heroH）；超出画面的部分截掉
+    zones: (() => { const area = L.heroH || height; return L.zones.filter(z => z.y < area).map(z => ({ id: z.id, tone: z.tone, x: 0, y: Math.round(Math.max(0, z.y) / area * 1000) / 1000, w: 1, h: Math.round((Math.min(z.y + z.h, area) - Math.max(0, z.y)) / area * 1000) / 1000 })); })(),
+    ...(L.heroH && { heroHeight: L.heroH })
   };
 }
