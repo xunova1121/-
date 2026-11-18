@@ -92,6 +92,7 @@ import { compactToolResults } from './turnContext.js';
 import { requirementsTool } from './taskRequirements.js';
 import * as holdings from './holdings.js';
 import { recentFailures, recentWorkLog } from './failedSteps.js';
+import { tryDeepseekQuestion } from './deepseekQuestion.js';
 import { createImageSight } from './imageSight.js';
 
 export const STABLE_PROMPT = `你是“未央”，用户的个人智能体。实际运行位置与能力以下方环境和本轮工具为准。
@@ -490,6 +491,16 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     }
     const intent = await classifyLookupIntent(requirementText, { history, preferences, classify: lookupClassifier, signal });
     retrieval.intent = intent; retrieval.intentRequest = requirementText;
+    if (adapter.deepseekWeb && !makingFile && !computerTask && !agent?.profile && !complaint && !questionProfile &&
+        !taskIntent.inherited && !inbox?.length && userText === requirementText &&
+        !review.report().contract.calculation && !review.report().sourceRequirement) {
+      const native = await tryDeepseekQuestion({ adapter, model, text: userText, intent, tools: availableTools, signal, retrieval, lookupControl, emit, review, now });
+      if (native && !inbox?.length) {
+        emit({ type: 'text', delta: native.text });
+        return finishAgentRun({ step: 0, limit, retrievalStopped: false, retrieval, stuck: false, review, nativeSearchCalls: native.calls,
+          light, signal, quiet, toolCount, lastToolOk, failCount, userText, finalText: native.text, emit, lookupDeadline, answerCompleted: true });
+      }
+    }
     let found = await runLookup(intent, {
       text: requirementText, getTool: name => loader.get(name), now: now(), signal, clock: lookupControl,
       execute: async (calls, s) => {

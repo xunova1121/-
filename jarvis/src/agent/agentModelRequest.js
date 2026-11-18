@@ -41,6 +41,7 @@ export function createModelRequest({ current, effort, signal, lookupDeadline, lo
     async run(input) {
       const searchOptions = {
         tools: input.tools,
+        webMode: input.webMode,
         allowWebSearch: allowWebSearch && !closing && retrieval.left > 0,
         maxWebSearches: lookupDeadline ? Math.min(2, retrieval.left) : retrieval.left
       };
@@ -49,6 +50,7 @@ export function createModelRequest({ current, effort, signal, lookupDeadline, lo
       const result = await requestWindow.race(() =>
         current.adapter.stream({
           model: current.model,
+          ...(input.webMode && { webMode: input.webMode }),
           effort,
           // 闲聊（你好、在吗）：12 秒没动静就算卡住，不重试，直接换备用模型（评测里主模型卡住、等了十几秒才换）
           stallTimeouts: { ...(light ? { first: 12_000, between: 15_000 } : lookupDeadline ? { first: 20_000, between: 25_000 } : { first: 45_000, between: 60_000 }), onActivity: () => !requestCtrl.signal.aborted && onActivity?.() },
@@ -68,9 +70,9 @@ export function createModelRequest({ current, effort, signal, lookupDeadline, lo
             if (delta || meta?.serverTool) observeOutput();
             if (meta?.serverTool) {
               emit({ type: 'server_tool', name: meta.serverTool });
-              if (/search/.test(meta.serverTool)) {
+              if (/search/.test(meta.serverTool) || input.webMode && meta.serverTool === 'fetch_url') {
                 // 请求前已传剩余maxWebSearches；真实搜索事件还须记账，下一轮不能重新获得完整额度。
-                try { retrieval.consume('search'); } catch (error) {
+                try { retrieval.consume(meta.serverTool === 'fetch_url' ? 'read' : 'search'); } catch (error) {
                   if (error.code !== 'RETRIEVAL_BUDGET') throw error;
                   stopSearch(); return;
                 }

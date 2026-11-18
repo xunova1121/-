@@ -4,6 +4,7 @@ export function deepseekSearchPanel({ cfg, workspace, node, toast }) {
   const scope = workspace.scope;
   let controller = null;
   const enabled = node('input', { type: 'checkbox', checked: cfg.deepseekSearchEnabled === true, ariaLabel: '启用DeepSeek搜索' });
+  const native = node('input', { type: 'checkbox', checked: cfg.deepseekNativeWeb === true });
   const key = node('input', {
     type: 'password',
     autocomplete: 'off',
@@ -28,7 +29,7 @@ export function deepseekSearchPanel({ cfg, workspace, node, toast }) {
   };
   const save = action('保存搜索设置', async () => {
     await workspace.patch(
-      (value) => ({ ...value, deepseekSearchEnabled: enabled.checked, ...(key.value.trim() && { deepseekSearchKey: key.value.trim() }) }),
+      (value) => ({ ...value, deepseekNativeWeb: native.checked, deepseekSearchEnabled: enabled.checked, ...(key.value.trim() && { deepseekSearchKey: key.value.trim() }) }),
       scope
     );
     key.value = '';
@@ -62,12 +63,13 @@ export function deepseekSearchPanel({ cfg, workspace, node, toast }) {
     node('summary', { textContent: '联网搜索 · DeepSeek Search/Fetch · ' + (scope === 'server' ? '云服务器' : '本机') }),
     node('p', {
       className: 'ml-muted',
-      textContent: '可与任意聊天模型搭配。默认关闭；启用后优先官方Search/Fetch，失败回原搜索/读取线路。此设置只影响当前配置位置。'
+      textContent: '模型内联网需选用官方 deepseek-flash。独立搜索可搭配其他聊天模型，使用下方单独的开关。'
     }),
     node('p', {
       className: 'ml-muted',
-      textContent: '按官方文档：Search、Fetch各每1000次成功请求5元，普通直接API调用不属于11月前指定工具免费场景。测试每个按钮最多请求2次，也可能计费。'
+      textContent: '官方 Flash 对话内搜索按模型 Token 计费。独立 Search、Fetch 各 5 元／千次成功请求，下方测试按钮调用独立接口。'
     }),
+    node('label', {}, native, '用官方 Flash 联网回答问题并附来源'),
     node('label', {}, enabled, '启用DeepSeek官方搜索与抓取'),
     node('label', {}, '独立官方API Key（可选）', key),
     node('p', {

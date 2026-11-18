@@ -1,3 +1,4 @@
+import { deepseekWebTools, deepseekWebEvidence } from './deepseekWeb.js';
 /**
  * OpenAI 兼容适配器：/chat/completions 流式 + 函数调用。
  * OpenAI、Gemini（OpenAI 兼容端点）、DeepSeek、通义千问、Kimi、智谱、豆包、硅基流动、OpenRouter、Ollama 都走这里。
@@ -66,7 +67,7 @@ export function tokenUsage(u = {}) {
 }
 
 /** 累积流式 delta：文本与按 index 拼接的 tool_calls */
-export function createAccumulator(onText) {
+export function createAccumulator(onText, webEvidence = null) {
   const calls = [];
   let text = '';
   let finish = null;
@@ -78,6 +79,7 @@ export function createAccumulator(onText) {
       if (chunk.usage) usage = tokenUsage(chunk.usage);
       const choice = chunk.choices?.[0];
       if (!choice) return;
+      webEvidence?.push(choice);
       const d = choice.delta ?? {};
       if (typeof d.reasoning_content === 'string') { hasReasoning = true; reasoning += d.reasoning_content; }
       else if (typeof choice.message?.reasoning_content === 'string') { hasReasoning = true; reasoning = choice.message.reasoning_content; }
@@ -117,7 +119,7 @@ export function createAccumulator(onText) {
         try { args = c.argText ? JSON.parse(c.argText) : {}; } catch (e) { parseError = `参数不是合法 JSON：${e.message}`; }
         return { id: c.id || `call_${i}_${Date.now().toString(36)}`, name: c.name, args, parseError };
       });
-      return { text, toolCalls, stop: finish, ...(usage && { usage }), ...(hasReasoning && { raw: { kind: 'openai', reasoning_content: reasoning } }) };
+      return { text, toolCalls, stop: finish, ...(webEvidence && { citations: webEvidence.result(text) }), ...(usage && { usage }), ...(hasReasoning && { raw: { kind: 'openai', reasoning_content: reasoning } }) };
     }
   };
 }
@@ -194,10 +196,12 @@ export const CONTINUE_PROMPT = '（网络中断了，你上一条回答只发出
 /**
  * serviceTier：服务档位（如中转站的 "fast" 快速档），每次请求带上 service_tier；服务商不认就自动去掉重试
  */
-export function createOpenAIAdapter({ baseURL, apiKey, headers = {}, retryDelays = RETRY_DELAYS, serviceTier = '', routeSort = '' }) {
-  const once = createOnce({ baseURL, apiKey, headers, serviceTier, routeSort });
+export function createOpenAIAdapter({ deepseekWeb = false, baseURL, apiKey, headers = {}, retryDelays = RETRY_DELAYS, serviceTier = '', routeSort = '' }) {
+  const once = createOnce({ deepseekWeb, baseURL, apiKey, headers, serviceTier, routeSort });
   return {
     kind: 'openai',
+    deepseekWeb,
+    usesNativeSearch: opts => Boolean(deepseekWeb && opts.webMode && opts.allowWebSearch && opts.maxWebSearches > 0 && !opts.tools?.length),
     async stream(opts) {
       const { signal, onText, onRetry } = opts;
       let partial = ''; // 已经显示给用户的文字（跨重试累计）
@@ -205,7 +209,7 @@ export function createOpenAIAdapter({ baseURL, apiKey, headers = {}, retryDelays
       for (let attempt = 0; ; attempt++) {
         let got = '';
         try {
-          const r = await once.stream({ ...opts, messages, onText: (d) => { got += d; onText?.(d); } });
+          const r = await once.stream({ ...opts, messages, onText: (d, meta) => { got += d; if (meta) onText?.(d, meta); else onText?.(d); } });
           // 续写的结果拼在已显示的部分后面
           return partial ? { ...r, text: partial + r.text } : r;
         } catch (err) {
@@ -224,14 +228,15 @@ export function createOpenAIAdapter({ baseURL, apiKey, headers = {}, retryDelays
 const noTierModels = new Set(); // 不认 service_tier 的型号：去掉后不再带
 const noRouteSort = new Set(); // 不认 provider.sort 的接口地址+型号：去掉后不再带
 const noUsageModels = new Set(); // 不认 stream_options 的中转站+型号：去掉后不再带
-function createOnce({ baseURL, apiKey, headers = {}, serviceTier = '', routeSort = '' }) {
+function createOnce({ deepseekWeb, baseURL, apiKey, headers = {}, serviceTier = '', routeSort = '' }) {
   return {
     async stream({ signal: outer, ...req }) {
       const guard = stallGuard(outer, req.stallTimeouts);
       try { return await streamOnce({ ...req, signal: guard.signal }, guard); } catch (e) { throw guard.error(e); } finally { guard.done(); }
     }
   };
-  async function streamOnce({ model, system, messages, tools, signal, onText, effort }, guard) {
+  async function streamOnce({ model, system, messages, tools, signal, onText, effort, webMode, allowWebSearch, maxWebSearches }, guard) {
+    const native = deepseekWeb && webMode && allowWebSearch && maxWebSearches > 0 && !tools?.length;
     const send = (withTools, withEffort, withTier = useTier, withUsage = useUsage) => fetch(`${baseURL.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(apiKey && { Authorization: `Bearer ${apiKey}` }), ...headers },
@@ -239,6 +244,7 @@ function createOnce({ baseURL, apiKey, headers = {}, serviceTier = '', routeSort
         model,
         stream: true,
         messages: toOpenAIMessages(system, messages),
+        ...(native && { thinking: { type: webMode === 'deep' ? 'enabled' : 'disabled' }, tools: deepseekWebTools(webMode), safety_check: { level: 'high' } }),
         ...(withTools && tools?.length && { tools: toOpenAITools(tools) }),
         // 思考强度：日常对话让推理模型少想一点，首字快很多（不支持的模型会报错，自动去掉重试）
         ...(withEffort && { reasoning_effort: effort }),
@@ -283,7 +289,7 @@ function createOnce({ baseURL, apiKey, headers = {}, serviceTier = '', routeSort
       try { detail = (await res.text()).slice(0, 300); } catch { /* ignore */ }
       throw Object.assign(new Error(`模型接口返回 ${res.status}${detail ? `：${detail}` : ''}`), { status: res.status, retryAfterMs: retryAfterMs(res.headers?.get?.('retry-after')) });
     }
-    const acc = createAccumulator(onText);
+    const acc = createAccumulator(onText, native ? deepseekWebEvidence(onText) : null);
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     let buf = '';
@@ -307,12 +313,12 @@ function createOnce({ baseURL, apiKey, headers = {}, serviceTier = '', routeSort
           if (data.choices?.length) {
             // 很多中转站一开始就发一个空包（只有 role，没有内容）：只重置卡住计时，不算“模型有反应”
             const c = data.choices[0], d = c?.delta ?? c?.message ?? {};
-            if (d.content || d.reasoning_content || d.reasoning || d.tool_calls?.length || c?.finish_reason) guard.alive();
+            if (c.server_tool_event || d.content || d.reasoning_content || d.reasoning || d.tool_calls?.length || c?.finish_reason) guard.alive();
             else guard.touch();
           }
           if (typeof data.service_tier === 'string') servedTier = data.service_tier;
           acc.push(data);
-          if (data.choices?.[0]?.finish_reason) finished = true;
+          if (!native && data.choices?.[0]?.finish_reason) finished = true;
         }
       }
     } finally {

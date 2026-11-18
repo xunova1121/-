@@ -1,3 +1,4 @@
+import { deepseekFlash } from './deepseekWeb.js';
 import { lookupComplaint } from '../agent/newsIntent.js';
 import { isResponseRevision } from '../core/responseRevision.js';
 import { serverRepositoryIntent } from './repositoryIntent.js';
@@ -111,7 +112,7 @@ const PREFER = {
   code: [/codex|coder|code/i, /claude.*(sonnet|opus)|(sonnet|opus)/i, /gpt-?[5-9](\.\d)?(?!.*mini)/i, /kimi-k2|glm-4\.[5-9]|qwen3-(max|235b)|deepseek-(v3|chat)/i],
   write: [/claude.*(opus|sonnet)|(opus|sonnet)/i, /gpt-?[5-9](\.\d)?(?!.*mini)|gpt-4\.1(?!-mini|-nano)|gpt-4o(?!-mini)/i, /qwen-max|qwen3-max|kimi|glm-4|doubao.*pro|deepseek-(chat|v3)/i],
   reason: [/\bo[134](-pro)?\b|o3|o4|r1|reasoner|thinking|think/i, /gpt-?[5-9](\.\d)?(?!.*mini)|opus|gemini-?[23](\.\d)?-pro/i],
-  vision: [/\bvl\b|-vl|vision/i, /gpt-?4o|gpt-?4\.1|gpt-?[5-9]|gemini|claude|sonnet|opus/i]
+  vision: [deepseekFlash, /\bvl\b|-vl|vision/i, /gpt-?4o|gpt-?4\.1|gpt-?[5-9]|gemini|claude|sonnet|opus/i]
 };
 /** 这个模型能不能看图（按模型名判断，聚合平台上的名字五花八门，判断不了的当不能看） */
 export function seesImages(model) {

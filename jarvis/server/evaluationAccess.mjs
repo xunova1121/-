@@ -33,10 +33,13 @@ export function evaluationAdapter(adapter) {
   if (!adapter) return adapter;
   return {
     ...adapter,
+    // 官方原生工具无法指定上游执行次数；有严格搜索配额的评测身份使用可预留次数的应用工具。
+    get deepseekWeb() { return adapter.deepseekWeb === true && !context.getStore(); },
     async stream(options) {
       if (options.signal?.aborted) throw options.signal.reason ?? Object.assign(new Error('已停止'), { name: 'AbortError' });
       const current = context.getStore();
       if (!current) return adapter.stream(options);
+      if (adapter.deepseekWeb && options.webMode) options = { ...options, webMode: undefined, allowWebSearch: false };
       const reservations = [];
       let actualSearches = 0, successful = false;
       const native = requestUsesNativeSearch(adapter, options);

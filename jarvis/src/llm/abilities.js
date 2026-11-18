@@ -1,3 +1,4 @@
+import { deepseekFlash } from './deepseekWeb.js';
 /**
  * 按“能力”配模型：日常对话、深度思考/写作、写代码、看图、画图、记忆向量，每项一个常用、一个备用。
  *
@@ -35,7 +36,7 @@ export const CAPABILITIES = {
     { provider: 'siliconflow', pick: /vl/i, model: 'Qwen/Qwen2.5-VL-72B-Instruct' },
     { provider: 'openai', pick: /^gpt-(4o|4\.1|[5-9])/i, model: 'gpt-4.1-mini' },
     { provider: 'gemini', pick: /gemini/i, model: 'gemini-2.5-flash' },
-    { provider: 'deepseek', pick: /vision/i, model: 'deepseek-v4-flash-vision-exp' }
+    { provider: 'deepseek', pick: deepseekFlash, model: 'deepseek-v4-flash-vision-exp' }
   ],
   image: [
     { provider: 'openai', pick: /gpt-image/i, model: 'gpt-image-1' },
@@ -68,6 +69,7 @@ const KIND = { vision: 'chat', ocr: 'chat', image: 'image', embed: 'embed' };
 /** 在拉取过的模型列表里按能力表认型号；没拉取过就用推荐型号（中转站没有推荐型号，必须拉取过） */
 function pickModel(cfg, row, ability) {
   const ids = cfg.modelLists?.[catalogKey(cfg, row.provider)]?.ids || [];
+  if (ability === 'vision' && row.provider === 'deepseek' && ids.includes('deepseek-flash')) return 'deepseek-flash';
   const hits = ids.filter((id) => row.pick.test(id) && modelKind(id) === KIND[ability] && (ability !== 'vision' || seesImages(id) || row.provider === 'doubao'));
   if (hits.length) return hits.sort((a, b) => version(b) - version(a) || a.length - b.length)[0];
   return row.model || '';
