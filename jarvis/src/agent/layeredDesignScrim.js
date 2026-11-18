@@ -30,7 +30,10 @@ export function overlayTexts(design) {
     const rows = textRows(node), total = rows.reduce((s, r) => s + r.w * r.h, 0);
     const image = design.layers.slice(0, index).filter(n => n.type === 'image').reverse()
       .find(img => rows.reduce((s, r) => s + area(r, img), 0) >= total * 0.5);
-    if (image) out.push({ node, image, rows, index });
+    // 图片和文字之间有不透明底块完整垫住这段字（如按钮），字实际在纯色上，交给 fixTextContrast 换色
+    const padded = image && design.layers.slice(design.layers.indexOf(image) + 1, index)
+      .some(n => n.type === 'shape' && !n.fade && !(n.opacity < 1) && rows.every(r => area(r, n) >= r.w * r.h - 1));
+    if (image && !padded) out.push({ node, image, rows, index });
   });
   return out;
 }
@@ -86,10 +89,16 @@ export async function protectOverlayText(design, { compose, raster, signal } = {
   let level = 0;
   for (; level < SCRIM_LEVELS.length; level++) {
     design.layers = design.layers.filter(n => !ids.includes(n.id));
-    // 遮罩插在该组最下层文字之前：盖住照片，不盖住文字和文字之间的其它图层
-    groups.map((group, i) => ({ group, i, at: Math.min(...group.items.map(item => design.layers.indexOf(item.node))) }))
+    // 遮罩插在“遮罩范围内所有文字”的最下层之前：盖住照片，不盖住任何文字。
+    // 遮罩会向上下渐变延伸，只看本组文字时，延伸范围里的相邻文字会被压在遮罩下面变灰（2026-11-18 足球赛程样张：“中国球队”和第一行被盖灰）
+    groups.map((group, i) => {
+      const layer = scrimLayer(design, group, start + i, SCRIM_LEVELS[level]);
+      const floor = design.layers.indexOf(group.image) + 1;
+      const covered = design.layers.map((n, at) => ({ n, at })).filter(({ n, at }) => at >= floor && n.type === 'text' && area(n, layer) > 0).map(({ at }) => at);
+      return { layer, at: Math.min(...group.items.map(item => design.layers.indexOf(item.node)), ...covered) };
+    })
       .sort((a, b) => b.at - a.at)
-      .forEach(({ group, i, at }) => design.layers.splice(at, 0, scrimLayer(design, group, start + i, SCRIM_LEVELS[level])));
+      .forEach(({ layer, at }) => design.layers.splice(at, 0, layer));
     failed = await measure(design, compose, raster, signal, candidates);
     if (failed === null || !failed.length) break;
   }

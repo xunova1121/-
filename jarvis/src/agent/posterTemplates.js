@@ -39,7 +39,7 @@ function layout(style, immersive = false) {
   const base = TEMPLATE_STYLES[style] || TEMPLATE_STYLES.blue;
   const c = immersive ? { ...base, background: base.deep, ink: base.onDeep, muted: base.onDeepMuted, card: base.deep, tint: mix(base.deep, base.accent, 0.38) } : base;
   // 沉浸式深底上，强调色做文字时提亮（原色做底块、圆点不变），保证压在画面和半透明卡片上也看得清
-  const accentText = immersive ? mix(base.accent, '#FFFFFF', 0.45) : base.accent;
+  const accentText = immersive ? mix(base.accent, '#FFFFFF', 0.6) : base.accent;
   const layers = [];
   let n = 0;
   const id = p => `${p}-${++n}`;
@@ -80,7 +80,8 @@ function header(L, { image, eyebrow, date, title, summary, minH = 560, align = '
   if (eyebrow) {
     // 字宽按真实字形量（中文约等于字号，留余量），不让眉题折成两行
     const w = Math.min(CW / 2 - 16, [...eyebrow].length * 32 + 64);
-    rect(M, y, w, 50, c.accent, { id: 'eyebrow-bg', radius: 25 });
+    // 沉浸式：标签底块压深一档，白字在任何画面上都够清楚
+    rect(M, y, w, 50, L.immersive ? mix(c.accent, '#000000', 0.3) : c.accent, { id: 'eyebrow-bg', radius: 25 });
     text('eyebrow', eyebrow, M + 24, y + 6, w - 40, 26, { bold: true, color: '#FFFFFF', role: 'label' });
   }
   if (date) text('date', date, M + CW / 2, y + 6, CW / 2, 26, { color: c.onDeepMuted, align: 'right', role: 'label' });
