@@ -13,9 +13,9 @@ const $ = (s) => document.querySelector(s);
 const opt = (value, text) => Object.assign(document.createElement('option'), { value, textContent: text });
 
 /**
- * @param {{ panels: { config: object, patchConfig(fn): object }, speaker: import('../perception/speaker.js').Speaker, getGateway: () => object|null }} o
+ * @param {{ panels: { config: object, patchConfig(fn): object }, speaker: import('../perception/speaker.js').Speaker, getGateway: () => object|null, getDeepseekVoice: () => { available: boolean, enabled: boolean } }} o
  */
-export function initVoicePanel({ panels, speaker, getGateway }) {
+export function initVoicePanel({ panels, speaker, getGateway, getDeepseekVoice }) {
   const vc = () => panels.config.voice;
   const patchVoice = (patch) => panels.patchConfig((c) => ({ ...c, voice: { ...c.voice, ...patch } }));
   const qwenPicker = initQwenVoicePicker({ getConfig: () => panels.config, patchVoice, getGateway, onChanged: () => render() });
@@ -31,7 +31,12 @@ export function initVoicePanel({ panels, speaker, getGateway }) {
     render();renderStt();$('#qwen-realtime-key').focus();
   });
   const engineSel = $('#tts-engine');
-  engineSel.replaceChildren(opt('auto', '自动（有百炼密钥用百炼，否则用免费在线声音）'), ...voiceEngines.map((e) => opt(e.id, e.name)));
+  const chooseDeepseek = $('#choose-deepseek-voice');
+  chooseDeepseek.addEventListener('click', () => {
+    if (!getDeepseekVoice().available) return;
+    patchVoice({ engine: 'deepseek' });
+    render();
+  });
 
   const fxSeg = $('#tts-fx');
   fxSeg.replaceChildren(...Object.entries(FX_PRESETS).map(([id, p]) => Object.assign(document.createElement('button'), { type: 'button', role: 'radio', textContent: p.name.replace(/ · .*/, ''), title: p.desc, value: id })));
@@ -43,6 +48,11 @@ export function initVoicePanel({ panels, speaker, getGateway }) {
     const gateway = getGateway();
     const effective = resolveVoice(cfg, gateway);
     const e = ttsEngineById(effective.engine);
+    const { available, enabled } = getDeepseekVoice();
+    const showDeepseek = v.engine === 'deepseek' || (available && enabled);
+    const engines = voiceEngines.filter(engine => engine.id !== 'deepseek' || showDeepseek);
+    engineSel.replaceChildren(opt('auto', '自动（有百炼密钥用百炼，否则用免费在线声音）'), ...engines.map(engine => opt(engine.id, engine.name)));
+    chooseDeepseek.hidden = !available || showDeepseek;
     engineSel.value = ttsEngineById(v.engine) ? v.engine : 'auto'; // 选过已去掉的引擎：按自动
 
     // 引擎说明
@@ -104,10 +114,12 @@ export function initVoicePanel({ panels, speaker, getGateway }) {
   // ------------------------------------------------------------ 语音识别
   const browserSR = speechRecognitionSupported && !window.jarvisDesktop && !MOBILE;
   const sttSel = $('#stt-engine');
-  sttSel.replaceChildren(opt('auto', '自动'), ...STT_ENGINES.filter((e) => e.id !== 'browser' || browserSR).map((e) => opt(e.id, e.name)));
   function renderStt() {
     const cfg = panels.config;
     const gateway = getGateway();
+    const engines = STT_ENGINES.filter(engine => (engine.id !== 'browser' || browserSR) &&
+      (engine.id !== 'deepseek' || cfg.stt.engine === 'deepseek' || getDeepseekVoice().available));
+    sttSel.replaceChildren(opt('auto', '自动'), ...engines.map(engine => opt(engine.id, engine.name)));
     sttSel.value = cfg.stt.engine;
     const id = resolveStt(cfg, { gateway, browserSupported: browserSR });
     const e = sttEngineById(id);

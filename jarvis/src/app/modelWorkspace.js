@@ -27,6 +27,7 @@ export function createModelWorkspace(app) {
     saveLocal: (cfg) => app.panels.setModelConfig(cfg),
     getClient,
     onServerSaved: (cfg) => {
+      app.voicePanel?.render();
       globalThis.__jarvisServerModel = currentLine(cfg).model;
       globalThis.__jarvisServerAuto = hasRouting(cfg);
       globalThis.__jarvisServerPinned = Boolean(cfg.pinModel);

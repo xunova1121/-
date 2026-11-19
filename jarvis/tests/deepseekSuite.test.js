@@ -7,6 +7,7 @@ import { reverseImageMode } from '../src/agent/deepseekQuestion.js';
 import { createAdapter } from '../src/llm/config.js';
 import { ocrLine } from '../src/llm/ocr.js';
 import { transcribe, encodeWav } from '../src/perception/stt.js';
+import { memberModelConfig } from '../server/userRoutes.mjs';
 import { synthesize } from '../src/perception/tts.js';
 import { createOpenAIAdapter } from '../src/llm/openai.js';
 import { createTools } from '../src/agent/tools.js';
@@ -230,4 +231,13 @@ it('文件输入被官方拒绝时保留审核原因，停止后续处理', asyn
   const fetchImpl = vi.fn(async () => Response.json({ error: { message: 'Content Exists Risk' } }, { status: 400 }));
   await expect(deepseekFileQuestion(cfg, pdf, '读文件', { fetchImpl })).rejects.toMatchObject({ code: 'MODEL_CONTENT_FILTER' });
   expect(fetchImpl).toHaveBeenCalledOnce();
+});
+
+it('成员只得到已开放的语音能力，不下发服务器密钥', () => {
+  for (const [suite, key, allowed] of [[true, 'test-official', true], [false, 'test-official', false], [true, '', false]]) {
+    const cfg = memberModelConfig({ deepseekSuite: suite, keys: { deepseek: key }, deepseekSearchKey: 'search-only' });
+    expect(cfg.deepseekVoiceAvailable).toBe(allowed);
+    expect(cfg.keys).toEqual({});
+    expect(JSON.stringify(cfg)).not.toMatch(/test-official|search-only/);
+  }
 });

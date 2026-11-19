@@ -35,6 +35,7 @@ export function memberModelConfig(config) {
     abilities: Object.fromEntries(Object.entries(config.abilities || {}).map(([name, value]) => [name, { main: line(value?.main), backup: line(value?.backup) }])),
     routing: { enabled: config.routing?.enabled === true, provider: config.routing?.provider, routes: textMap(config.routing?.routes) },
     customProviders: (Array.isArray(config.customProviders) ? config.customProviders : []).map(({ id, name, kind }) => ({ id, name, kind })),
+    deepseekVoiceAvailable: config.deepseekSuite === true && Boolean(config.keys?.deepseek?.trim()),
     keys: {}, readOnly: true, sharedModels: true
   };
 }

@@ -104,6 +104,16 @@ try {
       await page.evaluate(() => document.querySelectorAll('#panel details').forEach((d) => { d.open = true; }));
       const engines = await page.evaluate(() => [...document.querySelectorAll('#tts-engine option')].map((o) => o.value));
       check('声音只留三种：百炼实时、免费在线、手机自带', JSON.stringify(engines) === JSON.stringify(['auto', 'qwen-realtime', 'edge', 'browser']), engines.join(','));
+      const choose = page.locator('#choose-deepseek-voice');
+      check('已配官方密钥时可主动选用 DeepSeek 朗读', await choose.isVisible());
+      await choose.click();
+      check('手动选择后显示真实音色', await page.locator('#tts-engine').inputValue() === 'deepseek' && await page.locator('#tts-voice option').count() === 2);
+      await page.locator('#tts-engine').selectOption('auto');
+      const patchSuite = enabled => page.evaluate(value => window.__jarvis.panels.patchConfig(cfg => ({ ...cfg, deepseekSuite: value })), enabled);
+      await patchSuite(true);
+      check('全家桶已启用时直接列出 DeepSeek，保留原来的默认声音', await page.locator('#tts-engine option[value="deepseek"]').count() === 1 && await page.locator('#tts-engine').inputValue() === 'auto');
+      await page.evaluate(() => window.__jarvis.panels.patchConfig(cfg => ({ ...cfg, keys: {}, deepseekSearchKey: 'fixture-search-only' })));
+      check('只有独立搜索密钥时隐藏官方语音入口', await choose.isHidden() && await page.locator('#tts-engine option[value="deepseek"]').count() === 0 && await page.locator('#stt-engine option[value="deepseek"]').count() === 0);
     }
     check(`${width}px 没有页面错误`, errors.length === 0, errors.join('；'));
     await ctx.close();

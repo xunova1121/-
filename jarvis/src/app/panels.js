@@ -5,6 +5,7 @@ import { userStorageSuffix } from '../core/userStorage.js';
  * 右侧（手机上是整页）面板：切换面板，以及各面板的创建——工作区 / 知识库 / 记忆、声音、模型分工、模型选择、
  * 本地模型、MCP 连接、技能。
  */
+import { loadServerSettings } from '../core/serverClient.js';
 import { modelOf } from '../llm/config.js';
 import { initPanels } from '../ui/panels.js';
 import { initVoicePanel } from '../ui/voicePanel.js';
@@ -45,6 +46,12 @@ export function createPanels(app) {
     if (name === 'models') {
       panels.refreshModels();
       voicePanel.render();
+      if (app.modelWorkspace && loadServerSettings().enabled) {
+        app.modelWorkspace.refresh('server').then(
+          () => voicePanel.render(),
+          () => {}
+        );
+      }
       localModels.refresh();
       routingPanel.render();
     }
@@ -79,6 +86,7 @@ export function createPanels(app) {
     },
     onConfigChange: (cfg) => {
       app.llmConfig = cfg;
+      app.voicePanel?.render();
       app.updateModelLabels();
       app.syncMemoryEngine();
       app.updateOrbitStatus();
@@ -90,7 +98,17 @@ export function createPanels(app) {
       if (!on) clearTimeout(app.reflectTimer);
     }
   });
-  const voicePanel = initVoicePanel({ panels, speaker: app.speaker, getGateway: () => app.gateway });
+  const voicePanel = initVoicePanel({
+    panels,
+    speaker: app.speaker,
+    getGateway: () => app.gateway,
+    getDeepseekVoice: () => {
+      const remote = loadServerSettings().enabled;
+      const cfg = remote ? app.modelWorkspace?.config('server') : panels.config;
+      const available = Boolean(cfg?.keys?.deepseek?.trim() || cfg?.deepseekVoiceAvailable || (!remote && app.gateway?.keys?.includes('deepseek')));
+      return { available, enabled: cfg?.deepseekSuite === true || cfg?.deepseekVoiceAvailable === true };
+    }
+  });
   routingPanel = initRoutingPanel({
     getConfig: () => panels.config,
     patchConfig: (fn) => panels.patchConfig(fn),
