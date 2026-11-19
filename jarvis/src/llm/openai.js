@@ -1,3 +1,4 @@
+import { datedMessages } from './deepseekChat.js';
 import { deepseekWebTools, deepseekWebEvidence } from './deepseekWeb.js';
 /**
  * OpenAI 兼容适配器：/chat/completions 流式 + 函数调用。
@@ -119,7 +120,7 @@ export function createAccumulator(onText, webEvidence = null) {
         try { args = c.argText ? JSON.parse(c.argText) : {}; } catch (e) { parseError = `参数不是合法 JSON：${e.message}`; }
         return { id: c.id || `call_${i}_${Date.now().toString(36)}`, name: c.name, args, parseError };
       });
-      return { text, toolCalls, stop: finish, ...(webEvidence && { citations: webEvidence.result(text) }), ...(usage && { usage }), ...(hasReasoning && { raw: { kind: 'openai', reasoning_content: reasoning } }) };
+      return { text, toolCalls, stop: finish, ...(webEvidence && { citations: webEvidence.result(text), ...(webEvidence.imageResults?.().length && { imageResults: webEvidence.imageResults() }) }), ...(usage && { usage }), ...(hasReasoning && { raw: { kind: 'openai', reasoning_content: reasoning } }) };
     }
   };
 }
@@ -196,10 +197,11 @@ export const CONTINUE_PROMPT = '（网络中断了，你上一条回答只发出
 /**
  * serviceTier：服务档位（如中转站的 "fast" 快速档），每次请求带上 service_tier；服务商不认就自动去掉重试
  */
-export function createOpenAIAdapter({ deepseekWeb = false, baseURL, apiKey, headers = {}, retryDelays = RETRY_DELAYS, serviceTier = '', routeSort = '' }) {
-  const once = createOnce({ deepseekWeb, baseURL, apiKey, headers, serviceTier, routeSort });
+export function createOpenAIAdapter({ deepseekSuite = false, deepseekWeb = false, baseURL, apiKey, headers = {}, retryDelays = RETRY_DELAYS, serviceTier = '', routeSort = '' }) {
+  const once = createOnce({ deepseekSuite, deepseekWeb, baseURL, apiKey, headers, serviceTier, routeSort });
   return {
     kind: 'openai',
+    requiresModeration: deepseekSuite,
     deepseekWeb,
     usesNativeSearch: opts => Boolean(deepseekWeb && opts.webMode && opts.allowWebSearch && opts.maxWebSearches > 0 && !opts.tools?.length),
     async stream(opts) {
@@ -228,23 +230,28 @@ export function createOpenAIAdapter({ deepseekWeb = false, baseURL, apiKey, head
 const noTierModels = new Set(); // 不认 service_tier 的型号：去掉后不再带
 const noRouteSort = new Set(); // 不认 provider.sort 的接口地址+型号：去掉后不再带
 const noUsageModels = new Set(); // 不认 stream_options 的中转站+型号：去掉后不再带
-function createOnce({ deepseekWeb, baseURL, apiKey, headers = {}, serviceTier = '', routeSort = '' }) {
+function createOnce({ deepseekSuite, deepseekWeb, baseURL, apiKey, headers = {}, serviceTier = '', routeSort = '' }) {
   return {
     async stream({ signal: outer, ...req }) {
       const guard = stallGuard(outer, req.stallTimeouts);
       try { return await streamOnce({ ...req, signal: guard.signal }, guard); } catch (e) { throw guard.error(e); } finally { guard.done(); }
     }
   };
-  async function streamOnce({ model, system, messages, tools, signal, onText, effort, webMode, allowWebSearch, maxWebSearches }, guard) {
+  async function streamOnce({ model, system, messages, tools, signal, onText, effort, webMode, allowWebSearch, maxWebSearches, requestTitle }, guard) {
     const native = deepseekWeb && webMode && allowWebSearch && maxWebSearches > 0 && !tools?.length;
+    const wireMessages = toOpenAIMessages(system, messages);
+    const titled = deepseekSuite && requestTitle === true && !messages.some(m => m.role === 'assistant');
+    const moderated = deepseekSuite || native;
     const send = (withTools, withEffort, withTier = useTier, withUsage = useUsage) => fetch(`${baseURL.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(apiKey && { Authorization: `Bearer ${apiKey}` }), ...headers },
       body: JSON.stringify({
         model,
         stream: true,
-        messages: toOpenAIMessages(system, messages),
-        ...(native && { thinking: { type: webMode === 'deep' ? 'enabled' : 'disabled' }, tools: deepseekWebTools(webMode), safety_check: { level: 'high' } }),
+        messages: deepseekSuite ? datedMessages(wireMessages) : wireMessages,
+        ...(titled && { title: { enabled: true } }),
+        ...(moderated && { safety_check: { level: 'high' } }),
+        ...(native && { thinking: { type: webMode === 'deep' ? 'enabled' : 'disabled' }, tools: deepseekWebTools(webMode) }),
         ...(withTools && tools?.length && { tools: toOpenAITools(tools) }),
         // 思考强度：日常对话让推理模型少想一点，首字快很多（不支持的模型会报错，自动去掉重试）
         ...(withEffort && { reasoning_effort: effort }),
@@ -287,9 +294,11 @@ function createOnce({ deepseekWeb, baseURL, apiKey, headers = {}, serviceTier = 
     if (!res.ok || !res.body) {
       let detail = '';
       try { detail = (await res.text()).slice(0, 300); } catch { /* ignore */ }
+      if (moderated && res.status === 400 && /content exists risk|content_filter/i.test(detail)) throw Object.assign(new Error('服务商内容审核未通过'), { code: 'MODEL_CONTENT_FILTER', status: 400 });
       throw Object.assign(new Error(`模型接口返回 ${res.status}${detail ? `：${detail}` : ''}`), { status: res.status, retryAfterMs: retryAfterMs(res.headers?.get?.('retry-after')) });
     }
-    const acc = createAccumulator(onText, native ? deepseekWebEvidence(onText) : null);
+    let title = '';
+    const acc = createAccumulator(moderated ? null : onText, native ? deepseekWebEvidence(onText) : null);
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     let buf = '';
@@ -317,8 +326,10 @@ function createOnce({ deepseekWeb, baseURL, apiKey, headers = {}, serviceTier = 
             else guard.touch();
           }
           if (typeof data.service_tier === 'string') servedTier = data.service_tier;
+          const choice = data.choices?.[0];
+          if (titled && choice?.finish_reason) title = choice.delta?.title || choice.message?.title || '';
           acc.push(data);
-          if (!native && data.choices?.[0]?.finish_reason) finished = true;
+          if (!moderated && data.choices?.[0]?.finish_reason) finished = true;
         }
       }
     } finally {
@@ -326,6 +337,10 @@ function createOnce({ deepseekWeb, baseURL, apiKey, headers = {}, serviceTier = 
       reader.releaseLock();
     }
     const r = acc.result();
+    if (moderated && r.stop === 'content_filter') throw Object.assign(new Error('服务商内容审核未通过'), { code: 'MODEL_CONTENT_FILTER' });
+    if (moderated && !r.stop) throw Object.assign(new Error('服务商未返回最终审核状态'), { code: 'MODEL_MODERATION_INCOMPLETE' });
+    if (moderated && r.text) onText?.(r.text);
+    if (typeof title === 'string' && title.trim()) r.title = title.trim().slice(0, 60);
     // 填了服务档位：记下要的、实际发出去的、服务商回报的，回答底下显示快速档有没有生效
     return { ...r, stop: r.toolCalls.length ? 'tool_use' : r.stop, ...(serviceTier && { tier: { asked: serviceTier, sent: useTier, served: servedTier } }) };
   }

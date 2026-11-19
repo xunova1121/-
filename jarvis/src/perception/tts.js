@@ -1,12 +1,13 @@
 import { secMsGec } from '../../shared/edgeGec.js';
 /**
- * 语音合成引擎目录与请求（只留三种，其余 2026-10 按用户要求去掉）：
+ * 语音合成基础目录与用户可选的 DeepSeek 官方线路：
  *   qwen-realtime  百炼实时语音：流式合成边收边播（推荐，见 qwenRealtime）
  *   edge           Edge 在线朗读：免费、免密钥（安卓原生插件 / 电脑本机网关）
  *   browser        手机 / 浏览器自带（免费；音色取决于系统，无法加声线效果）
  * 云端引擎返回音频，经 voiceFx 效果链后播放。
  */
 
+import { deepseekVoice } from './deepseekVoice.js';
 import { QWEN_VOICES } from '../../shared/qwenRealtime.js';
 import { EDGE_VOICES } from '../../shared/edgeVoices.js';
 
@@ -19,7 +20,9 @@ export const TTS_ENGINES = [
   { id: 'browser', name: '手机 / 系统自带（免费）', fx: false }
 ];
 
-export const ttsEngineById = (id) => TTS_ENGINES.find((e) => e.id === id);
+export const voiceEngines = [...TTS_ENGINES, { id: 'deepseek', name: 'DeepSeek 官方朗读', keyFrom: 'deepseek', browser: true,
+  voices: [['stella', '海星 · 女声'], ['tide', '暗潮 · 男声']], note: '按句朗读，使用当前位置的 DeepSeek 官方服务商密钥。' }];
+export const ttsEngineById = (id) => voiceEngines.find((e) => e.id === id);
 
 /**
  * 浏览器自带声音排序：中文童声 > 自然的温柔中文声音 > 其他中文声音。
@@ -52,6 +55,7 @@ export async function synthesize(vc, keys, text, { gateway = null, signal, fetch
   if (!e || e.id === 'browser') throw new Error('不是云端语音引擎');
   if (e.id === 'qwen-realtime') throw new Error('百炼实时语音使用流式播放，请使用新版播放器');
   const voice = vc.voices?.[e.id] || e.voices[0]?.[0] || '';
+  if (e.id === 'deepseek') return deepseekVoice('tts', { keys }, { text, voice }, { gateway, signal, fetchImpl });
   if (e.id === 'edge') {
     if (!gateway && globalThis.__jarvisEdgeSpeech) {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');

@@ -47,8 +47,8 @@ export const CAPABILITIES = {
     { provider: 'doubao', pick: /seedream/i, model: 'doubao-seedream-4-0-250828' },
     { provider: 'siliconflow', pick: /kolors|flux/i, model: 'Kwai-Kolors/Kolors' }
   ],
-  // 文字识别：目前只接了智谱的文档解析接口（见 ocr.js）
-  ocr: [{ provider: 'zhipu', pick: /ocr/i, model: 'glm-ocr' }],
+  // DeepSeek OCR 使用专用工具端点，仅在打开官方文件能力后参与选择。
+  ocr: [{ provider: 'deepseek', pick: /^deepseek-ocr$/, model: 'deepseek-ocr' }, { provider: 'zhipu', pick: /ocr/i, model: 'glm-ocr' }],
   embed: [
     { provider: 'zhipu', pick: /^embedding-\d/i, model: 'embedding-3' },
     { provider: 'qwen', pick: /text-embedding/i, model: 'text-embedding-v4' },
@@ -80,7 +80,7 @@ const version = (id) => Number(String(id).match(/(\d+(?:\.\d+)?)/)?.[1] || 0);
 export function autoLine(cfg, ability, except = null) {
   const have = keyed(cfg);
   for (const row of CAPABILITIES[ability] || []) {
-    if (!have.includes(row.provider)) continue;
+    if (!have.includes(row.provider) || (ability === 'ocr' && row.provider === 'deepseek' && cfg.deepseekSuite !== true)) continue;
     const line = lineOf(row.provider, pickModel(cfg, row, ability));
     if (line && !same(line, except) && (!except || line.provider !== except.provider)) return line;
   }

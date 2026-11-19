@@ -92,7 +92,7 @@ import { compactToolResults } from './turnContext.js';
 import { requirementsTool } from './taskRequirements.js';
 import * as holdings from './holdings.js';
 import { recentFailures, recentWorkLog } from './failedSteps.js';
-import { tryDeepseekQuestion } from './deepseekQuestion.js';
+import { reverseImageMode, tryDeepseekQuestion } from './deepseekQuestion.js';
 import { createImageSight } from './imageSight.js';
 
 export const STABLE_PROMPT = `你是“未央”，用户的个人智能体。实际运行位置与能力以下方环境和本轮工具为准。
@@ -481,6 +481,13 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       takeInbox();
     }
   }
+  if (!depth && adapter.deepseekWeb && !codeWork?.enabled && !agent?.profile && !inbox?.length && reverseImageMode(requirementText, images)) {
+    const found = await tryDeepseekQuestion({ adapter, model, text: requirementText, intent: { kind: 'general' }, tools: availableTools, signal, retrieval, lookupControl, emit, review, now, images, requestTitle: !history.length });
+    if (found && !inbox?.length) {
+      emit({ type: 'text', delta: found.text });
+      return finishAgentRun({ step: 0, limit, retrievalStopped: false, retrieval, stuck: false, review, nativeSearchCalls: found.calls, light, signal, quiet, toolCount, lastToolOk, failCount, userText, finalText: found.text, emit, lookupDeadline, answerCompleted: true });
+    }
+  }
   const sportsScope = sportsFollowupScope(requirementText, history);
   if (sportsScope) { retrieval.sportsScope = sportsScope; ctx.dynamic = (ctx.dynamic || '') + '\n' + SPORTS_FOLLOWUP_NOTE; }
   // 所有查询在此唯一入口预取；原工具承担数据/卡片/安全校验，执行器保留真实进度回执。
@@ -494,7 +501,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     if (adapter.deepseekWeb && !makingFile && !computerTask && !agent?.profile && !complaint && !questionProfile &&
         !taskIntent.inherited && !inbox?.length && userText === requirementText &&
         !review.report().contract.calculation && !review.report().sourceRequirement) {
-      const native = await tryDeepseekQuestion({ adapter, model, text: userText, intent, tools: availableTools, signal, retrieval, lookupControl, emit, review, now });
+      const native = await tryDeepseekQuestion({ adapter, model, text: userText, intent, tools: availableTools, signal, retrieval, lookupControl, emit, review, now, requestTitle: !history.length });
       if (native && !inbox?.length) {
         emit({ type: 'text', delta: native.text });
         return finishAgentRun({ step: 0, limit, retrievalStopped: false, retrieval, stuck: false, review, nativeSearchCalls: native.calls,
@@ -603,9 +610,9 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     try {
     if (upgraded && ++upgradeCalls > UPGRADE_CALLS) throw Object.assign(new Error('本轮能力模型调用预算已用完，保留已完成的工作；未完成部分不能称已交付'), { code: 'CAPABILITY_BUDGET' });
     modelAttempts++;
-    const input = { system: measuredSystem, messages: projection.messages, tools: requestTools };
+    const input = { requestTitle: !depth && !history.length && step === 0, system: measuredSystem, messages: projection.messages, tools: requestTools };
     // 主模型 hedgeMs 内没反应：同时问备用模型，谁先有反应用谁（写文件的任务前面本来就要等很久，不这样做）
-    if (!phase && !fastAnswer && hedgeMs > 0 && backups.length && !holding && !makingFile) {
+    if (!phase && !fastAnswer && !requestCurrent.adapter.requiresModeration && hedgeMs > 0 && backups.length && !holding && !makingFile) {
       const next = backups[0];
       // 备用模型的系统说明里写它自己的名字：原先两边共用主模型那份，备用模型答完却自称是另一个模型
       const backupNote = modelNote ? `${modelNote}\n（原定的 ${model} 出错或太慢，这一轮实际由 ${next.model} 回答。）` : '';
@@ -634,6 +641,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     // 服务档位（快速档）实际有没有生效：告诉界面，回答底下显示
     if (r?.tier) emit({ type: 'tier', ...r.tier });
     } catch (e) {
+      if (['MODEL_CONTENT_FILTER', 'MODEL_MODERATION_INCOMPLETE'].includes(e.code)) throw e;
       if (e.code === 'LOOKUP_ANSWER_TIMEOUT') { releaseSafePartial(); throw e; }
       if (e.code === 'LOOKUP_RETRIEVAL_END' && !signal?.aborted) {
         releaseSafePartial();

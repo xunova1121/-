@@ -15,7 +15,7 @@ export function createVoiceInput(kind, { getConfig, getGateway, getEngine, brows
   if (kind === 'native') return new NativeVoice({ plugin, ...handlers });
   if (kind === 'qwen') return new QwenVoice({ getConfig, getGateway, allowBargeIn, ...handlers });
   return new (kind === 'recorded' ? RecordedVoice : VoiceInput)({
-    allowBrowserSR: browserSupported,
+    allowBrowserSR: browserSupported && getEngine() !== 'deepseek',
     getTranscriber: () => {
       const id = getEngine();
       return ['none', 'browser', 'qwen-realtime'].includes(id)

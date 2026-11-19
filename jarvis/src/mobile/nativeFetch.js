@@ -72,6 +72,10 @@ export function wrapFetch(webFetch, native, selfOrigin, g = globalThis) {
     const url = new URL(typeof input === 'string' ? input : input.url, selfOrigin);
     if (url.origin === selfOrigin || !/^https?:$/.test(url.protocol)) return webFetch(input, init);
     // 要边收边显示的（服务器推回答的事件流）：原生网络要等整个回答结束才一次给，所以先用 WebView；它连不上再退回原生
+    // 付费提交失败后可能已被上游接收，选一条传输线路，不自动重发。
+    if (init.noNetworkRetry) {
+      return init.stream && !nativeHosts.has(url.host) ? webFetch(input, init) : native(url.href, init);
+    }
     if (init.stream) {
       try {
         return await webFetch(input, init);

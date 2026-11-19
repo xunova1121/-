@@ -65,7 +65,9 @@ export function createVoice(app) {
       toast(
         resolveVoice(app.llmConfig, app.gateway).engine === 'qwen-realtime'
           ? `${e.message}（所选百炼声音未播放，请检查声音设置）`
-          : `${e.message}（先用系统自带声音朗读，5 分钟后再试）`
+          : resolveVoice(app.llmConfig, app.gateway).engine === 'deepseek'
+            ? `${e.message}（请检查 DeepSeek 声音设置）`
+            : `${e.message}（先用系统自带声音朗读，5 分钟后再试）`
       ),
     getVoiceConfig: () => resolveVoice(app.llmConfig, app.gateway),
     getKeys: () => app.llmConfig.keys,

@@ -66,6 +66,7 @@ import { factCheck, formatReport } from './factCheck.js';
 import { preferenceClaim, preferenceSupported } from './memoryPreference.js';
 import { evidence as evidenceStore } from './evidenceStore.js';
 import { createSongTool } from './music.js';
+import { attachmentQuestion } from './deepseekFileRead.js';
 import { createOcrTool } from './ocrTool.js';
 import { createArchitectureEvidenceTool } from './architectureEvidenceTool.js';
 import { createArchitecturePlanTool } from './architectureTool.js';
@@ -138,6 +139,7 @@ export function createTools(ctx) {
   ctx={...ctx,readDocument:navigation.read};
   const readPage = createPageReader(ctx); // 直接打不开或没读到正文时，有 Tavily Key 就让 Tavily 代读
   const seenFiles = new Set(); // 这次读过或写过的工作区文件（覆盖没读过的文件前先拦一下）
+  const answersByTurn = new WeakMap();
   const overwriteWarned = new Set();
   const tools = [
     ...(ctx.convertLegacyDoc ? [legacyDocumentTool(ctx)] : []),
@@ -534,11 +536,25 @@ export function createTools(ctx) {
     },
     {
       name: 'read_file',
-      description: '读取原文件。压缩包用open_archive；要通读长文档全部内容用digest_document。长Word/PDF先用view=sections取得程序生成的目录与sectionId，或用query定位，再以sectionId读相关原文；不要猜章节名或反复顺序翻整份文件。正文分页2万字，95%以上重叠范围不重复发送；目录和片段不代表全文已读。代码文本原样返回，图片直接查看。',
-      input_schema: S({ path: str('文件路径'), offset: { type: 'integer', minimum: 0, description: '正文/关键词的字符起点；sectionId存在时为该范围内偏移' }, view:{type:'string',enum:['text','sections']},query:{type:'string',maxLength:120},sectionId:{type:'string',maxLength:120},recover:{type:'boolean',description:'仅在旧工具结果已过期且确需原文时恢复该页；每个重叠范围最多恢复一次，不能用offset加1绕过'},catalogOffset:{type:'integer',minimum:0,maximum:1000},limit:{type:'integer',minimum:1,maximum:20} }, ['path']),
-      run: async ({ path, offset = 0,...options }, { signal } = {}) => {
+      description: '读取原文件。压缩包用open_archive；要通读长文档全部内容用digest_document。长Word/PDF先用view=sections取得程序生成的目录与sectionId，或用query定位，再以sectionId读相关原文；不要猜章节名或反复顺序翻整份文件。正文分页2万字，95%以上重叠范围不重复发送；目录和片段不代表全文已读。代码文本原样返回，图片直接查看。' + (ctx.askFile ? '已上传的附件可用 documentQuestion 回答用户本轮问题，layout 保留图表版式。' : ''),
+      input_schema: S({ path: str('文件路径'), ...(ctx.askFile && { documentQuestion: { type: 'boolean' }, layout: { type: 'boolean' } }), offset: { type: 'integer', minimum: 0, description: '正文/关键词的字符起点；sectionId存在时为该范围内偏移' }, view:{type:'string',enum:['text','sections']},query:{type:'string',maxLength:120},sectionId:{type:'string',maxLength:120},recover:{type:'boolean',description:'仅在旧工具结果已过期且确需原文时恢复该页；每个重叠范围最多恢复一次，不能用offset加1绕过'},catalogOffset:{type:'integer',minimum:0,maximum:1000},limit:{type:'integer',minimum:1,maximum:20} }, ['path']),
+      run: async ({ path, offset = 0, documentQuestion, layout, ...options }, { signal, rawRequestText, executionScope } = {}) => {
         let blob = await ws.readBlob(path);
         seenFiles.add(ws.normalize(path));
+        if (ctx.askFile && !offset && !Object.keys(options).length && (!isImageName(path) || documentQuestion === true)) {
+          const question = attachmentQuestion(rawRequestText, path, documentQuestion === true);
+          if (question) {
+            const rich = layout === true || /图文|图表|插图|示意图|版式/.test(question);
+            const fileAnswers = answersByTurn.get(executionScope) || new Map();
+            if (executionScope) answersByTurn.set(executionScope, fileAnswers);
+            const key = JSON.stringify([path, question, rich]);
+            if (!fileAnswers.has(key)) {
+              if (fileAnswers.size >= 16) fileAnswers.delete(fileAnswers.keys().next().value);
+              fileAnswers.set(key, ctx.askFile({ blob, name: path, layout: rich }, question, { signal }));
+            }
+            return '基于附件的 DeepSeek 文件问答（模型解读）\n' + await fileAnswers.get(key);
+          }
+        }
         if(isImageName(path)&&typeof document==='undefined'){
           if ((await imageFormat(blob))?.ext === 'svg') blob = await diagramPreview(ctx, await blob.text(), { signal });
           if(blob.size>8e6)throw new Error('图片超过8MB，请先压缩后再补充，或作为新消息发送');

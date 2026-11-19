@@ -1,11 +1,12 @@
 /**
  * 文字识别（OCR）：把图片、扫描版 PDF 里的字和表格原样抄出来（Markdown）。
  *
- *   用谁    能力表“文字识别”那一项（见 abilities.js），目前只认智谱 GLM-OCR
+ *   用谁    能力表“文字识别”那一项（见 abilities.js），支持智谱 GLM-OCR 和可选的 DeepSeek OCR
  *   接口    智谱“文档解析” POST {接口地址}/layout_parsing，{ model, file }；file 用 base64（data: 开头）
  *           结果在 md_results（字段名来自智谱文档，未用真 Key 核对）
  *   和看图的区别：看图模型看懂画面、回答问题；OCR 只抄字，大段文字、复杂表格更准、更便宜
  */
+import { deepseekOcr } from './deepseekSuite.js';
 import { abilityLines, cfgForLine } from './abilities.js';
 import { providerEndpoint } from './images.js';
 
@@ -14,6 +15,7 @@ export const OCR_LIMITS = { maxBytes: 10 * 1024 * 1024, timeoutMs: 90_000, maxCh
 /** 这份配置能不能做文字识别（返回用哪条线路） */
 export function ocrLine(cfg) {
   const line = abilityLines(cfg, 'ocr').main;
+  if (line?.provider === 'deepseek' && cfg.deepseekSuite === true) return line;
   return line?.provider === 'zhipu' ? line : null;
 }
 
@@ -31,9 +33,13 @@ const toBase64 = async (blob) => {
  */
 export async function recognizeText(cfg, file, { gateway = null, fetchImpl = globalThis.fetch, signal } = {}) {
   const line = ocrLine(cfg);
-  if (!line) throw Object.assign(new Error('还没有能做文字识别的服务商：在模型页填上智谱的 Key（会自动用 GLM-OCR）'), { code: 'OCR_UNAVAILABLE', kind: 'api' });
+  if (!line) throw Object.assign(new Error('还没有能做文字识别的服务商：在模型页填上智谱的 Key（会自动用 GLM-OCR），或启用 DeepSeek 官方 OCR'), { code: 'OCR_UNAVAILABLE', kind: 'api' });
   const mime = file.mime || file.blob?.type || 'image/png';
   if (file.blob && file.blob.size > OCR_LIMITS.maxBytes) throw Object.assign(new Error('文件超过 10MB，先压缩或分页再识别'), { kind: 'api' });
+  if (line.provider === 'deepseek') {
+    const blob = file.blob || new Blob([Uint8Array.from(atob(file.data), c => c.charCodeAt(0))], { type: mime });
+    return deepseekOcr(cfg, { ...file, blob, name: file.name || 'input.' + mime.split('/').pop() }, { gateway, fetchImpl, signal });
+  }
   const data = file.data ?? (await toBase64(file.blob));
   const { base, headers } = providerEndpoint(cfgForLine(cfg, line), gateway);
   const ctrl = new AbortController();

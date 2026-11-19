@@ -50,6 +50,7 @@ export function createModelRequest({ current, effort, signal, lookupDeadline, lo
       const result = await requestWindow.race(() =>
         current.adapter.stream({
           model: current.model,
+          requestTitle: input.requestTitle === true,
           ...(input.webMode && { webMode: input.webMode }),
           effort,
           // 闲聊（你好、在吗）：12 秒没动静就算卡住，不重试，直接换备用模型（评测里主模型卡住、等了十几秒才换）
@@ -95,6 +96,7 @@ export function createModelRequest({ current, effort, signal, lookupDeadline, lo
           }
         })
       );
+      if (result.title && input.requestTitle && !requestCtrl.signal.aborted) emit({ type: 'conversation_title', title: result.title });
       // 工具参数可能只在结束时可见；这是应用观察点，不冒充网络首包时间。
       observeOutput();
       if (!streamed && result.text) onText(boundary.push(result.text));

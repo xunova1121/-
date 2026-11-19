@@ -20,6 +20,7 @@ export function deepseekWebTools(mode) {
 
 /** 只保留本轮成功调用的公开来源；不保存签名、思考过程或抓取正文。 */
 export function deepseekWebEvidence(onText) {
+  const images = new Map();
   const seen = new Set();
   const sources = new Map();
   let citations = [];
@@ -33,6 +34,8 @@ export function deepseekWebEvidence(onText) {
     for (const source of [call.page, ...(Array.isArray(call.sources) ? call.sources : [])]) {
       const url = publicWebUrl(source?.url);
       if (!url || (!sources.has(url) && sources.size >= 80)) continue;
+      const imageUrl = publicWebUrl(source?.image_url);
+      if (imageUrl && ['image_search', 'deep_image_search'].includes(call.kind) && images.size < 12 && !images.has(imageUrl)) images.set(imageUrl, { url, imageUrl });
       const old = sources.get(url);
       sources.set(url, { url, title: String(source.title || old?.title || new URL(url).hostname).slice(0, 160),
         publishedAt: source.published_at || old?.publishedAt, read: Boolean(old?.read || source === call.page) });
@@ -46,6 +49,7 @@ export function deepseekWebEvidence(onText) {
       for (const step of delta?.server_tool_calls || []) for (const call of step.calls || []) note(call);
       if (Array.isArray(delta?.annotations)) citations = delta.annotations;
     },
+    imageResults: () => [...images.values()],
     result(text) {
       const length = Array.from(text).length;
       return citations.slice(0, 160).filter(a => a.type === 'url_citation').map(a => {

@@ -176,6 +176,7 @@ try {
     await mobileTab('服务商');
     const searchPanel = page.locator('details').filter({ has: page.getByText('联网搜索 · DeepSeek Search/Fetch · 云服务器', { exact: true }) });
     await searchPanel.locator('summary').click();
+    await searchPanel.getByLabel('启用 DeepSeek 官方文件问答、OCR 与对话增强', { exact: true }).check();
     await searchPanel.getByLabel('用官方 Flash 联网回答问题并附来源', { exact: true }).check();
     await searchPanel.getByLabel('DeepSeek搜索Key', { exact: true }).fill('fake-search-key-secret');
     await searchPanel.getByLabel('启用DeepSeek搜索', { exact: true }).check();
@@ -191,6 +192,7 @@ try {
     check(`${width} DeepSeek搜索云端独立保存、掩码且不改变默认模型`,
       searchReadback.cfg.deepseekSearchEnabled === true && searchReadback.cfg.deepseekSearchKey === '••••cret'
       && searchReadback.cfg.provider === 'custom' && !JSON.stringify(searchReadback.local).includes('fake-search-key-secret'));
+    check(width + ' 文件和对话增强只保存到云端', searchReadback.cfg.deepseekSuite === true && searchReadback.local?.deepseekSuite !== true);
     check(width + ' 原生开关只保存到云端', searchReadback.cfg.deepseekNativeWeb === true && searchReadback.local?.deepseekNativeWeb !== true);
     await searchPanel.getByLabel('启用DeepSeek搜索', { exact: true }).uncheck();
     searchSaved = page.waitForResponse(response => response.url() === base + '/api/server/config' && response.request().method() === 'PUT' && response.request().postDataJSON()?.deepseekSearchEnabled === false);

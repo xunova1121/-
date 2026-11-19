@@ -3,7 +3,7 @@ import { initQwenVoicePicker } from './qwenVoicePicker.js';
  * “模型”面板里的声音设置：语音引擎（百炼实时 / 免费在线 / 系统自带）、声音、声线效果、提示音、试听。
  */
 import { MOBILE } from '../config.js';
-import { TTS_ENGINES, ttsEngineById } from '../perception/tts.js';
+import { voiceEngines, ttsEngineById } from '../perception/tts.js';
 import { FX_PRESETS } from '../perception/voiceFx.js';
 import { resolveVoice } from '../llm/config.js';
 import { STT_ENGINES, sttEngineById, resolveStt } from '../perception/stt.js';
@@ -31,7 +31,7 @@ export function initVoicePanel({ panels, speaker, getGateway }) {
     render();renderStt();$('#qwen-realtime-key').focus();
   });
   const engineSel = $('#tts-engine');
-  engineSel.replaceChildren(opt('auto', '自动（有百炼密钥用百炼，否则用免费在线声音）'), ...TTS_ENGINES.map((e) => opt(e.id, e.name)));
+  engineSel.replaceChildren(opt('auto', '自动（有百炼密钥用百炼，否则用免费在线声音）'), ...voiceEngines.map((e) => opt(e.id, e.name)));
 
   const fxSeg = $('#tts-fx');
   fxSeg.replaceChildren(...Object.entries(FX_PRESETS).map(([id, p]) => Object.assign(document.createElement('button'), { type: 'button', role: 'radio', textContent: p.name.replace(/ · .*/, ''), title: p.desc, value: id })));

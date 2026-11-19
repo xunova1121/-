@@ -4,11 +4,14 @@
  */
 import { customViaGateway, providerById, upstreamFor } from '../../shared/providers.js';
 
+import { deepseekVoice } from './deepseekVoice.js';
+
 export const STT_ENGINES = [
   {id:'qwen-realtime',name:'百炼 Qwen3 实时识别（推荐）',keyFrom:'qwen',model:'qwen3-asr-flash-realtime',browser:true},
   { id: 'browser', name: '浏览器自带（Chrome / Edge，需联网）' },
   { id: 'siliconflow', name: '硅基流动 SenseVoice（中文快且便宜）', keyFrom: 'siliconflow', model: 'FunAudioLLM/SenseVoiceSmall', base: 'https://api.siliconflow.cn/v1', browser: false },
   { id: 'openai', name: 'OpenAI 语音转写', keyFrom: 'openai', model: 'gpt-4o-mini-transcribe', base: 'https://api.openai.com/v1', browser: true },
+  { id: 'deepseek', name: 'DeepSeek 语音识别（按句转写）', keyFrom: 'deepseek', browser: true },
   { id: 'custom', name: '自定义（OpenAI 兼容 /audio/transcriptions）', keyFrom: 'stt-custom', custom: true, browser: true },
   { id: 'provider', name: '用当前模型服务商转写（不用另配密钥，需服务商支持）', fromProvider: true, browser: true }
 ];
@@ -33,6 +36,7 @@ export function resolveStt(cfg, { gateway = null, browserSupported }) {
   if (has('siliconflow')) return 'siliconflow';
   // 都没有：试试当前的模型服务商（中转平台大多也提供 OpenAI 兼容的语音转写）
   const p = providerById(cfg.provider);
+  if (p?.id === 'deepseek') return 'none'; // 官方按句识别由用户在声音设置中选择。
   if (['openai', 'multi'].includes(p?.kind) && (has(p.id) || p.needsKey === false) && (!p.custom || cfg.baseURLs?.[p.id])) return 'provider';
   return 'none';
 }
@@ -66,6 +70,8 @@ export async function transcribe(engineId, cfg, audio, { gateway = null, signal,
   const e = sttEngineById(engineId);
   if (!e || e.id === 'browser') throw new Error('不是云端识别引擎');
   if (e.id === 'qwen-realtime') throw new Error('百炼实时识别需要实时收音器，请重新开启语音对话');
+  if (e.id === 'deepseek' || (e.fromProvider && cfg.provider === 'deepseek'))
+    return cleanTranscript(await deepseekVoice('asr', cfg, audio, { gateway, signal, fetchImpl }));
   if (e.fromProvider) return transcribeViaProvider(cfg, audio, { gateway, signal, fetchImpl });
   const key = cfg.keys?.[e.keyFrom] || '';
   const customURL = cfg.stt?.customURL || '';

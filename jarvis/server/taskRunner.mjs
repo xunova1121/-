@@ -24,6 +24,8 @@ import { evaluationTools, bindEvaluation } from './evaluation.mjs';
 import { measureModelInput, measureModelTokens } from '../shared/modelMetrics.js';
 import { createHelperLlm } from '../src/llm/helper.js';
 import { createEmbedder } from '../src/llm/embeddings.js';
+import { applySuggestedTitle } from '../src/llm/deepseekChat.js';
+import { deepseekFileQuestion } from '../src/llm/deepseekSuite.js';
 import { ocrLine, recognizeText } from '../src/llm/ocr.js';
 import { projectExecutionTool } from './projectExecution.mjs';
 import { renderOffice } from './officeRender.mjs';
@@ -215,6 +217,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   const recovered = recover();
 
   function record(task, e) {
+    if (e.type === 'conversation_title' && !task.suggestedTitle) task.suggestedTitle = e.title;
     task.timing?.event(e);
     if (e.type === 'diagnostic' && e.phase === 'model_start') {
       console.log(`[模型输入估算] ${task.id} ${JSON.stringify({ estimatedSystemTokens: e.estimatedSystemTokens ?? null, estimatedDialogueTokens: e.estimatedDialogueTokens ?? null, estimatedToolResultTokens: e.estimatedToolResultTokens ?? null, estimatedSchemaTokens: e.estimatedSchemaTokens ?? null, systemChars: e.systemChars ?? null, messageChars: e.messageChars ?? null, toolSchemaChars: e.toolSchemaChars ?? null })}`);
@@ -374,7 +377,9 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       canvasRenderer: serverCanvasRenderer,
       compareDiagramPpt,
       visionLlm: sight(cfg, task).describeImages || null,
-      ocr: ocrLine(cfg) ? (file, o) => recognizeText(cfg, file, { ...o, fetchImpl: evaluationModelFetch }) : null, // 文字识别（智谱 GLM-OCR）
+      ocrDocuments: ocrLine(cfg)?.provider === 'deepseek',
+        askFile: !task.evaluationId && cfg.deepseekSuite === true && cfg.keys?.deepseek ? (file, question, o) => deepseekFileQuestion(cfg, file, question, { ...o, fetchImpl: evaluationModelFetch }) : null,
+        ocr: ocrLine(cfg) ? (file, o) => recognizeText(cfg, file, { ...o, fetchImpl: evaluationModelFetch }) : null, // 文字识别（智谱 GLM-OCR）
       videoGen: (o) => generateVideo(cfg, { ...o, fetchImpl: evaluationModelFetch }),
       // 显示工作区里已有的图片：让手机按文件取回来显示
       onImage: (src, path) => { if (path) record(task, { type: 'file', path }); },
@@ -478,6 +483,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     await editSession(task.sessionId, async (fresh) => {
       fresh ??= session;
       if (!fresh) return;
+      if (!error && !stopped) applySuggestedTitle(fresh, task.suggestedTitle);
       fresh.messages = fresh.messages.filter((m) => m.draftOf !== task.id);
       if (!error && !stopped) fresh.messages.push({ role: 'assistant', content: text || '（完成）', ts: now(), ...extra });
       else if (shown.trim() || usedTools.length || task.markets?.length) fresh.messages.push({ role: 'assistant', content: `${shown.trim()}\n\n${stopped ? '（已打断）' : interruptionMark({ message: error, kind: errorType })}`, ts: now(), ...extra });

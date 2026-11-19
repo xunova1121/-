@@ -21,6 +21,7 @@ import { createDocumentReviewer } from '../llm/documentReviewer.js';
 import { createAdapter } from '../llm/config.js';
 import { createHelperLlm } from '../llm/helper.js';
 import { $, body, DESKTOP, COMPACT, toast, storage } from './env.js';
+import { deepseekFileQuestion } from '../llm/deepseekSuite.js';
 import { ocrLine, recognizeText } from '../llm/ocr.js';
 
 export function createToolbox(app) {
@@ -111,6 +112,11 @@ export function createToolbox(app) {
         }),
         visionLlm: app.visionHelperLlm(), // PPT 生成后看预览图检查排版
         // 文字识别（能力表“文字识别”，智谱 GLM-OCR）；没有就不提供
+        ocrDocuments: ocrLine(app.llmConfig)?.provider === 'deepseek',
+        askFile:
+          app.llmConfig.deepseekSuite === true && app.llmConfig.keys?.deepseek
+            ? (file, question, o) => deepseekFileQuestion(app.llmConfig, file, question, { ...o, gateway: app.gateway })
+            : null,
         ocr: ocrLine(app.llmConfig) ? (file, o) => recognizeText(app.llmConfig, file, { ...o, gateway: app.gateway }) : null,
         onPreview: background
           ? () => {}

@@ -1,3 +1,4 @@
+import { createDeepseekVoiceRoute } from './deepseekVoice.mjs';
 import { createTenderCenter } from './tenderCenter.mjs';
 import { createTenderRoutes } from './tenderRoutes.mjs';
 import { createUserStore, currentUser, PRIMARY_USER, runAsUser, userDataDir, userService } from './userScope.mjs';
@@ -232,6 +233,7 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
   };
 
   const accessRoutes = createAccessRoutes({ security, runner, sessions, readJson, json, getConfig: loadConfig, appDir });
+  const deepseekVoiceRoute = createDeepseekVoiceRoute({ loadConfig, readBody, readJson, json });
   const searchTest = createSearchTest({ getConfig: () => withoutCodeCredentials(loadConfig()), readJson, json, ...(searchFetch && { fetchViaGateway: searchFetch }) });
   const companyLookup = createCompanyLookup({ getConfig: () => withoutCodeCredentials(loadConfig()), readJson, json, ...(searchFetch && { get: searchFetch }),
     watchAccess: (req, cancel) => { const id = security.authenticate(req)?.id; return security.onRevoke(revoked => { if (revoked === id) cancel(); }); } });
@@ -294,6 +296,7 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
     if (await agentProfileRoutes(req, res, pathname, url)) return true;
     if (await studioRoutes(req, res, pathname, url)) return true;
     if (await tenderRoutes(req, res, pathname, url, principal)) return true;
+    if (await deepseekVoiceRoute(req, res, pathname, principal)) return true;
     if (await phoneRoutes(req, res, pathname)) return true;
     if (pathname === '/api/server/readiness') {
       if (!authorized(req)) { json(res, 401, { error: '服务器登录已失效' }); return true; }

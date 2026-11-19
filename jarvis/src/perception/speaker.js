@@ -8,6 +8,7 @@
  */
 import { buildFx, levelOf, playCue } from './voiceFx.js';
 import { synthesize, ttsEngineById, rankBrowserVoices } from './tts.js';
+import { streamDeepseekSpeech, streamDeepseekAvailable } from './deepseekVoice.js';
 import { streamQwenSpeech } from './qwenRealtime.js';
 import { browserDelivery } from './voiceProfile.js';
 
@@ -118,9 +119,9 @@ export class Speaker {
       if (vc.engine === 'browser') { await this.#browserSay(text); return { engine:'browser', voice:this.voice?.name || '系统默认' }; }
       const ctx = this.unlock(); if (!ctx) throw new Error('当前 WebView 没有可用的音频播放环境');
       this.ctrl = new AbortController();
-      if (vc.engine === 'qwen-realtime') {
+      if (this.#streams(vc.engine)) {
         await this.#playRealtime(text,gen);
-        return { engine:vc.engine, voice:vc.voices?.[vc.engine] || 'Bella' };
+        return { engine:vc.engine, voice:vc.voices?.[vc.engine] || (vc.engine === 'deepseek' ? 'stella' : 'Bella') };
       }
       const ab = await synthesize(vc,this.getKeys(),text,{gateway:this.getGateway(),config:this.getConfig(),signal:this.ctrl.signal});
       if (gen !== this.gen || !this.foreground) throw new DOMException('Aborted','AbortError');
@@ -194,7 +195,7 @@ export class Speaker {
   }
 
   #prefetch() {
-    if (this.getVoiceConfig().engine === 'qwen-realtime') return;
+    if (this.#streams(this.getVoiceConfig().engine)) return;
     this.ctrl ??= new AbortController();
     const vc = this.getVoiceConfig();
     for (const item of this.queue.slice(0, PREFETCH)) {
@@ -218,7 +219,7 @@ export class Speaker {
     while (this.queue.length) {
       const item = this.queue[0];
       const gen = item.gen;
-      if (this.getVoiceConfig().engine === 'qwen-realtime') {
+      if (this.#streams(this.getVoiceConfig().engine)) {
         try { await this.#playRealtime(item.text, gen); }
         catch (e) { if (gen === this.gen && e.name !== 'AbortError') this.onError?.(e); }
         if (gen !== this.gen) return;
@@ -246,6 +247,10 @@ export class Speaker {
   }
 
 
+  #streams(engine) {
+    return engine === 'qwen-realtime' || (engine === 'deepseek' && streamDeepseekAvailable(this.getKeys()));
+  }
+
   /** PCM分片按时间轴连续排队，取消时同时停止已排队的全部音源。 */
   async #playRealtime(text,gen) {
     const ctx=this.unlock();if(!ctx)throw new Error('当前系统没有音频播放能力');
@@ -258,17 +263,18 @@ export class Speaker {
     this.realtimeDone=resolvePlayback;
     const check=()=>{if(ended&&!sources.size)resolvePlayback();};
     try{
-      await streamQwenSpeech(text,{
-        key:this.getKeys().qwen||'',region:vc.qwenRegion||'beijing',voice:vc.voices?.['qwen-realtime']||'Bella',gateway:this.getGateway(),signal:this.ctrl.signal,
+      const stream = vc.engine === 'deepseek' ? streamDeepseekSpeech : streamQwenSpeech;
+      await stream(text,{
+        key:this.getKeys()[vc.engine === 'deepseek' ? 'deepseek' : 'qwen']||'',region:vc.qwenRegion||'beijing',voice:vc.voices?.[vc.engine]||(vc.engine === 'deepseek' ? 'stella' : 'Bella'),gateway:this.getGateway(),signal:this.ctrl.signal,
         onAudio:(samples,rate)=>{
           if(gen!==this.gen||!this.foreground)throw new DOMException('Aborted','AbortError');
           if(next-ctx.currentTime>60)throw new Error('音频排队过长，请缩短单句朗读');
           const buffer=ctx.createBuffer(1,samples.length,rate);buffer.getChannelData(0).set(samples);
           const src=ctx.createBufferSource();src.buffer=buffer;src.detune.value=this.fx.detune;src.connect(this.fx.input);
           src.onended=()=>{sources.delete(src);src.disconnect();if(this.source===src)this.source=null;check();};
-          sources.add(src);this.source=src;this.onEngine?.('qwen-realtime',false);
+          sources.add(src);this.source=src;this.onEngine?.(vc.engine,false);
           const at=Math.max(ctx.currentTime+0.02,next);next=at+buffer.duration;src.start(at);
-          if(!announced){announced=true;this.onAudioScheduled?.({engine:'qwen-realtime',delayMs:Math.max(0,(at-ctx.currentTime)*1000)});}
+          if(!announced){announced=true;this.onAudioScheduled?.({engine:vc.engine,delayMs:Math.max(0,(at-ctx.currentTime)*1000)});}
         }
       });
       ended=true;check();await playback;

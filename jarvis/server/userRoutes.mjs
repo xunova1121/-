@@ -21,7 +21,7 @@ export function memberRoute(method, pathname) {
   if (/^\/api\/(tasks|sessions|files|work-records)(\/|$)/.test(pathname)) return true;
   if (/^\/api\/server\/(schedules|document-styles|code-projects)(\/|$)/.test(pathname)) return true;
   if (['/api/server/status', '/api/server/notices', '/api/server/memory-status', '/api/server/skills', '/api/server/readiness', '/api/server/lookup-health'].includes(pathname)) return method === 'GET';
-  if (['/api/server/pc-model', '/api/server/models'].includes(pathname)) return method === 'POST';
+  if (['/api/server/pc-model', '/api/server/models', '/api/server/deepseek/voice/asr', '/api/server/deepseek/voice/tts', '/api/server/deepseek/voice/tts-stream'].includes(pathname)) return method === 'POST';
   return (/^\/api\/weather(?:\/|$)/.test(pathname) || ['/api/sports/scores', '/api/voice/qwen/voices'].includes(pathname)) && method === 'GET';
 }
 

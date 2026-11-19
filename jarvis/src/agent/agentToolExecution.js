@@ -138,6 +138,7 @@ export async function executeToolCalls(
       } else output = String(r);
       if (outImages.length && /^computer_(look|click|type|key|scroll|drag|screenshot)$/.test(c.name)) newScreenThisStep = true;
     } catch (e) {
+      if (e.code === 'MODEL_CONTENT_FILTER') throw e;
       ok = false;
       failure = e;
       lookupRecovery = e.lookupRecovery;

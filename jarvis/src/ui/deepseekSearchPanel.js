@@ -5,6 +5,7 @@ export function deepseekSearchPanel({ cfg, workspace, node, toast }) {
   let controller = null;
   const enabled = node('input', { type: 'checkbox', checked: cfg.deepseekSearchEnabled === true, ariaLabel: '启用DeepSeek搜索' });
   const native = node('input', { type: 'checkbox', checked: cfg.deepseekNativeWeb === true });
+  const suite = node('input', { type: 'checkbox', checked: cfg.deepseekSuite === true });
   const key = node('input', {
     type: 'password',
     autocomplete: 'off',
@@ -29,7 +30,7 @@ export function deepseekSearchPanel({ cfg, workspace, node, toast }) {
   };
   const save = action('保存搜索设置', async () => {
     await workspace.patch(
-      (value) => ({ ...value, deepseekNativeWeb: native.checked, deepseekSearchEnabled: enabled.checked, ...(key.value.trim() && { deepseekSearchKey: key.value.trim() }) }),
+      (value) => ({ ...value, ...(suite.checked !== (cfg.deepseekSuite === true) && { deepseekSuite: suite.checked }), deepseekNativeWeb: native.checked, deepseekSearchEnabled: enabled.checked, ...(key.value.trim() && { deepseekSearchKey: key.value.trim() }) }),
       scope
     );
     key.value = '';
@@ -67,9 +68,11 @@ export function deepseekSearchPanel({ cfg, workspace, node, toast }) {
     }),
     node('p', {
       className: 'ml-muted',
-      textContent: '官方 Flash 对话内搜索按模型 Token 计费。独立 Search、Fetch 各 5 元／千次成功请求，下方测试按钮调用独立接口。'
+      textContent: '上传图片后说“找这张图的出处”可按图搜索。官方 Flash 对话内搜索按模型 Token 计费。独立 Search、Fetch 各 5 元／千次成功请求，下方测试按钮调用独立接口。'
     }),
     node('label', {}, native, '用官方 Flash 联网回答问题并附来源'),
+    node('label', {}, suite, '启用 DeepSeek 官方文件问答、OCR 与对话增强'),
+    node('p', { className: 'ml-muted', textContent: '文字识别会将原件发给 DeepSeek。文件问答会上传本轮选中的附件，用后请求删除，最迟一小时过期。官方 Flash 对话可生成标题、识别当前日期，审核完成后展示回答。语音识别和朗读可在声音设置中单独选择。各项按官方规则计费。' }),
     node('label', {}, enabled, '启用DeepSeek官方搜索与抓取'),
     node('label', {}, '独立官方API Key（可选）', key),
     node('p', {
