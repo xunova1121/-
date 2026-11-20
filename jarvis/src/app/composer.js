@@ -44,6 +44,7 @@ export function createComposer(app) {
     }
   });
   prompt.addEventListener('input', (e) => {
+    app.workshopNewsChat.draftChanged(e.target.value);
     autosize();
     if (e.target.value && app.speaker.speaking) app.speaker.cancel(); // 开始打字即打断朗读
     if (e.target.value && !app.active && app.machine.task !== 'listening') app.machine.beginUserTurn();

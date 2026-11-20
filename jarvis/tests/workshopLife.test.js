@@ -38,12 +38,14 @@ it.each([
   [7, 32, 'coffee', false],
   [8, 20, 'plan', false],
   [9, 12, 'study', false],
+  [9, 38, 'news', false],
   [10, 35, 'sing', false],
   [12, 4, 'eat', false],
   [13, 1, 'sleep', false],
   [14, 0, 'tidy', false],
   [15, 1, 'coffee', false],
   [15, 18, 'study', false],
+  [17, 46, 'news', false],
   [18, 10, 'eat', true],
   [19, 10, 'tv', true],
   [19, 36, 'sing', true],
@@ -217,4 +219,56 @@ it('坏记录采用当前作息，存储不可写时仍能操作房间', () => {
   };
   dispatchWorkshopCommand('sing');
   expect(getWorkshopLife()).toMatchObject({ activity: 'sing', manual: true });
+});
+
+it('主动关电视后，本段晚间休息跨页面和工作结束都保持关机，下次看电视时段才恢复', async () => {
+  at(19, 10);
+  const room = open();
+  expect(room.snapshot().activity).toBe('tv');
+  expect(room.perform('tv-off')).toBe(true);
+  expect(room.snapshot()).toMatchObject({ activity: 'rest', televisionOff: true });
+  room.setBusy(true);
+  vi.advanceTimersByTime(60000);
+  expect(room.snapshot()).toMatchObject({ activity: 'work', televisionOff: true });
+  room.setBusy(false);
+  room.setVisible(false);
+  room.setVisible(true);
+  expect(room.snapshot()).toMatchObject({ activity: 'rest', televisionOff: true });
+  vi.resetModules();
+  const { getWorkshopLife: restored } = await import('../src/app/workshopLife.js');
+  expect(restored()).toMatchObject({ activity: 'rest', televisionOff: true });
+  at(19, 35);
+  expect(room.snapshot()).toMatchObject({ activity: 'sing', televisionOff: false });
+  at(20, 30);
+  expect(room.snapshot()).toMatchObject({ activity: 'tv', televisionOff: false });
+});
+
+it('关掉手动打开的电视会结束观看，手动再次打开即使先前关机也能立即观看', () => {
+  at(19, 30);
+  const room = open();
+  room.perform('tv');
+  room.perform('tv-off');
+  vi.advanceTimersByTime(6 * 60000);
+  expect(room.snapshot()).toMatchObject({ activity: 'sing', televisionOff: true, manual: false });
+  room.setBusy(true);
+  room.perform('tv');
+  expect(room.snapshot()).toMatchObject({ activity: 'work', televisionOff: false });
+  room.setBusy(false);
+  expect(room.snapshot()).toMatchObject({ activity: 'tv', manual: true });
+});
+
+it('点显示器后到电脑前查看，实际任务优先，完成后回到尚未结束的个人活动', () => {
+  at(12, 5);
+  const room = open();
+  expect(room.perform('news')).toBe(true);
+  expect(room.snapshot()).toMatchObject({ activity: 'news', manual: true });
+  room.setBusy(true);
+  expect(room.snapshot().activity).toBe('work');
+  expect(room.perform('coffee')).toBe(false);
+  room.setBusy(false);
+  expect(room.snapshot().activity).toBe('news');
+  room.perform('rest');
+  expect(room.snapshot().activity).toBe('rest');
+  vi.advanceTimersByTime(10 * 60000);
+  expect(room.snapshot()).toMatchObject({ activity: 'eat', manual: false });
 });

@@ -113,6 +113,15 @@ try {
   await light.click();
   await sheet.locator('.ws-scene[data-lamp="on"]').waitFor();
   assert.equal(await light.getAttribute('aria-pressed'), 'true');
+  const deskLamp = sheet.getByRole('button', { name: '控制桌上的台灯' });
+  await deskLamp.tap();
+  await sheet.locator('.ws-scene[data-lamp="off"]').waitFor();
+  await deskLamp.tap();
+  await sheet.locator('.ws-scene[data-lamp="on"]').waitFor();
+  await sheet.getByRole('button', { name: '坐到沙发上休息' }).tap();
+  await checkLife('rest');
+  await sheet.getByRole('button', { name: '去茶水桌泡咖啡' }).tap();
+  await checkLife('coffee');
   await roomAction('coffee');
   await checkLife('coffee');
   await sheet.getByRole('button', { name: '返回对话' }).click();

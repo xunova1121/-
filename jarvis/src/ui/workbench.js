@@ -10,7 +10,7 @@ import { createWorkbenchStudio } from './workbenchStudio.js';
 import { initWorkbenchAgents } from './workbenchAgents.js';
 
 const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text)e.textContent=text;if(cls)e.className=cls;return e;};
-export function initWorkbench({showPanel,newSession,openSession,getSession,getRunning,openFile,activity}){
+export function initWorkbench({showPanel,newSession,openSession,getSession,getRunning,openFile,activity,newsChat,newsFeed,getPlayers}){
  document.body.classList.add('workbench','side-closed');document.body.classList.remove('side-open');
  const rail=document.querySelector('.rail'),main=document.querySelector('.main'),top=document.querySelector('.topbar');
  const home=node('div',null,'wb-brand');const mark=node('span',null,'wb-mark');mark.append(createMascot());home.append(mark,node('b','未央'),node('small','WEIYANG AI · 私人智能工作台'));rail.prepend(home);
@@ -29,7 +29,7 @@ export function initWorkbench({showPanel,newSession,openSession,getSession,getRu
  const recent=node('section',null,'wb-recent'),recentHead=node('div',null,'wb-recent-head'),search=node('button','⌕');search.title='搜索全部对话';search.onclick=()=>showPanel('sessions');recentHead.append(node('span','最近对话'),search);const history=node('div',null,'wb-history-list');history.tabIndex=0;history.setAttribute('aria-label','最近对话列表');const more=node('button','查看更多','wb-recent-more');more.type='button';more.hidden=true;more.onclick=()=>showPanel('sessions');recent.append(recentHead,history,more);rail.append(recent);
  const bottom=node('button','⚙  设置与模型','wb-bottom');bottom.onclick=()=>showPanel('models');rail.append(bottom);
  const tabs=node('nav',null,'wb-tabs'),chat=node('button','对话'),studio=node('button','工作台');tabs.setAttribute('aria-label','工作视图');tabs.append(chat,studio);top.append(tabs);
- const studioSurface=createWorkbenchStudio({getSession,activity});
+ const studioSurface=createWorkbenchStudio({getSession,activity,newsChat,newsFeed,getPlayers});
  const classicPreview=initWorkbenchClassicPreview(()=>setView(false,true));
  // 智能体作为一级导航，对话与工作台共用当前会话。
  const agents=button('智能体','✦',()=>{closePanel();window.dispatchEvent(new Event('jarvis:open-agents'));});agents.className='wb-agents-entry';agents.dataset.destination='agents';fresh.after(agents);chat.onclick=()=>setView(false);studio.onclick=()=>setView(true);

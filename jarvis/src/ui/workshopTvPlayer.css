@@ -1,0 +1,14 @@
+.ws-tv-player:not([hidden]) {
+  width: 100%;
+  overflow: hidden;
+  border-radius: 8px;
+}
+.ws-tv-player :is(video, iframe) {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: min(52vh, 380px);
+  border: 0;
+  background: #13202b;
+  object-fit: contain;
+}

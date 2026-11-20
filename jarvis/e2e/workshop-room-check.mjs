@@ -44,10 +44,22 @@ export async function checkWorkshopRoom({ page, enter, send, output }) {
   await room.locator('.ws-scene[data-lamp="on"]').waitFor();
   await room.locator('[data-room-action="light"]').click();
   await room.locator('.ws-scene[data-lamp="off"]').waitFor();
+  const deskLamp = scene.getByRole('button', { name: '控制桌上的台灯' });
+  await deskLamp.click();
+  await room.locator('.ws-scene[data-lamp="on"]').waitFor();
+  await deskLamp.press('Enter');
+  await room.locator('.ws-scene[data-lamp="off"]').waitFor();
+  await scene.getByRole('button', { name: '坐到沙发上休息' }).click();
+  await when('rest');
+  await scene.getByRole('button', { name: '去茶水桌泡咖啡' }).click();
+  await when('coffee');
   await send(page, '去泡杯咖啡吧');
   await when('coffee');
   await page.screenshot({ path: path.join(output, 'pc-room-coffee.png') });
-  for (const action of ['tv', 'think', 'rest', 'shred']) await choose(action);
+  for (const action of ['tv', 'think', 'rest', 'shred']) {
+    await choose(action);
+    if (action === 'tv') await room.getByRole('button', { name: '返回房间' }).click();
+  }
   assert.equal(await room.locator('[data-entry-id]').filter({ hasText: '移入回收站' }).count(), 0, '桌面废纸没有产生文件变更');
   // 记录真正启动的 Web Audio 节点，不替换合成器；普通自动作息不会主动播放。
   await page.evaluate(() => {

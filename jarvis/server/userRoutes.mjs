@@ -1,5 +1,6 @@
 /** 普通成员允许的接口；未知接口默认拒绝，避免新增管理接口绕过隔离。 */
 export function memberRoute(method, pathname) {
+  if (pathname === '/api/workshop/tv-players') return method === 'GET';
   if (pathname === '/api/server/company-query') return method === 'POST';
   if (pathname === '/api/tenders/catalog') return method === 'GET';
   if (pathname === '/api/tenders/mine') return ['GET', 'PATCH'].includes(method);
@@ -22,7 +23,7 @@ export function memberRoute(method, pathname) {
   if (/^\/api\/server\/(schedules|document-styles|code-projects)(\/|$)/.test(pathname)) return true;
   if (['/api/server/status', '/api/server/notices', '/api/server/memory-status', '/api/server/skills', '/api/server/readiness', '/api/server/lookup-health'].includes(pathname)) return method === 'GET';
   if (['/api/server/pc-model', '/api/server/models', '/api/server/deepseek/voice/asr', '/api/server/deepseek/voice/tts', '/api/server/deepseek/voice/tts-stream'].includes(pathname)) return method === 'POST';
-  return (/^\/api\/weather(?:\/|$)/.test(pathname) || ['/api/sports/scores', '/api/voice/qwen/voices'].includes(pathname)) && method === 'GET';
+  return (/^\/api\/weather(?:\/|$)/.test(pathname) || ['/api/sports/scores', '/api/workshop/news', '/api/voice/qwen/voices'].includes(pathname)) && method === 'GET';
 }
 
 /** 成员只看可用模型与展示参数，不下发管理员密钥、地址、仓库账户或个人配置。 */

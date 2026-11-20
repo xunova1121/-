@@ -20,6 +20,7 @@ it.each([
   ['你在干嘛', 'status'], ['小未央，你现在在做什么呀？', 'status'], ['现在你在忙什么呢', 'status'],
   ['请打开工作台的台灯', 'lamp-on'], ['把房间里的台灯关掉', 'lamp-off'], ['恢复自动灯光', 'lamp-auto'],
   ['未央，去泡杯咖啡吧', 'coffee'], ['给自己冲一杯咖啡', 'coffee'], ['你先去吃饭吧', 'eat'], ['去睡一会儿', 'sleep'],
+  ['把电视关了', 'tv-off'], ['关闭工作台的电视', 'tv-off'],
   ['休息一下', 'rest'], ['去看会儿电视', 'tv'], ['沉思一会儿吧', 'think'], ['粉碎桌上的废纸', 'shred'],
   ['你能不能哼一支小曲', 'sing'], ['给我唱首歌听听', 'sing'], ['恢复自己的作息吧', 'auto']
 ])('房间短句 %s 匹配 %s', (text, command) => expect(workshopCommand(text)).toBe(command));
@@ -27,6 +28,7 @@ it.each([
 it.each([
   '打开文件', '查找并删除以前的文件', '把昨天的工作区文件销毁', '把废纸.pdf送进碎纸机', '帮我删除资料架中的文件夹',
   '查一下泡咖啡的步骤', '开灯流程写进交接方案', '买个台灯', '我吃饭多少钱', '你在干嘛，继续把表格做好',
+  '查一下如何关掉电视机', '给我买个电视机',
   '播放周杰伦的歌', '我想听《晴天》', '生成一首歌', '唱个歌并导出MP3', '帮我生成喝咖啡的歌单', '睡觉有什么用'
 ])('交给原任务路由 %s', (text) => expect(workshopCommand(text)).toBeNull());
 
@@ -46,6 +48,8 @@ it('默认输入的纯状态询问即时答，明确排队的状态询问保留�
   expect(shouldAnswerWorkshopCommand('lamp-off', { busy: true, mode: 'steer' })).toBe(true);
   expect(answerWorkshopCommand('sleep', { busy: true })).toContain('当前任务');
   expect(getWorkshopLife().manual).toBe(false);
+  expect(answerWorkshopCommand('tv-off', { busy: true })).toContain('电视关好了');
+  expect(getWorkshopLife({ busy: true })).toMatchObject({ activity: 'work', televisionOff: true });
 });
 
 function fixture(server) {

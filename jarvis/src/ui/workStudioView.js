@@ -1,5 +1,6 @@
 import './workStudioView.css';
 import './workbenchWorkshopMotion.css';
+import { createWorkshopMedia } from './workshopMedia.js';
 import { addWorkshopFixtures } from './workshopFixtures.js';
 import { createWorkshopMotion, routineStations, stationForStep, stationNames } from './workshopMotion.js';
 import { createWorkshopRoom } from './workshopRoom.js';
@@ -37,7 +38,7 @@ function text(el, content = '') {
   if (el.textContent !== content) el.textContent = content;
 }
 
-export function createWorkStudioView({ workshop = false } = {}) {
+export function createWorkStudioView({ workshop = false, newsFeed, newsChat, getPlayers } = {}) {
   const element = node('section', 'work-studio work-studio-view');
   const viewTitle = workshop ? '未央工作台' : '看未央工作';
   element.setAttribute('aria-label', viewTitle);
@@ -69,7 +70,7 @@ export function createWorkStudioView({ workshop = false } = {}) {
   // 文件对象也作为可选中文本呈现在下方；场景里只画一次。
   prop.setAttribute('aria-hidden', 'true');
   const chip = node('span', 'ws-pose-label');
-  let motion, room;
+  let motion, room, media;
   if (workshop) {
     const floor = node('div', 'ws-floorplan');
     addWorkshopFixtures(floor);
@@ -77,6 +78,7 @@ export function createWorkStudioView({ workshop = false } = {}) {
     scene.append(floor, chip, prop);
     motion = createWorkshopMotion(scene, actor);
     room = createWorkshopRoom(scene, floor, update);
+    media = createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, getPlayers });
   } else scene.append(chip, prop, actor);
   const caption = node('div', 'ws-caption');
   const action = node('strong', 'ws-action');
@@ -175,6 +177,10 @@ export function createWorkStudioView({ workshop = false } = {}) {
       const backgroundWork = !isReview && snapshot.otherWork && !snapshot.active;
       const showTask = Boolean(isReview || snapshot.active || backgroundWork || justFinished !== null);
       const state = room.render(showTask, !backgroundWork && entry?.roomOperation === 'shred' && entry.status === 'done');
+      if (state.televisionOff) media.powerOff();
+      media.setTask(snapshot.sessionId, showTask,
+        backgroundWork ? '正在处理另一段对话的任务' : title,
+        backgroundWork ? '' : filename || description);
       const routine = scene.dataset.lifePose === state.activity ? routineStations[state.activity] : null;
       const station = routine?.station || stationForStep(snapshot.entries, n);
       text(stationLabel, stationNames[station]);
@@ -303,12 +309,14 @@ export function createWorkStudioView({ workshop = false } = {}) {
     const shown = visible && !document.hidden;
     element.dataset.visible = String(shown);
     room?.setVisible(shown);
+    media?.setVisible(shown);
     if (!shown) { stopPlaying(); motion?.reset(); clearTimeout(justFinished); justFinished = null; }
     else update();
   }
 
   return {
     element,
+    closeMedia: () => media?.close(),
     render(nextSnapshot) {
       if (nextSnapshot.sessionId !== snapshot.sessionId) {
         clearTimeout(justFinished);
@@ -336,6 +344,7 @@ export function createWorkStudioView({ workshop = false } = {}) {
       const show = Boolean(on);
       if (visible === show) return;
       visible = show;
+      if (!show && !document.hidden) media?.close(false);
       element.hidden = !show;
       if (show) document.addEventListener('visibilitychange', visibilityChanged);
       else document.removeEventListener('visibilitychange', visibilityChanged);

@@ -6,6 +6,7 @@ const activities = {
   rest: { label: '坐下来歇一会儿', minutes: 10 },
   sleep: { label: '睡着了', minutes: 25 },
   tv: { label: '正在看电视', minutes: 15 },
+  news: { label: '正在电脑前查看新闻显示器', minutes: 10 },
   think: { label: '安静地想事情', minutes: 8 },
   sing: { label: '正在哼歌', minutes: 3 },
   shred: { label: '正在把桌上的废纸放进碎纸机', minutes: 0.25 }
@@ -21,6 +22,8 @@ const routine = [
   ['08:20', 'plan', '正在桌前写今天的计划'],
   ['09:05', 'rest', '放下笔，坐下来伸个懒腰'],
   ['09:12', 'study', '正在电脑前核对自己的日程'],
+  ['09:36', 'news'],
+  ['09:43', 'study', '在电脑上接着整理上午的日程'],
   ['09:47', 'think', '离开屏幕，望着窗外想事情'],
   ['09:54', 'tidy', '正在把自己的资料分门别类'],
   ['10:35', 'sing'],
@@ -44,6 +47,8 @@ const routine = [
   ['16:36', 'plan', '正在手账里写下今天的心得'],
   ['17:15', 'rest'],
   ['17:23', 'study', '正在电脑前看看明天的安排'],
+  ['17:44', 'news'],
+  ['17:50', 'study', '正在电脑前收好今天的笔记'],
   ['18:00', 'eat', '正在吃晚饭'],
   ['18:30', 'rest'],
   ['19:00', 'tv'],
@@ -88,6 +93,7 @@ function readPreferences() {
     preferences = { lightMode: 'auto' };
     const value = JSON.parse(raw);
     if (value?.lightMode === 'on' || value?.lightMode === 'off') preferences.lightMode = value.lightMode;
+    if (Number.isFinite(value?.tvOffUntil)) preferences.tvOffUntil = value.tvOffUntil;
     if (typeof value?.action === 'string' && Object.hasOwn(activities, value.action) && Number.isFinite(value.startedAt)) {
       preferences.action = value.action;
       preferences.startedAt = value.startedAt;
@@ -100,6 +106,14 @@ function readPreferences() {
 
 function manualEnd(prefs) {
   return prefs.action ? prefs.startedAt + activities[prefs.action].minutes * MINUTE : 0;
+}
+
+function nextRoutineChange(date) {
+  const minute = date.getHours() * 60 + date.getMinutes();
+  const next = routine.find(([start]) => start > minute);
+  const boundary = new Date(date);
+  boundary.setHours(0, next?.[0] ?? 24 * 60, 0, 0);
+  return boundary.getTime();
 }
 
 function daylightAt(hour) {
@@ -118,9 +132,11 @@ function stateAt(now, busy, prefs) {
   if (busy) state = { activity: 'work', label: '正在工作' };
   else if (manual) state = { activity: prefs.action, label: activities[prefs.action].label };
   else state = routineAt(date);
+  const televisionOff = now < prefs.tvOffUntil;
+  if (state.activity === 'tv' && televisionOff) state = { activity: 'rest', label: activities.rest.label };
   const needsLamp = (hour < 7 || hour >= 18) && state.activity !== 'sleep';
   const lampOn = prefs.lightMode === 'auto' ? needsLamp : prefs.lightMode === 'on';
-  return { ...state, manual, period, night: period === 'night', lightMode: prefs.lightMode, lampOn };
+  return { ...state, manual, period, night: period === 'night', lightMode: prefs.lightMode, lampOn, televisionOff };
 }
 
 export function getWorkshopLife({ busy = false } = {}) {
@@ -132,9 +148,20 @@ export function dispatchWorkshopCommand(command, { busy = false } = {}) {
   const current = readPreferences();
   let next;
   if (command === 'lamp-on' || command === 'lamp-off' || command === 'lamp-auto') next = { ...current, lightMode: command.slice(5) };
-  else if (command === 'auto') next = { lightMode: current.lightMode };
-  else if (!busy && typeof command === 'string' && Object.hasOwn(activities, command)) next = { ...current, action: command, startedAt: Date.now() };
-  else return false;
+  else if (command === 'tv-off') {
+    // 关闭电视后，时钟刷新、切后台、真实任务结束都不会在本段休息内重新点亮。
+    const now = new Date();
+    next = { ...current, tvOffUntil: nextRoutineChange(now) };
+    if (current.action === 'tv') {
+      next.tvOffUntil = Math.max(next.tvOffUntil, manualEnd(current));
+      delete next.action;
+      delete next.startedAt;
+    }
+  } else if (command === 'auto') next = { lightMode: current.lightMode };
+  else if ((!busy || command === 'tv') && typeof command === 'string' && Object.hasOwn(activities, command)) {
+    next = { ...current, action: command, startedAt: Date.now() };
+    if (command === 'tv') delete next.tvOffUntil;
+  } else return false;
 
   preferences = next;
   try {

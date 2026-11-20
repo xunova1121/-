@@ -30,7 +30,9 @@ import { serverObservationActions, serverTaskMayBeRunning } from '../core/server
 import { HEDGE_MS } from '../agent/hedgedRequest.js';
 import { createTaskKeeper } from '../mobile/backgroundTasks.js';
 import { noteAction } from '../mobile/renderDiagnostics.js';
-import { createWorkshopChat, workshopCommand, shouldAnswerWorkshopCommand } from './workshopChat.js';
+import { createWorkshopNewsChat } from './workshopNewsChat.js';
+import { workshopNewsInstruction } from '../core/workshopNewsReference.js';
+import { createWorkshopChat, workshopCommand, workshopMediaReply, shouldAnswerWorkshopCommand } from './workshopChat.js';
 import { providerLabel, modelNote } from '../llm/modelLibrary.js';
 import { $, DESKTOP, now, storage, toast, wp, markActivity } from './env.js';
 
@@ -46,6 +48,7 @@ function serverSlowTag(t) {
 export function createTurn(app) {
   let turns = 0;
   const taskKeeper = createTaskKeeper(globalThis.__jarvisBackgroundTask, (e) => toast(e.message));
+  const workshopNewsChat = createWorkshopNewsChat(app);
   const roomChat = createWorkshopChat(app, (error) => toast(`这条工作台对话没能同步到服务器：${error.message}`));
 
   /** 打断（barge-in）：停止朗读并中止正在执行的任务 */
@@ -286,14 +289,18 @@ export function createTurn(app) {
     const inputFiles = queuedFiles ?? app.attachments;
     if (!text && !inputFiles.length) return;
     if (!inputFiles.length) {
-      const command = workshopCommand(text);
+      const direct = !expectedTurn && (instantStatus || byVoice);
+      const mediaReply = direct && workshopNewsChat.inRoom() ? workshopMediaReply(text) : '';
+      const command = mediaReply ? 'television' : workshopCommand(text);
       if (command) {
         const snapshot = app.studioActivity?.snapshot(app.session);
         const busy = Boolean((app.active && !app.active.streamDone) || snapshot?.active || (app.server && app.session.taskId));
-        if (shouldAnswerWorkshopCommand(command, { busy, mode, instantStatus })) return roomChat.reply(command, text, { echo, busy, byVoice, snapshot });
+        if (mediaReply || shouldAnswerWorkshopCommand(command, { busy, mode, instantStatus }))
+          return roomChat.reply(command, text, { echo, busy, byVoice, snapshot, mediaReply });
         return app.messageQueue.enqueue(text, { files: inputFiles });
       } else if (!expectedTurn && app.companion?.perform(text)) return;
     }
+    if (!expectedTurn && (instantStatus || byVoice)) text = workshopNewsChat.bind(text, byVoice);
     app.askNotifyOnce();
     if (!text && inputFiles.some((a) => a.image)) text = '请看看这张图片。';
     // 正在干活时又发了一句：不打断，问进度就直接答，别的话交给正在干的未央；说“停”才停
@@ -355,10 +362,15 @@ export function createTurn(app) {
         checkpoint: turn.checkpoint
       });
 
-    const { computerKind, task, taskIntent, route, remotePC, model, adapter, problem, effort, here } = app.chooseTurnModel(text, turn, st, {
-      imgs,
-      withImages
-    });
+    const { computerKind, task, taskIntent, route, remotePC, model, adapter, problem, effort, here } = app.chooseTurnModel(
+      workshopNewsInstruction(text),
+      turn,
+      st,
+      {
+        imgs,
+        withImages
+      }
+    );
     if (problem && (!app.server || here)) {
       // 服务器模式：用服务器上的模型设置
       bubble.append(problem);
@@ -663,6 +675,7 @@ export function createTurn(app) {
   }
 
   return {
+    workshopNewsChat,
     send,
     interrupt,
     finishTurn,

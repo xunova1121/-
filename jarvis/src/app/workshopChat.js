@@ -1,4 +1,5 @@
 import { getWorkshopLife, dispatchWorkshopCommand } from './workshopLife.js';
+import { selectWorkshopChannel } from '../ui/workshopMediaChannels.js';
 import { playWorkshopHum, stopWorkshopHum } from '../ui/workshopHum.js';
 
 // 只接本人对未央房间说的完整短句，保留搜索、生成音乐、文档内容与真实文件管理的原有路由。
@@ -18,6 +19,7 @@ const actions = [
   ['rest', /^(?:去)?(?:休息|歇)(?:一会儿?|会儿?|一下)?$/],
   ['sleep', /^(?:去)?(?:睡觉|睡个觉|睡一觉|打个盹|睡一会儿?)$/],
   ['tv', /^(?:去)?看(?:一会儿?|会儿?)?电视$/],
+  ['tv-off', /^(?:关|关掉|关闭)(?:(?:工作台|房间)(?:里)?的)?电视(?:机)?$|^把电视(?:机)?(?:关掉|关了|关闭|关上)$/],
   ['think', /^(?:去)?(?:发(?:会儿?|一会儿?|个)?呆|沉思(?:一会儿?|会儿?)?)$/],
   ['sing', /^(?:(?:给我|我想听你)?(?:哼(?:一?[支段首]|个)?(?:小曲儿?|曲子|歌)|唱(?:一?首|个)?歌)(?:听听)?|在(?:房间|工作台|工作室)(?:里)?唱(?:一?首|个)?歌)$/],
   [
@@ -38,6 +40,18 @@ export function workshopCommand(text) {
   return actions.find(([, matches]) => matches.test(command))?.[0] ?? null;
 }
 
+export function workshopMediaReply(text) {
+  const phrase = text
+    .trim()
+    .replace(/^(?:小?未央[，,、\s]*)?(?:请你|请|麻烦你)?/u, '')
+    .replace(/[！。!?？]+$/u, '');
+  if (/^(?:刚才|现在|刚刚)?(?:电视(?:里|上)?|这个频道)(?:刚才|现在|刚刚)?(?:播了什么|在播什么|说了什么|讲了什么|在说什么)$/u.test(phrase))
+    return '我目前能帮你选台和打开官方直播。这里没有节目字幕，无法核实刚才播出的内容。你也可以告诉我关键词，我来查相关报道。';
+  if (!/^(?:把电视)?(?:换|切|切换|调|转)(?:到|成|至).{1,18}$/u.test(phrase)) return '';
+  const channel = selectWorkshopChannel(phrase);
+  return channel ? '工作台电视已选中 ' + channel.label + '。' : '';
+}
+
 // 返回本机实况，房间动作不创建模型任务或碰文件空间。
 export function answerWorkshopCommand(command, { busy, otherWork, taskTitle, taskFile } = {}) {
   const working = Boolean(busy || otherWork);
@@ -55,6 +69,7 @@ export function answerWorkshopCommand(command, { busy, otherWork, taskTitle, tas
   const next = getWorkshopLife({ busy: working });
   if (command === 'lamp-on' || command === 'lamp-off') return next.lampOn ? '工作台的台灯已经打开了。' : '工作台的台灯已经关了。';
   if (command === 'lamp-auto') return '台灯已恢复跟随作息。';
+  if (command === 'tv-off') return '工作台的电视关好了。';
   if (command === 'auto') return `我按当地时间恢复作息了，现在${next.label}。`;
   return `我在工作台，${next.label}。`;
 }
@@ -81,11 +96,13 @@ export function createWorkshopChat(app, reportSyncError) {
     sessions.set(id, saved);
     return saved;
   }
-  async function reply(command, text, { echo, busy, byVoice, snapshot }) {
+  async function reply(command, text, { echo, busy, byVoice, snapshot, mediaReply }) {
     const session = app.session;
     const client = app.server;
     const step = snapshot?.active && snapshot.entries.findLast((entry) => entry.status === 'running' || entry.status === 'waiting');
-    const words = answerWorkshopCommand(command, { busy, otherWork: snapshot?.otherWork, taskTitle: step?.title || app.active?.status, taskFile: step?.file });
+    const words =
+      mediaReply ||
+      answerWorkshopCommand(command, { busy, otherWork: snapshot?.otherWork, taskTitle: step?.title || app.active?.status, taskFile: step?.file });
     const from = session.messages.length;
     if (busy) {
       if (echo) app.transcript.add('user', text);

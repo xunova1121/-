@@ -1,4 +1,5 @@
 /** 前后端共用任务判断。只读用户原话，不把助手的“已完成”或工具正文当新指令。 */
+import { workshopNewsInstruction } from './workshopNewsReference.js';
 import { isResponseRevision } from './responseRevision.js';
 import { isPhoneRequest } from '../../shared/phoneControl.js';
 const CODE = /代码|编程|函数|变量|bug\b|调试|脚本|编译|html|css|javascript|typescript|python|java\b|golang|rust\b|sql\b|正则|前端|后端|部署|docker|git\b|网页|网站|小程序|```/i;
@@ -15,7 +16,7 @@ const FOLLOW = /^(?:(?:继续|恢复|接着|重新做|重做|再做一版|改一
 export const isTaskFollowup = text => !isResponseRevision(text) && FOLLOW.test(String(text || '').trim());
 export const isTaskStatus = text => STATUS.test(String(text || '').trim());
 export function isCodeRequest(text) {
-  const value = String(text || '');
+  const value = workshopNewsInstruction(String(text || ''));
   if (SOURCE.test(value)) return true;
   // 报告谈到 API/接口、费用异常，不能仅凭名词切到代码模型。
   if (DOCUMENT.test(value) && !/代码|编程|调试|修复.{0,20}(?:bug|函数)|```/i.test(value)) return false;
@@ -23,7 +24,7 @@ export function isCodeRequest(text) {
 }
 
 export function classifyTaskText(text, { images = 0 } = {}) {
-  const value = String(text || '');
+  const value = workshopNewsInstruction(String(text || ''));
   if (images > 0) return 'vision';
   if (isCodeRequest(value)) return 'code';
   if (WRITE.test(value) || DOCUMENT.test(value)) return 'write';

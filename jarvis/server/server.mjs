@@ -41,16 +41,19 @@ import { edgeSpeak } from './edgeTts.mjs';
 import { createWeatherProxy } from './weather.mjs';
 import { attachQwenGateway } from './qwenRealtime.mjs';
 import { refreshSports } from './sports.mjs';
+import { workshopTvPlayers } from '../shared/workshopTv.js';
+import { createWorkshopNewsRoute } from './workshopNews.mjs';
 import { createRuntimeReadiness } from './runtimeReadiness.mjs';
 
-const CORS_PATHS = /^\/api\/(health|readiness|local\/metrics|llm\/.+|tts\/edge|voice\/qwen\/voices)$/;
+const CORS_PATHS = /^\/api\/(health|readiness|local\/metrics|workshop\/news|llm\/.+|tts\/edge|voice\/qwen\/voices)$/;
 /** 服务器模式里允许跨域调用的接口（手机 App、电脑版连自己的服务器） */
-const SERVER_CORS = /^\/api\/(health|server\/.+|phone\/(?:devices(?:\/[a-f0-9-]{36})?|transport)|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?|work-records(\/[^/]+)?|weather(\/cities)?|sports\/scores|voice\/qwen\/voices)$/;
+const SERVER_CORS = /^\/api\/(health|server\/.+|phone\/(?:devices(?:\/[a-f0-9-]{36})?|transport)|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?|work-records(\/[^/]+)?|weather(\/cities)?|sports\/scores|workshop\/news|voice\/qwen\/voices)$/;
 // PC/手机借云网关使用自己保存的搜索Key时也要先过预检，仅开放已实现的两个搜索POST。
 const SEARCH_PROXY_CORS = /^\/api\/llm\/openai-search\/(?:responses|chat-completions)$/;
 // 独立业务路由不在 /api/server 下；PC本机页面连云服务器也必须能预检。
 // 仅列出已实现的资源路径，实际请求继续走下方登录与成员权限校验。
 const SERVER_RESOURCE_CORS = [
+  /^\/api\/workshop\/tv-players$/,
   /^\/api\/agent-profiles(?:\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*)?$/,
   /^\/api\/studio\/(?:preferences|works|versions|copy|edit|inspect|preview|team(?:\/[a-f0-9-]{36}(?:\/copy)?)?)$/,
   /^\/api\/tenders\/(?:catalog|mine|settings|refresh)$/
@@ -81,6 +84,7 @@ export function createServer({
   const subscribers = new Set();
   const weather=createWeatherProxy({qweather:()=>serverMode?.qweather?.()||null,configurationPlace:serverMode?'云服务器':'本机'});
   const voiceCatalog = createQwenVoiceCatalog();
+  const workshopNews = createWorkshopNewsRoute(json);
   const runtimeReadiness = createRuntimeReadiness({ appDir: ROOT, scope: 'local' });
   let activeChats = 0;
 
@@ -368,6 +372,12 @@ export function createServer({
         return json(res, 200, await voiceCatalog({ refresh: query.get('refresh') === '1' }));
       }
       if (pathname === '/api/chat' && req.method === 'POST') return await handleChat(req, res);
+      if (pathname === '/api/workshop/tv-players' && req.method === 'GET') {
+        if (!serverMode && !sameOriginOnly(req)) return json(res, 403, { error: '只允许本机未央页面调用' });
+        let configured;
+        try { configured = JSON.parse(process.env.JARVIS_CCTV_PLAYERS || '{}'); } catch { /* 未配置时仍能在官网观看。 */ }
+        return json(res, 200, { players: workshopTvPlayers(configured) });
+      }
       if (pathname === '/api/local/metrics' && req.method === 'GET') return json(res, 200, await collectMetrics({ tasks: { active: activeChats } }));
       if (pathname === '/api/agent/events' && req.method === 'GET') return handleEvents(req, res);
       if (pathname === '/api/agent/emotion' && req.method === 'POST') return await handleInject(req, res);
@@ -393,6 +403,7 @@ export function createServer({
       if (pathname.startsWith('/api/ollama/')) return await handleOllama(req, res, pathname);
       if (pathname === '/api/fetch' && req.method === 'GET') return await handleFetch(req, res, new URL(req.url, 'http://x').searchParams.get('url'));
       if ((pathname === '/api/weather'||pathname === '/api/weather/cities')&&req.method==='GET') return json(res,200,await weather(pathname,new URL(req.url,'http://x').searchParams,req.headers));
+      if (pathname === '/api/workshop/news' && req.method === 'GET') return await workshopNews(res);
       if (pathname === '/api/sports/scores' && req.method === 'GET') {
         const { publicFetch } = await import('./taskRunner.mjs');
         const ctrl = new AbortController();

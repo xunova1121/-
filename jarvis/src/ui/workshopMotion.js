@@ -4,7 +4,8 @@ export const stationNames = { rest: '待命区', archive: '资料架', bench: '�
 export const routineStations = {
   plan: { station: 'bench', operation: 'write' },
   tidy: { station: 'archive', operation: 'archive' },
-  study: { station: 'review', operation: 'type' }
+  study: { station: 'review', operation: 'type' },
+  news: { station: 'review', operation: 'type' }
 };
 
 export function stationForStep(entries, index) {

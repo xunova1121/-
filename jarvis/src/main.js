@@ -36,6 +36,8 @@ import * as agentMemory from './agent/memory.js';
 import * as habits from './agent/habits.js';
 import * as sessionsApi from './agent/sessions.js';
 import { createStudioActivity } from './app/studioActivity.js';
+import { createWorkshopNewsFeed } from './core/workshopNews.js';
+import { getWorkshopTvPlayers } from './app/workshopTv.js';
 import { initMobileWorkStudio } from './ui/mobileWorkStudio.js';
 import { initWorkbench } from './ui/workbench.js';
 import { initMascots } from './ui/mascot.js';
@@ -225,9 +227,16 @@ window.__jarvis = {
 };
 
 // 工作台界面只用在电脑上；手机 App 保留自己的界面（底部输入、左侧抽屉菜单、整页面板）
+const studioOptions = {
+  getSession: () => app.session,
+  activity: app.studioActivity,
+  newsFeed: createWorkshopNewsFeed(app),
+  newsChat: app.workshopNewsChat,
+  getPlayers: (signal) => getWorkshopTvPlayers(app, signal)
+};
 // prettier-ignore
-if (!COMPACT) initWorkbench({ showPanel: app.showPanel, newSession: app.newSession, openSession: app.openSession, getSession: () => app.session, getRunning: () => (app.active && !app.active.streamDone ? app.session.id : null), openFile: app.openInWorkspace, activity: app.studioActivity });
-else initMobileWorkStudio({ getSession: () => app.session, activity: app.studioActivity, closeDrawer: () => app.drawer?.close() });
+if (!COMPACT) initWorkbench({ showPanel: app.showPanel, newSession: app.newSession, openSession: app.openSession, ...studioOptions, getRunning: () => (app.active && !app.active.streamDone ? app.session.id : null), openFile: app.openInWorkspace });
+else initMobileWorkStudio({ ...studioOptions, closeDrawer: () => app.drawer?.close() });
 mascots = initMascots();
 companion = initCompanion({
   send: app.send,
