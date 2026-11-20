@@ -161,6 +161,7 @@ async function check(mobile) {
     await monitor.locator('.ws-article-content').getByText(articleText, { exact: true }).waitFor();
     assert.equal(page.url(), initialUrl, '阅读原文留在工作台');
     assert.equal(context.pages().length, 1, '阅读原文没有打开其他窗口');
+    await page.screenshot({ path: path.join(output, platform + '-article.png') });
     await button(monitor, '下一条').click();
     await monitor.getByText(items[1].title, { exact: true }).waitFor();
     assert.equal(await link(monitor, '阅读原文').getAttribute('href'), items[1].url);
@@ -231,6 +232,7 @@ async function check(mobile) {
     console.log(`${platform} 工作台已验证电视选台、新闻原文与切换、同一会话追问、真实 Word 读回。`);
   } catch (error) {
     await page.screenshot({ path: path.join(output, `${platform}-failure.png`) }).catch(() => {});
+    console.error(platform, error.message);
     console.error(platform, errors, (await page.locator('.work-studio:visible').innerText({ timeout: 1000 }).catch(() => '')).slice(-1000));
     console.error((await page.locator('#transcript').innerText({ timeout: 1000 }).catch(() => '')).slice(-1500),
       await page.evaluate(() => window.__jarvis?.workspace.list()).catch(() => []));

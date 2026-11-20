@@ -60,7 +60,8 @@ async function checkProgramArea(video, label) {
   });
   assert(geometry?.front && geometry.fraction > .5, label + ' 节目实际画面须占场景一半以上 ' + JSON.stringify(geometry));
   if (geometry.deskFraction != null) assert(geometry.deskFraction > .5, label + ' 节目实际画面须占宽屏工作台一半以上 ' + JSON.stringify(geometry));
-  console.log(label + ' 节目占比 ' + (geometry.fraction * 100).toFixed(1) + '%');
+  const desk = geometry.deskFraction == null ? '' : '，占整个工作台 ' + (geometry.deskFraction * 100).toFixed(1) + '%';
+  console.log(label + ' 节目占房间 ' + (geometry.fraction * 100).toFixed(1) + '%' + desk);
 }
 
 // 在真实视频标签播放一段生成的测试图像。测试只拦截许可地址，不连接外部电视或依赖某个节目的版权。
