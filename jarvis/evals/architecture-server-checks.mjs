@@ -7,6 +7,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {createHash} from 'node:crypto';
 import {architectureServerInput} from './architecture-server-input.mjs';
+import {createFileStore} from '../server/fileStore.mjs';
 const source='上传/虚构采购.docx';
 async function fixture(){
  const folder=await fs.mkdtemp(path.join(os.tmpdir(),'architecture-live-input-'));
@@ -27,6 +28,18 @@ test('只读确切原件和当前配置，不改模型分工，不把Key放入�
   assert.equal(await fs.readFile(path.join(f.folder,'config.json'),'utf8'),f.config);
   assert.equal(await fs.readFile(path.join(f.files,f.hash+'.json'),'utf8'),f.record);
   assert.deepEqual((await fs.readdir(f.folder)).sort(),['config.json','store']);
+ }finally{await fs.rm(f.folder,{recursive:true,force:true});}
+});
+test('当前 FileStore 生成的原件可读取，移至回收站后不可读，恢复后读取同一份内容',async()=>{
+ const f=await fixture();try{
+  const store=createFileStore(path.join(f.folder,'store'));
+  const bytes=Buffer.from([0x50,0x4b,1,2,3]);
+  await store.put('files',{id:source,data:new Blob([bytes])});
+  assert.deepEqual(Buffer.from((await architectureServerInput(f.folder,source)).bytes),bytes);
+  await store.updateFileRecord(source,row=>({id:row.id,trashData:row.data}));
+  await assert.rejects(architectureServerInput(f.folder,source),{code:'ARCHITECTURE_TEST_INPUT'});
+  await store.updateFileRecord(source,row=>({id:row.id,data:row.trashData}));
+  assert.deepEqual(Buffer.from((await architectureServerInput(f.folder,source)).bytes),bytes);
  }finally{await fs.rm(f.folder,{recursive:true,force:true});}
 });
 test('错路径、不匹配记录和越界二进制拒绝，不读取其他对话替代原件',async()=>{

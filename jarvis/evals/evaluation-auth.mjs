@@ -1,8 +1,6 @@
 /** 只读评测协议；不拿主人设置，不退回密码或永久凭证。 */
-import fs from 'node:fs/promises';
-import constants from 'node:constants';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { readWorkspaceEvidence } from './workspace-evidence-file.mjs';
 
 export async function evaluationInfo(api) {
   let info;
@@ -23,28 +21,7 @@ export function evaluationFiles({ dataDir, tokenId }) {
     forTurn(turn) {
       if (!dataDir || !/^[a-f0-9]{24}$/.test(tokenId || '') || !new RegExp(`^ev_${tokenId}_[a-f0-9]{20}$`).test(turn.evaluationId || '')) return unavailable;
       const scope = path.resolve(dataDir, 'evaluations', turn.evaluationId, 'store', 'files');
-      return async (file, { maxBytes = 20e6 } = {}) => {
-        if (typeof file !== 'string' || !file || file.length > 1024 || file.split(/[\\/]/).includes('..')) return null;
-        const key = createHash('sha1').update(file).digest('hex');
-        let handle;
-        try {
-          // 不创建目录；拒绝任何父级符号链接或文件符号链接，不能越过本轮私有空间。
-          if (await fs.realpath(scope) !== scope) return null;
-          handle = await fs.open(path.join(scope, key + '.data.bin'), constants.O_RDONLY | constants.O_NOFOLLOW);
-          const metadata = await handle.stat();
-          const limit = Number.isFinite(maxBytes) && maxBytes > 0 ? Math.min(20e6, Math.floor(maxBytes)) : 20e6;
-          if (!metadata.isFile() || metadata.size > limit) return null;
-          const buffer = Buffer.alloc(Math.min(limit, metadata.size) + 1);
-          let received = 0;
-          while (received < buffer.length) {
-            const read = await handle.read(buffer, received, buffer.length - received, null);
-            if (!read.bytesRead) return new Uint8Array(buffer.subarray(0, received));
-            received += read.bytesRead;
-          }
-          return received > limit || received > metadata.size ? null : new Uint8Array(buffer.subarray(0, received));
-        } catch { return null; }
-        finally { await handle?.close(); }
-      };
+      return (file, options) => readWorkspaceEvidence(scope, file, options);
     }
   };
 }

@@ -14,7 +14,8 @@ mkdir "$STAGE/app"
 cp "$APP/package.json" "$STAGE/app/package.json"
 cp -aL "$APP/evals" "$STAGE/app/evals"
 for part in src shared server node_modules; do ln -s "$APP/$part" "$STAGE/app/$part"; done
-for file in evaluation-auth.mjs joint.mjs joint-evidence.mjs joint-files.mjs joint-rubric.mjs joint-report.mjs speed-quality-cases.mjs speed-quality-report.mjs run-joint.sh; do
+for file in evaluation-auth.mjs workspace-evidence-file.mjs joint.mjs joint-evidence.mjs joint-files.mjs joint-rubric.mjs joint-report.mjs speed-quality-cases.mjs speed-quality-report.mjs run-joint.sh; do
+  if [[ "$file" == *workspace-evidence-file.mjs ]] && ! grep -Fq "./workspace-evidence-file.mjs" "$STAGE/app/evals/evaluation-auth.mjs"; then continue; fi
   curl -fsSL --retry 2 --connect-timeout 10 --max-time 60 --max-filesize 1000000 -H 'Accept: application/vnd.github.raw+json' "https://api.github.com/repos/xunova1121/-/contents/jarvis/evals/$file?ref=$REVISION" -o "$STAGE/app/evals/$file"
 done
 node --check "$STAGE/app/evals/joint.mjs"

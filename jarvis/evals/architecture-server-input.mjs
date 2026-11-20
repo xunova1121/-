@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {createHash} from 'node:crypto';
+import { readWorkspaceEvidence } from './workspace-evidence-file.mjs';
 import {DEFAULT_CONFIG} from '../src/llm/config.js';
 import {validateLiveConfig} from './baseline.mjs';
 import {normalize} from '../src/agent/workspace.js';
@@ -12,13 +12,8 @@ export async function architectureServerInput(dataDir,source){
  if(!source.endsWith('.docx')||source.length>400)throw invalid('请提供工作区内确切的原始DOCX路径');
  const cfg={...DEFAULT_CONFIG,...JSON.parse(await bounded(path.join(root,'config.json'),2e6))};
  const selected=validateLiveConfig(cfg);
- const hash=createHash('sha1').update(source).digest('hex');
- const folder=path.join(root,'store','files');
- const record=JSON.parse(await bounded(path.join(folder,hash+'.json'),100000));
- if(record.id!==source||record.data?.$file!==hash+'.data.bin')throw invalid('工作区原件记录不匹配，不能借其他文件替代');
- const file=await fs.realpath(path.join(folder,record.data.$file));
- if(path.dirname(file)!==await fs.realpath(folder))throw invalid('工作区原件不能指向目录外');
- const bytes=await bounded(file,10e6);
+ const bytes=await readWorkspaceEvidence(path.join(root,'store','files'),source,{maxBytes:10e6});
+ if(!bytes)throw invalid('指定的工作区原件不可用，请检查活动文件、原件路径与大小');
  if(bytes[0]!==0x50||bytes[1]!==0x4b)throw invalid('文件不是可读取的DOCX压缩包');
  return {cfg,selected,source,bytes};
 }

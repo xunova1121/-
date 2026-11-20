@@ -36,8 +36,17 @@ describe('专用授权评测启动与私有文件证据', () => {
     expect(await read('outputs/result.txt', { maxBytes: 1 })).toBeNull();
     expect(await read('../../jarvis.env')).toBeNull();
     expect(await files.forTurn({ evaluationId: scope.replace('a'.repeat(24), 'c'.repeat(24)) })('outputs/result.txt')).toBeNull();
-    const name = createHash('sha1').update('outputs/result.txt').digest('hex') + '.data.bin';
-    const file = path.join(root, 'files', name);
+    const key = createHash('sha1').update('outputs/result.txt').digest('hex');
+    const metadata = path.join(root, 'files', key + '.json');
+    const active = JSON.parse(await fs.readFile(metadata, 'utf8'));
+    const file = path.join(root, 'files', active.data.$file);
+    // 即使还有旧名称的残留二进制，回收记录也不能再作为活动文件被读出。
+    await fs.writeFile(path.join(root, 'files', key + '.data.bin'), '残留');
+    await fs.writeFile(metadata, JSON.stringify({ id: active.id, trashData: active.data }));
+    expect(await read('outputs/result.txt')).toBeNull();
+    await fs.writeFile(metadata, JSON.stringify({ id: '其他记录', data: active.data }));
+    expect(await read('outputs/result.txt')).toBeNull();
+    await fs.writeFile(metadata, JSON.stringify(active));
     await fs.unlink(file);
     await fs.writeFile(path.join(dataDir, 'unrelated.txt'), '不得读取');
     await fs.symlink(path.join(dataDir, 'unrelated.txt'), file);
@@ -50,6 +59,7 @@ describe('专用授权评测启动与私有文件证据', () => {
     for (const name of ['run-joint.sh', 'run-baseline.sh', 'run-speed-quality-server.sh', 'run-focus-server.sh']) {
       const script = await fs.readFile(new URL('../evals/' + name, import.meta.url), 'utf8');
       expect(script, name).toContain('JARVIS_EVAL_TOKEN');
+      if (/focus|speed-quality/.test(name)) expect(script, name).toContain('workspace-evidence-file.mjs');
       expect(script, name).not.toMatch(/JARVIS_PASSWORD|jarvis\.env|BENCH_PASSWORD|read\s+-r\s+-s|jarvis-server:/);
     }
   });
