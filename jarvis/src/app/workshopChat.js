@@ -76,7 +76,7 @@ export function answerWorkshopCommand(command, { busy, otherWork, taskTitle, tas
 
 // 普通发送时可以就地问当前进度。明确排队的消息仍排队；引导只作用于绑定的原任务。
 export function shouldAnswerWorkshopCommand(command, { busy, mode, instantStatus }) {
-  return !busy || mode !== 'queue' || (command === 'status' && Boolean(instantStatus));
+  return !busy || mode !== 'queue' || ((command === 'status' || command === 'tv-off') && Boolean(instantStatus));
 }
 
 export function createWorkshopChat(app, reportSyncError) {

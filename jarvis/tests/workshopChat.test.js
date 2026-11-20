@@ -44,6 +44,8 @@ it('家中无人打扰时自动作息不会发声；直接明确点唱复用本�
 it('默认输入的纯状态询问即时答，明确排队的状态询问保留在队列，穿插指令遵循工作优先', () => {
   expect(shouldAnswerWorkshopCommand('status', { busy: true, mode: 'queue', instantStatus: true })).toBe(true);
   expect(shouldAnswerWorkshopCommand('status', { busy: true, mode: 'queue' })).toBe(false);
+  expect(shouldAnswerWorkshopCommand('tv-off', { busy: true, mode: 'queue', instantStatus: true })).toBe(true);
+  expect(shouldAnswerWorkshopCommand('tv-off', { busy: true, mode: 'queue' })).toBe(false);
   expect(shouldAnswerWorkshopCommand('sleep', { busy: true, mode: 'queue', instantStatus: true })).toBe(false);
   expect(shouldAnswerWorkshopCommand('lamp-off', { busy: true, mode: 'steer' })).toBe(true);
   expect(answerWorkshopCommand('sleep', { busy: true })).toContain('当前任务');
