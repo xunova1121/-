@@ -1,0 +1,27 @@
+.ws-room-tools {
+  position: absolute; inset: 8px 8px auto auto; z-index: 4; display: flex; gap: 4px;
+  border: 1px solid #ecdab66b; border-radius: 24px; padding: 3px;
+  color: #fff7e4; background: #273428eb; box-shadow: 0 2px 8px #221c172a;
+}
+.work-studio-view .ws-room-tools button {
+  appearance: none; display: block; border: 0; margin: 0; color: inherit; background: transparent;
+  border-radius: 15px; padding: 4px 9px; min-height: 28px; font-family: inherit; font-size: 12px; font-weight: 550; line-height: 1.4; white-space: nowrap;
+}
+.ws-room-tools button[data-room-action="light"]::before {
+  content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 5px;
+  border-radius: 50%; background: #b7c0b2;
+}
+.ws-room-tools button[aria-pressed="true"]::before { background: #ffcf66; box-shadow: 0 0 5px #ffcf66; }
+.work-studio-view .ws-room-tools button:hover, .work-studio-view .ws-room-tools button:focus-visible,
+.work-studio-view .ws-room-tools button[aria-expanded="true"] { background: #617052; }
+.work-studio-view .ws-room-tools button:focus-visible { outline: 2px solid #f9df9c; }
+.ws-room-menu {
+  position: absolute; inset: calc(100% + 4px) -1px auto auto; display: grid; grid-template-columns: repeat(2, auto);
+  gap: 2px; padding: 6px; max-height: min(190px,45vh); overflow: auto;
+  border: 1px solid #856f4f; border-radius: 12px; background: #28372bf5; box-shadow: 0 5px 19px #251b1c48;
+}
+.work-studio-view .ws-room-menu button { padding: 6px 10px; min-height: 31px; text-align: left; border-radius: 6px; }
+@media (pointer: coarse) {
+  .work-studio-view .ws-room-tools button { min-height: 35px; }
+  .ws-room-menu { grid-template-columns: repeat(3,auto); }
+}

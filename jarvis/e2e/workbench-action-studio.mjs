@@ -11,6 +11,7 @@ import { currentUser, runAsUser } from '../server/userScope.mjs';
 import { createTools } from '../src/agent/tools.js';
 import { createServerClient } from '../src/core/serverClient.js';
 import { useBackend } from '../src/agent/store.js';
+import { checkWorkshopRoom } from './workshop-room-check.mjs';
 
 const output = path.resolve(process.argv[2] || '/tmp/weiyang-workbench-action-studio');
 await mkdir(output, { recursive: true });
@@ -113,20 +114,30 @@ async function stationPoint(page, station) {
   });
 }
 
-async function observeWalk(page) {
-  return stage(page).locator('.ws-actor').evaluate(async actor => {
-    const start = performance.now();
-    let from;
-    // 只计同一段行走里的位移，工位瞬移或原地切换精灵图不能算通过。
-    while (performance.now() - start < 9000) {
-      await new Promise(requestAnimationFrame);
-      if (actor.dataset.walking !== 'true') { from = null; continue; }
-      const now = actor.getBoundingClientRect();
-      if (from && Math.hypot(now.left - from.left, now.top - from.top) >= 3) return true;
-      from ??= now;
-    }
-    return false;
+async function observeWalk(page, startAction) {
+  const actor = stage(page).locator('.ws-actor');
+  // 跨进程先装好逐帧观察，再准许工具完成，避免在短动画结束后才启动采样。
+  await actor.evaluate(el => {
+    el.observedTravel = (async () => {
+      const start = performance.now();
+      const scene = el.closest('.ws-scene');
+      const phases = new Set();
+      let from, walkingFrames = 0;
+      while (performance.now() - start < 9000) {
+        await new Promise(requestAnimationFrame);
+        phases.add([scene.dataset.station, scene.dataset.workPhase, scene.dataset.lifePose].join('/'));
+        if (el.dataset.walking !== 'true') { from = null; continue; }
+        const now = el.getBoundingClientRect();
+        walkingFrames++;
+        // 必须是在同一次走动中，真正绘制的两帧在屏幕上发生了位移。
+        if (from && Math.hypot(now.left - from.left, now.top - from.top) >= 3) return true;
+        from ??= now;
+      }
+      throw Error('没有捕捉到实际步行位移；行走帧 ' + walkingFrames + '；所见工位 ' + [...phases].join('，'));
+    })();
   });
+  await startAction();
+  return actor.evaluate(el => el.observedTravel);
 }
 // 工具实际运行时验证专用接触动作的三帧。单纯改标签、挪角色或让静态立绘上下浮动都不够。
 async function checkWorkingHands(page, operation) {
@@ -168,6 +179,14 @@ async function checkFit(page) {
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), '无横向溢出');
 }
 try {
+  let roomModelCalls = 0;
+  const roomPage = await open(desktop, { viewport: { width: 1392, height: 900 }, timezoneId: 'Asia/Shanghai' }, null, route => {
+    roomModelCalls++;
+    return route.abort();
+  });
+  await checkWorkshopRoom({ page: roomPage, enter, send, output });
+  assert.equal(roomModelCalls, 0, '工作台查询、控灯和生活操作都在本机完成');
+  await roomPage.context().close();
   let modelCalls = 0;
   const local = await open(desktop, { viewport: { width: 1440, height: 900 } }, null, async route => {
     modelCalls++;
@@ -245,7 +264,7 @@ try {
     assert.ok(Math.hypot(a.x - b.x, a.y - b.y) > .08, '读取、修改和复核有不同的实际站位');
   }
   const ids = await rows(local).evaluateAll(list => list.map(el => el.dataset.entryId));
-  const [walked] = await Promise.all([observeWalk(local), stage(local).locator('[data-action="play"]').click()]);
+  const walked = await observeWalk(local, () => stage(local).locator('[data-action="play"]').click());
   assert.ok(walked, '播放真实任务时，小人跑过车间而不是瞬移');
   await local.emulateMedia({ reducedMotion: 'reduce' });
   await local.waitForFunction(() => {
@@ -311,9 +330,20 @@ try {
   const login = await owner.loginAccount(member.accessCode);
   const remote = await open(desktop, { viewport: { width: 1280, height: 860 } }, { enabled: true, url: url(cloud), userId: member.id, token: login.token, role: 'member' });
   await enter(remote);
+  const roomSession = await remote.evaluate(() => window.__jarvis.sessionId);
+  const memberClient = createServerClient({ base: url(cloud), token: login.token });
+  const savedRoom = remote.waitForResponse(res => res.request().method() === 'POST' && res.url().endsWith('/' + roomSession + '/append'));
+  await send(remote, '请打开工作台的台灯');
+  assert.equal((await savedRoom).status(), 200, '工作台问答真实保存到当前云账号');
+  assert.deepEqual((await memberClient.getSession(roomSession)).messages.map(m => m.content), ['请打开工作台的台灯', '工作台的台灯已经打开了。']);
+  assert.equal(await owner.getSession(roomSession), null, '房间对话存入成员自己的空间');
+  assert.equal(requests.filter(req => req.method === 'POST' && req.path === '/api/tasks').length, 0, '房间灯控没有提交云任务');
   await send(remote, '请列出已有文件，再写一份简报保存到' + cloudFile + '，最后核对成果记录并核验交付文件。');
   await stage(remote).locator('.ws-scene[data-station="archive"]').waitFor();
   await checkWorkingHands(remote, 'archive');
+  await send(remote, '未央，你在干嘛？');
+  await remote.locator('#transcript .msg.agent').filter({ hasText: '当前步骤是“列出文件”' }).waitFor();
+  assert.equal(requests.filter(req => req.method === 'POST' && req.path.endsWith('/append')).length, 1, '忙中问进度没有往执行中的会话追加工具或消息');
   await remote.locator('.wb-tabs').getByRole('button', { name: '对话', exact: true }).click();
   steps.get('list_files').resolve();
   await remote.locator('#transcript').getByText('写入文件', { exact: true }).first().waitFor();
@@ -334,9 +364,7 @@ try {
     const activeActor = document.querySelector('.work-studio[data-zoom="wide"] .ws-actor');
     return activeActor && Math.abs(activeActor.getBoundingClientRect().width - width) < 1;
   }, wideActor.width);
-  const walking = observeWalk(remote);
-  steps.get('write_file').resolve();
-  assert.ok(await walking, '返回工作台后，下一道真实工序开始时小人继续走动');
+  assert.ok(await observeWalk(remote, steps.get('write_file').resolve), '返回工作台后，下一道真实工序开始时小人继续走动');
   await stage(remote).locator('.ws-scene[data-station="review"]').waitFor();
   await checkWorkingHands(remote, 'type');
   steps.get('list_work_records').resolve();

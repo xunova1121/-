@@ -56,6 +56,7 @@ import { isImageName, prepareImage } from './images.js';
 import * as scheduler from './scheduler.js';
 import * as sessions from './sessions.js';
 import { createConversationTrashTools } from './conversationTrashTools.js';
+import { createWorkspaceTrashTools } from './workspaceTrashTools.js';
 import { createSearch } from './webSearch.js';
 import { getWeather } from './weather.js';
 import { createPageReader, pageReaderOrder } from './pageReader.js';
@@ -733,7 +734,7 @@ export function createTools(ctx) {
     }
   ];
   // 说一句话删某段时间的对话（先列清单、用户确认才删，进回收站留 7 天）
-  tools.push(...createConversationTrashTools());
+  tools.push(...createConversationTrashTools(), ...createWorkspaceTrashTools());
 
   const engine = createSearch({ ...ctx, searchRegion: ctx.lookup?.region && ctx.lookup.region !== 'auto' ? ctx.lookup.region : ctx.searchRegion });
   tools.push(...createBusinessTools(ctx, engine));

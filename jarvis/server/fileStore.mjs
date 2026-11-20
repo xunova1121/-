@@ -9,15 +9,20 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 const keyOf = (id) => createHash('sha1').update(String(id)).digest('hex');
 const isBinary = (v) => v instanceof Blob || v instanceof ArrayBuffer || ArrayBuffer.isView(v);
 
 async function atomicWrite(file, data) {
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await fsp.writeFile(tmp, data, { mode: 0o600 });
-  await fsp.rename(tmp, file);
+  try {
+    await fsp.writeFile(tmp, data, { mode: 0o600 });
+    await fsp.rename(tmp, file);
+  } catch (error) {
+    await fsp.rm(tmp, { force: true }).catch(() => {});
+    throw error;
+  }
 }
 
 /**
@@ -71,8 +76,58 @@ export function createFileStore(dir) {
     return next;
   }
 
+  // 使用不可变的内容文件。移入和恢复只改同一条 JSON 的指针；先提交新元数据，
+  // 再释放失去引用的旧字节。文件仍在写入或磁盘写满时，旧路径继续指向完整内容。
+  function updateFileRecord(id, change) {
+    return queue('files', id, async () => {
+      const map = await load('files');
+      const previous = map.get(id);
+      const next = change(previous);
+      const root = folder('files');
+      const key = keyOf(id);
+      const metadata = path.join(root, key + '.json');
+      const prior = new Set(Object.values(previous || {}).map(v => v?.$file).filter(Boolean));
+      const created = [];
+      try {
+        if (next) {
+          const row = { ...next };
+          for (const [field, value] of Object.entries(row)) {
+            if (!isBinary(value)) continue;
+            const name = key + '.' + randomUUID() + '.bin';
+            const bytes = value instanceof Blob ? new Uint8Array(await value.arrayBuffer()) :
+              value instanceof ArrayBuffer ? new Uint8Array(value) : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+            created.push(name);
+            await fsp.writeFile(path.join(root, name), bytes, { mode: 0o600, flag: 'wx' });
+            row[field] = { $file: name, type: value.type || '' };
+          }
+          await atomicWrite(metadata, JSON.stringify(row));
+          map.set(id, row);
+          for (const value of Object.values(row)) prior.delete(value?.$file);
+        } else {
+          await fsp.rm(metadata, { force: true });
+          map.delete(id);
+        }
+      } catch (error) {
+        await Promise.all(created.map(name => fsp.rm(path.join(root, name), { force: true }).catch(() => {})));
+        throw error;
+      }
+      // 提交已经完成。释放旧块失败不能使客户端误判操作失败再写一遍。
+      await Promise.all([...prior].map(name => fsp.rm(path.join(root, name), { force: true }).catch(() => {})));
+    });
+  }
+
   return {
     dir,
+    updateFileRecord,
+    async mapFileMetadata(project) {
+      const records = await load('files');
+      const rows = [];
+      for (const file of records.values()) {
+        const row = project(file);
+        if (row) rows.push(row);
+      }
+      return rows;
+    },
     async all(name) {
       const map = await load(name);
       return Promise.all([...map.values()].map((r) => hydrateAsync(name, r)));
@@ -82,6 +137,7 @@ export function createFileStore(dir) {
       return hydrateAsync(name, map.get(id));
     },
     async put(name, obj) {
+      if (name === 'files') return updateFileRecord(obj.id, () => obj);
       const map = await load(name);
       const key = keyOf(obj.id);
       const rec = {};
@@ -103,6 +159,7 @@ export function createFileStore(dir) {
       });
     },
     async delete(name, id) {
+      if (name === 'files') return updateFileRecord(id, () => null);
       const map = await load(name);
       const rec = map.get(id);
       map.delete(id);

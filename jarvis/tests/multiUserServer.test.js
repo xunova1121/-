@@ -39,6 +39,27 @@ it('成员共享模型但看不到密钥和管理员项目账户，所有管理/
   expect((await json(bLogin.token, '/api/server/security')).devices).toHaveLength(1);
 });
 
+it('同名文件回收和恢复由登录身份隔离，清单、下载、入参和重试均不能越过当前用户', async () => {
+  const file = 'inputs/回收测试.bin';
+  const raw = '/api/files/raw?path=' + encodeURIComponent(file);
+  for (const [login, label] of [[aLogin, '甲'], [bLogin, '乙']]) {
+    expect((await fetch(base + raw, { method: 'PUT', headers: { Authorization: 'Bearer ' + login.token }, body: label })).status).toBe(200);
+  }
+  const snapshot = (await json(aLogin.token, '/api/files')).find(row => row.path === file);
+  expect((await api('', '/api/files/trash', 'POST', { path: file })).status).toBe(401);
+  const saved = await json(aLogin.token, '/api/files/trash', 'POST', { path: file, expected: snapshot, userId: b.id });
+  expect(saved.path).toBe(file);
+  expect((await api(aLogin.token, raw)).status).toBe(404);
+  expect(await (await api(bLogin.token, raw)).text()).toBe('乙');
+  expect(await json(bLogin.token, '/api/files/trash')).toEqual([]);
+  expect((await api(bLogin.token, '/api/files/restore', 'POST', { path: file, userId: a.id })).status).toBe(404);
+  expect(await json(aLogin.token, '/api/files/trash')).toContainEqual(saved);
+  expect((await api(aLogin.token, '/api/files/restore', 'POST', { path: file, expected: { ...saved, mtime: saved.mtime + 1 } })).status).toBe(409);
+  await json(aLogin.token, '/api/files/restore', 'POST', { path: file, expected: saved });
+  expect(await (await api(aLogin.token, raw)).text()).toBe('甲');
+  expect(await json(aLogin.token, '/api/files/trash')).toEqual([]);
+});
+
 it('附件路径相同也各读各的，任务、进度、票据及会话ID不能跨用户访问', async () => {
   for (const [login, label] of [[aLogin, '甲附件'], [bLogin, '乙附件']]) {
     expect((await fetch(base + '/api/files/raw?path=inputs/same.txt', { method: 'PUT', headers: { Authorization: 'Bearer ' + login.token }, body: label })).status).toBe(200);

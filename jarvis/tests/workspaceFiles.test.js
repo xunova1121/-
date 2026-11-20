@@ -104,3 +104,28 @@ it('云端预览导出PDF回到相同服务器，不悄悄写本机导致文件�
   expect(server.upload).toHaveBeenCalledWith('海报/说明.pdf', blob);
   expect(local.write).not.toHaveBeenCalled();
 });
+it('管理云端回收站只操作所选账号，移动和恢复后重新读取目录', async () => {
+  const { capture, server, local, changeOwner } = fixture();
+  let active = true;
+  const file = { path: primary, size: 8, mtime: 12 };
+  const stored = { ...file, trashedAt: 123 };
+  server.listFiles.mockImplementation(async () => active ? [file] : []);
+  server.trashFile = vi.fn(async () => { active = false; return stored; });
+  server.listTrashedFiles = vi.fn(async () => active ? [] : [stored]);
+  server.restoreTrashedFile = vi.fn(async () => { active = true; return file; });
+  const source = capture();
+  expect(await source.exists(primary)).toBe(true);
+  expect(await source.trash(primary, file)).toEqual(stored);
+  expect(await source.exists(primary)).toBe(false);
+  expect(await source.listTrash()).toEqual([stored]);
+  await expect(source.purgeTrash(primary)).rejects.toThrow(/浏览器内/);
+  await source.restoreTrash(primary, stored);
+  expect(await source.exists(primary)).toBe(true);
+  expect(await source.listTrash()).toEqual([]);
+  expect(server.trashFile).toHaveBeenCalledWith(primary, file);
+  expect(server.restoreTrashedFile).toHaveBeenCalledWith(primary, stored);
+  expect(local.readBlob).not.toHaveBeenCalled();
+  changeOwner();
+  await expect(source.trash(primary, file)).rejects.toMatchObject({ code: 'WORKSPACE_CHANGED' });
+  expect(server.trashFile).toHaveBeenCalledTimes(1);
+});

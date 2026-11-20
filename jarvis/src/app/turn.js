@@ -30,6 +30,7 @@ import { serverObservationActions, serverTaskMayBeRunning } from '../core/server
 import { HEDGE_MS } from '../agent/hedgedRequest.js';
 import { createTaskKeeper } from '../mobile/backgroundTasks.js';
 import { noteAction } from '../mobile/renderDiagnostics.js';
+import { createWorkshopChat, workshopCommand, shouldAnswerWorkshopCommand } from './workshopChat.js';
 import { providerLabel, modelNote } from '../llm/modelLibrary.js';
 import { $, DESKTOP, now, storage, toast, wp, markActivity } from './env.js';
 
@@ -45,6 +46,7 @@ function serverSlowTag(t) {
 export function createTurn(app) {
   let turns = 0;
   const taskKeeper = createTaskKeeper(globalThis.__jarvisBackgroundTask, (e) => toast(e.message));
+  const roomChat = createWorkshopChat(app, (error) => toast(`这条工作台对话没能同步到服务器：${error.message}`));
 
   /** 打断（barge-in）：停止朗读并中止正在执行的任务 */
   function interrupt() {
@@ -270,7 +272,7 @@ export function createTurn(app) {
     return interject(content, { mode: 'steer', expectedTurn, thumbs: extra.filter((f) => f.image).map((f) => ({ src: f.image.thumb, path: f.path })) });
   }
 
-  async function send(text, { echo = true, byVoice = false, mode = 'auto', queuedFiles, expectedTurn } = {}) {
+  async function send(text, { echo = true, byVoice = false, mode = 'auto', queuedFiles, expectedTurn, instantStatus = false } = {}) {
     if (
       expectedTurn &&
       (app.active !== expectedTurn ||
@@ -280,11 +282,19 @@ export function createTurn(app) {
     )
       return false;
     noteAction(byVoice ? '语音提问' : '发消息');
-    app.askNotifyOnce();
     text = String(text || '').trim();
     const inputFiles = queuedFiles ?? app.attachments;
     if (!text && !inputFiles.length) return;
-    if (!expectedTurn && !inputFiles.length && app.companion?.perform(text)) return;
+    if (!inputFiles.length) {
+      const command = workshopCommand(text);
+      if (command) {
+        const snapshot = app.studioActivity?.snapshot(app.session);
+        const busy = Boolean((app.active && !app.active.streamDone) || snapshot?.active || (app.server && app.session.taskId));
+        if (shouldAnswerWorkshopCommand(command, { busy, mode, instantStatus })) return roomChat.reply(command, text, { echo, busy, byVoice, snapshot });
+        return app.messageQueue.enqueue(text, { files: inputFiles });
+      } else if (!expectedTurn && app.companion?.perform(text)) return;
+    }
+    app.askNotifyOnce();
     if (!text && inputFiles.some((a) => a.image)) text = '请看看这张图片。';
     // 正在干活时又发了一句：不打断，问进度就直接答，别的话交给正在干的未央；说“停”才停
     if ((echo || expectedTurn) && app.active && !app.active.streamDone) return addToRunningTurn(text, { echo, byVoice, mode, queuedFiles, expectedTurn });
@@ -387,15 +397,21 @@ export function createTurn(app) {
     try {
       // 服务器模式：服务器做，进度事件和本机一样显示（runRemote 的用法和 runAgent 一样）
       const serverRun = async (o) => {
-        for (const f of files) await app.server.upload(f.path, await ws.readBlob(f.path)); // 发来的附件先传到服务器的工作区
+        const client = app.server;
+        const saving = roomChat.pending(client, turn.session.id);
+        if (saving) {
+          await saving;
+          if (ctrl.signal.aborted || app.server !== client) throw new DOMException('会话服务器已切换或任务已取消', 'AbortError');
+        }
+        for (const f of files) await client.upload(f.path, await ws.readBlob(f.path)); // 发来的附件先传到服务器的工作区
         // 追问前面发过的图（“这个图……”）：本机模式靠历史里带图，服务器那边没有这些图，一起发过去（最多 4 张）
-        return runRemote(app.server, {
+        return runRemote(client, {
           sessionId: o.sessionId,
           userText: o.userText,
           images: remoteTurnImages(o.images, llmHistory),
           voice: o.voice,
           agentId,
-          agentForm: app.session.agentForm || null,
+          agentForm: turn.session.agentForm || null,
           emit: o.emit,
           signal: o.signal,
           onFile: (p) => app.pullServerFile(p, turn),
@@ -403,7 +419,7 @@ export function createTurn(app) {
             turn.remoteId = remoteTask.id;
             for (const note of turn.inbox.splice(0)) {
               try {
-                await app.server.appendTaskNote(remoteTask.id, note);
+                await client.appendTaskNote(remoteTask.id, note);
               } catch (e) {
                 app.prompt.value += (app.prompt.value.trim() ? '\n' : '') + note;
                 app.autosize();

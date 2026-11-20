@@ -69,6 +69,7 @@ export function createRemoteTask(app) {
             if (app.active === turn) app.setTask('processing', turn.status);
           } else if (e.type === 'tool_progress') cards.get(e.id)?.progress(e.text);
           else if (e.type === 'tool_end') {
+            app.panels?.onWorkspaceToolEnd?.(e);
             if (isRetrievalStop(e)) {
               const card = cards.get(e.id);
               if (card) {

@@ -7,6 +7,32 @@ const open = (id, name, args = {}) => ({ type: 'tool_start', id, name, args });
 const close = (id, name, ok) => ({ type: 'tool_end', id, name, ok });
 
 describe('工作室动作记录', () => {
+  it('本人在其他对话工作时保持忙碌，不带出任务细节，换账号不会继承这项状态', () => {
+    let owner = 'one';
+    const feed = createStudioActivity({ scope: () => owner }), busy = turn('a'), idle = turn('b');
+    feed.begin(busy);
+    feed.record(busy, open('file', 'read_file', { path: '另一段对话.md' }));
+    expect(feed.snapshot(idle.session)).toMatchObject({ active: false, otherWork: true, entries: [] });
+    owner = 'two';
+    expect(feed.snapshot(turn('c').session).otherWork).toBeUndefined();
+    owner = 'one';
+    feed.finish(busy, 'done');
+    expect(feed.snapshot(idle.session).otherWork).toBeUndefined();
+  });
+  it('只有当前工具回执确认有文件实际移入回收站，才显示碎纸机动作', () => {
+    const feed = createStudioActivity(), t = turn();
+    feed.begin(t);
+    for (const [id, name, ok, output, moved] of [
+      ['preview', 'prepare_file_trash', true, '{"changedCount":3}', false],
+      ['error', 'trash_files', false, '{"changedCount":1}', false],
+      ['empty', 'trash_files', true, '{"changedCount":0}', false],
+      ['invalid', 'trash_files', true, 'example: {"changedCount":1}', false],
+      ['confirmed', 'trash_files', true, '{"changedCount":1,"items":[', true]
+    ]) {
+      feed.record(t, { ...close(id, name, ok), output });
+      expect(feed.snapshot(t.session).entries.at(-1).roomOperation === 'shred').toBe(moved);
+    }
+  });
   it('按实际工具标记取资料、制作、检验工位，读取失败和旧记录保留相同工位', () => {
     const feed = createStudioActivity(), t = turn();
     const tools = ['read_file', 'list_files', 'web_search', 'write_file', 'inspect_image', 'check_writing'];

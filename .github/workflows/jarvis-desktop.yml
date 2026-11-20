@@ -476,6 +476,7 @@ jobs:
           ARCHITECTURE_VIEW=workflow node e2e/architecture-logic.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-workflow"
           ARCHITECTURE_VIEW=dataflow node e2e/architecture-logic.mjs "$RUNNER_TEMP/jarvis-e2e/architecture-dataflow"
           node e2e/workspace-management.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/workspace-file-trash.mjs
           node e2e/image-followup.mjs
           node e2e/settings-layout.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/work-studio-mobile.mjs "$RUNNER_TEMP/jarvis-e2e"

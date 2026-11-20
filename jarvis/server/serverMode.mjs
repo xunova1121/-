@@ -579,6 +579,12 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
     if (pathname.startsWith('/api/work-records/') && req.method === 'PATCH') { const body = await readJson(req); if (typeof body.title !== 'string' || body.title.length > 160) { json(res, 400, { error: '名称格式不正确' }); return true; } await renameWorkRecord(decodeURIComponent(pathname.slice('/api/work-records/'.length)), body.title); json(res, 200, { ok: true }); return true; }
     if (pathname.startsWith('/api/work-records/') && req.method === 'DELETE') { await removeWorkRecord(decodeURIComponent(pathname.slice('/api/work-records/'.length))); json(res, 200, { ok: true }); return true; }
     if (pathname === '/api/files' && req.method === 'GET') { json(res, 200, await ws.list(url.searchParams.get('prefix') || '')); return true; }
+    if (pathname === '/api/files/trash' && req.method === 'GET') { json(res, 200, await ws.listTrash()); return true; }
+    if (['/api/files/trash', '/api/files/restore'].includes(pathname) && req.method === 'POST') {
+      const { path, expected } = await readJson(req, 8192);
+      json(res, 200, await (pathname === '/api/files/trash' ? ws.trash(path, expected) : ws.restoreTrash(path, expected)));
+      return true;
+    }
     if (pathname === '/api/files/raw') {
       const p = ws.normalize(url.searchParams.get('path') || '');
       if (req.method === 'GET') {

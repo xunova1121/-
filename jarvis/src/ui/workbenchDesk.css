@@ -69,8 +69,6 @@ body.workbench.wb-studio .wb-desk:not([hidden])::before {
 .wb-desk .work-studio-view .ws-mode { font-size: 10px; }
 .wb-desk .work-studio-view .ws-body { display: flex; flex-direction: column; min-height: 0; }
 .wb-desk .work-studio-view .ws-performance { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
-/* 站位按动作图集手指与笔尖校准到柜格、纸面及键盘，保留小人在台面走动的比例。 */
-.wb-desk .ws-scene { --ws-station-x: 34%; --ws-station-floor: 43%; --ws-aim-x: 34%; }
 .wb-desk .work-studio-view .ws-scene {
   position: relative;
   container-type: size;
@@ -85,34 +83,11 @@ body.workbench.wb-studio .wb-desk:not([hidden])::before {
   background: var(--desk-soft);
 }
 .wb-desk .work-studio-view[data-visible="true"] .ws-scene { background: var(--desk-soft); }
-.wb-desk .ws-scene[data-station="archive"] { --ws-station-x: 17.55%; --ws-station-floor: 46.60%; --ws-aim-x: 15%; }
-.wb-desk .ws-scene[data-station="bench"] { --ws-station-x: 46.63%; --ws-station-floor: 43.95%; --ws-aim-x: 50%; }
-.wb-desk .ws-scene[data-station="review"] { --ws-station-x: 83.87%; --ws-station-floor: 42.55%; --ws-aim-x: 87%; }
-.wb-desk .ws-floorplan {
-  position: absolute; bottom: 0; left: 50%;
-  transform: translate(-50%,var(--ws-floor-shift,0%)) scale(var(--ws-scene-scale,1));
-  transform-origin: clamp(0%,calc(var(--ws-aim-x) + var(--ws-aim-x) - 50%),100%) var(--ws-aim-y,54%);
-  width: 100%; aspect-ratio: 1402 / 1122;
-}
-.wb-desk .work-studio-view[data-visible="true"] .ws-floorplan {
-  background: url('./assets/workStudio/workshop.webp') center / 100% 100% no-repeat;
-}
-:root[data-theme="dark"] .wb-desk .ws-floorplan::before {
-  content: ''; position: absolute; inset: 0; background: #1125283b; pointer-events: none;
-}
-/* 近景使用现场原节点，手和工具的相对坐标始终相同。 */
-.wb-desk .work-studio-view[data-zoom="detail"] .ws-scene { --ws-scene-scale: 2; }
 .wb-desk .work-studio-view .ws-zoom-toggle {
   flex: 0 0 auto; margin-left: auto; min-height: 27px; padding: 2px 8px;
   color: var(--desk-accent); background: var(--desk-soft); border: 1px solid var(--desk-line);
   border-radius: 7px; font-size: 12px; line-height: 1.5;
 }
-.wb-desk .work-studio-view .ws-floorplan > .ws-actor {
-  left: var(--ws-station-x); bottom: var(--ws-station-floor);
-  width: 13%; height: auto; max-height: none; aspect-ratio: 1;
-}
-.wb-desk .work-studio-view .ws-prop,
-.wb-desk .work-studio-view .ws-pose-label { display: none; }
 .wb-desk .ws-station-name {
   flex: none; color: var(--desk-accent); font-size: 12px; font-weight: 650;
   padding-right: 8px; border-right: 1px solid var(--desk-line);

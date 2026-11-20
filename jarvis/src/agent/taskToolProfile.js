@@ -16,6 +16,12 @@ const MEMORY = ['recall', 'read_memory', 'remember', 'kb_search', 'search_conver
 const FILES = ['find_files', 'search_in_files', 'list_files', 'read_file', 'digest_document', 'open_archive', 'write_file', 'edit_file', 'preview', 'run_javascript', 'run_project_tests'];
 const SEARCH = ['web_search', 'fetch_url', 'read_evidence', 'fetch_json', 'reconcile_numbers'];
 
+export function workspaceFileRemovalRequest(value) {
+  const fileTarget = /文件|附件|海报|工作区|\.(?:docx?|xlsx?|pptx?|pdf|png|jpe?g|md|txt)\b/i.test(value);
+  const contentEdit = /(?:文件|文档|海报|附件|段落|表格|\.[a-z]{2,5})(?:中|里|内部|的).*(?:行|文字|内容|列|段落|标题|水印|图标|背景|批注)|(?:海报|文件|文档|表格)的?(?:标题|水印|批注|空白行|空列)/i.test(value);
+  return fileTarget && /删|清理|清除|清空|销毁|移[到入至]回收站/.test(value) && !contentEdit;
+}
+
 /** 只决定先展示哪些 schema；所有工具仍可通过目录发现、按名字直接调用，权限边界不变。 */
 export function taskToolCore(intent, text, { images = [], computerTask = false, strict = false } = {}) {
   if (computerTask) return CORE;
@@ -23,6 +29,10 @@ export function taskToolCore(intent, text, { images = [], computerTask = false, 
   const names = new Set([...BASIC, ...MEMORY]);
   const add = list => list.forEach(name => names.add(name));
   if (/海报|Demo|大屏|文档|文件|代码|Word|PPT|Excel|研究|调研|企业|公司|招标/i.test(value)) add(['read_task_method', 'verify_delivery']);
+  if (/回收站/.test(value) || workspaceFileRemovalRequest(value)) {
+    add(['find_files', 'list_files', 'prepare_file_trash', 'list_trashed_files', 'restore_file']);
+    return names;
+  }
   if (visualSceneRequest(value)) { add(VISUAL_SCENE_TOOLS); return names; }
   if (strict || images.length) return CORE;
   if (isPhoneRequest(value)) { add(['phone_devices', 'phone_action', 'get_current_time', 'time_calc']); return names; }

@@ -81,13 +81,12 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     let files;
     try { files = await source.list(); } catch (e) { if (e.code === 'WORKSPACE_CHANGED') return; files = []; toast(`读取工作区失败：${e.message}`); }
     if (generation !== fileRefresh) return;
-    const total = files.length;
-    const result = await workspaceView.render(files, { category: fileCategory, query: fileQuery, fresh, current, isCurrent: () => generation === fileRefresh });
+    const result = await workspaceView.render(files, { category: fileCategory, query: fileQuery, fresh, current, source, isCurrent: () => generation === fileRefresh });
     if (!result || generation !== fileRefresh) return;
     list.setAttribute('aria-busy', 'false');
     list.inert = false;
     $('.ws-batch').inert = false;
-    counter.textContent = `${result.groups} 项成果 · ${result.files} / ${total} 个文件`;
+    counter.textContent = `${result.groups} 项成果 · ${result.files} / ${result.total} 个文件`;
     syncListVisibility();
   }
 
@@ -563,6 +562,10 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
 
   return {
     refreshFiles,
+    onWorkspaceToolEnd(event) {
+      if ((event.name === 'trash_files' || event.name === 'restore_file') && /^\s*\{\s*"changedCount"\s*:\s*[1-9]\d*\s*[,}]/.test(event.output)
+        && !$('[data-pane="workspace"]').hidden) refreshFiles();
+    },
     workspaceMode: () => getWorkspace().mode(),
     openFile,
     markFresh(path) { fresh.add(path); },

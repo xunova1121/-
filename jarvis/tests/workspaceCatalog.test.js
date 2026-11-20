@@ -38,3 +38,9 @@ it('快速并发修改按最新元数据合并，不覆盖另一个成果的标�
   await Promise.all([patchCatalog('concurrent', ['甲.docx'], { favorite: true }), patchCatalog('concurrent', ['乙.docx'], { project: '项目乙' })]);
   expect(await loadCatalog('concurrent')).toMatchObject({ '甲.docx': { favorite: true }, '乙.docx': { project: '项目乙' } });
 });
+it('真实回收文件可直接显示在回收站；过程文件也可恢复，同名新文件仍在活动目录', () => {
+  const row = { path: '.workflows/海报/原稿.docx', size: 8, mtime: 1 };
+  const mixed = [row, { ...row, size: 5, inTrash: true }];
+  expect(catalogGroups(mixed, { view: 'trash' })[0].files.map(f => f.size)).toEqual([5]);
+  expect(catalogGroups(mixed, { process: true })[0].files.map(f => f.size)).toEqual([8]);
+});

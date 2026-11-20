@@ -61,11 +61,11 @@ export function catalogGroups(files, { items = {}, query = '', view = 'recent', 
   const q = String(query).trim().toLowerCase();
   for (const file of files) {
     const meta = items[file.path] || {};
-    const trash = Boolean(meta.trash);
+    const trash = Boolean(file.inTrash || meta.trash);
     if (trash !== (view === 'trash')) continue;
     const poster = posterPrimary.get(file.path);
-    if (!process && !q && posterSources.has(file.path)) continue;
-    if (!process && !q && PROCESS_FILE.test(file.path) && !poster) continue;
+    if (!trash && !process && !q && posterSources.has(file.path)) continue;
+    if (!trash && !process && !q && PROCESS_FILE.test(file.path) && !poster) continue;
     if (view === 'favorites' && !meta.favorite) continue;
     if (category !== 'all' && fileCategory(file.path) !== category) continue;
     if (project && meta.project !== project) continue;

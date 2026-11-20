@@ -194,6 +194,14 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     if (!res.ok) throw Object.assign(new Error(res.status === 401 ? '服务器登录已失效，请到 设置 → 服务器模式 重新登录' : data.error || `服务器返回 ${res.status}`), { status: res.status, requestTiming: responseTimings.get(res), ...(data.code && { code: data.code }), ...(data.kind && { kind: data.kind }), ...(data.upstreamStatus && { upstreamStatus: data.upstreamStatus }) });
     return data;
   }
+  async function fileTrashRequest(path, options) {
+    try { return await req(path, options); }
+    catch (error) {
+      if (error.status === 404 && !error.code && error.message === 'not found')
+        throw Object.assign(new Error('当前服务器尚未支持文件回收站，请先更新服务器。'), { status: 404, code: 'WORKSPACE_TRASH_UNSUPPORTED' });
+      throw error;
+    }
+  }
   let warmedAt = -Infinity, warming = null;
   // 回答边收边显示（WebView 收事件流）：有的手机网络下 WebView 连不上或收不到，试过不行就退回原生网络（一次给全），记一天
   const streamKey = `jarvis.server.noStream:${root}`;
@@ -305,6 +313,9 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     appendSession: (id, messages) => req(`/api/sessions/${encodeURIComponent(id)}/append`, { method: 'POST', body: { messages } }),
     searchSessions: (q) => req(`/api/sessions/search?q=${encodeURIComponent(q)}`),
     listFiles: () => req('/api/files'),
+    listTrashedFiles: () => fileTrashRequest('/api/files/trash'),
+    trashFile: (path, expected) => fileTrashRequest('/api/files/trash', { method: 'POST', body: { path, expected } }),
+    restoreTrashedFile: (path, expected) => fileTrashRequest('/api/files/restore', { method: 'POST', body: { path, expected } }),
     listWorkRecords: ({ signal, ...options } = {}) => req('/api/work-records?' + new URLSearchParams(Object.entries(options).map(([key, value]) => [key, String(value)])), { signal, timeout: 5000 }),
     renameWorkRecord: (id, title) => req('/api/work-records/' + encodeURIComponent(id), { method: 'PATCH', body: { title } }),
     removeWorkRecord: (id) => req('/api/work-records/' + encodeURIComponent(id), { method: 'DELETE' }),

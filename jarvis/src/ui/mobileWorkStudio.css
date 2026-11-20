@@ -23,6 +23,19 @@
   margin: -4px 0 4px auto;
 }
 .compact .who > .mobile-studio-entry { margin-inline-start: auto; }
+.compact .drawer-studio-entry {
+  margin-inline-start: auto;
+  padding: 0 13px;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--accent);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.compact .drawer-studio-entry + .drawer-close { margin-inline-start: 0; }
 .mobile-studio-entry::after, .mobile-studio-back::before {
   content: '';
   width: 6px;
@@ -49,7 +62,43 @@
   background: var(--bg, #f8f8fc);
   color: var(--text, #191a32);
 }
-.mobile-studio-sheet > .work-studio-view { --ws-height: min(60vh, 495px); --ws-height: min(60dvh, 495px); }
+.mobile-studio-sheet > .work-studio-view { height: auto; }
+.mobile-studio-sheet .ws-body { flex: none; display: flex; flex-direction: column; }
+.mobile-studio-sheet .ws-performance { flex: none; }
+/* 手机全景显示完整原画，近看使用相同底图和工位锚点。 */
+.mobile-studio-sheet .work-studio-view .ws-scene {
+  flex: none; width: 100%; aspect-ratio: 1402 / 1122; container-type: size;
+  background: var(--ws-tint);
+}
+.mobile-studio-sheet .ws-caption {
+  min-height: 40px; padding: 5px 9px; gap: 3px 7px;
+}
+.mobile-studio-sheet .ws-zoom-toggle {
+  flex: none; margin-inline-start: auto; padding: 4px 9px; min-height: 34px;
+  border: 1px solid var(--ws-line); border-radius: 8px; font-size: 12px;
+  background: var(--ws-tint); color: var(--ws-on-tint);
+}
+.mobile-studio-sheet .ws-timeline { flex: none; border-top: 1px solid var(--ws-line); border-left: 0; }
+.mobile-studio-sheet .ws-list-header { display: flex; }
+.mobile-studio-sheet .ws-list {
+  display: block; flex: none; max-height: min(19vh,170px);
+  overflow: auto; scroll-snap-type: none; padding: 0 7px 4px;
+}
+.mobile-studio-sheet .ws-list li { max-width: none; }
+.mobile-studio-sheet .ws-control { min-height: 34px; }
+.mobile-studio-sheet .ws-row { min-height: 38px; }
+.mobile-studio-sheet .ws-room-menu {
+  max-height: min(190px,calc(100cqh - 55px)); overscroll-behavior: contain;
+}
+@media (orientation: landscape) and (max-height: 560px) {
+  .mobile-studio-sheet .ws-body {
+    display: grid; grid-template-columns: minmax(0,min(56%,calc(125vh - 195px))) minmax(0,1fr);
+    align-items: start;
+  }
+  .mobile-studio-sheet .ws-timeline { border-top: 0; border-left: 1px solid var(--ws-line); }
+  .mobile-studio-sheet .ws-list { max-height: 44vh; }
+  .mobile-studio-sheet .ws-room-menu { grid-template-columns: repeat(2, auto); }
+}
 .mobile-studio-sheet::backdrop { background: rgb(14 19 42 / 44%); }
 .mobile-studio-sheet .mobile-studio-back {
   display: inline-flex;

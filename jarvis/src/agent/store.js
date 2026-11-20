@@ -62,11 +62,79 @@ function tx(db, store, mode, fn) {
 }
 
 let backend = null;
+const fileUpdates = new WeakMap();
 /**
  * 换一种存储（服务器版用 server/fileStore.mjs 存到硬盘）；浏览器里不用。
  * backend 提供 all / get / put / delete / clear(集合名, …)
  */
 export function useBackend(b) { backend = b; }
+
+/** 文件清单只投影小段元数据。本机按游标处理，服务器直接读取索引里的大小和时间。 */
+export async function mapFileMetadata(project) {
+  const scope = backend?.scoped?.('files') || backend;
+  if (scope?.mapFileMetadata) return scope.mapFileMetadata(project);
+  if (scope) return (await scope.all('files')).map(project).filter(Boolean);
+  const db = await openDb();
+  if (!db) return [...memoryDb.get('files').values()].map(project).filter(Boolean);
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('files', 'readonly');
+    const cursor = transaction.objectStore('files').openCursor();
+    const rows = [];
+    cursor.onsuccess = () => {
+      const current = cursor.result;
+      if (!current) return;
+      const row = project(current.value);
+      if (row) rows.push(row);
+      current.continue();
+    };
+    transaction.oncomplete = () => resolve(rows);
+    transaction.onabort = () => reject(transaction.error);
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+// 文件的活动内容和回收内容放在同一条记录里。检查快照和修改须在同一事务中完成，
+// 否则另一个标签页可能在确认弹窗打开时已经写入了一份同名新文件。
+export async function updateFileRecord(id, change) {
+  if (backend) {
+    const scope = backend.scoped?.('files') || backend;
+    if (scope.updateFileRecord) return scope.updateFileRecord(id, change);
+    // 兼容只实现了基础集合协议的自定义存储；同一后端同一路径的操作依次核对。
+    if (!fileUpdates.has(scope)) fileUpdates.set(scope, new Map());
+    const queue = fileUpdates.get(scope);
+    const next = (queue.get(id) || Promise.resolve()).catch(() => {}).then(async () => {
+      const row = change(await scope.get('files', id));
+      return row ? scope.put('files', row) : scope.delete('files', id);
+    });
+    queue.set(id, next);
+    try { return await next; } finally { if (queue.get(id) === next) queue.delete(id); }
+  }
+  const db = await openDb();
+  if (!db) {
+    const files = memoryDb.get('files');
+    const row = change(files.get(id));
+    if (row) files.set(id, row); else files.delete(id);
+    return;
+  }
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction('files', 'readwrite');
+    const files = transaction.objectStore('files');
+    const read = files.get(id);
+    let error;
+    read.onsuccess = () => {
+      try {
+        const row = change(read.result);
+        if (row) files.put(row); else files.delete(id);
+      } catch (e) {
+        error = e;
+        transaction.abort();
+      }
+    };
+    transaction.oncomplete = resolve;
+    transaction.onabort = () => reject(error || transaction.error);
+    transaction.onerror = () => reject(error || transaction.error);
+  });
+}
 
 /** 私有缓存跟随集合后端；WeakMap在后端释放后一起回收，不保存其他用户的状态。 */
 export function scopedState(name, create) {

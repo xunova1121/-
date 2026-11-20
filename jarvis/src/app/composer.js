@@ -33,7 +33,7 @@ export function createComposer(app) {
     const v = prompt.value;
     prompt.value = '';
     autosize();
-    app.send(v, { mode: messageQueue.mode });
+    app.send(v, { mode: messageQueue.mode, instantStatus: true });
   });
   // 手机（触屏）键盘没有 Shift：回车就是换行，点发送按钮才发送；电脑上回车发送、Shift+回车换行
   const enterSends = () => !MOBILE && !globalThis.matchMedia?.('(pointer: coarse)').matches;

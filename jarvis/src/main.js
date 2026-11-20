@@ -227,7 +227,7 @@ window.__jarvis = {
 // 工作台界面只用在电脑上；手机 App 保留自己的界面（底部输入、左侧抽屉菜单、整页面板）
 // prettier-ignore
 if (!COMPACT) initWorkbench({ showPanel: app.showPanel, newSession: app.newSession, openSession: app.openSession, getSession: () => app.session, getRunning: () => (app.active && !app.active.streamDone ? app.session.id : null), openFile: app.openInWorkspace, activity: app.studioActivity });
-else initMobileWorkStudio({ getSession: () => app.session, activity: app.studioActivity });
+else initMobileWorkStudio({ getSession: () => app.session, activity: app.studioActivity, closeDrawer: () => app.drawer?.close() });
 mascots = initMascots();
 companion = initCompanion({
   send: app.send,

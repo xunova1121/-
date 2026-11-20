@@ -2,6 +2,7 @@ import './workStudioView.css';
 import './workbenchWorkshopMotion.css';
 import { addWorkshopFixtures } from './workshopFixtures.js';
 import { createWorkshopMotion, stationForStep, stationNames } from './workshopMotion.js';
+import { createWorkshopRoom } from './workshopRoom.js';
 
 const poses = {
   idle: '安静等候', run: '跑去取资料', think: '托腮思考', edit: '动笔修改',
@@ -38,12 +39,13 @@ function text(el, content = '') {
 
 export function createWorkStudioView({ workshop = false } = {}) {
   const element = node('section', 'work-studio work-studio-view');
-  element.setAttribute('aria-label', '看未央工作');
+  const viewTitle = workshop ? '未央工作台' : '看未央工作';
+  element.setAttribute('aria-label', viewTitle);
   element.hidden = true;
   if (workshop) element.dataset.workshop = 'true';
 
   const header = node('div', 'ws-header');
-  const heading = node('h2', 'ws-heading', '看未央工作');
+  const heading = node('h2', 'ws-heading', viewTitle);
   const mode = node('span', 'ws-mode');
   const toolbar = node('div', 'ws-playback-controls');
   toolbar.setAttribute('role', 'group');
@@ -67,13 +69,14 @@ export function createWorkStudioView({ workshop = false } = {}) {
   // 文件对象也作为可选中文本呈现在下方；场景里只画一次。
   prop.setAttribute('aria-hidden', 'true');
   const chip = node('span', 'ws-pose-label');
-  let motion;
+  let motion, room;
   if (workshop) {
     const floor = node('div', 'ws-floorplan');
     addWorkshopFixtures(floor);
     floor.append(actor);
     scene.append(floor, chip, prop);
     motion = createWorkshopMotion(scene, actor);
+    room = createWorkshopRoom(scene, floor, update);
   } else scene.append(chip, prop, actor);
   const caption = node('div', 'ws-caption');
   const action = node('strong', 'ws-action');
@@ -116,6 +119,7 @@ export function createWorkStudioView({ workshop = false } = {}) {
   let selected = null; // null 表示跟随最新步骤，回看时按稳定的事件 id 定位。
   let playing = false;
   let timer = null;
+  let justFinished = null;
   const rows = new Map();
 
   function index() {
@@ -178,6 +182,19 @@ export function createWorkStudioView({ workshop = false } = {}) {
         working: movingStep && ((live && entry.status === 'running') || playing),
         gesture: !isReview && (pose === 'stomp' || pose === 'cheer')
       });
+      const backgroundWork = !isReview && snapshot.otherWork && !snapshot.active;
+      const state = room.render(Boolean(isReview || snapshot.active || backgroundWork || justFinished !== null), !backgroundWork && entry?.roomOperation === 'shred' && entry.status === 'done');
+      if (state.activity !== 'work') {
+        text(mode, '生活中');
+        text(stationLabel, '工作台');
+        text(action, state.label);
+        detail.hidden = file.hidden = prop.hidden = true;
+      } else if (backgroundWork) {
+        text(mode, '工作中');
+        text(stationLabel, '工作台');
+        text(action, '正在处理另一段对话的任务');
+        detail.hidden = file.hidden = prop.hidden = true;
+      }
     }
     back.disabled = n <= 0;
     next.disabled = n < 0 || n >= snapshot.entries.length - 1;
@@ -282,7 +299,8 @@ export function createWorkStudioView({ workshop = false } = {}) {
   function visibilityChanged() {
     const shown = visible && !document.hidden;
     element.dataset.visible = String(shown);
-    if (!shown) { stopPlaying(); motion?.reset(); }
+    room?.setVisible(shown);
+    if (!shown) { stopPlaying(); motion?.reset(); clearTimeout(justFinished); justFinished = null; }
     else update();
   }
 
@@ -290,6 +308,8 @@ export function createWorkStudioView({ workshop = false } = {}) {
     element,
     render(nextSnapshot) {
       if (nextSnapshot.sessionId !== snapshot.sessionId) {
+        clearTimeout(justFinished);
+        justFinished = null;
         stopPlaying();
         motion?.reset();
         if (zoom) setZoom(false);
@@ -297,6 +317,10 @@ export function createWorkStudioView({ workshop = false } = {}) {
         for (const row of rows.values()) row.item.remove();
         rows.clear();
         list.scrollTop = 0;
+      } else if (visible && !document.hidden && snapshot.active && !nextSnapshot.active) {
+        // 工具完成后先留出辨认收尾动作的时间，再回到当前时刻的生活。
+        clearTimeout(justFinished);
+        justFinished = setTimeout(() => { justFinished = null; update(); }, 2300);
       }
       snapshot = nextSnapshot;
       if (selected !== null && index() < 0) {

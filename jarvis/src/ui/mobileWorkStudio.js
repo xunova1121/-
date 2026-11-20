@@ -1,8 +1,8 @@
 import { createWorkStudioView } from './workStudioView.js';
 import './mobileWorkStudio.css';
 
-// 将入口放在当前这轮的工作进展旁，旧消息、旧分页都不挂载入口。
-export function initMobileWorkStudio({ getSession, activity }) {
+// 从菜单可随时看房间；当前回复旁的快捷入口只回看这一轮。
+export function initMobileWorkStudio({ getSession, activity, closeDrawer }) {
   const transcript = document.getElementById('transcript');
   const entry = document.createElement('button');
   entry.type = 'button';
@@ -10,6 +10,14 @@ export function initMobileWorkStudio({ getSession, activity }) {
   entry.textContent = '看未央工作';
   entry.setAttribute('aria-haspopup', 'dialog');
   entry.setAttribute('aria-controls', 'mobile-work-studio');
+  const roomEntry = document.createElement('button');
+  roomEntry.type = 'button';
+  roomEntry.className = 'drawer-studio-entry';
+  roomEntry.textContent = '工作台';
+  roomEntry.setAttribute('aria-label', '未央工作台');
+  roomEntry.setAttribute('aria-haspopup', 'dialog');
+  roomEntry.setAttribute('aria-controls', 'mobile-work-studio');
+  document.querySelector('#drawer .drawer-close')?.before(roomEntry);
   const sheet = document.createElement('dialog');
   sheet.id = 'mobile-work-studio';
   sheet.className = 'mobile-studio-sheet';
@@ -23,6 +31,7 @@ export function initMobileWorkStudio({ getSession, activity }) {
   document.body.append(sheet);
   let view;
   let sessionId;
+  let fromReply = false;
   let scheduled = false;
   let disposed = false;
 
@@ -38,20 +47,18 @@ export function initMobileWorkStudio({ getSession, activity }) {
     if (disposed) return;
     const reply = latestReply();
     const snapshot = activity.snapshot(getSession());
-    if (!reply || !snapshot.entries.length) {
-      entry.remove();
-      if (sheet.open) sheet.close();
-      return;
-    }
-    const card = reply.querySelector(':scope > .progress-card');
-    if (card) {
-      if (card.nextElementSibling !== entry) card.after(entry);
-    } else {
-      const who = reply.querySelector(':scope > .who');
-      if (who && who !== entry.parentNode) who.append(entry);
-    }
+    const hasReply = Boolean(reply && snapshot.entries.length);
+    if (hasReply) {
+      const card = reply.querySelector(':scope > .progress-card');
+      if (card) {
+        if (card.nextElementSibling !== entry) card.after(entry);
+      } else {
+        const who = reply.querySelector(':scope > .who');
+        if (who && who !== entry.parentNode) who.append(entry);
+      }
+    } else entry.remove();
     if (sheet.open) {
-      if (sessionId !== snapshot.sessionId) sheet.close();
+      if (sessionId !== snapshot.sessionId || (fromReply && !hasReply)) sheet.close();
       else view.render(snapshot);
     }
   }
@@ -62,18 +69,22 @@ export function initMobileWorkStudio({ getSession, activity }) {
     queueMicrotask(refresh);
   }
 
-  entry.addEventListener('click', () => {
+  function open(viaReply) {
     const snapshot = activity.snapshot(getSession());
-    if (!latestReply()?.contains(entry) || !snapshot.entries.length || sheet.open) return;
+    if (sheet.open || (viaReply && (!latestReply()?.contains(entry) || !snapshot.entries.length))) return;
+    fromReply = viaReply;
+    if (!fromReply) closeDrawer();
     if (!view) {
-      view = createWorkStudioView();
+      view = createWorkStudioView({ workshop: true });
       sheet.append(view.element);
     }
     sessionId = snapshot.sessionId;
     sheet.showModal();
     view.render(snapshot);
     view.setVisible(true);
-  });
+  }
+  entry.addEventListener('click', () => open(true));
+  roomEntry.addEventListener('click', () => open(false));
   back.addEventListener('click', () => sheet.close());
   sheet.addEventListener('click', (e) => {
     if (e.target !== sheet) return;
@@ -90,7 +101,8 @@ export function initMobileWorkStudio({ getSession, activity }) {
   sheet.addEventListener('close', () => {
     if (sheet.open) return;
     view?.setVisible(false);
-    if (sessionId === getSession()?.id && entry.isConnected) entry.focus({ preventScroll: true });
+    const target = fromReply && entry.isConnected ? entry : document.getElementById('btn-menu');
+    if (sessionId === getSession()?.id) target?.focus({ preventScroll: true });
     sessionId = null;
   });
   // 真机切后台时停止回放；返回前台后拉取已在内存中的最新步骤。
@@ -112,6 +124,7 @@ export function initMobileWorkStudio({ getSession, activity }) {
     if (sheet.open) sheet.close();
     view?.setVisible(false);
     entry.remove();
+    roomEntry.remove();
     sheet.remove();
   };
 }

@@ -1,6 +1,7 @@
 import * as workspace from '../agent/workspace.js';
 import { fmtSize } from '../agent/tools.js';
 import { loadCatalog, patchCatalog, catalogGroups, PROCESS_FILE } from './workspaceCatalog.js';
+import { confirmTrashAll } from './workspaceTrashAll.js';
 import './workspaceView.css';
 const element = (tag, properties = {}, ...children) => {
   const node = Object.assign(document.createElement(tag), properties);
@@ -51,6 +52,21 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
     refresh();
   };
   const processLabel = element('label', { className: 'ws-process-toggle' }, processInput, document.createTextNode('显示过程文件'));
+  const clearAll = action('全部移入回收站', () => {
+    const scope = scopeNow();
+    return confirmTrashAll({
+      source: getWorkspace(),
+      refresh,
+      toast,
+      afterMove: async paths => {
+        assertScope(scope);
+        const catalog = await loadCatalog(scope);
+        const oldMarks = paths.filter(path => catalog[path]?.trash);
+        if (oldMarks.length) await patchCatalog(scope, oldMarks, { trash: false });
+      }
+    });
+  });
+  clearAll.className = 'ws-clear-all';
   const batch = element('div', { className: 'ws-batch', hidden: true });
   const more = element('button', { type: 'button', className: 'ws-load-more', hidden: true, textContent: '加载更多成果' });
   more.onclick = () => {
@@ -61,7 +77,7 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
     'div',
     { className: 'ws-organizer' },
     tabs,
-    element('div', { className: 'ws-organizer-options' }, projectSelect, processLabel),
+    element('div', { className: 'ws-organizer-options' }, projectSelect, processLabel, clearAll),
     batch
   );
   const manager = element('dialog', { className: 'ws-manager' });
@@ -93,7 +109,7 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
   function assertScope(scope) {
     if (scope !== scopeNow()) throw Object.assign(new Error('工作区来源已改变，请重新打开成果管理'), { code: 'WORKSPACE_CHANGED', kind: 'input' });
   }
-  async function updateGroups(groups, patch, scope, items) {
+  async function updateGroups(groups, patch, scope) {
     assertScope(scope);
     await patchCatalog(
       scope,
@@ -103,13 +119,52 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
     selected.clear();
     refresh();
   }
+  async function changeTrash(groups, operation, scope, items) {
+    assertScope(scope);
+    const source = getWorkspace();
+    if (source.mode() === 'folder') return updateGroups(groups, { trash: operation === 'trash' }, scope);
+    const files = groups.flatMap(group => group.files);
+    let completed = 0;
+    try {
+      for (const file of files) {
+        assertScope(scope);
+        const path = file.path;
+        const expected = { size: file.size, mtime: file.mtime, trashedAt: file.trashedAt };
+        if (operation === 'trash') await source.trash(path, expected);
+        if (operation === 'restore' && file.inTrash) await source.restoreTrash(path, expected);
+        if (operation === 'purge') {
+          // 旧版“回收站”中的文件还在活动目录。先按当时看到的版本移入，再清理对应的回收记录。
+          const entry = file.inTrash ? expected : await source.trash(path, expected);
+          await source.purgeTrash(path, entry);
+          if (items[path]) {
+            if (!(await source.exists(path))) await patchCatalog(scope, [path], null);
+            else if (items[path].trash) await patchCatalog(scope, [path], { trash: false });
+          }
+        } else if (items[path]?.trash) {
+          await patchCatalog(scope, [path], { trash: false });
+        }
+        completed++;
+      }
+    } catch (error) {
+      if (completed) {
+        if (manager.open) manager.close();
+        throw new Error(`已处理 ${completed} / ${files.length} 个文件。${error.message}`);
+      }
+      throw error;
+    } finally {
+      selected.clear();
+      refresh();
+    }
+  }
   function action(label, run) {
     const button = element('button', { type: 'button', textContent: label });
-    button.onclick = (event) => {
+    button.onclick = async (event) => {
       event.stopPropagation();
-      Promise.resolve()
-        .then(run)
-        .catch((error) => toast(error.message));
+      if (button.disabled) return;
+      button.disabled = true;
+      try { await run(); }
+      catch (error) { toast(error.message); }
+      finally { button.disabled = false; }
     };
     return button;
   }
@@ -149,7 +204,9 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
       element('label', {}, document.createTextNode('所属项目'), projectInput),
       element('p', {
         className: 'muted small',
-        textContent: '显示名称、项目和收藏仅在当前设备保存，不移动原文件。回收站暂存仍保留原链接；永久删除需另行勾选确认。'
+        textContent: getWorkspace().mode() === 'folder'
+          ? '连接的本地文件夹只支持在本设备隐藏和恢复列表项，原文件保留在文件夹中。'
+          : '移入回收站后，可在当前工作区的回收站恢复文件。显示名称、项目和收藏保存在本设备。'
       })
     );
     for (const file of group.files) manager.append(element('p', { className: 'ws-source-path', textContent: file.path }));
@@ -165,19 +222,19 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
     manager.append(
       scopedAction('保存名称与项目', async () => {
         if (group.source && onRenameWorkRecord) await onRenameWorkRecord(group.source.id, title.value.trim().slice(0, 160));
-        await updateGroups([group], { title: title.value.trim().slice(0, 160), project: projectInput.value.trim().slice(0, 80) }, scope, items);
+        await updateGroups([group], { title: title.value.trim().slice(0, 160), project: projectInput.value.trim().slice(0, 80) }, scope);
         manager.close();
       })
     );
     manager.append(
       scopedAction(group.favorite ? '取消收藏' : '收藏成果', async () => {
-        await updateGroups([group], { favorite: !group.favorite }, scope, items);
+        await updateGroups([group], { favorite: !group.favorite }, scope);
         manager.close();
       })
     );
     manager.append(
-      scopedAction(view === 'trash' ? '恢复到工作区' : '移至回收站', async () => {
-        await updateGroups([group], { trash: view !== 'trash' }, scope, items);
+      scopedAction(view === 'trash' ? '恢复到工作区' : getWorkspace().mode() === 'folder' ? '从列表隐藏' : '移至回收站', async () => {
+        await changeTrash([group], view === 'trash' ? 'restore' : 'trash', scope, items);
         manager.close();
       })
     );
@@ -185,20 +242,14 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
       const confirmDelete = element('input', { type: 'checkbox' });
       const permanent = scopedAction('永久删除文件', async () => {
         if (!confirmDelete.checked) return;
-        for (const file of group.files) await workspace.removeVirtual(file.path);
-        await patchCatalog(
-          scope,
-          group.files.map((file) => file.path),
-          null
-        );
+        await changeTrash([group], 'purge', scope, items);
         manager.close();
-        refresh();
       });
       permanent.disabled = true;
       confirmDelete.onchange = () => {
         permanent.disabled = !confirmDelete.checked;
       };
-      manager.append(element('label', {}, confirmDelete, document.createTextNode('确认永久删除；较大文件可能没有历史备份')), permanent);
+      manager.append(element('label', {}, confirmDelete, document.createTextNode('确认永久删除所列文件')), permanent);
     }
     if (group.source && onRemoveWorkRecord)
       manager.append(
@@ -212,7 +263,8 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
     manager.append(close);
     if (!manager.open) manager.showModal();
   }
-  async function render(files, { query = '', category = 'all', fresh = new Set(), current = null, isCurrent = () => true } = {}) {
+  async function render(files, { query = '', category = 'all', fresh = new Set(), current = null, isCurrent = () => true, source = getWorkspace() } = {}) {
+    clearAll.hidden = source.mode() === 'folder' || view === 'trash';
     const scope = scopeNow();
     if (scope !== currentScope) {
       currentScope = scope;
@@ -231,6 +283,19 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
     } catch {
       items = {};
       toast('文件管理标记读取失败，先显示原文件，不会删除文件。');
+    }
+    let trashError = '';
+    if (view === 'trash') {
+      let trashed = [];
+      try {
+        if (source.mode() !== 'folder') trashed = await source.listTrash();
+      } catch (error) {
+        if (!isCurrent() || scope !== scopeNow()) return null;
+        trashError = '读取回收站失败：' + error.message;
+      }
+      const stored = new Set(trashed.map(file => file.path));
+      // 旧版本只给仍在工作区的路径打标记。优先真实回收条目，兼容其余旧标记。
+      files = [...files.filter(file => items[file.path]?.trash && !stored.has(file.path)), ...trashed.map(file => ({ ...file, inTrash: true }))];
     }
     // 只有存在任务海报时才取简短成果索引，最多等待1.5秒；无此类文件保持原首屏路径。
     let records = cachedSources?.scope === scope ? cachedSources.items : [];
@@ -259,8 +324,8 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
       batch.hidden = !chosen.length;
       batch.replaceChildren(
         element('span', { textContent: `已选 ${chosen.length} 项` }),
-        action(view === 'favorites' ? '取消收藏' : '收藏', () => updateGroups(chosen, { favorite: view !== 'favorites' }, scope, items)),
-        action(view === 'trash' ? '恢复' : '移至回收站', () => updateGroups(chosen, { trash: view !== 'trash' }, scope, items)),
+        action(view === 'favorites' ? '取消收藏' : '收藏', () => updateGroups(chosen, { favorite: view !== 'favorites' }, scope)),
+        action(view === 'trash' ? '恢复' : source.mode() === 'folder' ? '从列表隐藏' : '移至回收站', () => changeTrash(chosen, view === 'trash' ? 'restore' : 'trash', scope, items)),
         action('取消选择', () => {
           selected.clear();
           refresh();
@@ -284,8 +349,8 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
       };
       const fileTitle = group.files.length === 1 && !group.poster && !items[primary.path]?.title ? primary.path.split('/').pop() : group.title;
       const formats = element('div', { className: 'ws-formats' });
-      if (group.files.length > 1) for (const file of group.files) formats.append(action(file.path.split('/').pop(), () => openFile(file.path)));
-      if (group.poster) {
+      if (view !== 'trash' && group.files.length > 1) for (const file of group.files) formats.append(action(file.path.split('/').pop(), () => openFile(file.path)));
+      if (view !== 'trash' && group.poster) {
         for (const [label, entries] of [['源文件', group.poster.sourceFiles], ['历史稿', group.poster.historyFiles]]) {
           if (!entries.length) continue; // 没有以前的成品就不显示“历史稿（0）”
           const detail = element('details', { className: 'ws-poster-files' }, element('summary', { textContent: label + `（${entries.length}）` }));
@@ -326,19 +391,21 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
       row.setAttribute('role', 'button');
       if (group.files.some((file) => fresh.has(file.path))) row.classList.add('fresh');
       if (group.files.some((file) => current === file.path)) row.classList.add('active');
-      row.onclick = () => openFile(primary.path);
+      const activate = view === 'trash' ? () => manage(group, scope, items) : () => openFile(primary.path);
+      row.onclick = activate;
       row.onkeydown = (event) => {
         if (event.target === row && ['Enter', ' '].includes(event.key)) {
           event.preventDefault();
-          openFile(primary.path);
+          activate();
         }
       };
       return row;
     });
     list.replaceChildren(
+      ...(trashError ? [element('li', { className: 'empty', textContent: trashError })] : []),
       ...(rows.length
         ? rows
-        : [
+        : trashError ? [] : [
             element('li', {
               className: 'empty',
               textContent:
@@ -350,7 +417,7 @@ export function initWorkspaceView({ list, refresh, toast, openFile, getScope, ge
     more.hidden = !hasMore;
     more.textContent = `加载更多（已显示 ${Math.min(limit, groups.length)} / ${groups.length} 项）`;
     const processCount = files.filter((file) => PROCESS_FILE.test(file.path)).length;
-    return { groups: groups.length, files: groups.reduce((sum, group) => sum + group.files.length, 0), processCount };
+    return { groups: groups.length, files: groups.reduce((sum, group) => sum + group.files.length, 0), total: files.length, processCount };
   }
   return {
     control,

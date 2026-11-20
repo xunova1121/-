@@ -6,6 +6,14 @@ export function createWorkspaceFiles(app, { files = workspace, identity = userSt
   return () => {
     const server = app.server,
       owner = identity();
+    let locationLabel = server ? '云服务器（当前账号）' : '本机工作区';
+    if (server?.base) {
+      try {
+        locationLabel = '云服务器（当前账号 · ' + new URL(server.base).host + '）';
+      } catch {
+        /* 尚未配置有效地址时仍可正常打开文件空间。 */
+      }
+    }
     let mode = files.mode(),
       folder = files.folderName();
     const check = () => {
@@ -20,6 +28,13 @@ export function createWorkspaceFiles(app, { files = workspace, identity = userSt
     };
     let listing;
     const list = () => call(() => (listing ??= server ? server.listFiles() : files.list()));
+    const mutate = async (run) => {
+      try {
+        return await call(run);
+      } finally {
+        listing = undefined;
+      }
+    };
     const readBlob = async (path) => {
       const normalized = workspace.normalize(path);
       const blob = await call(() => (server ? server.download(normalized) : files.readBlob(normalized)));
@@ -32,6 +47,7 @@ export function createWorkspaceFiles(app, { files = workspace, identity = userSt
       ...files,
       check,
       mode: () => (server ? 'server' : mode),
+      locationLabel,
       canUseFolders: () => !server && files.canUseFolders(),
       restoreFolder: async (...args) => {
         check();
@@ -44,9 +60,19 @@ export function createWorkspaceFiles(app, { files = workspace, identity = userSt
         return result;
       },
       list,
+      listTrash: () => call(() => (server ? server.listTrashedFiles() : files.listTrash())),
+      trash: (path, expected) =>
+        mutate(() => (server ? server.trashFile(workspace.normalize(path), expected) : files.trash(workspace.normalize(path), expected))),
+      restoreTrash: (path, expected) =>
+        mutate(() => (server ? server.restoreTrashedFile(workspace.normalize(path), expected) : files.restoreTrash(workspace.normalize(path), expected))),
+      purgeTrash: (path, expected) =>
+        mutate(() => {
+          if (server || mode !== 'virtual') throw new Error('只有浏览器内工作区支持永久删除');
+          return files.purgeTrash(workspace.normalize(path), expected);
+        }),
       readBlob,
       readText: async (path) => (await readBlob(path)).text(),
-      write: (path, blob) => call(() => (server ? server.upload(workspace.normalize(path), blob) : files.write(path, blob))),
+      write: (path, blob) => mutate(() => (server ? server.upload(workspace.normalize(path), blob) : files.write(path, blob))),
       exists: (path) => call(async () => (server ? (await list()).some((file) => file.path === workspace.normalize(path)) : files.exists(path)))
     };
   };

@@ -147,6 +147,8 @@ export function createStudioActivity({ scope = () => null } = {}) {
         state.calls.set(e.id, row);
         if (e.type === 'tool_end') {
           row.status = e.ok ? 'done' : 'error';
+          // 文件工具把实际移动数放在回执开头，即使长结果被裁短也可核对。空预览或失败均不会触发碎纸动作。
+          if (e.name === 'trash_files' && e.ok && /^\s*\{\s*"changedCount"\s*:\s*[1-9]\d*\s*[,}]/.test(e.output || '')) row.roomOperation = 'shred';
           state.lastOperationFailed = !e.ok;
           if (!e.ok) Object.assign(row, { pose: 'stomp', title: row.title + '遇到问题' });
           // 并行步骤可能倒序完成，把最新获得回执的动作排在最后。
@@ -224,7 +226,10 @@ export function createStudioActivity({ scope = () => null } = {}) {
       (state.active ||
         sameObservedTask ||
         (!session.taskId && (sessionRuns.get(session) === state || sameTask || !(session.messages?.at(-1)?.ts > state.finishedAt))));
-    return { sessionId, active: Boolean(useLive && state.active), entries: useLive ? state.entries.map((e) => ({ ...e })) : historyEntries(session) };
+    const active = Boolean(useLive && state.active);
+    // 跳到另一段对话也不会让正在干活的未央去睡觉，不跨对话展示文件名和步骤。
+    const otherWork = !active && [...sessions.values()].some((item) => item !== state && item.scope === owner && item.active);
+    return { sessionId, active, ...(otherWork && { otherWork }), entries: useLive ? state.entries.map((e) => ({ ...e })) : historyEntries(session) };
   }
 
   return {

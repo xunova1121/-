@@ -1,7 +1,7 @@
 import { PHONE_GUIDANCE } from '../../shared/phoneControl.js';
 import { isRetrievalStop } from '../../shared/retrievalStop.js';
 import { DOCUMENT_TASK_CORE, documentRouteNote } from './documentToolProfile.js';
-import { taskToolCore } from './taskToolProfile.js';
+import { taskToolCore, workspaceFileRemovalRequest } from './taskToolProfile.js';
 import { projectLookupMessages, compactLookupReceipt } from './requestContext.js';
 import { resolveTaskIntent } from '../core/taskIntent.js';
 import { estimateTokens, contextBudget } from './contextBudget.js';
@@ -77,6 +77,7 @@ import * as sessions from './sessions.js';
 import * as memory from './memory.js';
 import * as kb from './knowledge.js';
 import * as ws from './workspace.js';
+import { replyToFileTrashPreview } from './workspaceTrashTools.js';
 import * as packs from './skillPacks.js';
 import { summaryBlock, HISTORY_SOURCE_RULE } from './compress.js';
 import { narrowAgentTools, agentPromptNote, withAgentRequirement } from './agentTurn.js';
@@ -280,6 +281,16 @@ export function trimComputerScreenshots(messages,keep=2) {
 async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, maxTotalSteps = null, codeWork = null, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, isolated = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false, describeImages = null, visionLabel = '看图模型', readImageText = null, modelNote = '', hedgeMs = 0, lookupModel = null, lookupAnswerModel = null, retrievalText = null, lookupPreferences = null, lookupClassifier = null, taskIntent = null, capabilityRoutes = [], agent = null }) {
   // 智能体对话：工具只在原有范围里收窄，用户选择附加到本轮要求（见 agentTurn.js）
   if (agent?.profile) { tools = narrowAgentTools(tools, agent.profile); requirementText = withAgentRequirement(requirementText, agent); }
+  const trashReply = !depth && !isolated && !quiet && await replyToFileTrashPreview({ tools, history, userText, sessionId, emit, signal });
+  if (trashReply) {
+    emit({ type: 'text', delta: trashReply.text });
+    return trashReply;
+  }
+  // 普通对话里的单一回收操作只允许检索、选取。清单和结果均由真实文件工具输出。
+  const selectingTrash = !depth && !isolated && !quiet && !computerTask && !codeWork?.enabled && !images.length && sessionId
+    && tools.some(t => t.name === 'prepare_file_trash' && t.finishPreview) && workspaceFileRemovalRequest(userText)
+    && !/如何|怎么|能否|为什么|不要|不许|禁止|然后|并且|另外|同时|之后|[？?]/.test(userText);
+  if (selectingTrash) tools = tools.filter(t => ['find_files', 'list_files', 'prepare_file_trash'].includes(t.name));
   const agentNote = [agentPromptNote(agent?.profile), agent?.profile && agent.note && `本轮${agent.note}（来自智能体页面上的选择，和用户原话同样要遵守）`].filter(Boolean).join('\n');
   taskIntent ||= resolveTaskIntent(requirementText, { history, state: summary?.taskContext, images: images.length });
   const workStartedAt = Date.now();
@@ -560,7 +571,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     const guardedAnswer = review.guardsAnswer();
     const lookupEnabled = Boolean(lookupModel) && (infoPrompt || todayNewsIntent(requirementText)) && !light && !images.length && !codeWork?.enabled;
     const phase = lookupPhase({ enabled: lookupEnabled, step, closing, preFound, messages: convo, final: lookupFinal });
-    const holding = makingFile || Boolean(checkedText) || guardedAnswer || lookupEnabled && !phase && !lookupJudged;
+    const holding = selectingTrash || makingFile || Boolean(checkedText) || guardedAnswer || lookupEnabled && !phase && !lookupJudged;
     const latestData = convo.at(-1);
     const fastData = step === 0 && !['failed', 'input', 'cached'].includes(preFound?.recovery?.state) && ['get_weather', 'get_market_quote', 'get_stock_kline'].includes(preFound?.tool) || lookupDelivery.hasResults && latestData?.role === 'tool' && !latestData.isError && ['web_search', 'fetch_url', 'fetch_json', 'get_weather', 'get_market_quote', 'get_stock_kline'].includes(latestData.name);
     const fastAnswer = lookupAnswerModel && fastData && !upgraded && !images.length && !computerTask && !makingFile && !codeWork?.enabled && !review.report().contract.calculation && !review.report().sourceRequirement && !extensiveRetrieval(currentRequest) && !/计算|核[实验对]|查证|分析|对比|比较/.test(currentRequest);
@@ -573,6 +584,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     };
     const releaseHeld = () => {
       if (!holding || !held) return;
+      if (selectingTrash) { held = ''; return; }
       if (!checkedText || !ACK_ONLY.test(held.trim()) && !repeats(checkedText, held) && !metaReply(held)) showText(held);
       held = '';
     };
@@ -704,6 +716,12 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       lookupFinal = true; lookupJudged = true;
       continue;
     }
+    if (selectingTrash && !r.toolCalls.length && r.stop !== 'pause_turn') {
+      const choices = await replyToFileTrashPreview({ tools, history: [], userText, sessionId, emit, signal, suggestFiles: true });
+      const text = '还没有文件移入回收站。' + '\n\n' + choices.text;
+      emit({ type: 'text', delta: text });
+      return { text, toolCalls: toolCount + choices.toolCalls };
+    }
     if (guardedAnswer && !r.toolCalls.length && r.stop !== 'pause_turn') {
       const issues = review.checkAnswer(held, now());
       const canCheckNumbers = availableTools.some(tool => /^(?:verify_numbers|time_calc|run_javascript|run_python)$/.test(tool.name));
@@ -816,6 +834,13 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       if (recent.length > 12) recent.shift();
       convo.push({ role: 'tool', toolCallId: c.id, name: c.name, content: output, isError: !ok && !stopped, ...(outImages.length && { images: outImages }) });
       await see(convo.at(-1), { hint: requirementText, signal, ocr: c.name !== 'read_image_text' });
+    }
+    // 向用户展示工具实际选中的清单；保留原文供下一轮核对，不让模型改写文件名或自行确认。
+    const filePreview = [...results].reverse().find(result => result.ok && result.c.name === 'prepare_file_trash');
+    if (filePreview) {
+      const text = (finalText ? '\n\n' : '') + filePreview.output;
+      emit({ type: 'text', delta: text });
+      return { text: finalText + text, toolCalls: toolCount };
     }
     const recoveryStop = results.find(result => result.recoveryStop)?.recoveryStop;
     // 正常收尾不计失败，但仍要阻止模型反复调用已关闭的检索；给一次改为回答/本地产出的机会。

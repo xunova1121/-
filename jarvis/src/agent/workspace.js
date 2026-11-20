@@ -4,12 +4,13 @@
  *   本地文件夹：用户点“连接文件夹”授权后（Chrome / Edge 的 File System Access API），
  *               直接读写这台电脑上的那个文件夹。
  *
- * 安全约定：智能体不能删除文件；在本地文件夹里写文件时，同名文件不会被覆盖，
+ * 虚拟工作区的文件可按路径移入回收站。连接的本地文件夹只允许读和新建，同名文件不会被覆盖，
  * 而是另存为“名称 (2).扩展名”，并在结果里说明。
  * 架构工作流的私有状态只由专用内部写入器原路径更新，不应用于普通用户成果。
  * 虚拟工作区里覆盖、删除之前自动留一份旧版本，可在“改动记录”里恢复（见 fileHistory.js）。
  */
-import { collection } from './store.js';
+import { collection, mapFileMetadata, updateFileRecord } from './store.js';
+import { changeTrash, checkSnapshot, fileTimestamp, hasActiveFile, remainingTrash, trashInfo } from './workspaceTrash.js';
 import * as history from './fileHistory.js';
 import { isArchitecturePrivateFilePath, isArchitectureMetadataPath, ownsArchitectureInternalRecord, architectureJsonValue } from './architectureStateOwnership.js';
 import { throwControl } from '../core/networkRequest.js';
@@ -95,7 +96,7 @@ async function folderFileHandle(path, create = false) {
 
 export async function list(prefix = '') {
   const pre = prefix ? normalize(prefix) : '';
-  const all = dirHandle ? await walkFolder(dirHandle) : (await files.all()).map(({ id, size, mtime }) => ({ path: id, size, mtime }));
+  const all = dirHandle ? await walkFolder(dirHandle) : await mapFileMetadata(row => hasActiveFile(row) && { path: row.id, size: row.size, mtime: row.mtime });
   return all.filter((f) => !pre || f.path === pre || f.path.startsWith(`${pre}/`)).sort((a, b) => a.path.localeCompare(b.path));
 }
 
@@ -104,7 +105,7 @@ export async function readBlob(path) {
   path = normalize(path);
   if (dirHandle) return (await folderFileHandle(path)).getFile();
   const f = await files.get(path);
-  if (!f) throw Object.assign(new Error(`找不到文件：${path}`), { code: 'WORKSPACE_NOT_FOUND', kind: 'input' });
+  if (!hasActiveFile(f)) throw Object.assign(new Error(`找不到文件：${path}`), { code: 'WORKSPACE_NOT_FOUND', kind: 'input' });
   return f.data instanceof Blob ? f.data : new Blob([f.data], { type: MIME[ext(path)] || 'text/plain' });
 }
 
@@ -182,7 +183,7 @@ async function checkArchitectureStateTarget(path, blob) {
     }
   } else {
     const record = await files.get(path);
-    if (record) previous = asBlob(record, path);
+    if (hasActiveFile(record)) previous = asBlob(record, path);
   }
   if (!previous) return;
   const current = await architectureJsonValue(previous);
@@ -195,10 +196,14 @@ const asBlob = (f, path) => (f.data instanceof Blob ? f.data : new Blob([f.data]
 
 /** 写进虚拟工作区：同名文件先留一份旧版本 */
 async function writeVirtual(path, blob, note = '') {
-  const old = await files.get(path);
+  const found = await files.get(path);
+  const old = hasActiveFile(found) ? found : null;
   const e = await history.record({ path, op: old ? 'overwrite' : 'create', blob: old ? asBlob(old, path) : null, note });
-  const mtime = Date.now();
-  await files.put({ id: path, data: blob, size: blob.size, mtime });
+  let mtime;
+  await updateFileRecord(path, row => {
+    mtime = fileTimestamp(row);
+    return { ...remainingTrash(row), id: path, data: blob, size: blob.size, mtime };
+  });
   await history.markWritten(e.id, mtime);
   return e;
 }
@@ -207,8 +212,34 @@ async function writeVirtual(path, blob, note = '') {
 export async function removeVirtual(path, note = '') {
   path = normalize(path);
   const old = await files.get(path);
-  if (old) await history.record({ path, op: 'delete', blob: asBlob(old, path), note });
-  await files.delete(path);
+  if (!hasActiveFile(old)) return;
+  await history.record({ path, op: 'delete', blob: asBlob(old, path), note });
+  await updateFileRecord(path, row => {
+    if (row?.mtime !== old.mtime) throw new Error('文件已发生变化，请刷新：' + path);
+    return remainingTrash(row);
+  });
+}
+
+function trashPath(path) {
+  if (dirHandle) throw Object.assign(new Error('连接的设备文件夹不支持工作区回收站'), { code: 'WORKSPACE_FOLDER_PROTECTED', status: 403, kind: 'input' });
+  if (typeof path !== 'string' || !path.trim()) throw Object.assign(new Error('需要指定工作区文件路径'), { code: 'WORKSPACE_PATH_REQUIRED', status: 400, kind: 'input' });
+  try { return normalize(path); }
+  catch (error) { throw Object.assign(error, { code: 'WORKSPACE_INVALID_PATH', status: 400, kind: 'input' }); }
+}
+
+export const listTrash = async () => dirHandle ? [] : (await mapFileMetadata(trashInfo)).sort((a, b) => b.trashedAt - a.trashedAt);
+export const trash = async (path, expected) => changeTrash(trashPath(path), 'trash', expected);
+export const restoreTrash = async (path, expected) => changeTrash(trashPath(path), 'restore', expected);
+// 只有手动勾选确认的本地文件管理界面调用永久清理，模型和服务器 API 仅提供可恢复的移动。
+export async function purgeTrash(path, expected) {
+  path = trashPath(path);
+  const record = await files.get(path);
+  const saved = trashInfo(record);
+  if (saved) {
+    checkSnapshot(saved, expected);
+    await history.record({ path, op: 'delete', blob: asBlob({ data: record.trashData }, path), note: '在回收站手动永久删除' });
+  }
+  return changeTrash(path, 'purge', { ...saved, ...expected });
 }
 
 /**
@@ -218,7 +249,8 @@ export async function removeVirtual(path, note = '') {
 export async function checkVersion(id) {
   const e = await history.get(id);
   if (!e) return { ok: false, problem: '找不到这条记录，可能已经过期被清理' };
-  const cur = await files.get(e.path);
+  const found = await files.get(e.path);
+  const cur = hasActiveFile(found) ? found : null;
   const changed = cur && e.mtimeAfter && cur.mtime !== e.mtimeAfter;
   if (e.op === 'create') {
     if (!cur) return { ok: false, problem: `文件已经不在了，不需要撤销：${e.path}` };
