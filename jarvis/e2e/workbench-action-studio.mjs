@@ -6,6 +6,9 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from '../server/server.mjs';
 import { createServerMode, tokenFor } from '../server/serverMode.mjs';
+import { createTaskRunner } from '../server/taskRunner.mjs';
+import { currentUser, runAsUser } from '../server/userScope.mjs';
+import { createTools } from '../src/agent/tools.js';
 import { createServerClient } from '../src/core/serverClient.js';
 import { useBackend } from '../src/agent/store.js';
 
@@ -19,15 +22,29 @@ let continueCloud;
 const cloudGate = new Promise(resolve => { continueCloud = resolve; });
 let cloudRounds = 0, eventsResponse;
 const requests = [];
-const mode = createServerMode({
-  dataDir: dir, password: 'studio-fixture',
-  makeTaskAdapter: () => ({ model: 'studio-fixture', adapter: { async stream(input) {
-    if (cloudRounds++ === 0) return { text: '', toolCalls: [write(cloudFile)], stop: 'tool_use' };
+// 等测试端观察到每道真实工序，再放行对应工具，避免本机文件在一帧内做完。
+const cloudCalls = [
+  { id: 'collect-cloud', name: 'list_files', args: {} }, write(cloudFile),
+  { id: 'audit-cloud', name: 'list_work_records', args: {} },
+  { id: 'inspect-cloud', name: 'verify_delivery', args: { paths: [cloudFile] } }
+];
+const steps = new Map(['list_files', 'write_file', 'list_work_records'].map(name => [name, Promise.withResolvers()]));
+const runner = createTaskRunner({
+  getConfig: async () => config,
+  userAccess: { current: currentUser, run: runAsUser, active: () => true },
+  makeTools: ctx => createTools(ctx).map(tool => {
+    const gate = steps.get(tool.name);
+    return gate ? { ...tool, async run(...args) { await gate.promise; return tool.run(...args); } } : tool;
+  }),
+  makeAdapter: () => ({ model: 'studio-fixture', adapter: { async stream(input) {
+    const tool = cloudCalls[cloudRounds++];
+    if (tool) return { text: '', toolCalls: [tool], stop: 'tool_use' };
     input.onText?.('已保存云端简报。');
     await cloudGate;
     return { text: '已保存云端简报。', toolCalls: [], stop: 'end_turn' };
   } } })
 });
+const mode = createServerMode({ dataDir: dir, password: 'studio-fixture', runner });
 await mode.ready;
 const desktop = createServer({ staticDir: path.resolve('dist'), ollama: null });
 const mobile = createServer({ staticDir: path.resolve('dist-mobile'), ollama: null });
@@ -87,8 +104,10 @@ async function stationPoint(page, station) {
     if (actor.width <= 0 || actor.height <= 0 || actor.height > room.height * .32 || actor.width > room.width * .21) {
       throw new Error('角色没有保持车间远景比例：' + JSON.stringify({ actor, room }));
     }
-    if (actor.left < room.left - 1 || actor.right > room.right + 1 || actor.top < room.top - 1 || actor.bottom > room.bottom + 1) {
-      throw new Error('角色离开了车间画面');
+    for (const bounds of [room, floor.closest('.ws-scene').getBoundingClientRect()]) {
+      if (actor.left < bounds.left - 1 || actor.right > bounds.right + 1 || actor.top < bounds.top - 1 || actor.bottom > bounds.bottom + 1) {
+        throw new Error('角色被车间画面的边缘裁掉');
+      }
     }
     return { x: (actor.left + actor.width / 2 - room.left) / room.width, y: (actor.bottom - room.top) / room.height };
   });
@@ -108,6 +127,40 @@ async function observeWalk(page) {
     }
     return false;
   });
+}
+// 工具实际运行时验证专用接触动作的三帧。单纯改标签、挪角色或让静态立绘上下浮动都不够。
+async function checkWorkingHands(page, operation) {
+  const sprite = stage(page).locator(`.ws-scene[data-operation="${operation}"][data-work-phase="working"] .ws-actor > .ws-sprite`);
+  await sprite.waitFor();
+  // 图集中三帧的取件尖端、笔尖和指尖。目标取自页面里的真实道具，缩放后也要对得上。
+  const contacts = {
+    archive: { row: '0%', target: '.ws-rack-folder', points: [[.104,.532],[.178,.559],[.164,.564]] },
+    write: { row: '50%', target: '.ws-drawing-slip', points: [[.898,.723],[.901,.736],[.898,.620]] },
+    type: { row: '100%', target: '.ws-keyboard', points: [[.863,.647],[.845,.622],[.856,.626]] }
+  };
+  const frames = await sprite.evaluate(async (node, { row, target, points }) => {
+    const samples = [];
+    const prop = node.closest('.ws-floorplan').querySelector(target);
+    const start = performance.now();
+    while (samples.filter(Boolean).length < 3 && performance.now() - start < 4000) {
+      const style = getComputedStyle(node);
+      const index = ['0%', '50%', '100%'].indexOf(style.backgroundPositionX);
+      if (index >= 0 && !samples[index] && /workshop-actions[^/]*\.webp/.test(style.backgroundImage) && style.backgroundPositionY === row) {
+        const spriteBox = node.getBoundingClientRect(), objectBox = prop.getBoundingClientRect();
+        const x = spriteBox.left + points[index][0] * spriteBox.width;
+        const y = spriteBox.top + points[index][1] * spriteBox.height;
+        const gap = Math.max(0, objectBox.left - x, x - objectBox.right, objectBox.top - y, y - objectBox.bottom);
+        samples[index] = { gap: gap / spriteBox.width, x: x / spriteBox.width, y: y / spriteBox.height };
+      }
+      await new Promise(requestAnimationFrame);
+    }
+    return samples.filter(Boolean);
+  }, contacts[operation]);
+  assert.equal(frames.length, 3, operation + ' 实际作业使用对应工位的三帧手部接触动作');
+  const count = { archive: 1, write: 2, type: 3 }[operation];
+  assert.ok(frames.slice(0, count).every(p => p.gap < .045), operation + ' 手部接触实际道具：' + JSON.stringify(frames));
+  if (operation === 'archive') assert.ok(frames[1].x - frames[0].x > .05, '取出资料后与柜格拉开');
+  if (operation === 'write') assert.ok(frames[1].y - frames[2].y > .07, '纸面书写后抬起笔尖');
 }
 async function checkFit(page) {
   const box = await page.locator('#prompt').boundingBox();
@@ -156,6 +209,7 @@ try {
   assert.equal(await failure.count(), 1, '读取失败只显示一条真实记录');
   await failure.click();
   assert.equal(await stage(local).getAttribute('data-pose'), 'stomp');
+  assert.equal(await stage(local).locator('.ws-scene').getAttribute('data-operation'), 'none', '读取失败没有继续取件的动作');
   const archive = await stationPoint(local, 'archive');
   assert.notEqual(await actor.getAttribute('data-walking'), 'true', '手动回看停在读取文件的工位');
   await local.screenshot({ path: path.join(output, 'pc-studio-retry.png') });
@@ -163,6 +217,8 @@ try {
   assert.equal(await edits.count(), 1, '工具开始和结束合并为一次编辑');
   await edits.click();
   assert.equal(await stage(local).getAttribute('data-mode'), 'review');
+  const snapshot = stage(local).locator('.ws-scene[data-work-phase="snapshot"][data-operation="write"] .ws-sprite');
+  assert.equal(await snapshot.evaluate(el => getComputedStyle(el).backgroundPositionX), '50%', '手动回看已执行的写入停留在笔尖接触纸面的帧');
   const bench = await stationPoint(local, 'bench');
   assert.ok((await stage(local).innerText()).includes(path.basename(localFile)), '动作显示真实文件名');
   assert.ok(!(await stage(local).innerText()).includes(privateText), '排除文件正文');
@@ -179,7 +235,8 @@ try {
   assert.ok(assetCount >= 2, '正式构建的人物和场景图均可解码');
   await checkFit(local);
   await local.screenshot({ path: path.join(output, 'pc-studio-edit.png') });
-  await stage(local).locator('[data-entry-id]').filter({ hasText: '核验交付文件' }).click();
+  const inspection = stage(local).locator('[data-entry-id]').filter({ hasText: '核验交付文件' });
+  await inspection.click();
   const review = await stationPoint(local, 'review');
   await stage(local).locator('[data-action="live"]').click();
   assert.equal(await stage(local).getAttribute('data-pose'), 'cheer');
@@ -216,8 +273,13 @@ try {
   await stationPoint(local, 'bench');
   await local.screenshot({ path: path.join(output, 'pc-studio-compact.png') });
   await local.setViewportSize({ width: 768, height: 620 });
-  await stationPoint(local, 'bench');
+  for (const [row, station] of [[failure, 'archive'], [edits, 'bench'], [inspection, 'review']]) {
+    await row.click();
+    await stationPoint(local, station);
+  }
   await checkFit(local);
+  await local.screenshot({ path: path.join(output, 'workshop-narrow.png') });
+  await stage(local).locator('[data-action="live"]').click();
   await local.setViewportSize({ width: 1024, height: 600 });
   await local.locator('.rail .wb-new').click();
   assert.ok(await local.evaluate(() => window.__jarvis.stage == null), '普通对话不创建经典 WebGL 场景');
@@ -249,8 +311,35 @@ try {
   const login = await owner.loginAccount(member.accessCode);
   const remote = await open(desktop, { viewport: { width: 1280, height: 860 } }, { enabled: true, url: url(cloud), userId: member.id, token: login.token, role: 'member' });
   await enter(remote);
-  const [liveWalk] = await Promise.all([observeWalk(remote), send(remote, '请写一份简报并保存到' + cloudFile)]);
-  assert.ok(liveWalk, '实际云任务运行期间可见跨工位移动');
+  await send(remote, '请列出已有文件，再写一份简报保存到' + cloudFile + '，最后核对成果记录并核验交付文件。');
+  await stage(remote).locator('.ws-scene[data-station="archive"]').waitFor();
+  await checkWorkingHands(remote, 'archive');
+  await remote.locator('.wb-tabs').getByRole('button', { name: '对话', exact: true }).click();
+  steps.get('list_files').resolve();
+  await remote.locator('#transcript').getByText('写入文件', { exact: true }).first().waitFor();
+  await enter(remote);
+  await stationPoint(remote, 'bench');
+  const liveActor = stage(remote).locator('.ws-actor');
+  assert.notEqual(await liveActor.getAttribute('data-walking'), 'true', '切回后直接定位正在写文件的工位');
+  await checkWorkingHands(remote, 'write');
+  const wideActor = await liveActor.boundingBox();
+  await stage(remote).getByRole('button', { name: '近看操作' }).click();
+  await remote.waitForFunction(width => {
+    const activeActor = document.querySelector('.work-studio[data-zoom="detail"] .ws-actor');
+    return activeActor && activeActor.getBoundingClientRect().width > width * 1.5;
+  }, wideActor.width);
+  await checkWorkingHands(remote, 'write');
+  await stage(remote).getByRole('button', { name: '看全景' }).click();
+  await remote.waitForFunction(width => {
+    const activeActor = document.querySelector('.work-studio[data-zoom="wide"] .ws-actor');
+    return activeActor && Math.abs(activeActor.getBoundingClientRect().width - width) < 1;
+  }, wideActor.width);
+  const walking = observeWalk(remote);
+  steps.get('write_file').resolve();
+  assert.ok(await walking, '返回工作台后，下一道真实工序开始时小人继续走动');
+  await stage(remote).locator('.ws-scene[data-station="review"]').waitFor();
+  await checkWorkingHands(remote, 'type');
+  steps.get('list_work_records').resolve();
   await remote.locator('#transcript').getByText('已保存云端简报。', { exact: false }).first().waitFor();
   const remoteEdit = stage(remote).locator('[data-entry-id][data-pose="edit"]').filter({ hasText: '写入文件' });
   await remoteEdit.waitFor();
@@ -276,8 +365,9 @@ try {
   assert.equal(await stage(phone).count(), 0, '手机页不会常驻 PC 舞台');
   await checkFit(phone);
   assert.deepEqual(errors, []);
-  console.log('工作台通过本机工具、云端断线续接、回放、会话隔离、场景资源及桌面/手机布局验收。');
+  console.log('工作台通过三工位真实工具、手部三帧、近看、切回定位、云端断线续接、回放及桌面/手机布局验收。');
 } finally {
+  for (const gate of steps.values()) gate.resolve();
   continueCloud();
   await browser.close();
   await mode.tenders.stop(); await mode.runner.settled();

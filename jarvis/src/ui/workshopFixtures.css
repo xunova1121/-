@@ -1,0 +1,59 @@
+/* 坐标使用未裁切的 1402×1122 底图。所有接触点和近景都随同一画面缩放。 */
+.ws-floorplan > .ws-fixtures { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.ws-fixtures > span { position: absolute; box-sizing: border-box; }
+.ws-rack-folder {
+  left: 11.8%; top: 44.9%; width: 1.3%; height: 6.4%;
+  border-radius: 30% 18% 0 4%; border-left: 1px solid #f9d778;
+  background: linear-gradient(92deg,#865625,#e3ac51 42%,#ba7c31);
+  transform: rotate(5deg); transform-origin: bottom;
+}
+.ws-drawing-slip {
+  left: 49.8%; top: 48.9%; width: 8.2%; height: 5.2%;
+  transform: skewX(-8deg) rotate(-1deg);
+  background: linear-gradient(162deg,#fff8e5,#e5d9bb);
+  border: .5px solid #b7a88c; box-shadow: 0 1px 1px #52483256;
+}
+.ws-drawing-slip::before {
+  content: ''; position: absolute; inset: 23% 17% auto 16%; height: 12%;
+  background: linear-gradient(to right,#8a9588 65%,transparent 65%); opacity: .65;
+}
+.ws-pen-mark {
+  left: 51.8%; top: 51.55%; width: 1.95%; height: .55%;
+  background: #31546e; opacity: 0; transform-origin: left center;
+  clip-path: polygon(0 70%,13% 10%,26% 60%,44% 12%,59% 42%,75% 18%,86% 43%,100% 5%,100% 58%,84% 85%,73% 63%,55% 87%,44% 58%,24% 100%,13% 62%,0 99%);
+}
+.ws-keyboard {
+  display: flex; flex-flow: column; gap: 8%; padding: .19% .36% .17%;
+  left: 83.7%; top: 50.6%; width: 10.2%; height: 3.2%;
+  transform: perspective(80px) rotateX(15deg) skewX(-10deg) rotate(2deg);
+  border-radius: 10% / 22%; background: #787a68; border: 1px solid #666c5c;
+  box-shadow: 0 1px #484c42, 0 2px 2px #504a362e;
+}
+.ws-key-row { display: flex; flex: 1; gap: 3%; min-height: 0; }
+.ws-key { flex: 1; min-width: 0; border-radius: 1px; background: #e0d8bd; box-shadow: 0 .5px #666859; }
+.ws-key-row:last-child .ws-key:nth-child(4) { flex: 3; }
+.ws-terminal-output {
+  left: 86.75%; top: 41.25%; width: 6%; height: 5.35%;
+  opacity: 0; overflow: hidden; border-radius: 13%; transform: skewY(5deg);
+  background: radial-gradient(ellipse at 40% 30%,#436139,#2a452b);
+}
+.ws-terminal-output::before {
+  content: ''; position: absolute; left: 10%; top: 16%; width: 74%; height: 48%;
+  background: repeating-linear-gradient(0deg,transparent 0 18%,#bbd7a4 18% 24%);
+  clip-path: polygon(0 0,89% 0,89% 26%,61% 26%,61% 55%,100% 55%,100% 77%,73% 77%,73% 100%,0 100%);
+}
+.ws-terminal-caret { position: absolute; left: 20%; bottom: 15%; width: 10%; height: 6%; background: #c6edac; }
+
+.ws-scene:is([data-work-phase="working"],[data-work-phase="snapshot"])[data-operation="write"] .ws-pen-mark,
+.ws-scene:is([data-work-phase="working"],[data-work-phase="snapshot"])[data-operation="type"] .ws-terminal-output { opacity: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  body:not(.reduced-motion) .ws-scene[data-work-phase="working"][data-operation="archive"] .ws-rack-folder { animation: ws-unfile 1.2s ease-in-out infinite; }
+  body:not(.reduced-motion) .ws-scene[data-work-phase="working"][data-operation="write"] .ws-pen-mark { animation: ws-ink-stroke 1.2s linear infinite; }
+  body:not(.reduced-motion) .ws-scene[data-work-phase="working"][data-operation="type"] .ws-key-row:nth-child(2) .ws-key:nth-child(4) { animation: ws-keypress .6s steps(1,end) infinite; }
+  body:not(.reduced-motion) .ws-scene[data-work-phase="working"][data-operation="type"] .ws-key-row:first-child .ws-key:nth-child(3) { animation: ws-keypress .6s .3s steps(1,end) infinite; }
+  body:not(.reduced-motion) .ws-scene[data-work-phase="working"][data-operation="type"] .ws-terminal-caret { animation: ws-caret 1.2s steps(3,end) infinite; }
+}
+@keyframes ws-unfile { 0%,100% { opacity: 1; transform: rotate(5deg); } 34%,77% { opacity: .08; transform: translate(38%,-18%) rotate(12deg); } }
+@keyframes ws-ink-stroke { 0% { transform: scaleX(.03); opacity: .75; } 55%,83% { transform: scaleX(1); opacity: 1; } 100% { transform: scaleX(1); opacity: .15; } }
+@keyframes ws-keypress { 0%,45% { background: #f4c177; box-shadow: none; transform: translateY(.7px); } 50%,100% { background: #e0d8bd; } }
+@keyframes ws-caret { from { transform: translateX(0); } to { transform: translateX(300%); } }

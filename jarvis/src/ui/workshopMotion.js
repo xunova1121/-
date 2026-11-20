@@ -11,56 +11,127 @@ export function stationForStep(entries, index) {
   return 'rest';
 }
 
+// 两次真实回执可能在同一帧抵达。只给已经完成的最近一项留一轮手部动作，消息列表立即更新。
+const WORK_CYCLE = 640;
+
 export function createWorkshopMotion(scene, actor) {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   const canTranslate = typeof actor.animate === 'function' && CSS.supports('translate', '0px');
+  const reduceMotion = () => reduced.matches || document.body.classList.contains('reduced-motion');
   let walk = null;
-  let previous = null;
+  let station = null;
+  let latest = null;
+  let displayed = null;
+  let workingId = null;
+  let workingSince = 0;
+  let receiptId = null;
+  let lastReceiptId = null;
+  let timer = null;
 
-  function preferenceChanged(event) {
-    if (event.matches) stop();
-  }
-
-  function stop() {
+  function stopWalk() {
     if (walk) {
       walk.onfinish = null;
       walk.cancel();
       walk = null;
-      reduced.removeEventListener?.('change', preferenceChanged);
     }
     actor.dataset.walking = 'false';
   }
 
+  function clearReceipt() {
+    clearTimeout(timer);
+    timer = null;
+    receiptId = null;
+  }
+
+  function updateHands() {
+    const { entry, working, gesture } = displayed;
+    const operation = entry && ['running', 'done'].includes(entry.status) ? entry.operation : null;
+    const acting = Boolean(operation && (working || receiptId) && !reduceMotion());
+    const phase = walk ? 'travel' : !operation ? 'idle' : acting ? 'working' : 'snapshot';
+    scene.dataset.operation = operation || 'none';
+    scene.dataset.workPhase = phase;
+    scene.dataset.workReceipt = String(Boolean(receiptId));
+    scene.dataset.motion = phase === 'working' ? 'working' : gesture && !operation ? 'gesture' : 'still';
+    const id = phase === 'working' ? entry.id : null;
+    if (workingId !== id) {
+      workingId = id;
+      workingSince = performance.now();
+    }
+  }
+
+  function present(next) {
+    displayed = next;
+    const mayWalk = next.travel && !receiptId && canTranslate && !reduceMotion();
+    const changesStation = station !== next.station;
+    const from = changesStation && station && mayWalk ? actor.getBoundingClientRect() : null;
+    if (changesStation || !mayWalk) stopWalk();
+    station = next.station;
+    scene.dataset.station = station;
+    if (from) {
+      // 坐席作业和步态图的画格可以不同，两个位置都以脚下中心为准。
+      scene.dataset.workPhase = 'travel';
+      const to = actor.getBoundingClientRect();
+      const floor = actor.parentElement;
+      const scale = floor.offsetWidth ? floor.getBoundingClientRect().width / floor.offsetWidth : 1;
+      const dx = (from.left + from.width / 2 - to.left - to.width / 2) / (scale || 1);
+      const dy = (from.bottom - to.bottom) / (scale || 1);
+      const distance = Math.hypot(dx, dy);
+      if (distance >= 4) {
+        actor.dataset.facing = dx > 0 ? 'left' : 'right';
+        actor.dataset.walking = 'true';
+        const duration = Math.min(800, Math.max(150, distance * 2.4));
+        walk = actor.animate([{ translate: `${dx}px ${dy}px` }, { translate: '0px 0px' }], { duration, easing: 'ease-in-out' });
+        walk.onfinish = () => { stopWalk(); updateHands(); };
+      }
+    }
+    updateHands();
+  }
+
+  function preferenceChanged() {
+    if (!latest) return;
+    clearReceipt();
+    stopWalk();
+    present(latest);
+  }
+
   return {
     reset() {
-      stop();
-      previous = null;
+      clearReceipt();
+      stopWalk();
+      reduced.removeEventListener?.('change', preferenceChanged);
+      station = latest = displayed = workingId = lastReceiptId = null;
+      scene.dataset.operation = 'none';
+      scene.dataset.workPhase = 'idle';
+      scene.dataset.workReceipt = 'false';
     },
-    show(station, { travel, working, gesture }) {
-      scene.dataset.motion = working ? 'working' : gesture ? 'gesture' : 'still';
-      const mayWalk = travel && canTranslate && !reduced.matches && !document.body.classList.contains('reduced-motion');
-      if (previous === station) {
-        if (!mayWalk) stop();
-        return;
-      }
+    show(nextStation, options) {
+      const { entry, mode, active, entries } = options;
+      const before = latest;
+      if (!before) reduced.addEventListener?.('change', preferenceChanged);
+      latest = { ...options, station: nextStation };
+      const id = entry?.id;
+      if (mode !== 'live' || !entry || ['error', 'stopped', 'waiting'].includes(entry.status) ||
+          (entry.status === 'running' && entry.station && id !== receiptId) ||
+          (receiptId && !entries.some(step => step.id === receiptId))) clearReceipt();
 
-      // 新回执可以在路上抵达。从此刻脚下的位置转向下一工位，旧动画随即释放。
-      const from = previous && mayWalk ? actor.getBoundingClientRect() : null;
-      stop();
-      previous = station;
-      scene.dataset.station = station;
-      if (!from) return;
-      const to = actor.getBoundingClientRect();
-      const dx = from.left - to.left;
-      const dy = from.bottom - to.bottom;
-      const distance = Math.hypot(dx, dy);
-      if (distance < 4) return;
-      actor.dataset.facing = dx > 0 ? 'left' : 'right';
-      actor.dataset.walking = 'true';
-      const duration = Math.min(1050, Math.max(200, distance * 3.2));
-      walk = actor.animate([{ translate: `${dx}px ${dy}px` }, { translate: '0px 0px' }], { duration, easing: 'ease-in-out' });
-      walk.onfinish = stop;
-      reduced.addEventListener?.('change', preferenceChanged);
+      let confirmed = active && entry?.status === 'done' && entry.operation ? latest : null;
+      // 流式写回复可能与正常结束落在同一帧，只凭同一轮确实转为 done 的记录补完这一下。
+      if (!receiptId && entry?.pose === 'cheer' && before?.active && before.mode === 'live' && before.entry?.operation) {
+        const finished = entries.find(step => step.id === before.entry.id && step.status === 'done');
+        if (finished) confirmed = { ...before, entry: finished, travel: false };
+      }
+      if (before && mode === 'live' && confirmed && confirmed.entry.id !== lastReceiptId && !reduceMotion()) {
+        clearReceipt();
+        lastReceiptId = confirmed.entry.id;
+        const seen = workingId === lastReceiptId ? performance.now() - workingSince : 0;
+        if (seen < WORK_CYCLE) {
+          receiptId = lastReceiptId;
+          present(confirmed);
+          timer = setTimeout(() => { clearReceipt(); present(latest); }, WORK_CYCLE - seen);
+          return;
+        }
+      }
+      if (!receiptId) present(latest);
     }
   };
 }

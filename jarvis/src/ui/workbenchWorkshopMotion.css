@@ -25,3 +25,34 @@
   .work-studio-view[data-workshop] .ws-actor { translate: none !important; }
 }
 .reduced-motion .work-studio-view[data-workshop] .ws-actor { translate: none !important; }
+
+/* 九帧按上中下三排表示取档、执笔、键盘操作。静止回看统一保留实际接触物体的中间帧。 */
+.work-studio-view[data-workshop][data-visible="true"] .ws-scene:is([data-work-phase="working"],[data-work-phase="snapshot"]) .ws-actor .ws-sprite {
+  background-image: url('./assets/workStudio/workshop-actions.webp');
+  background-size: 300% 300%;
+  background-position: 50% var(--ws-hand-row);
+  transform: none;
+}
+.ws-scene[data-operation="archive"] { --ws-hand-row: 0%; }
+.ws-scene[data-operation="write"] { --ws-hand-row: 50%; }
+.ws-scene[data-operation="type"] { --ws-hand-row: 100%; }
+.work-studio-view[data-workshop][data-visible="true"] .ws-scene[data-work-phase="working"] .ws-actor .ws-sprite {
+  animation: ws-use-hands .64s steps(1,end) infinite;
+}
+@keyframes ws-use-hands {
+  0%,100% { background-position-x: 0%; }
+  25%,75% { background-position-x: 50%; }
+  50% { background-position-x: 100%; }
+}
+.work-studio-view[data-workshop][data-visible="true"] .ws-scene[data-work-phase="working"][data-operation="write"] .ws-actor .ws-sprite {
+  animation: ws-write-frames 1.2s steps(1,end) infinite, ws-pen-line 1.2s ease-in-out infinite;
+}
+@keyframes ws-write-frames {
+  0%,100% { background-position-x: 0%; }
+  25% { background-position-x: 50%; }
+  75% { background-position-x: 100%; }
+}
+@keyframes ws-pen-line {
+  0%,100% { transform: translateX(0); }
+  55%,75% { transform: translateX(15%); }
+}

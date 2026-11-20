@@ -26,6 +26,33 @@ describe('工作室动作记录', () => {
     expect(restored.entries.slice(0, -1).map(step => step.station)).toEqual([...stations.slice(1), 'archive']);
   });
 
+  it('普通问答只呈现思考和写回复，工具和复核回执分别提供找文件、执笔、键盘的证据', () => {
+    const feed = createStudioActivity(), t = turn();
+    const last = () => feed.snapshot(t.session).entries.at(-1);
+    feed.begin(t);
+    expect(last().operation).toBeUndefined();
+    feed.record(t, { type: 'text', delta: '你好' });
+    expect(last()).toMatchObject({ operation: 'write', title: '正在写回复' });
+    for (const [tool, station, operation] of [
+      ['read_file', 'archive', 'archive'], ['write_file', 'bench', 'write'],
+      ['computer_read_file', 'review', 'type'], ['computer_click', 'review', 'type'],
+      ['code_run', 'review', 'type'], ['verify_delivery', 'review', 'type']
+    ]) {
+      feed.record(t, open(tool, tool));
+      expect(last()).toMatchObject({ station, operation, status: 'running' });
+      feed.record(t, close(tool, tool, true));
+      expect(last()).toMatchObject({ station, operation, status: 'done' });
+    }
+    feed.record(t, open('unknown', 'mcp_internal'));
+    expect(last().operation).toBeUndefined();
+    feed.record(t, { type: 'team_review', pass: true });
+    expect(last()).toMatchObject({ station: 'review', operation: 'type', status: 'done' });
+    feed.finish(t, 'done');
+    expect(last().operation).toBeUndefined();
+    const saved = feed.snapshot({ id: 'history', messages: [{ role: 'assistant', content: '已完成', tools: ['computer_click', 'write_file'] }] });
+    expect(saved.entries.map(x => x.operation)).toEqual(['type', 'write', undefined]);
+  });
+
   it('正常收尾、错误和停止留在当前工位，真实复核才进入检验台', () => {
     const write = { pose: 'edit', status: 'done', station: 'bench' };
     const review = { pose: 'think', status: 'done', station: 'review' };

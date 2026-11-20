@@ -1,5 +1,6 @@
 import './workStudioView.css';
 import './workbenchWorkshopMotion.css';
+import { addWorkshopFixtures } from './workshopFixtures.js';
 import { createWorkshopMotion, stationForStep, stationNames } from './workshopMotion.js';
 
 const poses = {
@@ -69,6 +70,7 @@ export function createWorkStudioView({ workshop = false } = {}) {
   let motion;
   if (workshop) {
     const floor = node('div', 'ws-floorplan');
+    addWorkshopFixtures(floor);
     floor.append(actor);
     scene.append(floor, chip, prop);
     motion = createWorkshopMotion(scene, actor);
@@ -80,6 +82,22 @@ export function createWorkStudioView({ workshop = false } = {}) {
   const stationLabel = workshop ? node('span', 'ws-station-name') : null;
   if (stationLabel) caption.append(stationLabel);
   caption.append(action, detail, file);
+  let zoom;
+  function setZoom(detail) {
+    element.dataset.zoom = detail ? 'detail' : 'wide';
+    const label = detail ? '看全景' : '近看操作';
+    zoom.textContent = label;
+    zoom.setAttribute('aria-label', label);
+    zoom.setAttribute('aria-pressed', String(detail));
+    zoom.title = label;
+  }
+  if (workshop) {
+    zoom = control('zoom', '近看操作');
+    zoom.className = 'ws-zoom-toggle';
+    setZoom(false);
+    zoom.onclick = () => setZoom(element.dataset.zoom !== 'detail');
+    caption.append(zoom);
+  }
   performance.append(scene, caption);
 
   const timeline = node('aside', 'ws-timeline');
@@ -155,6 +173,7 @@ export function createWorkStudioView({ workshop = false } = {}) {
       const live = !isReview && snapshot.active;
       const movingStep = !!entry && entry.status !== 'waiting' && entry.status !== 'stopped' && !['idle', 'stop', 'stomp', 'cheer'].includes(pose);
       motion.show(station, {
+        entry, entries: snapshot.entries, mode: isReview ? (playing ? 'play' : 'manual') : 'live', active: snapshot.active,
         travel: movingStep && (live || playing),
         working: movingStep && ((live && entry.status === 'running') || playing),
         gesture: !isReview && (pose === 'stomp' || pose === 'cheer')
@@ -273,6 +292,7 @@ export function createWorkStudioView({ workshop = false } = {}) {
       if (nextSnapshot.sessionId !== snapshot.sessionId) {
         stopPlaying();
         motion?.reset();
+        if (zoom) setZoom(false);
         selected = null;
         for (const row of rows.values()) row.item.remove();
         rows.clear();

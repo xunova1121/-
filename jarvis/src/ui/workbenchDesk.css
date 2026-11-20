@@ -69,8 +69,8 @@ body.workbench.wb-studio .wb-desk:not([hidden])::before {
 .wb-desk .work-studio-view .ws-mode { font-size: 10px; }
 .wb-desk .work-studio-view .ws-body { display: flex; flex-direction: column; min-height: 0; }
 .wb-desk .work-studio-view .ws-performance { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
-/* 站位相对整张车间原画。小窗口只裁去顶部空间，各工位之间的地面仍连通。 */
-.wb-desk .ws-scene { --ws-station-x: 34%; --ws-station-floor: 9%; }
+/* 站位按动作图集手指与笔尖校准到柜格、纸面及键盘，保留小人在台面走动的比例。 */
+.wb-desk .ws-scene { --ws-station-x: 34%; --ws-station-floor: 43%; --ws-aim-x: 34%; }
 .wb-desk .work-studio-view .ws-scene {
   position: relative;
   container-type: size;
@@ -85,42 +85,27 @@ body.workbench.wb-studio .wb-desk:not([hidden])::before {
   background: var(--desk-soft);
 }
 .wb-desk .work-studio-view[data-visible="true"] .ws-scene { background: var(--desk-soft); }
-.wb-desk .ws-scene[data-station="archive"] { --ws-station-x: 17%; --ws-station-floor: 21%; }
-.wb-desk .ws-scene[data-station="bench"] { --ws-station-x: 49%; --ws-station-floor: 22%; }
-.wb-desk .ws-scene[data-station="review"] { --ws-station-x: 84%; --ws-station-floor: 21%; }
+.wb-desk .ws-scene[data-station="archive"] { --ws-station-x: 17.55%; --ws-station-floor: 46.60%; --ws-aim-x: 15%; }
+.wb-desk .ws-scene[data-station="bench"] { --ws-station-x: 46.63%; --ws-station-floor: 43.95%; --ws-aim-x: 50%; }
+.wb-desk .ws-scene[data-station="review"] { --ws-station-x: 83.87%; --ws-station-floor: 42.55%; --ws-aim-x: 87%; }
 .wb-desk .ws-floorplan {
-  position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+  position: absolute; bottom: 0; left: 50%;
+  transform: translate(-50%,var(--ws-floor-shift,0%)) scale(var(--ws-scene-scale,1));
+  transform-origin: clamp(0%,calc(var(--ws-aim-x) + var(--ws-aim-x) - 50%),100%) var(--ws-aim-y,54%);
   width: 100%; aspect-ratio: 1402 / 1122;
 }
 .wb-desk .work-studio-view[data-visible="true"] .ws-floorplan {
   background: url('./assets/workStudio/workshop.webp') center / 100% 100% no-repeat;
 }
-/* 工具在该工位执行时，给真实底图中的文件、图纸或屏幕加一点动作。 */
-@media (prefers-reduced-motion: no-preference) {
-  body:not(.reduced-motion) .wb-desk [data-visible="true"] .ws-scene[data-motion="working"]:not(:has(.ws-actor[data-walking="true"])) .ws-floorplan::after {
-    content: ''; position: absolute; pointer-events: none;
-  }
-  .wb-desk [data-station="archive"] .ws-floorplan::after {
-    left: 10%; top: 43%; width: 3.5%; height: 5%; border-radius: 1px 2px 0 0;
-    background: linear-gradient(100deg,#dcac55,#f6d28b);
-    animation: ws-pick-sheet 1.7s ease-in-out infinite;
-  }
-  .wb-desk [data-station="bench"] .ws-floorplan::after {
-    left: 47%; top: 51%; width: 7%; height: 1.5px; border-radius: 2px;
-    background: #466876; transform-origin: left;
-    animation: ws-pencil-line 1.65s ease-in-out infinite;
-  }
-  .wb-desk [data-station="review"] .ws-floorplan::after {
-    left: 86.7%; top: 43%; width: 5.9%; height: 2px; background: #c7f2aa;
-    box-shadow: 0 0 3px #c0f3ab;
-    animation: ws-read-gauge 1.45s ease-in-out infinite;
-  }
-}
-@keyframes ws-pick-sheet { 0%,100% { opacity: 0; transform: translateY(12%) rotate(-4deg); } 45%,60% { opacity: 1; transform: translateY(-25%) rotate(5deg); } }
-@keyframes ws-pencil-line { 0%,15% { opacity: 0; transform: scaleX(.08) rotate(-5deg); } 65% { opacity: .9; transform: scaleX(1) rotate(-5deg); } 100% { opacity: 0; transform: scaleX(1) rotate(-5deg); } }
-@keyframes ws-read-gauge { 0%,100% { opacity: .1; transform: translateY(-2px) rotate(4deg); } 48% { opacity: .95; transform: translateY(4px) rotate(4deg); } }
 :root[data-theme="dark"] .wb-desk .ws-floorplan::before {
   content: ''; position: absolute; inset: 0; background: #1125283b; pointer-events: none;
+}
+/* 近景使用现场原节点，手和工具的相对坐标始终相同。 */
+.wb-desk .work-studio-view[data-zoom="detail"] .ws-scene { --ws-scene-scale: 2; }
+.wb-desk .work-studio-view .ws-zoom-toggle {
+  flex: 0 0 auto; margin-left: auto; min-height: 27px; padding: 2px 8px;
+  color: var(--desk-accent); background: var(--desk-soft); border: 1px solid var(--desk-line);
+  border-radius: 7px; font-size: 12px; line-height: 1.5;
 }
 .wb-desk .work-studio-view .ws-floorplan > .ws-actor {
   left: var(--ws-station-x); bottom: var(--ws-station-floor);
@@ -244,8 +229,8 @@ body.workbench .wb-desk-chat > :is(.composer-message-queue,#inputbar,.wb-desk-ch
   .wb-desk .work-studio-view .ws-header { min-height: 30px; padding-block: 1px; }
   .wb-desk .work-studio-view .ws-body { display: grid; grid-template-columns: minmax(0,1.34fr) minmax(118px,.8fr); gap: 8px; }
   .wb-desk .work-studio-view .ws-caption { padding: 4px 7px; flex-wrap: nowrap; }
-  .wb-desk .work-studio-view .ws-scene { flex: 1 1 0; aspect-ratio: auto; min-height: 0; margin-top: 5px; }
-  .wb-desk .work-studio-view .ws-floorplan { width: min(100%, 235cqh); transform: translate(-50%,7%); }
+  .wb-desk .work-studio-view .ws-scene { --ws-aim-y: 49%; flex: 1 1 0; aspect-ratio: auto; min-height: 0; margin-top: 5px; }
+  .wb-desk .work-studio-view .ws-floorplan { width: min(100%, 220cqh); --ws-floor-shift: 14%; }
   .wb-desk .work-studio-view .ws-pose-label { display: none; }
   .wb-desk .work-studio-view .ws-timeline { margin: 5px 0 0; min-height: 0; max-height: none; }
   .wb-desk .work-studio-view .ws-action { max-width: 80%; font-size: 12px; }

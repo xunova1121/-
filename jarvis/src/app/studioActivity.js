@@ -21,12 +21,24 @@ function toolAction(name) {
     : /^(?:read|inspect|review|check|plan|reconcile|code_read|computer_(?:read|look))/.test(name)
       ? 'think'
       : 'run';
-  const station = /^(?:inspect|review|check|reconcile|validate|verify)(?:_|$)|^(?:code_run|list_work_records)$/.test(name)
-    ? 'review'
-    : /^(?:read|list|search|fetch|find|lookup|research)(?:_|$)|^(?:web_search|code_read|code_search|computer_read|clipboard_read)$/.test(name)
-      ? 'archive'
-      : 'bench';
-  return { pose, title, station };
+  if (
+    /^(?:computer_|run_python$|run_javascript$|code_run$)/.test(name) ||
+    /^(?:inspect|review|check|reconcile|validate|verify)(?:_|$)|^list_work_records$/.test(name)
+  )
+    return { pose, title, station: 'review', operation: 'type' };
+  if (
+    /^(?:read|list|search|fetch|find|lookup|research)(?:_|$)|^(?:web_search|code_read|code_search|clipboard_read|kb_search|deep_research|get_today_news)$/.test(
+      name
+    )
+  )
+    return { pose, title, station: 'archive', operation: 'archive' };
+  if (
+    /^(?:write|edit|generate|make|render|export)(?:_|$)|^(?:create_(?:document|spreadsheet|presentation|diagram|visual_demo)|process_image|code_(?:edit|write))$/.test(
+      name
+    )
+  )
+    return { pose, title, station: 'bench', operation: 'write' };
+  return { pose, title, station: 'bench' };
 }
 
 const terminal = {
@@ -40,8 +52,7 @@ function historyEntries(session) {
   const message = session?.messages?.at(-1);
   if (!message || !['assistant', 'agent'].includes(message.role) || message.proactive || session.taskId) return [];
   const entries = [];
-  const add = (pose, title, status, file, detail = '会话记录', station) =>
-    entries.push({ id: 'history-' + entries.length, pose, title, status, detail, ...(file && { file }), ...(station && { station }) });
+  const add = (entry) => entries.push({ id: 'history-' + entries.length, status: 'done', detail: '会话记录', ...entry });
   const failures = new Set(
     (Array.isArray(message.failures) ? message.failures : [])
       .slice(-12)
@@ -50,20 +61,19 @@ function historyEntries(session) {
   );
   for (const name of new Set((Array.isArray(message.tools) ? message.tools : []).slice(-20))) {
     if (failures.has(name)) continue;
-    const { pose, title, station } = toolAction(name);
-    add(pose, title, 'done', '', '会话记录 · 已调用', station);
+    add({ ...toolAction(name), detail: '会话记录 · 已调用' });
   }
   for (const name of failures) {
-    const { title, station } = toolAction(name);
-    add('stomp', title + '遇到问题', 'error', '', '会话记录', station);
+    const action = toolAction(name);
+    add({ ...action, pose: 'stomp', title: action.title + '遇到问题', status: 'error' });
   }
   for (const file of new Set((Array.isArray(message.files) ? message.files : []).slice(-12).map(filename).filter(Boolean)))
-    add('edit', '工作区文件', 'done', file);
+    add({ pose: 'edit', title: '工作区文件', file });
   const end = String(message.content || '').slice(-160);
-  if (/（已打断(?:，还没完成；以上内容已保留)?）\s*$/.test(end)) add('stop', '本轮已停止', 'stopped');
-  else if (/（本轮回答未完成[：；][^）]*）\s*$/.test(end)) add('stop', '回复中断', 'stopped');
-  else if (message.draftOf) add('stop', '已保存部分进度', 'waiting');
-  else add('idle', failures.size ? '已回复，记录中有失败步骤' : '已保存回复', 'done');
+  if (/（已打断(?:，还没完成；以上内容已保留)?）\s*$/.test(end)) add({ pose: 'stop', title: '本轮已停止', status: 'stopped' });
+  else if (/（本轮回答未完成[：；][^）]*）\s*$/.test(end)) add({ pose: 'stop', title: '回复中断', status: 'stopped' });
+  else if (message.draftOf) add({ pose: 'stop', title: '已保存部分进度', status: 'waiting' });
+  else add({ pose: 'idle', title: failures.size ? '已回复，记录中有失败步骤' : '已保存回复' });
   return entries;
 }
 
@@ -85,11 +95,11 @@ export function createStudioActivity({ scope = () => null } = {}) {
     }
     return item;
   };
-  const phase = (state, pose, title, status = 'running', station) => {
+  const phase = (state, pose, title, status = 'running', station, operation) => {
     const last = state.entries.at(-1);
     if (last?.title === title && last.pose === pose && last.status === status) return false;
     if (state.phase?.status === 'running') state.phase.status = 'done';
-    state.phase = add(state, { pose, title, status, ...(station && { station }) });
+    state.phase = add(state, { pose, title, status, ...(station && { station }), ...(operation && { operation }) });
     return true;
   };
 
@@ -148,7 +158,7 @@ export function createStudioActivity({ scope = () => null } = {}) {
       if (e.type === 'team_review') state.lastOperationFailed = !e.pass;
       if (e.type === 'team_step' && ['fail', 'done'].includes(e.status)) state.lastOperationFailed = e.status === 'fail';
       let action;
-      if (e.type === 'text' && e.delta) action = ['edit', '正在写回复'];
+      if (e.type === 'text' && e.delta) action = ['edit', '正在写回复', 'running', undefined, 'write'];
       else if (e.type === 'seeing') action = ['think', '正在看图'];
       else if (e.type === 'state' && e.value === 'processing') action = ['think', '正在思考'];
       else if (e.type === 'plan' || e.type === 'team_plan') action = ['edit', '正在安排步骤'];
@@ -158,12 +168,12 @@ export function createStudioActivity({ scope = () => null } = {}) {
       else if (e.type === 'team_step' && e.status === 'redo') action = ['repair', '正在返工'];
       else if (e.type === 'team_step' && e.status === 'fail') action = ['stomp', '协作步骤遇到问题', 'error'];
       else if (e.type === 'team_step' && e.status === 'running') action = ['run', '正在执行协作步骤'];
-      else if (e.type === 'team_review') action = e.pass ? ['think', '复核通过', 'done', 'review'] : ['stomp', '复核发现问题', 'error', 'review'];
+      else if (e.type === 'team_review') action = e.pass ? ['think', '复核通过', 'done', 'review', 'type'] : ['stomp', '复核发现问题', 'error', 'review'];
       else if (e.type === 'server_tool')
         action = /read|fetch/.test(e.name)
-          ? ['think', '正在阅读网页', 'running', 'archive']
+          ? ['think', '正在阅读网页', 'running', 'archive', 'archive']
           : /search/.test(e.name)
-            ? ['run', '正在联网检索', 'running', 'archive']
+            ? ['run', '正在联网检索', 'running', 'archive', 'archive']
             : ['run', '正在调用模型工具'];
       else if (e.type === 'tool_progress' && e.id === 'queue') action = ['think', '等待服务器执行', 'waiting'];
       else if (e.type === 'server_connection') action = e.state === 'connected' ? ['run', '已恢复连接', 'done'] : ['repair', '正在重连'];
