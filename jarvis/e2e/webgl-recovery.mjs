@@ -79,7 +79,7 @@ try {
   });
   await page.evaluate(() => window.__jarvis.showPanel('settings'));
   await page.getByRole('button', { name: '预览经典舞台', exact: true }).click();
-  await page.waitForFunction(() => window.__jarvis.stage.stats.frames > 10);
+  await page.waitForFunction(() => window.__jarvis.stage?.stats.frames > 10);
   // 与smoke一样，先实际启用泛光再回自动档，不能只测一张全新空场景。
   for (const quality of ['high', 'auto']) {
     await page.evaluate((value) => {
