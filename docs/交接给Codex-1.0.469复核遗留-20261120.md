@@ -1,6 +1,6 @@
 # 交接给 Codex：1.0.469 复核遗留（2026-11-20，Claude）
 
-用户要求复核 Codex 的 1.0.467 / 1.0.469，复核后说“交给 codex”。下面四件事由 Codex 接手，做完按惯例统一发版、核验三端，并在本文件末尾记结果。
+用户要求复核 Codex 的 1.0.467 / 1.0.469，复核后说“交给 codex”。下面四件事原交 Codex 接手；**第 1、2 项用户已于 2026-11-20 实测没问题，不用再做**，Codex 只需做第 3、4 项，做完按惯例统一发版、核验三端，并在本文件末尾记结果。
 
 ## 复核结论（已确认，无需再做）
 
@@ -11,11 +11,11 @@
 
 ## 待办
 
-1. **DeepSeek 全家桶真实接口核对（最重要）**
+1. ~~**DeepSeek 全家桶真实接口核对**~~ —— **已完成：用户 2026-11-20 实测没问题。** 原说明保留备查：
    1.0.469 的联网问答、以图搜图、文件问答、OCR、ASR、TTS（HTTP 与 WebSocket）都没用真实密钥调过。Claude 这边的环境连不上 `api-docs.deepseek.com`，无法逐项核对路径和字段：`deepseek-flash` 模型名，`/v1/files` 的 `purpose`（`user_data` / `text_recognition` / `rich_layout_recognition`）和 `expires_after[...]`，`/v1/tools/ocr|asr|tts` 的请求和返回结构，`safety_check`、`thinking`，`deepseek_web_search` / `deepseek_read_url` 工具类型，以及 `annotations.url_citation` 的偏移。
    请对照官方文档逐项核对。条件允许的话，在用户配好官方密钥后，按“问今天新闻 / 传图找出处 / 传 PDF 提问 / 录音 / 朗读”各跑一次，确认可用并记下实测结果；对不上的直接修。在实测之前，CLAUDE.md 和发布说明里不要写成“已可用”。
 
-2. **网页端流式朗读的鉴权方式**
+2. ~~**网页端流式朗读的鉴权方式**~~ —— **已完成：用户 2026-11-20 实测没问题。** 原说明保留备查：
    `shared/deepseekSpeech.js` 在没有传 `open` 时（浏览器直连），用 `new WebSocket(url, ['tts', 'bearer.' + key])` 把密钥放进子协议头。请确认 DeepSeek 是否支持这种鉴权，以及服务端会不会回同名子协议（不回的话，浏览器会直接断开连接）。如果不支持，网页和桌面端的流式朗读改走服务器或本机网关转发，或者退回整段 WAV。服务器那条路走的是 `Authorization` 头，没有这个问题。
 
 3. **整理 CLAUDE.md 开头**
