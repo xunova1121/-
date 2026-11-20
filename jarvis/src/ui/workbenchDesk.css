@@ -43,7 +43,7 @@ body.workbench .wb-desk {
 }
 body.workbench.wb-studio .wb-desk:not([hidden])::before {
   content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
-  background: var(--desk-room-tint), url('./assets/workStudio/studio.webp') 48% 56% / cover no-repeat;
+  background: var(--desk-room-tint), linear-gradient(135deg, #b8c0aa 0%, #e9e1c5 45%, #c3bc9e 100%);
 }
 :root[data-theme="dark"] body.workbench .wb-desk {
   --desk-paper: #253028; --desk-sheet: #202b25f5; --desk-ink: #ecf0e4; --desk-muted: #b6c3b7;
@@ -68,28 +68,78 @@ body.workbench.wb-studio .wb-desk:not([hidden])::before {
 .wb-desk .work-studio-view .ws-heading { font-size: clamp(14px,1.24vw,19px); }
 .wb-desk .work-studio-view .ws-mode { font-size: 10px; }
 .wb-desk .work-studio-view .ws-body { display: flex; flex-direction: column; min-height: 0; }
-.wb-desk .work-studio-view .ws-performance { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
-.wb-desk .work-studio-view .ws-scene,
-.wb-desk .work-studio-view[data-visible="true"] .ws-scene {
-  flex: 1 1 0; min-height: 82px; border: 0; border-radius: 0;
-  background: transparent;
+.wb-desk .work-studio-view .ws-performance { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
+/* 站位相对整张车间原画。小窗口只裁去顶部空间，各工位之间的地面仍连通。 */
+.wb-desk .ws-scene { --ws-station-x: 34%; --ws-station-floor: 9%; }
+.wb-desk .work-studio-view .ws-scene {
+  position: relative;
+  container-type: size;
+  width: 100%;
+  aspect-ratio: 1402 / 1122;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 8px;
+  overflow: hidden;
+  border: 1px solid var(--desk-line);
+  border-radius: 14px 14px 0 0;
+  background: var(--desk-soft);
 }
-.wb-desk .work-studio-view .ws-pose-label {
-  top: auto; bottom: 4%; left: 2%; z-index: 3;
-  background: var(--desk-chip); color: var(--desk-ink);
-  border-color: var(--desk-line); font-weight: 550;
+.wb-desk .work-studio-view[data-visible="true"] .ws-scene { background: var(--desk-soft); }
+.wb-desk .ws-scene[data-station="archive"] { --ws-station-x: 17%; --ws-station-floor: 21%; }
+.wb-desk .ws-scene[data-station="bench"] { --ws-station-x: 49%; --ws-station-floor: 22%; }
+.wb-desk .ws-scene[data-station="review"] { --ws-station-x: 84%; --ws-station-floor: 21%; }
+.wb-desk .ws-floorplan {
+  position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+  width: 100%; aspect-ratio: 1402 / 1122;
 }
-.wb-desk .work-studio-view .ws-actor { --ws-x: 32%; bottom: 8%; height: 71%; max-height: clamp(154px,19vw,282px); }
-.wb-desk .work-studio-view[data-pose="idle"] .ws-actor, .wb-desk .work-studio-view[data-pose="stop"] .ws-actor { --ws-x: 40%; }
-.wb-desk .work-studio-view .ws-prop { left: 71%; bottom: 22%; min-width: 84px; }
+.wb-desk .work-studio-view[data-visible="true"] .ws-floorplan {
+  background: url('./assets/workStudio/workshop.webp') center / 100% 100% no-repeat;
+}
+/* 工具在该工位执行时，给真实底图中的文件、图纸或屏幕加一点动作。 */
+@media (prefers-reduced-motion: no-preference) {
+  body:not(.reduced-motion) .wb-desk [data-visible="true"] .ws-scene[data-motion="working"]:not(:has(.ws-actor[data-walking="true"])) .ws-floorplan::after {
+    content: ''; position: absolute; pointer-events: none;
+  }
+  .wb-desk [data-station="archive"] .ws-floorplan::after {
+    left: 10%; top: 43%; width: 3.5%; height: 5%; border-radius: 1px 2px 0 0;
+    background: linear-gradient(100deg,#dcac55,#f6d28b);
+    animation: ws-pick-sheet 1.7s ease-in-out infinite;
+  }
+  .wb-desk [data-station="bench"] .ws-floorplan::after {
+    left: 47%; top: 51%; width: 7%; height: 1.5px; border-radius: 2px;
+    background: #466876; transform-origin: left;
+    animation: ws-pencil-line 1.65s ease-in-out infinite;
+  }
+  .wb-desk [data-station="review"] .ws-floorplan::after {
+    left: 86.7%; top: 43%; width: 5.9%; height: 2px; background: #c7f2aa;
+    box-shadow: 0 0 3px #c0f3ab;
+    animation: ws-read-gauge 1.45s ease-in-out infinite;
+  }
+}
+@keyframes ws-pick-sheet { 0%,100% { opacity: 0; transform: translateY(12%) rotate(-4deg); } 45%,60% { opacity: 1; transform: translateY(-25%) rotate(5deg); } }
+@keyframes ws-pencil-line { 0%,15% { opacity: 0; transform: scaleX(.08) rotate(-5deg); } 65% { opacity: .9; transform: scaleX(1) rotate(-5deg); } 100% { opacity: 0; transform: scaleX(1) rotate(-5deg); } }
+@keyframes ws-read-gauge { 0%,100% { opacity: .1; transform: translateY(-2px) rotate(4deg); } 48% { opacity: .95; transform: translateY(4px) rotate(4deg); } }
+:root[data-theme="dark"] .wb-desk .ws-floorplan::before {
+  content: ''; position: absolute; inset: 0; background: #1125283b; pointer-events: none;
+}
+.wb-desk .work-studio-view .ws-floorplan > .ws-actor {
+  left: var(--ws-station-x); bottom: var(--ws-station-floor);
+  width: 13%; height: auto; max-height: none; aspect-ratio: 1;
+}
+.wb-desk .work-studio-view .ws-prop,
+.wb-desk .work-studio-view .ws-pose-label { display: none; }
+.wb-desk .ws-station-name {
+  flex: none; color: var(--desk-accent); font-size: 12px; font-weight: 650;
+  padding-right: 8px; border-right: 1px solid var(--desk-line);
+}
 .wb-desk .work-studio-view .ws-caption {
   flex: 0 0 auto; display: flex; align-items: center; gap: 3px 7px; padding: 9px 12px;
-  color: var(--desk-ink); border: 1px solid var(--desk-line); border-radius: 12px;
+  color: var(--desk-ink); border: 1px solid var(--desk-line); border-top: 0; border-radius: 0 0 14px 14px;
   background: var(--desk-chip); box-shadow: 0 2px 7px var(--desk-shadow);
 }
 .wb-desk .work-studio-view .ws-action { font-size: 14px; }
 .wb-desk .work-studio-view .ws-timeline {
-  flex: 0 1 27%; min-height: 58px; max-height: 181px; margin-top: 8px;
+  flex: 1 1 110px; min-height: 58px; margin-top: 8px;
   padding-bottom: 3px; border: 1px solid var(--desk-line); border-radius: 13px;
   background: var(--desk-chip); box-shadow: 0 3px 8px var(--desk-shadow);
 }
@@ -190,16 +240,14 @@ body.workbench .wb-desk-chat > .composer-message-queue button { color: var(--des
 body.workbench .wb-desk-chat button:focus-visible { outline: 2px solid var(--desk-accent); outline-offset: 1px; }
 body.workbench .wb-desk-chat > :is(.composer-message-queue,#inputbar,.wb-desk-chat-head,.wb-desk-empty)[hidden] { display: none !important; }
 @container workbench-area (max-width: 730px) {
-  body.workbench .wb-desk { grid-template-columns: minmax(0,1fr); grid-template-rows: minmax(112px,32%) minmax(0,1fr); gap: 7px; padding: 8px; border-radius: 15px; }
+  body.workbench .wb-desk { grid-template-columns: minmax(0,1fr); grid-template-rows: minmax(136px,38%) minmax(0,1fr); gap: 7px; padding: 8px; border-radius: 15px; }
   .wb-desk .work-studio-view .ws-header { min-height: 30px; padding-block: 1px; }
   .wb-desk .work-studio-view .ws-body { display: grid; grid-template-columns: minmax(0,1.5fr) minmax(118px,.65fr); gap: 8px; }
   .wb-desk .work-studio-view .ws-caption { padding: 4px 7px; flex-wrap: nowrap; }
-  .wb-desk .work-studio-view .ws-scene { min-height: 0; }
+  .wb-desk .work-studio-view .ws-scene { flex: 1 1 0; aspect-ratio: auto; min-height: 0; margin-top: 5px; }
+  .wb-desk .work-studio-view .ws-floorplan { width: min(100%, 235cqh); }
   .wb-desk .work-studio-view .ws-pose-label { display: none; }
   .wb-desk .work-studio-view .ws-timeline { margin: 5px 0 0; min-height: 0; max-height: none; }
-  .wb-desk .work-studio-view .ws-actor { height: 94%; bottom: 0; }
-  .wb-desk .work-studio-view .ws-prop { min-width: 55px; padding: 4px 6px; bottom: 12%; }
-  .wb-desk .work-studio-view .ws-prop-mark { display: none; }
   .wb-desk .work-studio-view .ws-action { max-width: 80%; font-size: 12px; }
   body.workbench .wb-desk-chat > .wb-desk-chat-head { min-height: 34px; padding-block: 6px; }
   body.workbench .wb-desk-chat > #transcript { gap: 12px; padding-block: 10px; }
@@ -211,7 +259,6 @@ body.workbench .wb-desk-chat > :is(.composer-message-queue,#inputbar,.wb-desk-ch
   .wb-desk .work-studio-view .ws-row-icon { width: 18px; height: 18px; }
   .wb-desk .work-studio-view .ws-row-state { display: none; }
   .wb-desk .work-studio-view .ws-prop-title { font-size: 11px; }
-  .wb-desk .work-studio-view .ws-actor { height: 92%; }
   body.workbench .wb-desk-chat-head h2 { font-size: 15px; }
 }
 @media (max-height: 560px) {

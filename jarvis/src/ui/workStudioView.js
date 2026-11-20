@@ -1,4 +1,6 @@
 import './workStudioView.css';
+import './workbenchWorkshopMotion.css';
+import { createWorkshopMotion, stationForStep, stationNames } from './workshopMotion.js';
 
 const poses = {
   idle: '安静等候', run: '跑去取资料', think: '托腮思考', edit: '动笔修改',
@@ -33,10 +35,11 @@ function text(el, content = '') {
   if (el.textContent !== content) el.textContent = content;
 }
 
-export function createWorkStudioView() {
+export function createWorkStudioView({ workshop = false } = {}) {
   const element = node('section', 'work-studio work-studio-view');
   element.setAttribute('aria-label', '看未央工作');
   element.hidden = true;
+  if (workshop) element.dataset.workshop = 'true';
 
   const header = node('div', 'ws-header');
   const heading = node('h2', 'ws-heading', '看未央工作');
@@ -63,11 +66,19 @@ export function createWorkStudioView() {
   // 文件对象也作为可选中文本呈现在下方；场景里只画一次。
   prop.setAttribute('aria-hidden', 'true');
   const chip = node('span', 'ws-pose-label');
-  scene.append(chip, prop, actor);
+  let motion;
+  if (workshop) {
+    const floor = node('div', 'ws-floorplan');
+    floor.append(actor);
+    scene.append(floor, chip, prop);
+    motion = createWorkshopMotion(scene, actor);
+  } else scene.append(chip, prop, actor);
   const caption = node('div', 'ws-caption');
   const action = node('strong', 'ws-action');
   const detail = node('span', 'ws-detail');
   const file = node('span', 'ws-file');
+  const stationLabel = workshop ? node('span', 'ws-station-name') : null;
+  if (stationLabel) caption.append(stationLabel);
   caption.append(action, detail, file);
   performance.append(scene, caption);
 
@@ -138,6 +149,17 @@ export function createWorkStudioView() {
     text(propTitle, filename || title);
     prop.dataset.kind = filename ? 'file' : 'action';
     const n = index();
+    if (motion) {
+      const station = stationForStep(snapshot.entries, n);
+      text(stationLabel, stationNames[station]);
+      const live = !isReview && snapshot.active;
+      const movingStep = !!entry && entry.status !== 'waiting' && entry.status !== 'stopped' && !['idle', 'stop', 'stomp', 'cheer'].includes(pose);
+      motion.show(station, {
+        travel: movingStep && (live || playing),
+        working: movingStep && ((live && entry.status === 'running') || playing),
+        gesture: !isReview && (pose === 'stomp' || pose === 'cheer')
+      });
+    }
     back.disabled = n <= 0;
     next.disabled = n < 0 || n >= snapshot.entries.length - 1;
     play.disabled = snapshot.entries.length < 2;
@@ -241,7 +263,7 @@ export function createWorkStudioView() {
   function visibilityChanged() {
     const shown = visible && !document.hidden;
     element.dataset.visible = String(shown);
-    if (!shown) stopPlaying();
+    if (!shown) { stopPlaying(); motion?.reset(); }
     else update();
   }
 
@@ -250,6 +272,7 @@ export function createWorkStudioView() {
     render(nextSnapshot) {
       if (nextSnapshot.sessionId !== snapshot.sessionId) {
         stopPlaying();
+        motion?.reset();
         selected = null;
         for (const row of rows.values()) row.item.remove();
         rows.clear();

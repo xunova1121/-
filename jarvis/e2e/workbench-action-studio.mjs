@@ -77,6 +77,38 @@ async function send(page, prompt) {
   await page.click('#btn-send');
 }
 const rows = page => stage(page).locator('[data-entry-id]');
+// 用角色的实际脚下位置检查工位，不能只改变动作名称。
+async function stationPoint(page, station) {
+  const scene = stage(page).locator('.ws-scene');
+  assert.equal(await scene.getAttribute('data-station'), station);
+  return scene.locator('.ws-floorplan').evaluate(floor => {
+    const room = floor.getBoundingClientRect();
+    const actor = floor.querySelector('.ws-actor').getBoundingClientRect();
+    if (actor.width <= 0 || actor.height <= 0 || actor.height > room.height * .32 || actor.width > room.width * .21) {
+      throw new Error('角色没有保持车间远景比例：' + JSON.stringify({ actor, room }));
+    }
+    if (actor.left < room.left - 1 || actor.right > room.right + 1 || actor.top < room.top - 1 || actor.bottom > room.bottom + 1) {
+      throw new Error('角色离开了车间画面');
+    }
+    return { x: (actor.left + actor.width / 2 - room.left) / room.width, y: (actor.bottom - room.top) / room.height };
+  });
+}
+
+async function observeWalk(page) {
+  return stage(page).locator('.ws-actor').evaluate(async actor => {
+    const start = performance.now();
+    let from;
+    // 只计同一段行走里的位移，工位瞬移或原地切换精灵图不能算通过。
+    while (performance.now() - start < 9000) {
+      await new Promise(requestAnimationFrame);
+      if (actor.dataset.walking !== 'true') { from = null; continue; }
+      const now = actor.getBoundingClientRect();
+      if (from && Math.hypot(now.left - from.left, now.top - from.top) >= 3) return true;
+      from ??= now;
+    }
+    return false;
+  });
+}
 async function checkFit(page) {
   const box = await page.locator('#prompt').boundingBox();
   assert.ok(box && box.height > 0 && box.y >= 0 && box.y + box.height <= page.viewportSize().height + 1, '输入框完整可见');
@@ -89,8 +121,17 @@ try {
     const messages = route.request().postDataJSON().messages;
     const count = messages.filter(m => m.role === 'tool').length;
     const followUp = messages.some(m => m.role === 'user' && JSON.stringify(m.content).includes('刚才的文件叫什么'));
-    const result = followUp || count >= 2;
-    const call = count ? write(localFile) : { id: 'read-design', name: 'read_file', args: { path: localFile } };
+    const result = followUp || count >= 3;
+    if (!followUp && count === 3) {
+      const receipt = messages.filter(m => m.role === 'tool').at(-1);
+      assert.match(JSON.stringify(receipt.content), /readback.{0,10}passed/, '核验工具确实读回了活动方案');
+    }
+    const calls = [
+      { id: 'read-design', name: 'read_file', args: { path: localFile } },
+      write(localFile),
+      { id: 'verify-design', name: 'verify_delivery', args: { paths: [localFile] } }
+    ];
+    const call = calls[count];
     const notes = Array.from({ length: 18 }, (_, i) => (i + 1) + '. 排期复核与责任人确认');
     const answer = followUp ? '刚才保存的是春季活动.md。\n\n' + notes.join('\n') : '活动方案已保存。';
     const delta = result ? { content: answer } : { tool_calls: [{ index: 0, id: call.id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } }] };
@@ -102,27 +143,33 @@ try {
   assert.ok(await local.evaluate(() => window.__jarvis.stage == null), '工作台的角色不拉起星系 GPU 场景');
   assert.equal(await rows(local).count(), 0, '空会话只显示待命');
   assert.equal(await stage(local).getAttribute('data-pose'), 'idle');
+  await stationPoint(local, 'rest');
+  const actor = stage(local).locator('.ws-floorplan .ws-actor');
+  assert.notEqual(await actor.getAttribute('data-walking'), 'true', '空会话安静待命');
   await send(local, '请先读取' + localFile + '，文件不存在就写一份活动方案保存到这个位置。');
   await local.locator('#transcript .msg.agent').filter({ hasText: '活动方案已保存。' }).waitFor();
   await stage(local).locator('[data-entry-id][data-pose="cheer"]').waitFor();
   const sessionId = await local.evaluate(() => window.__jarvis.sessionId);
   assert.equal(await local.evaluate(file => window.__jarvis.workspace.readText(file), localFile), privateText);
-  assert.equal(modelCalls, 3, '实际读取失败，再写文件并收到最终回复');
+  assert.equal(modelCalls, 4, '实际读取失败后，写入文件、核验交付并收到最终回复');
   const failure = stage(local).locator('[data-entry-id][data-pose="stomp"]').filter({ hasText: '读取文件' });
   assert.equal(await failure.count(), 1, '读取失败只显示一条真实记录');
   await failure.click();
   assert.equal(await stage(local).getAttribute('data-pose'), 'stomp');
+  const archive = await stationPoint(local, 'archive');
+  assert.notEqual(await actor.getAttribute('data-walking'), 'true', '手动回看停在读取文件的工位');
   await local.screenshot({ path: path.join(output, 'pc-studio-retry.png') });
   const edits = stage(local).locator('[data-entry-id][data-pose="edit"]').filter({ hasText: '写入文件' });
   assert.equal(await edits.count(), 1, '工具开始和结束合并为一次编辑');
   await edits.click();
   assert.equal(await stage(local).getAttribute('data-mode'), 'review');
+  const bench = await stationPoint(local, 'bench');
   assert.ok((await stage(local).innerText()).includes(path.basename(localFile)), '动作显示真实文件名');
   assert.ok(!(await stage(local).innerText()).includes(privateText), '排除文件正文');
   const assetCount = await stage(local).evaluate(async el => {
     const urls = new Set();
     const backgrounds = [getComputedStyle(el.closest('.wb-desk'), '::before')];
-    for (const selector of ['.ws-scene', '.ws-sprite']) backgrounds.push(getComputedStyle(el.querySelector(selector)));
+    for (const selector of ['.ws-scene', '.ws-floorplan', '.ws-sprite']) backgrounds.push(getComputedStyle(el.querySelector(selector)));
     for (const css of backgrounds) {
       for (const match of css.backgroundImage.matchAll(/url\(["']?(.*?)["']?\)/g)) urls.add(match[1]);
     }
@@ -132,15 +179,28 @@ try {
   assert.ok(assetCount >= 2, '正式构建的人物和场景图均可解码');
   await checkFit(local);
   await local.screenshot({ path: path.join(output, 'pc-studio-edit.png') });
+  await stage(local).locator('[data-entry-id]').filter({ hasText: '核验交付文件' }).click();
+  const review = await stationPoint(local, 'review');
   await stage(local).locator('[data-action="live"]').click();
   assert.equal(await stage(local).getAttribute('data-pose'), 'cheer');
+  await stationPoint(local, 'bench'); // 核验后还写了回复，庆祝应在最后一次实际工作的地方。
+  for (const [a, b] of [[archive, bench], [archive, review], [bench, review]]) {
+    assert.ok(Math.hypot(a.x - b.x, a.y - b.y) > .08, '读取、修改和复核有不同的实际站位');
+  }
   const ids = await rows(local).evaluateAll(list => list.map(el => el.dataset.entryId));
-  await stage(local).locator('[data-action="play"]').click();
+  const [walked] = await Promise.all([observeWalk(local), stage(local).locator('[data-action="play"]').click()]);
+  assert.ok(walked, '播放真实任务时，小人跑过车间而不是瞬移');
+  await local.emulateMedia({ reducedMotion: 'reduce' });
+  await local.waitForFunction(() => {
+    const actor = document.querySelector('.wb-desk .ws-floorplan .ws-actor');
+    return actor.dataset.walking !== 'true' && !actor.getAnimations({ subtree: true }).some(a => a.playState === 'running');
+  });
   await stage(local).locator('[data-action="back"]:enabled').waitFor();
   await stage(local).locator('[data-action="back"]').click();
   await stage(local).locator('[data-action="forward"]').click();
   await stage(local).locator('[data-action="live"]').click();
   assert.deepEqual(await rows(local).evaluateAll(list => list.map(el => el.dataset.entryId)), ids, '回放不重复写入记录');
+  await local.emulateMedia({ reducedMotion: 'no-preference' });
   const draft = '这条草稿先保留';
   await local.fill('#prompt', draft);
   await local.locator('.wb-tabs').getByRole('button', { name: '对话', exact: true }).click();
@@ -153,7 +213,12 @@ try {
   await local.fill('#prompt', '');
   await local.setViewportSize({ width: 1024, height: 600 });
   await checkFit(local);
+  await stationPoint(local, 'bench');
   await local.screenshot({ path: path.join(output, 'pc-studio-compact.png') });
+  await local.setViewportSize({ width: 768, height: 620 });
+  await stationPoint(local, 'bench');
+  await checkFit(local);
+  await local.setViewportSize({ width: 1024, height: 600 });
   await local.locator('.rail .wb-new').click();
   assert.ok(await local.evaluate(() => window.__jarvis.stage == null), '普通对话不创建经典 WebGL 场景');
   await enter(local);
@@ -167,7 +232,7 @@ try {
   await checkFit(local);
   await send(local, '刚才的文件叫什么？');
   await local.locator('#transcript .msg.agent').filter({ hasText: '刚才保存的是春季活动.md。' }).waitFor();
-  assert.equal(modelCalls, 4, '切换多个工作视图后同一对话仍可继续发送');
+  assert.equal(modelCalls, 5, '切换多个工作视图后同一对话仍可继续发送');
   await enter(local);
   const scrolls = await local.locator('.wb-desk #transcript').evaluate(el => {
     el.scrollTop = el.scrollHeight;
@@ -184,7 +249,8 @@ try {
   const login = await owner.loginAccount(member.accessCode);
   const remote = await open(desktop, { viewport: { width: 1280, height: 860 } }, { enabled: true, url: url(cloud), userId: member.id, token: login.token, role: 'member' });
   await enter(remote);
-  await send(remote, '请写一份简报并保存到' + cloudFile);
+  const [liveWalk] = await Promise.all([observeWalk(remote), send(remote, '请写一份简报并保存到' + cloudFile)]);
+  assert.ok(liveWalk, '实际云任务运行期间可见跨工位移动');
   await remote.locator('#transcript').getByText('已保存云端简报。', { exact: false }).first().waitFor();
   const remoteEdit = stage(remote).locator('[data-entry-id][data-pose="edit"]').filter({ hasText: '写入文件' });
   await remoteEdit.waitFor();

@@ -70,7 +70,7 @@ export function createWorkbenchStudio({ getSession, activity }) {
     open = on;
     if (open) {
       if (!view) {
-        view = createWorkStudioView();
+        view = createWorkStudioView({ workshop: true });
         desk.prepend(view.element);
       }
       desk.hidden = false;

@@ -21,7 +21,12 @@ function toolAction(name) {
     : /^(?:read|inspect|review|check|plan|reconcile|code_read|computer_(?:read|look))/.test(name)
       ? 'think'
       : 'run';
-  return { pose, title };
+  const station = /^(?:inspect|review|check|reconcile|validate|verify)(?:_|$)|^(?:code_run|list_work_records)$/.test(name)
+    ? 'review'
+    : /^(?:read|list|search|fetch|find|lookup|research)(?:_|$)|^(?:web_search|code_read|code_search|computer_read|clipboard_read)$/.test(name)
+      ? 'archive'
+      : 'bench';
+  return { pose, title, station };
 }
 
 const terminal = {
@@ -35,8 +40,8 @@ function historyEntries(session) {
   const message = session?.messages?.at(-1);
   if (!message || !['assistant', 'agent'].includes(message.role) || message.proactive || session.taskId) return [];
   const entries = [];
-  const add = (pose, title, status, file, detail = '会话记录') =>
-    entries.push({ id: 'history-' + entries.length, pose, title, status, detail, ...(file && { file }) });
+  const add = (pose, title, status, file, detail = '会话记录', station) =>
+    entries.push({ id: 'history-' + entries.length, pose, title, status, detail, ...(file && { file }), ...(station && { station }) });
   const failures = new Set(
     (Array.isArray(message.failures) ? message.failures : [])
       .slice(-12)
@@ -45,10 +50,13 @@ function historyEntries(session) {
   );
   for (const name of new Set((Array.isArray(message.tools) ? message.tools : []).slice(-20))) {
     if (failures.has(name)) continue;
-    const { pose, title } = toolAction(name);
-    add(pose, title, 'done', '', '会话记录 · 已调用');
+    const { pose, title, station } = toolAction(name);
+    add(pose, title, 'done', '', '会话记录 · 已调用', station);
   }
-  for (const name of failures) add('stomp', toolAction(name).title + '遇到问题', 'error');
+  for (const name of failures) {
+    const { title, station } = toolAction(name);
+    add('stomp', title + '遇到问题', 'error', '', '会话记录', station);
+  }
   for (const file of new Set((Array.isArray(message.files) ? message.files : []).slice(-12).map(filename).filter(Boolean)))
     add('edit', '工作区文件', 'done', file);
   const end = String(message.content || '').slice(-160);
@@ -77,11 +85,11 @@ export function createStudioActivity({ scope = () => null } = {}) {
     }
     return item;
   };
-  const phase = (state, pose, title, status = 'running') => {
+  const phase = (state, pose, title, status = 'running', station) => {
     const last = state.entries.at(-1);
     if (last?.title === title && last.pose === pose && last.status === status) return false;
     if (state.phase?.status === 'running') state.phase.status = 'done';
-    state.phase = add(state, { pose, title, status });
+    state.phase = add(state, { pose, title, status, ...(station && { station }) });
     return true;
   };
 
@@ -150,9 +158,13 @@ export function createStudioActivity({ scope = () => null } = {}) {
       else if (e.type === 'team_step' && e.status === 'redo') action = ['repair', '正在返工'];
       else if (e.type === 'team_step' && e.status === 'fail') action = ['stomp', '协作步骤遇到问题', 'error'];
       else if (e.type === 'team_step' && e.status === 'running') action = ['run', '正在执行协作步骤'];
-      else if (e.type === 'team_review') action = e.pass ? ['think', '复核通过', 'done'] : ['stomp', '复核发现问题', 'error'];
+      else if (e.type === 'team_review') action = e.pass ? ['think', '复核通过', 'done', 'review'] : ['stomp', '复核发现问题', 'error', 'review'];
       else if (e.type === 'server_tool')
-        action = /read|fetch/.test(e.name) ? ['think', '正在阅读网页'] : /search/.test(e.name) ? ['run', '正在联网检索'] : ['run', '正在调用模型工具'];
+        action = /read|fetch/.test(e.name)
+          ? ['think', '正在阅读网页', 'running', 'archive']
+          : /search/.test(e.name)
+            ? ['run', '正在联网检索', 'running', 'archive']
+            : ['run', '正在调用模型工具'];
       else if (e.type === 'tool_progress' && e.id === 'queue') action = ['think', '等待服务器执行', 'waiting'];
       else if (e.type === 'server_connection') action = e.state === 'connected' ? ['run', '已恢复连接', 'done'] : ['repair', '正在重连'];
       if (!action || !phase(state, ...action)) return;

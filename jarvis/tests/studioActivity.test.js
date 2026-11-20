@@ -1,11 +1,42 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createStudioActivity } from '../src/app/studioActivity.js';
+import { stationForStep } from '../src/ui/workshopMotion.js';
 
 const turn = (id = 'local') => ({ session: { id, messages: [] }, files: new Set() });
 const open = (id, name, args = {}) => ({ type: 'tool_start', id, name, args });
 const close = (id, name, ok) => ({ type: 'tool_end', id, name, ok });
 
 describe('工作室动作记录', () => {
+  it('按实际工具标记取资料、制作、检验工位，读取失败和旧记录保留相同工位', () => {
+    const feed = createStudioActivity(), t = turn();
+    const tools = ['read_file', 'list_files', 'web_search', 'write_file', 'inspect_image', 'check_writing'];
+    const stations = ['archive', 'archive', 'archive', 'bench', 'review', 'review'];
+    feed.begin(t);
+    tools.forEach((name, i) => {
+      feed.record(t, open(name, name));
+      expect(feed.snapshot(t.session).entries.at(-1).station).toBe(stations[i]);
+      feed.record(t, close(name, name, i !== 0));
+      expect(feed.snapshot(t.session).entries.at(-1).station).toBe(stations[i]);
+    });
+    feed.record(t, { type: 'server_tool', name: 'deepseek_read_url' });
+    expect(feed.snapshot(t.session).entries.at(-1).station).toBe('archive');
+    feed.record(t, { type: 'team_review', pass: false });
+    expect(feed.snapshot(t.session).entries.at(-1)).toMatchObject({ pose: 'stomp', station: 'review' });
+    const restored = feed.snapshot({ id: 'saved', messages: [{ role: 'assistant', tools, failures: [{ tool: 'read_file' }] }] });
+    expect(restored.entries.slice(0, -1).map(step => step.station)).toEqual([...stations.slice(1), 'archive']);
+  });
+
+  it('正常收尾、错误和停止留在当前工位，真实复核才进入检验台', () => {
+    const write = { pose: 'edit', status: 'done', station: 'bench' };
+    const review = { pose: 'think', status: 'done', station: 'review' };
+    const finish = { pose: 'cheer', status: 'done' };
+    expect(stationForStep([finish], 0)).toBe('rest');
+    for (const end of [finish, { pose: 'stomp', status: 'error' }, { pose: 'stop', status: 'stopped' }]) {
+      expect(stationForStep([write, end], 1)).toBe('bench');
+      expect(stationForStep([write, review, end], 2)).toBe('review');
+    }
+  });
+
   it('只按实际事件切换动作，文本分片不重复刷新，恢复需要真实重试信号', () => {
     const feed = createStudioActivity(), t = turn(), changes = vi.fn();
     const unsubscribe = feed.subscribe(changes);
