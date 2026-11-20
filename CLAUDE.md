@@ -1,8 +1,7 @@
 # 未央（WEIYANG AI，原名贾维斯）开发约定
 
-> **当前版本 1.0.473（2026-11-20）**。点工作台的电视就能放大节目，点显示器可以在房间里阅读新闻正文、追问或生成 Word 简报。[本次发布记录](docs/分工-Claude与Codex-20261029.md#10473-房间内看电视和读原文)
-> 央视直播需要部署方接入获授权的频道。尚未接入的频道播放标明来源的未央风景短片。Windows 和安卓真机安装、真实授权节目播放和用户服务器升级仍待实测。
-> 海报策略、DeepSeek Harness、DNS 连接、rar/7z 和长工具打断的待办见[历史交接](docs/交接历史-CLAUDE开头存档.md)。
+> **当前版本 1.0.474（2026-11-20）**。工作台电视自带 RetroStrange 电影直播，支持在本设备试播、保存和切换自定义 M3U8。打开电视可以同时看到未央，手机读新闻可展开更大的正文区域。[发布验收](docs/分工-Claude与Codex-20261029.md#10474-工作台直播源和房间视野)
+> 浏览器已实播电影台和 CGTN 英语频道。Windows、安卓真机和用户服务器实际升级待验。
 
 个人 AI 智能体。界面上的名字叫“未央”；代码、数据目录、环境变量（JARVIS_*）、安装包文件名里的 jarvis / Jarvis 保持不变（改了会丢用户数据、断自动更新）。已确认形象在 `src/ui/mascot-approved.webp`，运行 `node scripts/make-icons.mjs` 从首格生成 `src/ui/logo.svg` 和电脑、安卓16张图标，`--check`只读核对像素一致性。代码在 `jarvis/`：网页界面（Vite）、本机网关（`server/`）、Windows 桌面版（`desktop/`，Electron）、安卓 App（`android/`，Capacitor）。
 
