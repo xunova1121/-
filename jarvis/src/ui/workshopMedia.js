@@ -37,9 +37,7 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
   function draw() {
     const reading = device === 'monitor' && !workOnMonitor();
     ui.panel.hidden = !device;
-    floor.inert = Boolean(device);
-    const roomTools = scene.querySelector('.ws-room-tools');
-    if (roomTools) roomTools.inert = Boolean(device);
+    scene.closest('.work-studio-view')?.toggleAttribute('data-media-open', Boolean(device));
     ui.panel.dataset.device = device;
     ui.panel.setAttribute('aria-label', device === 'tv' ? '电视' : '工作显示器');
     ui.monitor.setAttribute('aria-expanded', String(device === 'monitor'));
@@ -183,6 +181,7 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
   };
 
   return {
+    panel: ui.panel,
     setVisible(on) {
       if (visible === on) return;
       visible = on;

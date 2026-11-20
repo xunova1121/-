@@ -113,7 +113,9 @@ export function createWorkStudioView({ workshop = false, newsFeed, newsChat, get
   list.setAttribute('aria-label', '按时间排列的任务步骤');
   const empty = node('p', 'ws-empty', '任务开始后，这里会记录实际步骤。');
   timeline.append(listHeader, list, empty);
-  body.append(performance, timeline);
+  body.append(performance);
+  if (media) body.append(media.panel);
+  body.append(timeline);
   element.append(header, body);
 
   let snapshot = { sessionId: '', entries: [], active: false };

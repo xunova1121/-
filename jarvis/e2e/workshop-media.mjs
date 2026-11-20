@@ -32,13 +32,33 @@ async function openRoom(page, mobile) {
 
 // 只读真实生成的 Office 压缩包，核对正文使用的是选中的新闻。
 async function readBrief(page) {
-  await page.waitForFunction(file => window.__jarvis.workspace.exists(file), briefFile);
+  await page.locator('#transcript .msg.agent .body').filter({ hasText: '新闻简报已写入工作区。' }).waitFor();
+  assert(await page.evaluate(file => window.__jarvis.workspace.exists(file), briefFile));
   const bytes = await page.evaluate(async file => {
     const blob = await window.__jarvis.workspace.readBlob(file);
     return Array.from(new Uint8Array(await blob.arrayBuffer()));
   }, briefFile);
   const zip = await JSZip.loadAsync(Uint8Array.from(bytes));
   return zip.file('word/document.xml').async('string');
+}
+
+async function checkLayout(room) {
+  const layout = await room.evaluate(async el => {
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const box = selector => el.querySelector(selector).getBoundingClientRect();
+    const scene = box('.ws-scene'), panel = box('.ws-media-panel:not([hidden])');
+    const input = document.getElementById('prompt').getBoundingClientRect();
+    const at = document.elementFromPoint(input.x + input.width / 2, input.y + input.height / 2);
+    return {
+      separate: scene.bottom <= panel.top + 2 || scene.right <= panel.left + 2 || panel.right <= scene.left + 2,
+      officeVisible: scene.height >= 40 && scene.width >= 45 && scene.top >= 0 && scene.bottom <= visualViewport.height + 1,
+      panelVisible: panel.height >= 45 && panel.width >= 160,
+      canType: !!at?.closest('#inputbar') && input.bottom <= visualViewport.height + 1,
+      boxes: [scene.toJSON(), panel.toJSON(), input.toJSON()]
+    };
+  });
+  assert(layout.separate && layout.officeVisible && layout.panelVisible && layout.canType,
+    '打开显示器或电视时还应能看见身边工位、输入框并继续聊天 ' + JSON.stringify(layout));
 }
 
 function modelResponse(request, calls) {
@@ -106,6 +126,11 @@ async function check(mobile) {
     await device('tv').click();
     await button(tv, 'CCTV-2 财经').click();
     assert.equal(await link(tv, '去央视网观看').getAttribute('href'), 'https://tv.cctv.com/live/cctv2/');
+    await checkLayout(room);
+    const lamp = button(room, '控制桌上的台灯');
+    const lampState = await lamp.getAttribute('aria-pressed');
+    await lamp.click();
+    assert.notEqual(await lamp.getAttribute('aria-pressed'), lampState, '电视旁可操作真实房间热区');
     await page.screenshot({ path: path.join(output, `${platform}-tv.png`) });
     await button(tv, '返回房间').click();
     await device('tv').click();
@@ -120,18 +145,30 @@ async function check(mobile) {
     await button(monitor, '下一条').click();
     await monitor.getByText(items[1].title, { exact: true }).waitFor();
     assert.equal(await link(monitor, '阅读原文').getAttribute('href'), items[1].url);
+    await checkLayout(room);
+    await lamp.click();
+    assert.equal(await lamp.getAttribute('aria-pressed'), lampState, '读新闻时仍可操作台灯');
     await page.screenshot({ path: path.join(output, `${platform}-news.png`) });
     const composer = page.locator('#prompt');
-    const visibleComposer = await composer.evaluate(el => {
-      const r = el.getBoundingClientRect();
-      return r.bottom <= innerHeight + 1 && !!document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('#inputbar');
-    });
-    assert(visibleComposer, '看节目或读报道时可点击输入框');
     if (mobile) {
       await page.setViewportSize({ width: 844, height: 390 });
       assert(await page.locator('#mobile-work-studio').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
+      await checkLayout(room);
       await page.screenshot({ path: path.join(output, 'mobile-news-landscape.png') });
       await page.setViewportSize({ width: 390, height: 844 });
+      await composer.focus();
+      await page.evaluate(() => {
+        Object.defineProperty(visualViewport, 'height', { configurable: true, value: 480 });
+        visualViewport.dispatchEvent(new Event('resize'));
+      });
+      await page.waitForFunction(() => document.body.classList.contains('wy-keyboard-open'));
+      await checkLayout(room);
+      await page.screenshot({ path: path.join(output, 'mobile-news-keyboard.png'), clip: { x: 0, y: 0, width: 390, height: 480 } });
+      await page.evaluate(() => {
+        delete visualViewport.height;
+        visualViewport.dispatchEvent(new Event('resize'));
+        document.activeElement.blur();
+      });
     }
     await button(monitor, '问未央').click();
     assert.equal(await composer.evaluate(el => el === document.activeElement), true);
@@ -169,6 +206,8 @@ async function check(mobile) {
   } catch (error) {
     await page.screenshot({ path: path.join(output, `${platform}-failure.png`) }).catch(() => {});
     console.error(platform, errors, (await page.locator('.work-studio:visible').innerText({ timeout: 1000 }).catch(() => '')).slice(-1000));
+    console.error((await page.locator('#transcript').innerText({ timeout: 1000 }).catch(() => '')).slice(-1500),
+      await page.evaluate(() => window.__jarvis?.workspace.list()).catch(() => []));
     throw error;
   } finally { firstAnswer.resolve(); await context.close(); }
 }

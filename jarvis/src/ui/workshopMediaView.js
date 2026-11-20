@@ -81,7 +81,7 @@ export function mediaControls(scene, floor, channels, player) {
   task.append(taskTitle, taskDetail);
   scroll.append(news, television, task);
   panel.append(header, scroll);
-  scene.append(ticker, panel);
+  scene.append(ticker);
   return { monitor, mini, tv, ticker, tickerLabel, tickerText, panel, heading, back, switchScreen,
     news, title, credit, latest, original, actions, ask, brief, prev, next, refresh,
     television, channelButtons, network, power, task, taskTitle, taskDetail, scroll };
