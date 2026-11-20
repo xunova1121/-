@@ -23,8 +23,15 @@ const check = (name, ok, detail = '') => {
 /** 工作台：功能页是整页打开的（对话区隐藏），用测试接口直接打开 / 关闭 */
 const openPanel = (page, name) => page.evaluate((n) => { document.querySelector('#model-tools-dialog')?.close(); window.__jarvis.showPanel(n); }, name);
 const closeSide = (page) => page.evaluate(() => { document.body.classList.add('side-closed'); document.body.classList.remove('side-open'); });
-/** 工作台的“对话 / 工作室”切换：粒子舞台只在工作室里显示 */
-const studio = async (page, on) => { await closeSide(page); await page.click(`.wb-tabs button:nth-child(${on ? 2 : 1})`); await page.waitForTimeout(300); };
+/** 原有 WebGL/HUD 回归显式进入经典舞台。 */
+const studio = async (page, on) => {
+  await closeSide(page);
+  if (on) {
+    await openPanel(page, 'settings');
+    await page.getByRole('button', { name: '预览经典舞台', exact: true }).click();
+  } else await page.click('.wb-tabs button:nth-child(1)');
+  await page.waitForTimeout(300);
+};
 
 /** 发一条消息并等这一轮结束 */
 async function ask(page, q, timeout = 40000) {
@@ -104,7 +111,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.goto(BASE);
   // 电脑版的更新按钮（重启以更新 / 下载进度）在工作台顶栏里要能显示出来
   check('工作台：顶栏的更新按钮能显示', await page.evaluate(() => { const p = document.querySelector('#update-pill'); p.hidden = false; p.dataset.state = 'ready'; p.textContent = '重启以更新到 1.0.99'; const r = p.getBoundingClientRect(); const ok = getComputedStyle(p).display !== 'none' && r.width > 40 && r.top < 80; p.hidden = true; return ok; }));
-  check('工作台：左侧导航、对话 / 工作室切换', await page.isVisible('.rail .wb-nav .wb-new') && (await page.locator('.wb-tabs button').count()) === 2);
+  check('工作台：左侧导航、对话 / 工作台切换', await page.isVisible('.rail .wb-nav .wb-new') && (await page.locator('.wb-tabs button').count()) === 2);
   check('工作台：导航分组，最近对话保留独立区域',await page.evaluate(()=>{const rail=document.querySelector('.rail'),recent=document.querySelector('.wb-recent').getBoundingClientRect(),foot=document.querySelector('.wb-bottom').getBoundingClientRect();return document.querySelectorAll('.wb-nav-secondary button').length===4&&recent.height>=200&&foot.bottom<=innerHeight&&getComputedStyle(rail).overflowY==='hidden'&&getComputedStyle(document.querySelector('.wb-history-list')).overflowY==='visible';}));
   const interactionSpeech = await page.evaluate(() => { const s = window.__jarvis.speaker, enabled = s.enabled; s.enabled = false; return enabled; });
   await page.locator('.wb-mark').click();
@@ -172,9 +179,9 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('识别到本机网关', await page.evaluate(() => Boolean(window.__jarvis.gateway)), await page.textContent('#gw-badge'));
 
   check('没有手动切换形态的按钮', (await page.locator('[data-style]').count()) === 0);
-  // —— 工作台固定浅色；工作室里的粒子舞台仍是深色显示屏
+  // —— 工作台固定浅色；设置预览里的粒子舞台仍是深色显示屏
   const day = await page.evaluate(() => ({ t: document.documentElement.dataset.theme, bg: getComputedStyle(document.body).backgroundColor, stageBg: getComputedStyle(document.querySelector('#stage-wrap')).backgroundColor }));
-  check('工作台浅色界面，工作室舞台是深色显示屏', day.bg === 'rgb(255, 255, 255)' && day.stageBg === 'rgb(7, 18, 30)', JSON.stringify(day));
+  check('工作台浅色界面，设置预览舞台是深色显示屏', day.bg === 'rgb(255, 255, 255)' && day.stageBg === 'rgb(7, 18, 30)', JSON.stringify(day));
   await page.screenshot({ path: `${OUT}/workbench-studio.png` });
 
   // —— 欢迎页、HUD
@@ -254,7 +261,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('对话视图：不显示舞台，建议在输入框上方', mini.mini && mini.h === 0 && mini.chips === 3, JSON.stringify(mini));
   await studio(page, true);
   await page.waitForTimeout(300);
-  check('切到工作室：大舞台，建议回到光核旁', await page.evaluate(() => !document.body.classList.contains('stage-mini') && document.querySelector('.chip-bar').hidden));
+  check('打开设置预览：大舞台，建议回到光核旁', await page.evaluate(() => !document.body.classList.contains('stage-mini') && document.querySelector('.chip-bar').hidden));
   await page.waitForFunction(() => window.__jarvis.callouts.visible, null, { timeout: 5000 }).catch(() => {});
   const cl = await page.evaluate(() => ({ n: document.querySelectorAll('.callout:not([hidden])').length, d: [...document.querySelectorAll('.cl-line')].map((x) => x.getAttribute('d')) }));
   check('光核旁有 3 条建议，各自有虚线连到光核', cl.n === 3 && cl.d.every((d) => /^M[\d.]+,[\d.]+ L/.test(d || '')), JSON.stringify(cl.d[0]));
@@ -302,7 +309,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   let reply = await ask(page, '帮我写一个网页');
   const formsUsed = await page.evaluate((n) => window.__jarvis.director.history.slice(n), histBefore);
   check('粒子体按任务自动变形（写网页 → 晶格）', formsUsed.includes('lattice'), formsUsed.join(' → '));
-  await studio(page, true); // 轨道 HUD 只在工作室的舞台上画
+  await studio(page, true); // 轨道 HUD 只在设置预览的舞台上画
   await page.waitForTimeout(200);
   const sats = await page.evaluate(() => [...document.querySelectorAll('.oh-sat text')].map((t) => t.textContent));
   await studio(page, false);
@@ -581,7 +588,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.keyboard.press('/');
   check('/ 聚焦输入框', await page.evaluate(() => document.activeElement.id === 'prompt'));
 
-  // —— 后台暂停与恢复（粒子舞台在“工作室”里）
+  // —— 后台暂停与恢复（从设置预览粒子舞台）
   await studio(page, true);
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); });
   const f1 = await page.evaluate(() => window.__jarvis.stage.stats.frames);

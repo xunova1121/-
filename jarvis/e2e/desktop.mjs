@@ -33,7 +33,8 @@ const page = await app.firstWindow();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 await page.waitForSelector('.wb-tabs button', { timeout: 60000 });
-await page.click('.wb-tabs button:nth-child(2)'); // 粒子舞台在“工作室”里
+await page.evaluate(() => window.__jarvis.showPanel('settings'));
+await page.getByRole('button', { name: '预览经典舞台', exact: true }).click();
 await page.waitForFunction(() => window.__jarvis?.stage?.stats.frames > 3, null, { timeout: 60000 });
 await page.click('.wb-tabs button:nth-child(1)');
 await page.waitForFunction(() => window.__jarvis.gateway?.mcp, null, { timeout: 10000 }).catch(() => {});

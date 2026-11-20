@@ -66,6 +66,7 @@ export function createTurn(app) {
           },
           turn.session
         );
+      if (!turn.streamDone) app.studioActivity?.finish(turn, 'stopped');
       app.active.ctrl.abort();
       app.active.bubble?.done('已打断');
       app.active = null;
@@ -316,6 +317,7 @@ export function createTurn(app) {
       background: false
     };
     app.active = turn;
+    app.studioActivity?.begin(turn);
     app.setTask('processing', '思考中');
     // 这一轮的进度记录：事件处理（turnEvents）边收边改，做完 / 出错时用来显示和记进对话
     const st = {
@@ -353,6 +355,7 @@ export function createTurn(app) {
       bubble.done();
       app.callouts?.set(followUpSuggestions({ error: true, userText: text }));
       app.active = null;
+      app.studioActivity?.finish(turn, 'error');
       app.setTask('error', '需要配置模型');
       app.showPanel('models');
       app.messageQueue?.finished(turn, false);
@@ -479,6 +482,7 @@ export function createTurn(app) {
       });
       if (turn.background) {
         finishBackground(turn, { text: result.text, shown: st.shown, usedTools, files: madeFiles });
+        app.studioActivity?.finish(turn, 'done');
         return;
       }
       if (app.active !== turn) return;
@@ -562,14 +566,19 @@ export function createTurn(app) {
           .catch((e) => toast(`这一轮没能记到服务器上：${e.message}`));
       $('#mode-pill').classList.remove('offline');
       turn.streamDone = true;
+      app.studioActivity?.finish(turn, 'done');
       app.callouts?.set(followUpSuggestions({ tools: usedTools, userText: text, desktop: Boolean(DESKTOP) }));
       app.scheduleReflect();
       app.compressHistory();
       if (!app.speaker.speaking) finishTurn();
     } catch (err) {
       turn.queueFailed = true;
-      if (err.name === 'AbortError') return;
+      if (err.name === 'AbortError') {
+        app.studioActivity?.finish(turn, 'stopped');
+        return;
+      }
       turn.observationLost = serverTaskMayBeRunning(err);
+      app.studioActivity?.finish(turn, turn.observationLost ? 'waiting' : 'error');
       if (turn.background) {
         finishBackground(turn, { error: app.friendlyError(err), shown: st.shown, usedTools, files: madeFiles });
         return;

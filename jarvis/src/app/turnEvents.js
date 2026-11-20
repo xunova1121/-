@@ -13,6 +13,7 @@ export function createTurnEvents(app) {
   /** 这一轮的进度事件 → 界面：文字、工具卡片、模型切换、团队分工……（切到别的对话后只记进这一轮的气泡） */
   function turnEvents(turn, st, { bubble, speech, cards, doneSteps, model }) {
     return (e) => {
+      if (!turn.streamDone && !turn.ctrl?.signal.aborted && (turn.background || app.active === turn)) app.studioActivity?.record(turn, e);
       if (e.type === 'conversation_title') {
         if (!turn.streamDone && !turn.ctrl?.signal.aborted && !app.server) applySuggestedTitle(turn.session, e.title);
         return;

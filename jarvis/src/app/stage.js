@@ -84,7 +84,8 @@ export function createStage(app) {
   let orbit = null;
   /** 光核旁的建议标注（启动末尾创建） */
   let callouts = null;
-  let stageMiniWas = false; // 舞台上一次是不是迷你状态（updateStageMode 用）
+  let suggestionsWereChips = false;
+  const useSuggestionChips = () => body.classList.contains('stage-mini') || body.classList.contains('wb-studio');
 
   function frame(dt, t) {
     const p = tween.update(t);
@@ -167,7 +168,7 @@ export function createStage(app) {
     stageLoading = (async () => {
       try {
         const { createStage } = await import('../render/stage.js');
-        if (wantsReducedMotion(app.settings, reducedMql)) return null; // 加载期间切换成了减少动画
+        if (!body.classList.contains('wb-classic-stage') || wantsReducedMotion(app.settings, reducedMql)) return null;
         stage = createStage($('#stage'), {
           lowEnd,
           onContextChange: (s, ms) => console.info(`[stage] WebGL 上下文${s === 'lost' ? '丢失' : `已恢复（${Math.round(ms)}ms）`}`)
@@ -214,16 +215,17 @@ export function createStage(app) {
     body.classList.toggle('reduced-motion', reduced);
     dashboard.setMotion(!reduced);
     if (reduced) disposeStage();
-    else ensureStage();
+    else if (canvasVisible && body.classList.contains('wb-classic-stage')) ensureStage();
     $('#motion-status').textContent =
       `系统偏好：${reducedMql.matches ? '减少动态效果' : '未开启'}；当前：${reduced ? '已停用持续动画，仅以颜色表达情绪' : '完整动画'}`;
   }
   reducedMql.addEventListener?.('change', applyMotionMode);
 
   // 后台 / 视口外暂停（需求 9.2）
-  let canvasVisible = true;
+  let canvasVisible = false;
   new IntersectionObserver(([e]) => {
     canvasVisible = e.isIntersecting;
+    if (canvasVisible && body.classList.contains('wb-classic-stage') && !wantsReducedMotion(app.settings, reducedMql)) ensureStage();
     stage?.setPaused('offscreen', !canvasVisible);
   }).observe($('#stage-wrap'));
 
@@ -311,25 +313,27 @@ export function createStage(app) {
 
   // 有对话时舞台收成迷你状态条（桌面版），给对话留空间；点一下展开 / 收起
   function updateStageMode() {
-    // 工作台的“工作室”视图要大舞台；“对话”视图里舞台隐藏，迷你模式只为把建议放到输入框上方
+    // 工作台和普通对话把建议放在输入框上方；设置里的经典预览使用光核标注。
     const mini =
       !COMPACT &&
       body.classList.contains('has-convo') &&
       !app.settings.stageOpen &&
       !body.classList.contains('focus-view') &&
-      !body.classList.contains('wb-studio');
+      !body.classList.contains('wb-studio') &&
+      !body.classList.contains('wb-classic-stage');
     const label = $('#btn-stage-toggle span');
     if (label) label.textContent = app.settings.stageOpen ? '收起' : '展开';
-    body.classList.toggle('stage-mini', mini); // 工作台切到“工作室”时会自己去掉这个类，所以用变量记上一次的状态
-    if (mini === stageMiniWas) return;
-    stageMiniWas = mini;
+    body.classList.toggle('stage-mini', mini); // 切换视图时，重新把建议放到可见的控件。
+    const chips = useSuggestionChips();
+    if (chips === suggestionsWereChips) return;
+    suggestionsWereChips = chips;
     callouts?.relocate?.();
   }
   function setStageOpen(open) {
     app.setSetting('stageOpen', open);
     updateStageMode();
   }
-  addEventListener('resize', () => updateStageMode()); // 工作台切换“对话 / 工作室”时会发 resize
+  addEventListener('resize', () => updateStageMode()); // 工作台切换“对话 / 工作台”时会发 resize
   new MutationObserver(() => {
     body.classList.toggle('has-convo', Boolean(document.querySelector('#transcript .msg')));
     updateStageMode();
@@ -409,9 +413,7 @@ export function createStage(app) {
         setTimeout(() => app.send(item.prompt), 160);
       }
     };
-    callouts = COMPACT
-      ? initChips(suggestionOpts)
-      : dualSuggestions(initCallouts(suggestionOpts), initChips(suggestionOpts), () => body.classList.contains('stage-mini'));
+    callouts = COMPACT ? initChips(suggestionOpts) : dualSuggestions(initCallouts(suggestionOpts), initChips(suggestionOpts), useSuggestionChips);
   }
 
   return {

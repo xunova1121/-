@@ -77,7 +77,8 @@ try {
     document.body.classList.add('side-closed');
     document.body.classList.remove('side-open');
   });
-  await page.click('.wb-tabs button:nth-child(2)');
+  await page.evaluate(() => window.__jarvis.showPanel('settings'));
+  await page.getByRole('button', { name: '预览经典舞台', exact: true }).click();
   await page.waitForFunction(() => window.__jarvis.stage.stats.frames > 10);
   // 与smoke一样，先实际启用泛光再回自动档，不能只测一张全新空场景。
   for (const quality of ['high', 'auto']) {
@@ -89,7 +90,8 @@ try {
     await page.waitForTimeout(400);
   }
   await page.evaluate(() => window.__jarvis.send('运行八个独立的JavaScript小片段，检查界面反馈。'));
-  await page.click('.wb-tabs button:nth-child(2)');
+  await page.evaluate(() => window.__jarvis.showPanel('settings'));
+  await page.getByRole('button', { name: '预览经典舞台', exact: true }).click();
   console.log(
     '工具/HUD前置',
     await page.evaluate(() => ({

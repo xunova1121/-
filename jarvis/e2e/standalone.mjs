@@ -38,7 +38,9 @@ page.on('console', (m) => { if (m.type() === 'error' && !/fonts\.(googleapis|gst
 page.on('request', (r) => requests.push(r.url()));
 
 await page.goto(FILE);
-await page.click('.wb-tabs button:nth-child(2)'); // 粒子舞台在“工作室”里
+await page.waitForFunction(() => window.__jarvis?.showPanel);
+await page.evaluate(() => window.__jarvis.showPanel('settings'));
+await page.getByRole('button', { name: '预览经典舞台', exact: true }).click();
 await page.waitForFunction(() => window.__jarvis?.stage?.stats.frames > 10, null, { timeout: 30000 });
 const stats = await page.evaluate(() => window.__jarvis.stage.stats);
 check('双击打开即渲染（file://，无服务器）', true, `${stats.form} · ${stats.particles} 粒子 / ${stats.drawCalls} draw calls`);

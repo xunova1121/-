@@ -35,6 +35,8 @@ import * as ws from './agent/workspace.js';
 import * as agentMemory from './agent/memory.js';
 import * as habits from './agent/habits.js';
 import * as sessionsApi from './agent/sessions.js';
+import { createStudioActivity } from './app/studioActivity.js';
+import { initMobileWorkStudio } from './ui/mobileWorkStudio.js';
 import { initWorkbench } from './ui/workbench.js';
 import { initMascots } from './ui/mascot.js';
 import { initCompanion } from './ui/companion.js';
@@ -73,7 +75,7 @@ document.head.append(Object.assign(document.createElement('link'), { rel: 'icon'
 // ---------------------------------------------------------------- 设置
 const settings = loadSettings();
 /** 各模块共用的状态和函数（见 app/context.js） */
-const app = createApp({ settings });
+const app = createApp({ settings, studioActivity: createStudioActivity({ scope: () => app.messageQueue?.scope() }) });
 function setSetting(key, value) {
   settings[key] = value;
   // 通话临时启用的朗读 / 唤醒词不覆盖用户保存的偏好。
@@ -224,7 +226,8 @@ window.__jarvis = {
 
 // 工作台界面只用在电脑上；手机 App 保留自己的界面（底部输入、左侧抽屉菜单、整页面板）
 // prettier-ignore
-if (!COMPACT) initWorkbench({ showPanel: app.showPanel, newSession: app.newSession, openSession: app.openSession, getSession: () => app.session, getRunning: () => (app.active && !app.active.streamDone ? app.session.id : null), openFile: app.openInWorkspace });
+if (!COMPACT) initWorkbench({ showPanel: app.showPanel, newSession: app.newSession, openSession: app.openSession, getSession: () => app.session, getRunning: () => (app.active && !app.active.streamDone ? app.session.id : null), openFile: app.openInWorkspace, activity: app.studioActivity });
+else initMobileWorkStudio({ getSession: () => app.session, activity: app.studioActivity });
 mascots = initMascots();
 companion = initCompanion({
   send: app.send,

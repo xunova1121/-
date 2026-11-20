@@ -1,0 +1,249 @@
+/* PC 工作台内的真实对话、角色与轨迹共享一间工作坊。普通对话和手机独立面板沿用自己的布局。 */
+body.workbench .wb-desk[hidden] { display: none !important; }
+body.workbench.wb-studio #main {
+  container: workbench-area / inline-size;
+  min-height: 0;
+  padding: 0 clamp(8px,1.6vw,24px) 14px;
+}
+body.workbench .wb-desk {
+  --desk-paper: #fffdf5;
+  --desk-sheet: #fdfbf1ee;
+  --desk-ink: #283a31;
+  --desk-muted: #607066;
+  --desk-line: #d5d8c7;
+  --desk-accent: #296854;
+  --desk-soft: #e5eee1;
+  --desk-shadow: #534b3030;
+  --desk-room-tint: linear-gradient(0deg,#52462c2e,transparent 63%);
+  --desk-chip: #fcfae9eb;
+  --desk-user: #e6efdf;
+  --desk-input: #fffefa;
+  --desk-elevation: 0 2px 2px #433a2416,0 13px 30px #4f43282e;
+  --text: var(--desk-ink);
+  --muted: var(--desk-muted);
+  --accent: var(--desk-accent);
+  --accent-soft: var(--desk-soft);
+  position: relative;
+  isolation: isolate;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  margin: 0;
+  padding: clamp(10px,1.25vw,21px);
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0,.90fr) minmax(0,1.10fr);
+  grid-template-rows: minmax(0,1fr);
+  gap: clamp(12px,1.25vw,23px);
+  border: 1px solid #d4d3bd;
+  border-radius: 22px;
+  background: #ebe8d6;
+  color: var(--desk-ink);
+  font-family: var(--font-ui,system-ui,sans-serif);
+}
+body.workbench.wb-studio .wb-desk:not([hidden])::before {
+  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: var(--desk-room-tint), url('./assets/workStudio/studio.webp') 48% 56% / cover no-repeat;
+}
+:root[data-theme="dark"] body.workbench .wb-desk {
+  --desk-paper: #253028; --desk-sheet: #202b25f5; --desk-ink: #ecf0e4; --desk-muted: #b6c3b7;
+  --desk-line: #485547; --desk-accent: #a7dbb8; --desk-soft: #334b39;
+  --desk-room-tint: linear-gradient(120deg,#1b2b2d4b,#2435304a),linear-gradient(0deg,#13231fc9,transparent 77%);
+  --desk-chip: #263a31ed; --desk-user: #344b38; --desk-input: #2b382e;
+  --desk-shadow: #101a1640; --desk-elevation: 0 3px 4px #111a1250,0 14px 24px #111a1340;
+  border-color: #485144; background-color: #313b30; color-scheme: dark;
+}
+.wb-desk > .work-studio-view {
+  --ws-ink: var(--desk-ink); --ws-dim: var(--desk-muted); --ws-panel: var(--desk-paper);
+  --ws-tint: var(--desk-soft); --ws-on-tint: var(--desk-accent); --ws-line: var(--desk-line);
+  width: 100%; height: auto; min-height: 0; border: 0; padding: 0;
+  border-radius: 0; background: transparent; overflow: visible;
+}
+.wb-desk .work-studio-view .ws-header {
+  position: relative; inset: auto; flex: 0 0 auto; min-height: 42px; height: auto; width: fit-content; max-width: 100%;
+  display: flex; align-items: center; gap: 7px; padding: 4px 6px 4px 12px; margin: 0;
+  background: var(--desk-chip); color: var(--desk-ink);
+  box-shadow: 0 2px 9px var(--desk-shadow); border: 1px solid var(--desk-line); border-radius: 11px;
+}
+.wb-desk .work-studio-view .ws-heading { font-size: clamp(14px,1.24vw,19px); }
+.wb-desk .work-studio-view .ws-mode { font-size: 10px; }
+.wb-desk .work-studio-view .ws-body { display: flex; flex-direction: column; min-height: 0; }
+.wb-desk .work-studio-view .ws-performance { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+.wb-desk .work-studio-view .ws-scene,
+.wb-desk .work-studio-view[data-visible="true"] .ws-scene {
+  flex: 1 1 0; min-height: 82px; border: 0; border-radius: 0;
+  background: transparent;
+}
+.wb-desk .work-studio-view .ws-pose-label {
+  top: auto; bottom: 4%; left: 2%; z-index: 3;
+  background: var(--desk-chip); color: var(--desk-ink);
+  border-color: var(--desk-line); font-weight: 550;
+}
+.wb-desk .work-studio-view .ws-actor { --ws-x: 32%; bottom: 8%; height: 71%; max-height: clamp(154px,19vw,282px); }
+.wb-desk .work-studio-view[data-pose="idle"] .ws-actor, .wb-desk .work-studio-view[data-pose="stop"] .ws-actor { --ws-x: 40%; }
+.wb-desk .work-studio-view .ws-prop { left: 71%; bottom: 22%; min-width: 84px; }
+.wb-desk .work-studio-view .ws-caption {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 3px 7px; padding: 9px 12px;
+  color: var(--desk-ink); border: 1px solid var(--desk-line); border-radius: 12px;
+  background: var(--desk-chip); box-shadow: 0 2px 7px var(--desk-shadow);
+}
+.wb-desk .work-studio-view .ws-action { font-size: 14px; }
+.wb-desk .work-studio-view .ws-timeline {
+  flex: 0 1 27%; min-height: 58px; max-height: 181px; margin-top: 8px;
+  padding-bottom: 3px; border: 1px solid var(--desk-line); border-radius: 13px;
+  background: var(--desk-chip); box-shadow: 0 3px 8px var(--desk-shadow);
+}
+.wb-desk .work-studio-view .ws-list-header { display: flex; padding: 6px 11px 2px; }
+.wb-desk .work-studio-view .ws-list { display: block; overflow: auto; padding: 0 5px 4px; }
+.wb-desk .work-studio-view .ws-list li { max-width: none; }
+.wb-desk .work-studio-view .ws-row { min-height: 29px; padding: 2px 6px; }
+.wb-desk .work-studio-view .ws-row-icon { width: 25px; height: 25px; }
+.wb-desk .work-studio-view .ws-empty { margin: 5px 12px 7px; }
+
+/* 纸页和输入栏同属一块会话表面，保留原控件、文件动作和滚动容器。 */
+body.workbench .wb-desk-chat {
+  --surface: var(--desk-paper); --surface-2: var(--desk-soft); --line: var(--desk-line); --text: var(--desk-ink);
+  --muted: var(--desk-muted); --accent: var(--desk-accent); --accent-soft: var(--desk-soft);
+  position: relative; min-height: 0; min-width: 0; display: flex; flex-direction: column;
+  align-self: stretch; padding: 0; overflow: hidden;
+  color: var(--desk-ink); background: var(--desk-sheet); border: 1px solid var(--desk-line);
+  border-radius: 18px; box-shadow: var(--desk-elevation);
+}
+body.workbench .wb-desk-chat > .wb-desk-chat-head {
+  position: relative; inset: auto; z-index: auto; flex: 0 0 auto; display: flex; align-items: baseline;
+  min-height: 46px; height: auto; padding: 12px clamp(12px,1.5vw,23px) 9px; gap: 11px;
+  text-align: left; color: var(--desk-ink); background: transparent; border: 0; border-bottom: 1px solid var(--desk-line);
+}
+body.workbench .wb-desk-chat-head h2 { margin: 0; font-size: 17px; font-weight: 690; letter-spacing: -.025em; line-height: 1.35; white-space: nowrap; }
+body.workbench .wb-desk-chat-title { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--desk-muted); }
+body.workbench .wb-desk-chat > .wb-desk-empty {
+  position: absolute; z-index: 0; left: 20px; right: 20px; top: 36%; margin: 0;
+  font-size: clamp(15px,1.25vw,19px); line-height: 1.5; text-align: center;
+  font-weight: 500; color: var(--desk-muted); pointer-events: none;
+}
+body.workbench .wb-desk-chat > #transcript {
+  position: relative; z-index: 1; flex: 1 1 0; display: flex; flex-direction: column;
+  min-width: 0; min-height: 0; width: 100%; max-width: none; margin: 0;
+  padding: 14px clamp(12px,1.5vw,23px) 11px; gap: 17px; background: transparent;
+  overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--desk-line) transparent;
+}
+body.workbench .wb-desk-chat #transcript > .msg { min-width: 0; flex: none; color: var(--desk-ink); font-size: 14px; line-height: 1.65; }
+body.workbench .wb-desk-chat #transcript > .msg.user {
+  align-self: flex-end; width: fit-content; max-width: min(86%,600px);
+  padding: 9px 13px; border-radius: 13px 13px 4px 13px;
+  background: var(--desk-user); color: var(--desk-ink); border: 1px solid var(--desk-line); box-shadow: none;
+}
+body.workbench .wb-desk-chat #transcript > .msg.user .who-time { color: var(--desk-muted); }
+body.workbench .wb-desk-chat #transcript > .msg.agent {
+  display: block; align-self: stretch; width: 100%; max-width: none;
+  padding: 0; margin: 0; background: transparent; box-shadow: none; border: 0;
+}
+body.workbench .wb-desk-chat #transcript > .msg.agent > .who {
+  display: flex !important; align-items: center; flex-wrap: nowrap; height: auto !important;
+  min-height: 27px; margin: 0 0 5px !important; gap: 5px !important; font-size: 12px;
+  color: var(--desk-ink); line-height: 1.4;
+}
+body.workbench .wb-desk-chat #transcript > .msg.agent > .who::before { content: none; display: none; }
+body.workbench .wb-desk-chat #transcript > .msg.agent > .who .who-mood { --mascot-size: 36px !important; margin: -4px 0 -4px -5px !important; }
+body.workbench .wb-desk-chat #transcript .who-name { color: var(--desk-ink); font: 650 12px/1.5 var(--font-ui,sans-serif); }
+body.workbench .wb-desk-chat #transcript .who-time { font-size: 10px; color: var(--desk-muted); }
+body.workbench .wb-desk-chat #transcript .body { color: inherit; min-width: 0; overflow-wrap: anywhere; }
+body.workbench .wb-desk-chat #transcript .body :is(h2,h3,h4,h5,strong) { color: var(--desk-ink); }
+body.workbench .wb-desk-chat #transcript .body :is(pre,.table-wrap) { max-width: 100%; overflow-x: auto; }
+body.workbench .wb-desk-chat #transcript .msg-actions { gap: 3px; }
+body.workbench .wb-desk-chat #transcript .msg-actions button { color: var(--desk-muted); }
+body.workbench .wb-desk-chat #transcript .msg-actions button:hover { color: var(--desk-accent); background: var(--desk-soft); }
+body.workbench .wb-desk-chat #transcript .meta { color: var(--desk-muted); font-size: 11px; line-height: 1.5; }
+body.workbench .wb-desk-chat #transcript :is(.progress-card,.tool-group,.plan-card,.confirm-card) {
+  color: var(--desk-ink); background: var(--desk-paper); border: 1px solid var(--desk-line); border-radius: 10px; box-shadow: none; min-width: 0;
+}
+body.workbench .wb-desk-chat #transcript :is(.tool-group,.progress-card) > summary { padding: 6px 8px; min-height: 34px; }
+body.workbench .wb-desk-chat #transcript :is(.pc-count,.tg-title,.tg-count,.pc-time,.st,.pc-steps .pc-tx) { color: var(--desk-muted); }
+body.workbench .wb-desk-chat #transcript .progress-card .pc-mascot { --mascot-size: 34px; margin: -3px 0 -3px -4px; }
+body.workbench .wb-desk-chat #transcript .msg-images { max-width: 100%; }
+body.workbench .wb-desk-chat #transcript .file-links { gap: 5px; min-width: 0; }
+body.workbench .wb-desk-chat #transcript :is(.file-links a,.src-chip) { max-width: 100%; border-color: var(--desk-line); color: var(--desk-accent); background: var(--desk-soft); }
+
+/* 输入表单位于独立固定行。长文本、附件、排队项在各自区域滚动。 */
+body.workbench .wb-desk-chat > #inputbar {
+  flex: 0 0 auto; position: relative; inset: auto; box-sizing: border-box;
+  width: calc(100% - 20px); max-width: none; margin: 4px 10px 10px; padding: 8px;
+  color: var(--desk-ink); background: var(--desk-input); border: 1px solid var(--desk-line);
+  border-radius: 13px; box-shadow: 0 1px 4px var(--desk-shadow);
+}
+body.workbench .wb-desk-chat > #inputbar:focus-within { border-color: var(--desk-accent); }
+body.workbench .wb-desk-chat #inputbar #prompt {
+  box-sizing: border-box; color: var(--desk-ink); background: transparent; border: 0; box-shadow: none;
+  border-radius: 3px; width: 100%; min-height: 41px; max-height: min(16vh,125px); padding: 3px 5px;
+  font-size: 14px; line-height: 1.55;
+}
+body.workbench .wb-desk-chat #inputbar #prompt::placeholder { color: var(--desk-muted); opacity: .85; }
+body.workbench .wb-desk-chat #inputbar .composer-row { gap: 3px 6px; }
+body.workbench .wb-desk-chat #inputbar :is(#btn-attach,#btn-call,#btn-mic,#btn-quick) { color: var(--desk-accent); background: var(--desk-soft); }
+body.workbench .wb-desk-chat > :is(.wb-jump-latest,.wy-jump-latest) { bottom: 115px; color: var(--desk-accent); background: var(--desk-paper); border: 1px solid var(--desk-line); }
+body.workbench .wb-desk-chat #inputbar #model-chip { border: 1px solid var(--desk-line); color: var(--desk-muted); background: transparent; }
+body.workbench .wb-desk-chat #inputbar #btn-send { color: #fffdf3; background: #316a54; }
+body.workbench .wb-desk-chat #inputbar #btn-stop { color: #a14736; background: #f9e4dc; }
+body.workbench .wb-desk-chat #inputbar #attach-list { max-height: min(13vh,100px); overflow: auto; }
+body.workbench .wb-desk-chat > .composer-message-queue { width: calc(100% - 20px); max-height: min(15vh,115px); margin: 2px 10px; flex-shrink: 0; overflow-y: auto; border-color: var(--desk-line); }
+body.workbench .wb-desk-chat > .composer-message-queue button { color: var(--desk-ink); }
+body.workbench .wb-desk-chat button:focus-visible { outline: 2px solid var(--desk-accent); outline-offset: 1px; }
+body.workbench .wb-desk-chat > :is(.composer-message-queue,#inputbar,.wb-desk-chat-head,.wb-desk-empty)[hidden] { display: none !important; }
+@container workbench-area (max-width: 730px) {
+  body.workbench .wb-desk { grid-template-columns: minmax(0,1fr); grid-template-rows: minmax(112px,32%) minmax(0,1fr); gap: 7px; padding: 8px; border-radius: 15px; }
+  .wb-desk .work-studio-view .ws-header { min-height: 30px; padding-block: 1px; }
+  .wb-desk .work-studio-view .ws-body { display: grid; grid-template-columns: minmax(0,1.5fr) minmax(118px,.65fr); gap: 8px; }
+  .wb-desk .work-studio-view .ws-caption { padding: 4px 7px; flex-wrap: nowrap; }
+  .wb-desk .work-studio-view .ws-scene { min-height: 0; }
+  .wb-desk .work-studio-view .ws-pose-label { display: none; }
+  .wb-desk .work-studio-view .ws-timeline { margin: 5px 0 0; min-height: 0; max-height: none; }
+  .wb-desk .work-studio-view .ws-actor { height: 94%; bottom: 0; }
+  .wb-desk .work-studio-view .ws-prop { min-width: 55px; padding: 4px 6px; bottom: 12%; }
+  .wb-desk .work-studio-view .ws-prop-mark { display: none; }
+  .wb-desk .work-studio-view .ws-action { max-width: 80%; font-size: 12px; }
+  body.workbench .wb-desk-chat > .wb-desk-chat-head { min-height: 34px; padding-block: 6px; }
+  body.workbench .wb-desk-chat > #transcript { gap: 12px; padding-block: 10px; }
+  body.workbench .wb-desk-chat #inputbar #prompt { min-height: 34px; }
+}
+@container workbench-area (max-width: 395px) {
+  .wb-desk .work-studio-view .ws-body { grid-template-columns: minmax(0,1.4fr) minmax(88px,.65fr); gap: 4px; }
+  .wb-desk .work-studio-view .ws-row { gap: 3px; padding-inline: 3px; }
+  .wb-desk .work-studio-view .ws-row-icon { width: 18px; height: 18px; }
+  .wb-desk .work-studio-view .ws-row-state { display: none; }
+  .wb-desk .work-studio-view .ws-prop-title { font-size: 11px; }
+  .wb-desk .work-studio-view .ws-actor { height: 92%; }
+  body.workbench .wb-desk-chat-head h2 { font-size: 15px; }
+}
+@media (max-height: 560px) {
+  body.workbench .wb-desk { padding: 5px; gap: 6px; }
+  body.workbench .wb-desk-chat > .wb-desk-chat-head { min-height: 30px; padding: 4px 11px; }
+  body.workbench .wb-desk-chat #inputbar #prompt { min-height: 29px; max-height: 62px; }
+  body.workbench .wb-desk-chat > #inputbar { margin-bottom: 4px; padding: 4px; }
+  .wb-desk .work-studio-view .ws-timeline { max-height: 100px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wb-desk *, .wb-desk *::before, .wb-desk *::after { scroll-behavior: auto !important; }
+}
+/* 在工作台的夜间场景中，窗框与纸页同样随主题变暗。 */
+:root[data-theme="dark"] body.workbench.wb-studio.side-closed {
+  --wb-desk-shell: #1d2822;
+  --wb-desk-side: #233129;
+  --wb-desk-active: #35493b;
+  --wb-desk-fore: #e6eee6;
+  --wb-desk-secondary: #b5c3b8;
+}
+:root[data-theme="dark"] body.workbench.wb-studio.side-closed :is(.app,.topbar,#main) {
+  background: var(--wb-desk-shell); color: var(--wb-desk-fore);
+}
+:root[data-theme="dark"] body.workbench.wb-studio.side-closed .rail {
+  background: var(--wb-desk-side); color: var(--wb-desk-fore); border-color: #405044;
+}
+:root[data-theme="dark"] body.workbench.wb-studio.side-closed :is(.wb-brand b,.rail .wb-nav button,.wb-recent .wb-chat,.wb-rail-settings) { color: var(--wb-desk-fore); }
+:root[data-theme="dark"] body.workbench.wb-studio.side-closed :is(.wb-brand small,.wb-nav-icon,.wb-recent-head,.wb-recent-head button,.wb-rail-toggle,.wb-tabs button,.wb-recent-more) { color: var(--wb-desk-secondary); }
+:root[data-theme="dark"] body.workbench.wb-studio.side-closed :is(.wb-tabs,.cmd-btn,.wb-info-toggle,.rail .wb-new) {
+  color: var(--wb-desk-fore); background: var(--wb-desk-side); border-color: #516456;
+}
+:root[data-theme="dark"] body.workbench.wb-studio.side-closed :is(.wb-tabs .selected,.rail .wb-nav button:hover,.wb-recent .wb-chat.current,.wb-recent .wb-chat:hover) {
+  color: var(--wb-desk-fore); background: var(--wb-desk-active);
+}
+:root[data-theme="dark"] body.workbench.wb-studio.side-closed :is(.wb-nav-secondary,.wb-recent) { border-color: #48594c; }

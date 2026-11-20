@@ -3,7 +3,7 @@
  */
 import { runRemote } from '../core/serverClient.js';
 import { mergeMarketSnapshots } from '../../shared/marketSnapshot.js';
-import { serverConnectionText, serverObservationActions } from '../core/serverConnection.js';
+import { serverConnectionText, serverObservationActions, serverTaskMayBeRunning } from '../core/serverConnection.js';
 import { toolLabel } from '../ui/transcript.js';
 import { isRetrievalStop } from '../../shared/retrievalStop.js';
 import * as ws from '../agent/workspace.js';
@@ -35,6 +35,7 @@ export function createRemoteTask(app) {
       remote: Boolean(app.server)
     };
     app.active = turn;
+    app.studioActivity?.begin(turn, { resume: true });
     app.liveBubble = bubble;
     app.setTask('processing', '服务器上正在做');
     const cards = new Map();
@@ -49,6 +50,7 @@ export function createRemoteTask(app) {
         onFile: (p) => pullServerFile(p, turn),
         emit: (e) => {
           if (turn.streamDone || ctrl.signal.aborted) return;
+          app.studioActivity?.record(turn, e);
           if (e.type === 'server_connection') {
             const message = serverConnectionText(e);
             turn.status = message;
@@ -78,7 +80,9 @@ export function createRemoteTask(app) {
           }
         }
       });
+      app.studioActivity?.finish(turn, 'done');
     } catch (e) {
+      app.studioActivity?.finish(turn, e.name === 'AbortError' ? 'stopped' : serverTaskMayBeRunning(e) ? 'waiting' : 'error');
       if (e.name !== 'AbortError') {
         failed = true;
         const message = app.friendlyError(e);
@@ -119,6 +123,7 @@ export function createRemoteTask(app) {
     const owner = fileIdentity();
     const current = () => app.server === client && owner === fileIdentity() && !turn.ctrl?.signal.aborted;
     if (!client) return;
+    app.studioActivity?.record(turn, { type: 'file', path });
     turn.pendingFiles ??= new Map();
     if (turn.pendingFiles.has(path)) return turn.pendingFiles.get(path);
     // 最多32件在途；未启动的文件不登记完成，之后可从服务器文件空间打开或再次通知重取。

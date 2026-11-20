@@ -1,0 +1,14 @@
+.workbench.wb-classic-stage #stage-wrap {
+  display: block !important;
+  height: 46vh !important;
+  min-height: 220px;
+  margin-bottom: 14px;
+  border-radius: 22px;
+  background: #07121e;
+  --text: #d9e7f2;
+  --muted: #7a92a6;
+  --bg: #03070d;
+  --accent: #55bcff;
+}
+.workbench.wb-classic-stage .wb-landing,
+.workbench.wb-classic-stage .stage-toggle { display: none; }

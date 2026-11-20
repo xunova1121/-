@@ -1,0 +1,208 @@
+/* 画面和动画只在工作室可见时加载，原有聊天与输入栏沿用各自的布局。 */
+.work-studio-view {
+  --ws-ink: #233a31;
+  --ws-dim: #55665e;
+  --ws-line: #d4dbcd;
+  --ws-panel: #fbfbf6;
+  --ws-tint: #e6eee3;
+  --ws-on-tint: #2c6655;
+  --ws-alert: #9b482f;
+  --ws-height: clamp(184px, 42vh, 430px);
+  box-sizing: border-box;
+  container-type: inline-size;
+  flex: 0 0 auto;
+  position: relative;
+  width: 100%;
+  height: var(--ws-height);
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  color: var(--ws-ink);
+  background: var(--ws-panel);
+  border: 1px solid var(--ws-line);
+  border-radius: 17px;
+  font: inherit;
+  text-align: left;
+}
+.work-studio-view[hidden], .work-studio-view [hidden] { display: none !important; }
+:root[data-theme="dark"] .work-studio-view {
+  --ws-ink: #e7eee6;
+  --ws-dim: #a9baae;
+  --ws-line: #445048;
+  --ws-panel: #202924;
+  --ws-tint: #32473a;
+  --ws-on-tint: #ade2bf;
+  --ws-alert: #f2af8c;
+  color-scheme: dark;
+}
+.work-studio-view *, .work-studio-view *::before, .work-studio-view *::after { box-sizing: border-box; }
+.work-studio-view :is(h2,h3,ol,p) { margin: 0; padding: 0; }
+.work-studio-view button { cursor: pointer; color: inherit; font: inherit; }
+.work-studio-view button:disabled { opacity: .42; cursor: default; }
+.work-studio-view button:focus-visible { outline: 2px solid var(--ws-on-tint); outline-offset: -2px; }
+.work-studio-view .ws-header {
+  display: flex; align-items: center; gap: 9px; min-width: 0;
+  flex: none; min-height: 43px; padding: 5px 12px;
+  border-bottom: 1px solid var(--ws-line);
+}
+.work-studio-view .ws-heading { color: var(--ws-ink); font-size: 17px; font-weight: 720; line-height: 1.2; white-space: nowrap; }
+.work-studio-view .ws-mode {
+  color: var(--ws-on-tint); background: var(--ws-tint); padding: 2px 8px;
+  border-radius: 18px; font-size: 11px; line-height: 1.5; white-space: nowrap;
+}
+.work-studio-view .ws-playback-controls { display: flex; gap: 4px; margin-left: auto; align-items: center; }
+.work-studio-view .ws-control {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 29px; min-height: 29px; padding: 3px 8px; margin: 0;
+  color: var(--ws-ink); background: transparent;
+  border: 1px solid var(--ws-line); border-radius: 8px; font-size: 12px; line-height: 1.3;
+}
+.work-studio-view .ws-control[data-action="back"], .work-studio-view .ws-control[data-action="forward"] { font: 20px/1 system-ui,sans-serif; }
+.work-studio-view .ws-control[data-action="live"] { color: var(--ws-on-tint); border-color: transparent; }
+.work-studio-view .ws-control:not(:disabled):hover, .work-studio-view .ws-row:hover { background: var(--ws-tint); }
+.work-studio-view .ws-body {
+  flex: 1; min-width: 0; min-height: 0;
+  display: grid; grid-template-columns: minmax(0,2.5fr) minmax(155px,1fr);
+}
+.work-studio-view .ws-performance { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.work-studio-view .ws-scene {
+  --ws-camera: 52%; --ws-x: 36%; --ws-obj: 68%;
+  position: relative; isolation: isolate; flex: 1; min-height: 0; overflow: hidden;
+  background-color: #d9dbca; background-size: cover; background-position: var(--ws-camera) 54%;
+}
+.work-studio-view[data-visible="true"] .ws-scene { background-image: url('./assets/workStudio/studio.webp'); }
+.work-studio-view .ws-pose-label {
+  position: absolute; z-index: 4; top: 10px; left: 11px; padding: 3px 9px;
+  border-radius: 7px; color: #344c43; background: #fffcf1ec;
+  border: 1px solid #fff8; font-size: 11px; font-weight: 650; line-height: 1.4;
+  box-shadow: 0 2px 6px #34432f14;
+}
+.work-studio-view .ws-actor {
+  position: absolute; z-index: 2; left: var(--ws-x); bottom: 5%; transform: translateX(-50%);
+  height: 73%; max-height: 210px; aspect-ratio: 1; pointer-events: none;
+}
+.work-studio-view .ws-actor::before {
+  content: ''; position: absolute; left: 27%; width: 46%; bottom: 1%; height: 7%;
+  border-radius: 50%; background: #554f4b54; filter: blur(4px);
+}
+.work-studio-view .ws-sprite {
+  position: absolute; inset: 0; background-size: 300% 200%; background-repeat: no-repeat;
+  background-position: 50% 0; transform-origin: 50% 93%;
+}
+.work-studio-view[data-visible="true"] .ws-sprite,
+.work-studio-view[data-visible="true"] .ws-row-icon { background-image: url('./assets/workStudio/mascot.webp'); }
+.work-studio-view[data-visible="true"][data-pose="run"] .ws-sprite {
+  background-image: url('./assets/workStudio/run.webp'); background-size: 200% 200%;
+  background-position: 0 0; animation: ws-run-frames .62s steps(1,end) infinite, ws-travel 2.4s ease-in-out infinite;
+}
+.work-studio-view[data-pose="idle"] .ws-scene, .work-studio-view[data-pose="stop"] .ws-scene { --ws-x: 47%; }
+.work-studio-view[data-pose="run"] .ws-scene { --ws-camera: 28%; --ws-x: 33%; }
+.work-studio-view[data-pose="think"] .ws-scene { --ws-x: 34%; --ws-camera: 45%; }
+.work-studio-view[data-pose="edit"] .ws-scene { --ws-x: 41%; --ws-camera: 53%; }
+.work-studio-view[data-pose="stomp"] .ws-scene, .work-studio-view[data-pose="repair"] .ws-scene { --ws-x: 41%; --ws-camera: 68%; }
+.work-studio-view[data-pose="idle"] .ws-sprite { animation: ws-breathe 4.8s ease-in-out infinite; }
+.work-studio-view[data-pose="think"] .ws-sprite { animation: ws-think 3.4s ease-in-out infinite; }
+.work-studio-view[data-pose="edit"] .ws-sprite { background-position: 100% 0; animation: ws-draw 1.5s ease-in-out infinite; }
+.work-studio-view[data-pose="stomp"] .ws-sprite { background-position: 0 100%; animation: ws-stomp 2.3s ease-in-out infinite; }
+.work-studio-view[data-pose="repair"] .ws-sprite { background-position: 50% 100%; animation: ws-push 2.4s ease-in-out infinite; }
+.work-studio-view[data-pose="cheer"] .ws-sprite { background-position: 100% 100%; animation: ws-cheer 2.1s ease-in-out infinite; }
+@keyframes ws-run-frames {
+  0%,100% { background-position: 0 0; } 25% { background-position: 100% 0; }
+  50% { background-position: 0 100%; } 75% { background-position: 100% 100%; }
+}
+@keyframes ws-travel { 0%,100% { transform: translateX(-13%); } 63%,83% { transform: translateX(12%); } }
+@keyframes ws-breathe { 50% { transform: translateY(-1%) scale(1.01); } }
+@keyframes ws-think { 0%,100% { transform: rotate(-2deg); } 50% { transform: rotate(2deg) translateY(-2%); } }
+@keyframes ws-draw { 0%,100% { transform: rotate(-2deg) translateX(-2%); } 35%,72% { transform: rotate(3deg) translate(3%,2%); } 54% { transform: rotate(0); } }
+@keyframes ws-stomp {
+  0%,55%,100% { transform: none; } 10%,37% { transform: translateY(-8%) rotate(-3deg); }
+  19%,46% { transform: translate(1%,1%) scale(1.035,.96); } 29% { transform: translateX(-1%) rotate(2deg); }
+}
+@keyframes ws-push { 0%,100% { transform: translateX(-6%) rotate(-2deg); } 46%,73% { transform: translate(7%,1%) rotate(4deg); } }
+@keyframes ws-cheer { 0%,100% { transform: rotate(-2deg); } 42% { transform: translateY(-8%) rotate(3deg); } 74% { transform: scale(1.025,.98); } }
+.work-studio-view .ws-prop {
+  position: absolute; z-index: 1; left: var(--ws-obj); bottom: 16%; transform: translateX(-50%) rotate(-3deg);
+  min-width: 68px; max-width: 35%; padding: 7px 11px; color: #3b5043; background: #fff9e8;
+  border: 1px solid #b9b8a1; border-radius: 7px; box-shadow: 0 3px #cbbfab,0 7px 11px #3a46372b;
+}
+.work-studio-view .ws-prop-mark { display: block; width: 21px; height: 3px; border-radius: 4px; background: #bac7b1; margin: 1px 0 6px; }
+.work-studio-view .ws-prop-title { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; font-size: clamp(12px,1.6vw,17px); line-height: 1.35; }
+.work-studio-view .ws-prop-stroke { display: block; width: 65%; height: 3px; margin-top: 5px; border-radius: 3px; background: #d9d6bc; }
+.work-studio-view .ws-prop[data-kind="file"]::before { content: ''; position: absolute; bottom: 100%; left: 5px; width: 27px; height: 6px; border-radius: 3px 3px 0 0; background: #e9cd87; }
+.work-studio-view[data-pose="think"] .ws-prop { box-shadow: -5px 3px #e6ddc7,0 8px 12px #3a46372b; }
+.work-studio-view[data-pose="edit"] .ws-prop { transform: translateX(-50%) rotate(4deg); }
+.work-studio-view[data-pose="edit"] .ws-prop-stroke { background: #db995a; transform-origin: left; animation: ws-underline 1.5s infinite; }
+@keyframes ws-underline { 0%,14% { transform: scaleX(.15); } 78%,100% { transform: scaleX(1); } }
+.work-studio-view[data-pose="stomp"] .ws-prop { border-color: #a95f45; transform: translateX(-50%) rotate(5deg); }
+.work-studio-view[data-pose="stomp"] .ws-prop::after, .work-studio-view[data-pose="cheer"] .ws-prop::after {
+  content: '!'; display: grid; place-content: center; position: absolute; right: -7px; top: -8px; width: 18px; height: 18px;
+  border-radius: 50%; background: #b3623b; color: white; font: 700 12px/1 system-ui,sans-serif;
+}
+.work-studio-view[data-pose="cheer"] .ws-prop::after { content: '✓'; background: #478064; }
+.work-studio-view[data-pose="repair"] .ws-prop { animation: ws-align 2.4s ease-in-out infinite; }
+@keyframes ws-align { 0%,100% {transform:translateX(-55%) rotate(4deg)} 45%,74% {transform:translateX(-46%) rotate(0)} }
+.work-studio-view .ws-caption { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 9px; min-width: 0; flex: none; padding: 7px 12px; }
+.work-studio-view .ws-action, .work-studio-view .ws-detail, .work-studio-view .ws-file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.work-studio-view .ws-action { color: var(--ws-ink); font-weight: 690; font-size: 14px; }
+.work-studio-view .ws-detail { min-width: 0; color: var(--ws-dim); font-size: 12px; }
+.work-studio-view .ws-file { font: 11px/1.4 ui-monospace,monospace; color: var(--ws-on-tint); border-radius: 4px; background: var(--ws-tint); padding: 2px 5px; }
+.work-studio-view .ws-timeline { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--ws-line); }
+.work-studio-view .ws-list-header { display: flex; align-items: baseline; gap: 6px; padding: 9px 11px 5px; }
+.work-studio-view .ws-list-header h3 { font-size: 13px; color: var(--ws-ink); font-weight: 650; }
+.work-studio-view .ws-count { font: 11px/1.2 ui-monospace,monospace; color: var(--ws-dim); }
+.work-studio-view .ws-list { list-style: none; flex: 1; overflow-y: auto; scroll-behavior: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 0 5px 5px; }
+.work-studio-view .ws-list li { list-style: none; padding: 0; margin: 2px 0; }
+.work-studio-view .ws-row { display: flex; align-items: center; width: 100%; padding: 3px 6px; gap: 6px; min-height: 34px; border: 1px solid transparent; border-radius: 7px; background: transparent; text-align: left; }
+.work-studio-view .ws-row[aria-current="step"] { border-color: var(--ws-line); background: var(--ws-tint); }
+.work-studio-view .ws-row-icon { flex: none; width: 29px; height: 29px; background-size: 300% 200%; background-position: 50% 0; }
+.ws-row[data-pose="run"] .ws-row-icon {background-position: 0 0}
+.ws-row[data-pose="edit"] .ws-row-icon {background-position: 100% 0}
+.ws-row[data-pose="stomp"] .ws-row-icon {background-position: 0 100%}
+.ws-row[data-pose="repair"] .ws-row-icon {background-position: 50% 100%}
+.ws-row[data-pose="cheer"] .ws-row-icon {background-position: 100% 100%}
+.work-studio-view .ws-row-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--ws-ink); }
+.work-studio-view .ws-row-state { flex: none; margin-left: auto; font-size: 10px; color: var(--ws-dim); }
+.work-studio-view .ws-row[data-status="error"] .ws-row-state { color: var(--ws-alert); }
+.work-studio-view .ws-empty { margin: auto 13px; color: var(--ws-dim); font-size: 12px; line-height: 1.5; }
+.work-studio-view .ws-list:empty { flex: 0; padding: 0; }
+.work-studio-view[data-visible="false"] *, .work-studio-view[data-mode="review"][data-playing="false"] .ws-scene * { animation-play-state: paused !important; }
+@container (max-width: 550px) {
+  .work-studio-view .ws-header { min-height: 36px; padding: 3px 8px; gap: 5px; }
+  .work-studio-view .ws-heading { font-size: 15px; }
+  .work-studio-view .ws-mode { font-size: 10px; padding: 2px 6px; }
+  .work-studio-view .ws-playback-controls { gap: 2px; }
+  .work-studio-view .ws-control { min-width: 26px; min-height: 27px; padding-inline: 6px; }
+  .work-studio-view .ws-body { display: flex; flex-direction: column; }
+  .work-studio-view .ws-performance { flex: 1; }
+  .work-studio-view .ws-timeline { flex: none; border-left: 0; border-top: 1px solid var(--ws-line); }
+  .work-studio-view .ws-list-header { display: none; }
+  .work-studio-view .ws-list { display: flex; overflow-x: auto; overflow-y: hidden; gap: 5px; padding: 3px 7px; scroll-snap-type: x proximity; }
+  .work-studio-view .ws-list li { flex-shrink: 0; max-width: 185px; scroll-snap-align: start; }
+  .work-studio-view .ws-row { min-height: 30px; }
+  .work-studio-view .ws-row-icon { width: 23px; height: 23px; }
+  .work-studio-view .ws-empty { margin: 4px 10px 8px; }
+  .work-studio-view .ws-caption { padding: 5px 9px; }
+  .work-studio-view .ws-actor { height: 77%; --ws-x: 33%; }
+}
+@supports not (container-type: inline-size) {
+  @media (max-width: 600px) {
+    .work-studio-view .ws-body { display: flex; flex-direction: column; }
+    .work-studio-view .ws-performance { flex: 1; }
+    .work-studio-view .ws-timeline { max-height: 68px; border-left: 0; border-top: 1px solid var(--ws-line); }
+    .work-studio-view .ws-list-header { display: none; }
+  }
+}
+@media (max-height: 590px) {
+  .work-studio-view { --ws-height: clamp(132px,39vh,215px); border-radius: 11px; }
+  .work-studio-view .ws-header { min-height: 32px; padding-block: 2px; }
+  .work-studio-view .ws-caption { flex-wrap: nowrap; padding-block: 3px; }
+  .work-studio-view .ws-detail { flex: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .work-studio-view *, .work-studio-view *::before, .work-studio-view *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+
+.reduced-motion .work-studio-view *,
+.reduced-motion .work-studio-view *::before,
+.reduced-motion .work-studio-view *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }

@@ -478,6 +478,7 @@ jobs:
           node e2e/workspace-management.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/image-followup.mjs
           node e2e/settings-layout.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/work-studio-mobile.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/mobile-theme.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/model-library.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/settings-navigation.mjs "$RUNNER_TEMP/jarvis-e2e/settings-navigation"
@@ -509,6 +510,7 @@ jobs:
           done
           mkdir -p "$RUNNER_TEMP/jarvis-e2e"
           node e2e/smoke.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/workbench-action-studio.mjs "$RUNNER_TEMP/jarvis-e2e"
           # 单文件测试先验证“没有网关”，随后会自己启动测试网关；不能复用网页版的服务。
           kill "$SERVER_PID"
           wait "$SERVER_PID" 2>/dev/null || true

@@ -81,6 +81,7 @@ export function createToolbox(app) {
       if (!background && !/^skills\//.test(path)) {
         out()?.fileLink?.(path, app.openInWorkspace);
         turn?.files.add(path);
+        if (turn) app.studioActivity?.record(turn, { type: 'file', path });
       }
     };
     return [

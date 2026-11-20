@@ -86,6 +86,7 @@ export function createConversations(app) {
     return transcriptWindow(app.history.length, { mobile: MOBILE, safe: document.documentElement.classList.contains('safe-render'), end });
   }
   function replayTranscript(end = app.history.length, { fromTop = false } = {}) {
+    app.studioActivity?.changed();
     app.drawer?.markRead(app.session);
     showChatTitle();
     const root = $('#transcript'),
@@ -379,6 +380,7 @@ export function createConversations(app) {
       }
     }
     app.history.splice(at);
+    app.studioActivity?.forget(app.session);
     app.session.updatedAt = Date.now();
     // 本机模式下截成空的：空对话不会存盘，旧记录会留着；先删掉，重新发的时候再存
     if (!app.server && !app.history.length) sessionsApi.remove(app.session.id).catch(() => {});
