@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createServer } from '../server/server.mjs';
 import { createServerMode } from '../server/serverMode.mjs';
+import { checkWorkshopHlsPlayback } from './workshop-hls-playback.mjs';
 
 // APK 从已登录服务器读取获准的频道配置；本机离线状态单独在正常入场时验收。
 export async function openMobileCloudRoom({ page, staticDir, openRoom, check }) {
@@ -64,6 +65,62 @@ async function checkProgramArea(video, label) {
   console.log(label + ' 节目占房间 ' + (geometry.fraction * 100).toFixed(1) + '%' + desk);
 }
 
+// 角色是透明图集。比较同一帧构图隐藏人物前后的房间像素，排除电视节目自身的变化。
+export async function checkTvActor(room, { working = false } = {}) {
+  const page = room.page();
+  const selector = working ? '.ws-scene:not([data-life-place]) .ws-actor .ws-sprite' :
+    '.ws-scene[data-life-pose="tv"][data-life-phase="settled"] .ws-life-pose';
+  const actor = room.locator(selector);
+  await actor.waitFor({ state: 'visible', timeout: 10000 });
+  const { clip, glass, sample } = await actor.evaluate((el, working) => {
+    const scene = el.closest('.ws-scene');
+    const stage = scene.getBoundingClientRect();
+    const sprite = el.getBoundingClientRect();
+    // 坐姿图集另一侧画了小电视，只取头发和脸，避免把露出的道具算成人物。
+    const mirrored = parseFloat(getComputedStyle(el).scale) < 0;
+    const left = sprite.left + (working ? 0 : mirrored ? .53 : .07) * sprite.width;
+    const top = sprite.top + (working ? 0 : .12) * sprite.height;
+    const sample = { width: sprite.width * (working ? 1 : .4), height: sprite.height * (working ? 1 : .46) };
+    const x = Math.ceil(Math.max(0, stage.left, left));
+    const y = Math.ceil(Math.max(0, stage.top, top));
+    return { clip: { x, y, width: Math.floor(Math.min(innerWidth, stage.right, left + sample.width)) - x,
+      height: Math.floor(Math.min(innerHeight, stage.bottom, top + sample.height)) - y }, sample,
+    glass: scene.querySelector('.ws-media-screen').getBoundingClientRect().toJSON() };
+  }, working);
+  assert(clip.width > 0 && clip.height > 0, '人物须在现场镜头内 ' + JSON.stringify(clip));
+  const shown = await page.screenshot({ clip, scale: 'css' });
+  const hidden = await page.screenshot({ clip, scale: 'css', style: selector + ' { opacity: 0 !important; }' });
+  const ink = await page.evaluate(async ({ frames, clip, glass }) => {
+    const colors = await Promise.all(frames.map(async base64 => {
+      const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+      const image = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+      const canvas = new OffscreenCanvas(image.width, image.height);
+      const draw = canvas.getContext('2d');
+      draw.drawImage(image, 0, 0);
+      image.close();
+      return draw.getImageData(0, 0, canvas.width, canvas.height).data;
+    }));
+    let pixels = 0, left = clip.width, right = 0, top = clip.height, bottom = 0;
+    for (let y = 0; y < clip.height; y++) {
+      for (let x = 0; x < clip.width; x++) {
+        if (x + clip.x >= glass.left - 1 && x + clip.x <= glass.right + 1 &&
+            y + clip.y >= glass.top - 1 && y + clip.y <= glass.bottom + 1) continue;
+        const i = (y * clip.width + x) * 4;
+        const diff = Math.abs(colors[0][i] - colors[1][i]) + Math.abs(colors[0][i+1] - colors[1][i+1]) +
+          Math.abs(colors[0][i+2] - colors[1][i+2]);
+        if (diff < 45) continue;
+        pixels++; left = Math.min(left, x); right = Math.max(right, x); top = Math.min(top, y); bottom = Math.max(bottom, y);
+      }
+    }
+    return { pixels, width: right - left + 1, height: bottom - top + 1 };
+  }, { frames: [shown, hidden].map(frame => frame.toString('base64')), clip, glass });
+  const faceVisible = working || (ink.width >= .72 * sample.width && ink.height >= .7 * sample.height &&
+    ink.pixels >= .28 * sample.width * sample.height);
+  assert(ink.pixels >= 160 && ink.width >= 14 && ink.height >= 18 && faceVisible,
+    (working ? '工作' : '观看') + '的真实未央须清晰出现在节目画面之外 ' + JSON.stringify({ ink, clip, glass }));
+  console.log((working ? '工作中的未央' : '观看电视的未央头部') + '可见 ' + ink.width + ' × ' + ink.height + ' 像素');
+}
+
 // 在真实视频标签播放一段生成的测试图像。测试只拦截许可地址，不连接外部电视或依赖某个节目的版权。
 export async function checkWorkshopTvPlayback({ page, context, room, output, platform }) {
   const videoUrl = 'https://media.cctv.com/workshop-fixture.webm';
@@ -78,6 +135,7 @@ export async function checkWorkshopTvPlayback({ page, context, room, output, pla
     const news = room.getByRole('button', { name: 'CCTV-13 新闻', exact: true });
     const standby = room.locator('.ws-tv-standby video');
     await open.click();
+    await room.getByRole('button', { name: 'CCTV-2 财经', exact: true }).click();
     const sample = await playing(page, standby);
     assert.match(await room.locator('.ws-tv-standby').innerText(), /非频道直播|非直播/);
     await checkProgramArea(sample, platform + ' 内置短片');
@@ -87,6 +145,7 @@ export async function checkWorkshopTvPlayback({ page, context, room, output, pla
     const handle = await playing(page, video);
     assert(await handle.evaluate(el => el.videoWidth === 320 && el.videoHeight === 180));
     await checkProgramArea(handle, platform + ' 已配置频道');
+    await checkTvActor(room);
     await page.screenshot({ path: path.join(output, platform + '-tv-configured.png') });
     await room.getByRole('button', { name: 'CCTV-2 财经', exact: true }).click();
     await requireReleased(handle);
@@ -117,4 +176,5 @@ export async function checkWorkshopTvPlayback({ page, context, room, output, pla
     await context.unroute(config);
     await context.unroute(videoUrl);
   }
+  await checkWorkshopHlsPlayback({ page, context, room, platform, playing, requireReleased });
 }

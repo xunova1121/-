@@ -73,7 +73,7 @@
 .mobile-studio-sheet .ws-performance { flex: none; align-items: center; background: var(--room-wall); }
 /* 全景保留完整原画比例，近看仍以实际工作的台面为中心。 */
 .mobile-studio-sheet .work-studio-view .ws-scene {
-  flex: none; width: 100%; width: min(100%,45cqh);
+  flex: none; width: 100%; width: min(100%,62cqh);
   aspect-ratio: 1402 / 1122; container-type: size; background: var(--room-wall);
 }
 .mobile-studio-sheet .ws-caption {
@@ -137,7 +137,7 @@
 #mobile-work-studio .wy-jump-latest[hidden] { display: none; }
 .mobile-studio-entry:focus-visible, .mobile-studio-back:focus-visible { outline: 2px solid currentColor; }
 @container mobile-workroom (max-height: 620px) and (max-width: 599px) {
-  .mobile-studio-sheet .work-studio-view .ws-scene { width: min(100%,35cqh); }
+  .mobile-studio-sheet .work-studio-view .ws-scene { width: min(100%,53cqh); }
   .mobile-studio-sheet .ws-header { min-height: 34px; }
   .mobile-studio-sheet .mobile-studio-back { min-height: 32px; }
   .mobile-studio-chat-head { min-height: 25px; }
@@ -153,5 +153,5 @@
   .mobile-studio-sheet .ws-timeline { min-height: 0; overflow: hidden; }
 }
 @media (min-width:600px) and (min-aspect-ratio: 1.25) {
-  .mobile-studio-sheet[open] { grid-template: minmax(0,1fr) / minmax(0,46%) minmax(0,1fr); }
+  .mobile-studio-sheet[open] { grid-template: minmax(0,1fr) / minmax(0,54%) minmax(0,1fr); }
 }

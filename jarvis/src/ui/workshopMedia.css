@@ -30,10 +30,6 @@
   border: 1px solid var(--ws-line); border-radius: 12px;
   box-shadow: 0 7px 28px #19261750;
 }
-.work-studio-view[data-media-open] .ws-scene::after {
-  content: ''; position: absolute; inset: 0; z-index: 3; pointer-events: none;
-  background: linear-gradient(90deg,#1c281c4f,#1c281c0e);
-}
 .work-studio-view .ws-media-panel[data-device="monitor"] .ws-media-header { border-bottom: 2px solid var(--ws-on-tint); }
 .work-studio-view .ws-media-panel[data-device="monitor"] .ws-media-header h3,
 .work-studio-view .ws-media-panel[data-device="monitor"] .ws-media-title { font-family: "Songti SC","Noto Serif CJK SC",serif; }
@@ -47,8 +43,6 @@
 .ws-media-credit, .ws-media-updated { margin: 0; color: var(--ws-dim); font: 12px/1.45 var(--font-ui,sans-serif); }
 .ws-media-credit:empty, .ws-media-updated:empty { display: none; }
 .ws-media-actions, .ws-media-nav, .ws-media-channels { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
-.ws-media-nav { border-top: 1px solid var(--ws-line); padding-top: 6px; }
-.ws-media-nav button:last-child { margin-inline-start: auto; }
 .work-studio-view .ws-media-panel :is(button,a) {
   display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 4px 9px;
   border: 1px solid var(--ws-line); border-radius: 7px; background: var(--ws-panel); color: var(--ws-ink);
@@ -59,19 +53,31 @@
 .ws-media-panel :is(button,a):focus-visible, .ws-monitor-ticker:focus-visible { outline: 2px solid var(--ws-on-tint); outline-offset: -2px; }
 .ws-media-panel button:disabled { opacity: .55; cursor: default; }
 /* 镜头对准电视时，节目占据主要面积。右侧留出真实工位，底边是遥控器。 */
+.work-studio-view .ws-scene:has(.ws-media-panel[data-device="tv"]) {
+  --tv-inset: 1cqw;
+  /* 预留 40px 遥控区并计入机壳厚度。聊天队列变高时，剩余画幅也可充分利用。 */
+  --tv-width: min(85.5cqw, calc((100cqh - 42px) * 1.7777 - .4cqw));
+}
+.work-studio-view[data-workshop][data-visible="true"] .ws-scene:has(.ws-media-panel[data-device="tv"]) {
+  background: #bda27e url('./assets/workStudio/workshop.webp') center / cover;
+}
 .work-studio-view .ws-media-panel[data-device="tv"] {
   inset: 0; width: auto; max-height: none; padding: 0; display: block;
   border: none; border-radius: 0; box-shadow: none; background: transparent; pointer-events: none;
 }
 .ws-media-panel[data-device="tv"] .ws-media-header {
-  position: absolute; z-index: 1; inset: auto 2% 2% auto; padding: 0; border: 0; pointer-events: auto;
+  position: absolute; z-index: 1; inset: auto 1% 4px auto; padding: 0; border: 0; pointer-events: auto;
+}
+.ws-media-panel[data-device="tv"]::before {
+  content: ''; position: absolute; inset: auto 0 0; height: 39px;
+  background: var(--ws-panel); border-top: 1px solid var(--ws-line); pointer-events: none;
 }
 .ws-media-panel[data-device="tv"] .ws-media-header h3 { display: none; }
 .ws-media-panel[data-device="tv"] .ws-media-scroll,
 .ws-media-panel[data-device="tv"] .ws-media-tv { display: contents; }
 .ws-media-receiver {
-  position: absolute; left: 2%; top: calc(49% - 16px); transform: translateY(-50%);
-  width: min(91%, calc((98cqh - 40px) * 1.77)); min-width: 0; padding: 1% 3% 1.2% 1%;
+  position: absolute; left: var(--tv-inset); top: calc(50% - 20px); transform: translateY(-50%);
+  width: var(--tv-width); min-width: 0; padding: .75% 1.9% .9% .65%;
   box-sizing: border-box; border-radius: clamp(6px,1.9cqw,19px);
   background: repeating-linear-gradient(0deg,transparent 0 2px,#51301d16 2px 3px),
     linear-gradient(125deg,#d3ad75,#99673d 12%,#684227 56%,#a77542 81%,#633c24);
@@ -84,7 +90,7 @@
   box-shadow: 0 0 0 1.5px #342c23,0 0 0 2.5px #bfa06e;
 }
 .ws-tv-grille {
-  position: absolute; right: .7%; top: 9%; bottom: 9%; width: 1.9%; border-radius: 7px;
+  position: absolute; right: .45%; top: 9%; bottom: 9%; width: 1.1%; border-radius: 7px;
   background: repeating-linear-gradient(0deg,#4e3726 0 1px,transparent 2px 4px);
 }
 .ws-tv-grille::before,.ws-tv-grille::after {
@@ -94,7 +100,7 @@
 }
 .ws-tv-grille::after { top: 16%; }
 .ws-media-remote {
-  position: absolute; inset: auto calc(2% + 67px) 2% 2%; gap: 4px; display: flex; align-items: center;
+  position: absolute; inset: auto calc(2% + 67px) 4px 1%; gap: 4px; display: flex; align-items: center;
   overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; pointer-events: auto;
 }
 .ws-media-remote > *, .ws-media-channels > * { flex: none; }
@@ -113,10 +119,45 @@
 .work-studio-view[data-media-open][data-workshop] .ws-floorplan {
   width: 125%; left: 60%; bottom: 50%; transform: translate(-50%,50%);
 }
+.ws-scene:not(:has(.ws-media-panel[data-device="tv"])) .ws-floorplan { translate: none !important; }
+.work-studio-view[data-workshop] .ws-scene:has(.ws-media-panel[data-device="tv"]) .ws-floorplan {
+  /* 按当前工位的脚底取景。书架、纸面、键盘和角色同步移动，工作时仍使用原动作。 */
+  width: 94%; bottom: auto; top: 73%;
+  left: calc((100% + var(--tv-inset) + var(--tv-width)) / 2);
+  transform: translate(calc(0% - var(--ws-station-x)),calc(var(--ws-station-floor) - 100%));
+}
+.work-studio-view[data-workshop] .ws-scene[data-life-place]:has(.ws-media-panel[data-device="tv"]) .ws-floorplan {
+  transform: translate(calc(0% - var(--life-x)),calc(0% - var(--life-ground)));
+}
+.ws-scene[data-life-pose="tv"][data-life-phase="settled"]:has(.ws-media-panel[data-device="tv"]) .ws-life-pose {
+  /* 图集左侧是坐在凳子上的未央。让她朝向放大的电视，保留呼吸动画和凳子。 */
+  clip-path: inset(0 45% 0 0); scale: -1 1; translate: -23% 0;
+}
+.ws-scene[data-life-pose="tv"]:has(.ws-media-panel[data-device="tv"]) .ws-life-shadow {
+  left: 26%; right: 24%;
+}
 .work-studio-view[data-media-open] .ws-scene > .ws-room-tools { visibility: hidden; }
+.work-studio-view[data-media-open] .ws-scene:not([data-life-pose="tv"]):has(.ws-media-panel[data-device="tv"]) > .ws-room-tools {
+  visibility: visible; inset: 17% 1% auto auto; padding: 0;
+}
+.ws-scene:has(.ws-media-panel[data-device="tv"]) .ws-room-tools > :not([data-room-action="light"]) { display: none; }
+.ws-scene:has(.ws-media-panel[data-device="tv"]) .ws-room-tools [data-room-action="light"] { padding-inline: 5px; }
+@container (max-width: 480px) {
+  .ws-scene:has(.ws-media-panel[data-device="tv"]) .ws-room-tools [data-room-action="light"]::before { display: none; }
+}
 .wb-desk .work-studio-view[data-media-open] .ws-scene { aspect-ratio: 1.6; }
-.work-studio-view:has(.ws-media-panel[data-device="tv"]) :is(.ws-caption,.ws-timeline,.ws-playback-controls) { display: none; }
+.work-studio-view[data-media-open] :is(.ws-caption,.ws-timeline,.ws-playback-controls) { display: none; }
+.work-studio-view[data-media-open]:has(.ws-media-panel[data-device="monitor"]) .ws-floorplan {
+  width: max(125cqw,125cqh); left: auto; right: 6%; transform: translate(22%,50%);
+}
 @container workbench-area (min-width: 731px) {
+  body.workbench .wb-desk:has(.ws-media-panel[data-device="monitor"]) {
+    grid-template-columns: minmax(0,1.9fr) minmax(252px,1fr);
+  }
+  .wb-desk .work-studio-view:has(.ws-media-panel[data-device="monitor"]) :is(.ws-performance,.ws-scene) { flex: 1; }
+  .wb-desk .work-studio-view:has(.ws-media-panel[data-device="monitor"]) .ws-scene {
+    aspect-ratio: auto; border-radius: 14px;
+  }
   body.workbench .wb-desk:has(.ws-media-panel[data-device="tv"]) {
     grid-template-columns: minmax(0,1fr); grid-template-rows: minmax(0,1fr) minmax(134px,18%); gap: 8px;
   }
@@ -164,6 +205,15 @@
 @container mobile-workroom (min-width: 600px) and (min-aspect-ratio: 1.25) {
   .mobile-studio-sheet .work-studio-view:has(.ws-media-panel[data-device="tv"]) { align-self: start; height: auto; }
   .mobile-studio-sheet .work-studio-view[data-media-open] .ws-scene { max-height: 67cqh; }
+}
+/* 阅读时为报纸增加高度。下方仍留有独立的会话和输入栏，键盘弹起时按实际可见高度收缩。 */
+.mobile-studio-sheet .work-studio-view:has(.ws-media-panel[data-device="monitor"]) .ws-scene {
+  width: 100%; height: min(64cqh,calc(100cqh - 150px)); max-height: none; aspect-ratio: auto;
+}
+@container mobile-workroom (min-width: 600px) and (min-aspect-ratio: 1.25) {
+  .mobile-studio-sheet .work-studio-view:has(.ws-media-panel[data-device="monitor"]) .ws-scene {
+    height: calc(100cqh - 47px);
+  }
 }
 @container (max-width: 560px) {
   .ws-media-remote .ws-channel-prefix { display: none; }

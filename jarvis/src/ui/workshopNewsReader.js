@@ -5,13 +5,14 @@ export function createWorkshopNewsReader(ui, feed) {
   const content = document.createElement('div');
   content.className = 'ws-article-content';
   content.setAttribute('aria-live', 'polite');
-  ui.actions.before(content);
+  ui.news.append(content);
   let item = null;
   let request;
   let expanded = false;
   let failed = false;
 
   function showSummary() {
+    ui.scroll.scrollTop = 0;
     content.hidden = !item?.summary;
     content.textContent = item?.summary ? '导语 · ' + item.summary : '';
     ui.original.textContent = '阅读原文';
@@ -28,6 +29,7 @@ export function createWorkshopNewsReader(ui, feed) {
     if (!item) return;
     if (expanded && !failed) { reset(); return; }
     expanded = true;
+    ui.scroll.scrollTop = 0;
     failed = false;
     const pending = new AbortController();
     request = pending;

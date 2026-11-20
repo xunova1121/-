@@ -32,7 +32,7 @@ body.workbench .wb-desk {
   padding: clamp(10px,1.25vw,21px);
   overflow: hidden;
   display: grid;
-  grid-template-columns: minmax(0,.90fr) minmax(0,1.10fr);
+  grid-template-columns: minmax(0,1.55fr) minmax(0,1fr);
   grid-template-rows: minmax(0,1fr);
   gap: clamp(12px,1.25vw,23px);
   border: 1px solid #d4d3bd;
@@ -103,6 +103,7 @@ body.workbench.wb-studio .wb-desk:not([hidden])::before {
   padding-bottom: 3px; border: 1px solid var(--desk-line); border-radius: 13px;
   background: var(--desk-chip); box-shadow: 0 3px 8px var(--desk-shadow);
 }
+.wb-desk .work-studio-view .ws-timeline:has(.ws-list:empty) { display: none; }
 .wb-desk .work-studio-view .ws-list-header { display: flex; padding: 6px 11px 2px; }
 .wb-desk .work-studio-view .ws-list { display: block; overflow: auto; padding: 0 5px 4px; }
 .wb-desk .work-studio-view .ws-list li { max-width: none; }
@@ -200,9 +201,10 @@ body.workbench .wb-desk-chat > .composer-message-queue button { color: var(--des
 body.workbench .wb-desk-chat button:focus-visible { outline: 2px solid var(--desk-accent); outline-offset: 1px; }
 body.workbench .wb-desk-chat > :is(.composer-message-queue,#inputbar,.wb-desk-chat-head,.wb-desk-empty)[hidden] { display: none !important; }
 @container workbench-area (max-width: 730px) {
-  body.workbench .wb-desk { grid-template-columns: minmax(0,1fr); grid-template-rows: minmax(136px,38%) minmax(0,1fr); gap: 7px; padding: 8px; border-radius: 15px; }
+  body.workbench .wb-desk { grid-template-columns: minmax(0,1fr); grid-template-rows: minmax(136px,46%) minmax(0,1fr); gap: 7px; padding: 8px; border-radius: 15px; }
   .wb-desk .work-studio-view .ws-header { min-height: 30px; padding-block: 1px; }
   .wb-desk .work-studio-view .ws-body { display: grid; grid-template-columns: minmax(0,1.34fr) minmax(118px,.8fr); gap: 8px; }
+  .wb-desk .work-studio-view .ws-body:has(.ws-list:empty) { grid-template-columns: minmax(0,1fr); }
   .wb-desk .work-studio-view .ws-caption { padding: 4px 7px; flex-wrap: nowrap; }
   .wb-desk .work-studio-view .ws-scene { --ws-aim-y: 49%; flex: 1 1 0; aspect-ratio: auto; min-height: 0; margin-top: 5px; }
   .wb-desk .work-studio-view .ws-floorplan { width: min(100%, 220cqh); --ws-floor-shift: 14%; }

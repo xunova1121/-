@@ -1,5 +1,5 @@
 import './workshopLifeScene.css';
-import { routineStations } from './workshopMotion.js';
+import { routineStations, feetInRoom, walkAcrossRoom } from './workshopMotion.js';
 
 // 百分比坐标以完整车间为准。每个动作的两帧来自同一组角色、道具和镜头。
 const poses = {
@@ -20,13 +20,6 @@ function part(parent, className) {
   el.setAttribute('aria-hidden', 'true');
   parent.append(el);
   return el;
-}
-
-function feetInRoom(actor, floor) {
-  const room = floor.getBoundingClientRect();
-  if (!room.width || !room.height || !actor) return null;
-  const a = actor.getBoundingClientRect();
-  return { x: (a.left + a.width / 2 - room.left) / room.width, y: (a.bottom - room.top) / room.height };
 }
 
 export function createWorkshopLifeScene(scene, floor, onChange = () => {}) {
@@ -93,8 +86,7 @@ export function createWorkshopLifeScene(scene, floor, onChange = () => {}) {
     if (distance < 4) return;
     actor.dataset.facing = dx > 0 ? 'left' : 'right';
     scene.dataset.lifePhase = 'walking';
-    walk = actor.animate([{ translate: dx + 'px ' + dy + 'px' }, { translate: '0px 0px' }],
-      { duration: Math.min(850, Math.max(250, distance * 3)), easing: 'ease-in-out' });
+    walk = walkAcrossRoom(actor, dx, dy, Math.min(850, Math.max(250, distance * 3)));
     walk.onfinish = () => {
       stopWalk();
       if (pose === 'lamp') applyLamp();

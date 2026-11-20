@@ -18,6 +18,20 @@ function link(label) {
   return el;
 }
 
+export function renderWorkshopChannelButtons(container, channels) {
+  container.replaceChildren(...channels.map(channel => {
+    const ch = button('');
+    ch.dataset.channel = channel.id;
+    ch.setAttribute('aria-label', channel.label);
+    if (channel.kind === 'cctv') {
+      ch.append(mediaNode('span', 'ws-channel-prefix', 'CCTV-'), channel.number + ' ' + channel.title);
+    } else {
+      ch.textContent = channel.title;
+    }
+    return ch;
+  }));
+}
+
 export function mediaControls(scene, floor, channels, player) {
   function device(id, label) {
     const el = button(label, 'ws-device');
@@ -60,7 +74,9 @@ export function mediaControls(scene, floor, channels, player) {
   const refresh = button('刷新新闻');
   const nav = mediaNode('div', 'ws-media-nav');
   nav.append(prev, next, refresh);
-  news.append(title, credit, actions, latest, nav);
+  const newsTools = mediaNode('div', 'ws-news-tools');
+  newsTools.append(actions, nav);
+  news.append(title, credit, latest);
   const television = mediaNode('div', 'ws-media-tv');
   const receiver = mediaNode('div', 'ws-media-receiver');
   const glass = mediaNode('div', 'ws-tv-glass ws-media-screen');
@@ -70,29 +86,28 @@ export function mediaControls(scene, floor, channels, player) {
   receiver.append(glass, grille);
   const channelButtons = mediaNode('div', 'ws-media-channels');
   channelButtons.setAttribute('role', 'group');
-  channelButtons.setAttribute('aria-label', '央视频道');
-  for (const channel of channels) {
-    const ch = button('');
-    ch.dataset.channel = channel.id;
-    ch.setAttribute('aria-label', channel.label);
-    ch.append(mediaNode('span', 'ws-channel-prefix', 'CCTV-'), channel.number + ' ' + channel.title);
-    channelButtons.append(ch);
-  }
+  channelButtons.setAttribute('aria-label', '电视频道');
+  renderWorkshopChannelButtons(channelButtons, channels);
   const network = link('央视网');
   network.setAttribute('aria-label', '去央视网观看');
   const power = button('关机');
   power.setAttribute('aria-label', '关闭电视');
-  const remote = mediaNode('div', 'ws-media-remote');
-  remote.append(channelButtons, network, power);
+  const manageSources = button('视频源', 'ws-source-switch');
+  manageSources.setAttribute('aria-label', '管理视频源');
+  manageSources.setAttribute('aria-expanded', 'false');
+  const stations = mediaNode('div', 'ws-tv-stations');
+  stations.append(channelButtons, network, power);
+  const remote = mediaNode('div', 'ws-media-remote ws-tv-controls');
+  remote.append(manageSources, stations);
   television.append(receiver, remote);
   const task = mediaNode('div', 'ws-media-work');
   const taskTitle = mediaNode('h4', 'ws-media-title');
   const taskDetail = mediaNode('p', 'ws-media-credit');
   task.append(taskTitle, taskDetail);
   scroll.append(news, television, task);
-  panel.append(header, scroll);
+  panel.append(header, scroll, newsTools);
   scene.append(ticker);
   return { monitor, mini, tv, ticker, tickerLabel, tickerText, panel, heading, back, switchScreen,
-    news, title, credit, latest, original, actions, ask, brief, prev, next, refresh,
-    television, channelButtons, network, power, task, taskTitle, taskDetail, scroll };
+    news, newsTools, title, credit, latest, original, actions, ask, brief, prev, next, refresh,
+    television, channelButtons, manageSources, network, power, task, taskTitle, taskDetail, scroll };
 }

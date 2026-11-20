@@ -147,3 +147,65 @@ describe('工作台央视播放器', () => {
     expect(player.standby.children[0].children[1].textContent).toContain('未能播放风景短片');
   });
 });
+
+describe('工作台自定义视频源与 HLS 解码', () => {
+  const channel = { label: '试播', source: { url: 'https://video.example/live?station=1', format: 'hls' } };
+  function setupHls() {
+    const engine = { on: vi.fn(), loadSource: vi.fn(), attachMedia: vi.fn(), destroy: vi.fn() };
+    class Hls {
+      static isSupported = () => true;
+      static Events = { ERROR: 'error' };
+      static ErrorTypes = { NETWORK_ERROR: 'networkError' };
+      constructor() { return engine; }
+    }
+    return { engine, Hls };
+  }
+  it('原生 HLS 直放，设备解码失败才改用内置播放器', async () => {
+    mockPlayerDocument(() => 'probably');
+    const { engine, Hls } = setupHls();
+    const loadHls = vi.fn().mockResolvedValue({ default: Hls });
+    const player = createWorkshopTvPlayer({ loadHls });
+    await player.preview(channel);
+    const video = player.element.children[0];
+    expect(video.src).toBe(channel.source.url);
+    expect(loadHls).not.toHaveBeenCalled();
+    video.onerror();
+    await vi.waitFor(() => expect(engine.attachMedia).toHaveBeenCalledWith(video));
+    player.close();
+    expect(engine.destroy).toHaveBeenCalledOnce();
+  });
+
+  it('桌面通过 HLS 解码，只在致命错误时显示重试，关掉旧播放器后不再响应旧错误', async () => {
+    mockPlayerDocument();
+    const { engine, Hls } = setupHls();
+    const player = createWorkshopTvPlayer({ loadHls: async () => ({ default: Hls }) });
+    await player.preview(channel);
+    expect(engine.loadSource).toHaveBeenCalledWith(channel.source.url);
+    const [[, failure]] = engine.on.mock.calls;
+    failure('error', { fatal: false });
+    expect(player.element.hidden).toBe(false);
+    failure('error', { fatal: true, type: 'networkError' });
+    expect(engine.destroy).toHaveBeenCalledOnce();
+    expect(player.standby.children[0].children[1].textContent).toContain('直播');
+    await player.standby.children[0].children[2].onclick();
+    expect(engine.loadSource).toHaveBeenCalledTimes(2);
+    player.close();
+    failure('error', { fatal: true, type: 'networkError' });
+    expect(player.standby.hidden).toBe(true);
+  });
+
+  it('换台时异步加载的旧 HLS 解码器不能接管新画面，未保存的试播不改变记忆选台', async () => {
+    mockPlayerDocument();
+    let resolve;
+    const loading = new Promise(r => { resolve = r; });
+    const { engine, Hls } = setupHls();
+    const player = createWorkshopTvPlayer({ loadHls: () => loading, getPlayers: () => sources });
+    const first = player.preview(channel);
+    await player.select('cctv2');
+    resolve({ default: Hls });
+    await first;
+    expect(engine.attachMedia).not.toHaveBeenCalled();
+    expect(player.element.children[0].src).toBe(sources.cctv2.url);
+    expect(() => player.preview({ label: '测试', source: { url: 'javascript:0' } })).toThrow();
+  });
+});

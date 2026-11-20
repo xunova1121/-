@@ -12,9 +12,6 @@
 .work-studio-view[data-workshop][data-visible="true"] .ws-floorplan {
   background: url('./assets/workStudio/workshop.webp') center / 100% 100% no-repeat;
 }
-:root[data-theme="dark"] .work-studio-view[data-workshop] .ws-floorplan::before {
-  content: ''; position: absolute; inset: 0; background: #1125283b; pointer-events: none;
-}
 /* 近景使用现场原节点，手和工具的相对坐标始终相同。 */
 .work-studio-view[data-workshop][data-zoom="detail"] .ws-scene { --ws-scene-scale: 2; }
 .work-studio-view[data-workshop] .ws-floorplan > .ws-actor {

@@ -5,17 +5,20 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 import JSZip from 'jszip';
 import { createServer } from '../server/server.mjs';
-import { checkWorkshopTvPlayback, openMobileCloudRoom } from './workshop-tv-playback.mjs';
+import { checkWorkshopTvPlayback, checkTvActor, openMobileCloudRoom } from './workshop-tv-playback.mjs';
+import { checkWorkshopLighting } from './workshop-lighting.mjs';
+import { checkWorkshopSourceManagement } from './workshop-source-management.mjs';
 
 const output = path.resolve(process.argv[2] || '/tmp/weiyang-workshop-media');
 const briefFile = '工作台新闻简报.docx';
 const now = Date.now();
-const items = ['城市图书馆开放夜间借阅', '社区科学讲堂公布新一期安排'].map((title, i) => ({
+const items = ['城市图书馆开放夜间借阅，首批社区阅览室同步延长开放时间', '社区科学讲堂公布新一期安排'].map((title, i) => ({
   title, source: '央视网', publishedAt: new Date(now - (i + 1) * 60000).toISOString(),
   url: `https://news.cctv.com/2026/11/20/ARTIworkshop${i + 1}.shtml`
 }));
 const servers = [];
-const browser = await chromium.launch();
+// CI 默认用 Playwright Chromium；支持 AVC 的系统浏览器还可覆盖原生 HLS/TS。
+const browser = await chromium.launch({ executablePath: process.env.WORKSHOP_CHROMIUM_EXECUTABLE });
 await mkdir(output, { recursive: true });
 
 async function openRoom(page, mobile) {
@@ -64,6 +67,51 @@ async function checkLayout(room) {
     '电视和新闻须嵌在可见的办公室画面里，输入框应可点击 ' + JSON.stringify(layout));
 }
 
+// 核对真正露出的文字行和最后一个字。只检查容器的 scrollHeight 会漏掉被工具栏盖住的正文。
+async function checkReadingSpace(monitor, minimumLines) {
+  const port = monitor.locator('.ws-media-scroll');
+  const story = monitor.locator('.ws-article-content');
+  await port.evaluate(el => { el.scrollTop = 0; });
+  const layout = await story.evaluate(el => {
+    const viewport = el.closest('.ws-media-scroll').getBoundingClientRect();
+    const title = el.closest('.ws-media-news').querySelector('.ws-media-title');
+    const titleRange = document.createRange();
+    titleRange.selectNodeContents(title);
+    const titleEnd = [...titleRange.getClientRects()].at(-1);
+    let lines = 0;
+    for (const paragraph of el.querySelectorAll('p')) {
+      const range = document.createRange();
+      range.selectNodeContents(paragraph);
+      for (const line of range.getClientRects()) {
+        if (line.top >= viewport.top && line.bottom <= viewport.bottom &&
+            paragraph.contains(document.elementFromPoint(line.x + 1, line.y + line.height / 2))) lines++;
+      }
+    }
+    return {
+      lines,
+      overflows: el.scrollWidth > el.clientWidth + 1,
+      titleVisible: titleEnd.top >= viewport.top - 1 && titleEnd.bottom <= viewport.bottom + 1 &&
+        title.contains(document.elementFromPoint(titleEnd.x + 1, titleEnd.y + titleEnd.height / 2))
+    };
+  });
+  assert(layout.titleVisible && !layout.overflows && layout.lines >= minimumLines,
+    '打开报道后应能看全标题并立即阅读多行正文 ' + JSON.stringify(layout));
+  const last = story.locator('p').last();
+  await last.scrollIntoViewIfNeeded();
+  const endVisible = await last.evaluate(el => {
+    const lastWord = document.createRange();
+    lastWord.setStart(el.lastChild, el.lastChild.length - 1);
+    lastWord.setEndAfter(el.lastChild);
+    const end = lastWord.getClientRects()[0];
+    const scroll = el.closest('.ws-media-scroll');
+    return scroll.scrollTop > 0 && ['auto', 'scroll'].includes(getComputedStyle(scroll).overflowY) &&
+      el.contains(document.elementFromPoint(end.x + end.width / 2, end.y + end.height / 2));
+  });
+  assert(endVisible, '可滚到长篇报道末段且最后一个字无遮挡');
+  await port.evaluate(el => { el.scrollTop = 0; });
+  return layout.lines;
+}
+
 function modelResponse(request, calls) {
   const lastIndex = request.messages.findLastIndex(row => row.role === 'user');
   const question = request.messages[lastIndex]?.content;
@@ -99,6 +147,14 @@ async function check(mobile) {
     return route.fulfill({ json: { items, updatedAt: now, stale: false } });
   });
   const articleText = '记者在现场看到，第一批夜读读者已入馆借阅。';
+  const article = [articleText,
+    '阅览室新增了面向街道一侧的夜间入口。读者可以在这里领取借阅指引，也可以咨询续借、预约还书和跨馆取书的办理方式。',
+    '靠窗的座位留给安静阅读的市民，活动区安排在另一侧。工作人员介绍，这一调整来自此前试开放期间收集到的读者建议。',
+    '几位下班后来借书的读者说，过去总要赶在闭馆前到达，现在有充裕的时间挑选图书，还能坐下来读完一章再回家。',
+    '社区志愿者将在晚间协助引导读者。馆方把无障碍通道、卫生间和自助借还设备的位置标在入口地图上，首次到访也能找到。',
+    ...['江北', '城西', '东湖', '南河', '林荫路', '大学城'].map(name =>
+      name + '阅览室将定期邀请读者分享夜读体验。本周的讨论围绕预约流程、自助设备与返程交通，读者可在馆内填写意见。'),
+    '试运行结束后，各社区阅览室将根据借阅情况分别调整晚间服务。最新安排会同时公布在馆内告示栏和图书馆网站。'];
   let failArticle = true;
   await context.route('**/api/workshop/news/article?*', route => {
     const url = new URL(route.request().url()).searchParams.get('url');
@@ -107,7 +163,7 @@ async function check(mobile) {
       failArticle = false;
       return route.fulfill({ status: 503, json: { error: '测试来源暂时不可用' } });
     }
-    return route.fulfill({ json: { url, paragraphs: [url === items[0].url ? articleText : '讲座将面向社区居民开放。'], truncated: false } });
+    return route.fulfill({ json: { url, paragraphs: url === items[0].url ? article : ['讲座将面向社区居民开放。'], truncated: false } });
   });
   await context.route('**/cmsdatainterface/page/news_1.jsonp', route => {
     feedCount++;
@@ -138,6 +194,11 @@ async function check(mobile) {
     const button = (parent, name) => parent.getByRole('button', { name, exact: true });
     const link = (parent, name) => parent.getByRole('link', { name, exact: true });
     await device('tv').click();
+    assert.equal(await tv.locator('[data-channel="retrostrange-tv"]').getAttribute('aria-pressed'), 'true',
+      '新安装应默认选中已提供节目的电影频道');
+    const demo = tv.locator('[data-channel="ireplay-blender"]');
+    await demo.click();
+    assert.equal(await demo.getAttribute('aria-pressed'), 'true', '遥控器也可切换到公开演示频道');
     await button(tv, 'CCTV-2 财经').click();
     assert.equal(await link(tv, '去央视网观看').getAttribute('href'), 'https://tv.cctv.com/live/cctv2/');
     await checkLayout(room);
@@ -161,7 +222,18 @@ async function check(mobile) {
     await monitor.locator('.ws-article-content').getByText(articleText, { exact: true }).waitFor();
     assert.equal(page.url(), initialUrl, '阅读原文留在工作台');
     assert.equal(context.pages().length, 1, '阅读原文没有打开其他窗口');
+    const lines = await checkReadingSpace(monitor, mobile ? 5 : 7);
+    await checkLayout(room);
     await page.screenshot({ path: path.join(output, platform + '-article.png') });
+    console.log(platform + ' 新闻首屏正文可读 ' + lines + ' 行，长文末字可见');
+    if (mobile) {
+      await page.setViewportSize({ width: 360, height: 640 });
+      await checkLayout(room);
+      const shortLines = await checkReadingSpace(monitor, 3);
+      console.log('360 × 640 新闻首屏正文可读 ' + shortLines + ' 行，长文末字可见');
+      await page.screenshot({ path: path.join(output, 'mobile-compact-article.png') });
+      await page.setViewportSize({ width: 390, height: 844 });
+    }
     await button(monitor, '下一条').click();
     await monitor.getByText(items[1].title, { exact: true }).waitFor();
     assert.equal(await link(monitor, '阅读原文').getAttribute('href'), items[1].url);
@@ -203,6 +275,18 @@ async function check(mobile) {
     await Promise.race([firstQuestion.promise, page.waitForFunction(() => document.querySelector('.msg.agent .body')?.textContent.includes('出错了'))]);
     assert(calls.some(content => content.includes(items[1].title) && content.includes(items[1].url)));
     assert(!calls.some(content => content.includes(items[0].url)));
+    // 真实回答尚在进行时，打开电视仍可见当下工作的精灵。
+    await button(monitor, '返回房间').click();
+    await device('tv').click();
+    await page.waitForFunction(() => {
+      const el = document.querySelector('.work-studio:where([data-visible="true"]) .ws-tv-standby video');
+      return el && !el.paused && el.videoWidth > 0 && el.currentTime > 0;
+    }, null, { timeout: 12000 });
+    await checkTvActor(room, { working: true });
+    await checkLayout(room);
+    await page.screenshot({ path: path.join(output, platform + '-tv-working.png') });
+    await button(tv, '返回房间').click();
+    await device('monitor').click();
     // 回答期间显示工位进度；仍可自己切回新闻，把另一篇排队做成文件。
     await button(monitor, '切到新闻').click();
     await button(monitor, '上一条').click();
@@ -218,16 +302,20 @@ async function check(mobile) {
     const actualWord = await readBrief(page);
     assert(actualWord.includes(items[0].title) && !actualWord.includes(items[1].title), '切换新闻不改写队列中那份简报的原文');
     await page.waitForFunction(() => !document.body.classList.contains('generating'));
+    await checkWorkshopLighting(page, room, platform);
     await page.reload();
     await page.waitForFunction(() => window.__jarvis?.send);
     const reopened = await openRoom(page, mobile);
     await reopened.locator('[data-media-device="tv"]').click();
     assert.equal(await link(reopened, '去央视网观看').getAttribute('href'), 'https://tv.cctv.com/live/cctv2/', '重开仍保留上次频道');
     await button(reopened, '返回房间').click();
-    if (mobile) {
-      await openMobileCloudRoom({ page, staticDir, openRoom, check: room =>
-        checkWorkshopTvPlayback({ page, context, room, output, platform }) });
-    } else await checkWorkshopTvPlayback({ page, context, room: reopened, output, platform });
+    const checkTv = async room => {
+      const setup = { page, context, room, output, platform };
+      await checkWorkshopTvPlayback(setup);
+      await checkWorkshopSourceManagement(setup);
+    };
+    if (mobile) await openMobileCloudRoom({ page, staticDir, openRoom, check: checkTv });
+    else await checkTv(reopened);
     assert.deepEqual(errors, []);
     console.log(`${platform} 工作台已验证电视选台、新闻原文与切换、同一会话追问、真实 Word 读回。`);
   } catch (error) {

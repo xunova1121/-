@@ -20,6 +20,24 @@ export function stationForStep(entries, index) {
 // 两次真实回执可能在同一帧抵达。只给已经完成的最近一项留一轮手部动作，消息列表立即更新。
 const WORK_CYCLE = 640;
 
+// 以房间原画为坐标系，即使电视镜头正在跟拍，也能从角色眼前的位置接续走动。
+export function feetInRoom(actor, floor) {
+  const room = floor.getBoundingClientRect();
+  if (!room.width || !room.height || !actor) return null;
+  const box = actor.getBoundingClientRect();
+  return { x: (box.left + box.width / 2 - room.left) / room.width, y: (box.bottom - room.top) / room.height };
+}
+
+export function walkAcrossRoom(actor, dx, dy, duration) {
+  const options = { duration, easing: 'ease-in-out' };
+  const walk = actor.animate([{ translate: dx + 'px ' + dy + 'px' }, { translate: '0px 0px' }], options);
+  if (!CSS.supports('selector(:has(*))')) return walk;
+  // 两条轨迹共用同一时钟。只有电视镜头应用反向平移，全景依旧让人走过整间屋子。
+  const pan = actor.parentElement.animate([{ translate: -dx + 'px ' + -dy + 'px' }, { translate: '0px 0px' }], options);
+  walk.addEventListener('cancel', () => pan.cancel(), { once: true });
+  return walk;
+}
+
 export function createWorkshopMotion(scene, actor) {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   const canTranslate = typeof actor.animate === 'function' && CSS.supports('translate', '0px');
@@ -69,19 +87,19 @@ export function createWorkshopMotion(scene, actor) {
     displayed = next;
     const mayWalk = (next.travel || fromLife) && !receiptId && canTranslate && !reduceMotion();
     const changesStation = station !== next.station;
-    const from = !fromLife && changesStation && station && mayWalk ? actor.getBoundingClientRect() : null;
+    const floor = actor.parentElement;
+    const from = fromLife || (changesStation && station && mayWalk ? feetInRoom(actor, floor) : null);
     if (fromLife || changesStation || !mayWalk) stopWalk();
     station = next.station;
     scene.dataset.station = station;
-    if (mayWalk && (from || fromLife)) {
+    if (mayWalk && from) {
       // 坐席作业和步态图的画格可以不同，两个位置都以脚下中心为准。
       scene.dataset.workPhase = 'travel';
       const to = actor.getBoundingClientRect();
-      const floor = actor.parentElement;
       const box = floor.getBoundingClientRect();
       const scale = (floor.offsetWidth && box.width / floor.offsetWidth) || 1;
-      const x = fromLife ? box.left + box.width * fromLife.x : from.left + from.width / 2;
-      const y = fromLife ? box.top + box.height * fromLife.y : from.bottom;
+      const x = box.left + box.width * from.x;
+      const y = box.top + box.height * from.y;
       const dx = (x - to.left - to.width / 2) / scale;
       const dy = (y - to.bottom) / scale;
       const distance = Math.hypot(dx, dy);
@@ -89,7 +107,7 @@ export function createWorkshopMotion(scene, actor) {
         actor.dataset.facing = dx > 0 ? 'left' : 'right';
         actor.dataset.walking = 'true';
         const duration = Math.min(800, Math.max(150, distance * 2.4));
-        walk = actor.animate([{ translate: `${dx}px ${dy}px` }, { translate: '0px 0px' }], { duration, easing: 'ease-in-out' });
+        walk = walkAcrossRoom(actor, dx, dy, duration);
         walk.onfinish = () => { stopWalk(); updateHands(); };
       }
     }

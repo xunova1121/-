@@ -70,7 +70,7 @@
 .ws-scene[data-life-pose="sing"] .ws-life-actor { --life-tempo: 1.25s; }
 .ws-scene[data-life-pose="shred"] .ws-life-actor { --life-tempo: 1.5s; }
 
-/* 室内照明和窗外天色分开。灯的暖色落在底图真实吊灯与检验台灯上。 */
+/* 天色从上排窗户过渡到室内，桌面和人物保留原画的明暗层次。 */
 .ws-room-light { z-index: 4; }
 .ws-room-light::before, .ws-room-light::after { content: ''; position: absolute; inset: 0; }
 .ws-room-light::before {
@@ -78,22 +78,27 @@
   opacity: var(--room-daylight-strength);
 }
 .ws-scene[data-life-period="dawn"] {
-  --room-daylight: linear-gradient(120deg, #ffe2ad 8%, #d1c5bb 46%, #63768f 92%);
-  --room-daylight-strength: .30;
-}
-.ws-scene[data-life-period="day"] {
-  --room-daylight: linear-gradient(148deg, #fff4ce 4%, #f8faf7 41%, #65839b 96%);
-  --room-daylight-strength: .12;
-}
-.ws-scene[data-life-period="dusk"] {
-  --room-daylight: linear-gradient(225deg, #f5b176 6%, #b18b93 45%, #3a486b 92%);
+  --room-daylight: linear-gradient(156deg, #ffc98b 0%, #ffe0ad70 16%, transparent 42%);
   --room-daylight-strength: .38;
 }
-.ws-scene[data-life-period="night"] {
-  --room-daylight: linear-gradient(150deg, #25344f 6%, #26364b 55%, #182239 100%);
-  --room-daylight-strength: .67;
+.ws-scene[data-life-period="day"] {
+  --room-daylight: linear-gradient(170deg, #ffe9b8 0%, transparent 28%);
+  --room-daylight-strength: .18;
 }
-.ws-scene[data-life-period="night"][data-lamp-lit="on"] { --room-daylight-strength: .43; }
+.ws-scene[data-life-period="dusk"] {
+  --room-daylight: linear-gradient(190deg, #dd9163 1%, #d89a6d80 15%, transparent 42%);
+  --room-daylight-strength: .50;
+}
+.ws-scene[data-life-period="night"] {
+  --room-wall-shade: #21365055;
+  --room-floor-shade: #182b402e;
+  --room-daylight: linear-gradient(180deg, #152942 3%, #1e3551db 13%, var(--room-wall-shade) 35%, var(--room-floor-shade) 68%);
+  --room-daylight-strength: .78;
+}
+.ws-scene[data-life-period="night"][data-lamp-lit="on"] {
+  --room-wall-shade: #21365022;
+  --room-floor-shade: transparent;
+}
 .ws-scene[data-life-pose="tv"][data-life-phase="settled"] .ws-room-light::before {
   mask-image: radial-gradient(ellipse 7% 6% at 85% 70%,transparent 20%,black);
 }

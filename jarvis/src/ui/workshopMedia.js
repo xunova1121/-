@@ -1,7 +1,9 @@
-import { workshopChannels, workshopChannel, selectWorkshopChannel, onWorkshopChannel } from './workshopMediaChannels.js';
-import { mediaControls } from './workshopMediaView.js';
+import { listWorkshopChannels, workshopChannel, workshopChannelScope, selectWorkshopChannel,
+  onWorkshopChannel, onWorkshopChannelListChanged } from './workshopMediaChannels.js';
+import { mediaControls, renderWorkshopChannelButtons } from './workshopMediaView.js';
 import { createWorkshopTvPlayer } from './workshopTvPlayer.js';
 import { createWorkshopNewsReader } from './workshopNewsReader.js';
+import { createWorkshopSourceManager } from './workshopSourceManager.js';
 import './workshopMedia.css';
 
 const REFRESH = 15 * 60_000;
@@ -13,7 +15,7 @@ function clock(value) {
 
 export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, getPlayers }) {
   const player = createWorkshopTvPlayer({ getPlayers });
-  const ui = mediaControls(scene, floor, workshopChannels, player);
+  const ui = mediaControls(scene, floor, listWorkshopChannels(), player);
   const selectNewsArticle = createWorkshopNewsReader(ui, newsFeed);
   let device = '';
   let sessionId = '';
@@ -26,9 +28,49 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
   let article = null;
   let bound = null;
   let request = null;
-  let loadTimer, rotateTimer, unsubscribe;
+  let loadTimer, rotateTimer, unsubscribe, unsubscribeList;
   let channel = workshopChannel();
+  let scope = workshopChannelScope();
   const workOnMonitor = () => busy && !readDuringWork;
+  const sources = createWorkshopSourceManager(ui, {
+    preview: candidate => player.preview(candidate),
+    restoreChannel: () => player.select(channel.id),
+    selectChannel: selectWorkshopChannel,
+    updateChannelState
+  });
+
+  function updateChannelState() {
+    const testing = sources.testing();
+    ui.network.hidden = testing || !channel.url;
+    if (channel.url) ui.network.href = channel.url;
+    else ui.network.removeAttribute('href');
+    ui.network.textContent = channel.kind === 'cctv' ? '央视网' : '频道官网';
+    ui.network.setAttribute('aria-label', channel.kind === 'cctv' ? '去央视网观看' : '打开频道官网');
+    for (const el of ui.channelButtons.children) {
+      el.setAttribute('aria-pressed', String(!testing && el.dataset.channel === channel.id));
+    }
+  }
+  function refreshChannels() {
+    renderWorkshopChannelButtons(ui.channelButtons, listWorkshopChannels());
+    sources.refresh();
+    updateChannelState();
+  }
+  function catalogChanged() {
+    if (scope !== workshopChannelScope()) { syncChannelScope(); return; }
+    channel = workshopChannel();
+    refreshChannels();
+    if (visible && device === 'tv' && !sources.testing()) player.select(channel.id);
+  }
+  function syncChannelScope() {
+    const next = workshopChannelScope();
+    if (scope === next) return;
+    scope = next;
+    sources.reset();
+    player.close();
+    channel = workshopChannel();
+    refreshChannels();
+    if (visible && device === 'tv') player.select(channel.id);
+  }
 
   function bind(item) {
     if (bound === item) return;
@@ -44,10 +86,11 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     ui.panel.setAttribute('aria-label', device === 'tv' ? '电视' : '工作显示器');
     ui.monitor.setAttribute('aria-expanded', String(device === 'monitor'));
     ui.tv.setAttribute('aria-expanded', String(device === 'tv'));
-    ui.heading.textContent = device === 'tv' ? '央视频道' : reading ? '桌面新闻' : '工作进度';
+    ui.heading.textContent = device === 'tv' ? '电视频道' : reading ? '桌面新闻' : '工作进度';
     ui.switchScreen.hidden = !busy || device !== 'monitor';
     ui.switchScreen.textContent = reading ? '查看进度' : '切到新闻';
     ui.news.hidden = !reading;
+    ui.newsTools.hidden = !reading;
     ui.television.hidden = device !== 'tv';
     ui.task.hidden = device !== 'monitor' || !workOnMonitor();
     ui.taskTitle.textContent = taskTitle;
@@ -65,8 +108,7 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     selectNewsArticle(visible && reading ? article : null);
     ui.prev.disabled = ui.next.disabled = !(feed?.items?.length > 1);
     ui.refresh.disabled = !!request;
-    ui.network.href = channel.url;
-    for (const el of ui.channelButtons.children) el.setAttribute('aria-pressed', String(el.dataset.channel === channel.id));
+    updateChannelState();
     bind(visible && sessionId && (reading || !device && !busy) ? article : null);
   }
 
@@ -131,6 +173,7 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
   }
   function selectChannel(next) {
     if (!visible) return;
+    sources.reset();
     channel = next;
     if (device !== 'tv') { show('tv'); return; }
     room.perform('tv');
@@ -138,6 +181,8 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     draw();
   }
   function show(next, perform = true) {
+    syncChannelScope();
+    sources.reset();
     device = next;
     if (next === 'tv') {
       if (perform) room.perform('tv');
@@ -156,6 +201,7 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     const wasReadingDuringWork = readDuringWork;
     readDuringWork = false;
     device = '';
+    sources.reset();
     player.close();
     if (wasReadingDuringWork) syncTimers();
     draw();
@@ -178,7 +224,11 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
   ui.ask.onclick = () => article && newsChat?.ask(sessionId, article);
   ui.brief.onclick = () => article && newsChat?.brief(sessionId, article);
   ui.panel.onkeydown = e => {
-    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!sources.escape()) close();
+    }
   };
 
   return {
@@ -187,17 +237,23 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
       if (visible === on) return;
       visible = on;
       if (on) {
+        syncChannelScope();
         channel = workshopChannel();
+        refreshChannels();
         unsubscribe = onWorkshopChannel(selectChannel);
+        unsubscribeList = onWorkshopChannelListChanged(catalogChanged);
         if (device === 'tv') player.select(channel.id);
       } else {
         unsubscribe?.();
+        unsubscribeList?.();
+        sources.suspend();
         player.close();
       }
       syncTimers();
       draw();
     },
     setTask(id, working, title, detail) {
+      syncChannelScope();
       const sessionChanged = id !== sessionId;
       if (sessionChanged) {
         sessionId = id;
