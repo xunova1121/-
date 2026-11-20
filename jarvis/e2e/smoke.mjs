@@ -24,12 +24,14 @@ const check = (name, ok, detail = '') => {
 const openPanel = (page, name) => page.evaluate((n) => { document.querySelector('#model-tools-dialog')?.close(); window.__jarvis.showPanel(n); }, name);
 const closeSide = (page) => page.evaluate(() => { document.body.classList.add('side-closed'); document.body.classList.remove('side-open'); });
 /** 原有 WebGL/HUD 回归显式进入经典舞台。 */
+const openClassicPreview = async (page) => {
+  await openPanel(page, 'settings');
+  await page.getByRole('button', { name: '预览经典舞台', exact: true }).click();
+};
 const studio = async (page, on) => {
   await closeSide(page);
-  if (on) {
-    await openPanel(page, 'settings');
-    await page.getByRole('button', { name: '预览经典舞台', exact: true }).click();
-  } else await page.click('.wb-tabs button:nth-child(1)');
+  if (on) await openClassicPreview(page);
+  else await page.click('.wb-tabs button:nth-child(1)');
   await page.waitForTimeout(300);
 };
 
@@ -98,6 +100,24 @@ function fakeOpenAI() {
 }
 
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+
+// 独立冷启动，在设置预览的首个渲染帧采样。长会话里的造型会随操作和空闲时间变化。
+{
+  const page = await browser.newPage({ viewport: { width: 1600, height: 960 }, reducedMotion: 'no-preference' });
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => typeof window.__jarvis?.showPanel === 'function');
+  await closeSide(page);
+  const [firstFrame] = await Promise.all([
+    page.waitForFunction(() => {
+      const stats = window.__jarvis?.stage?.stats;
+      if (stats?.frames > 0) return { form: stats.form, particles: stats.particles, label: document.querySelector('#hud-form').textContent };
+    }, null, { timeout: 30000 }),
+    openClassicPreview(page)
+  ]);
+  const startup = await firstFrame.jsonValue();
+  check('主视觉启动（粒子体 · 光核）', startup.form === 'core' && startup.particles >= 6000 && /光核/.test(startup.label), JSON.stringify(startup));
+  await page.close();
+}
 
 // ---------- 1. 主流程 ----------
 {
@@ -169,7 +189,6 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.waitForFunction(() => window.__jarvis.stage.stats.bloom, null, { timeout: 10000 });
   await page.waitForTimeout(100);
   const stats = await page.evaluate(() => { const s = window.__jarvis.stage.stats; return { form: s.form, particles: s.particles, calls: s.drawCalls, bloom: s.bloom, gl2: s.isWebGL2 }; });
-  check('主视觉启动（粒子体 · 光核）', stats.form === 'core' && stats.particles >= 6000 && /光核/.test(await page.textContent('#hud-form')), JSON.stringify(stats));
   check('泛光开启时 draw calls ≤ 12', stats.bloom && stats.calls <= 12, String(stats.calls));
   await page.evaluate(() => { const s = document.querySelector('#set-quality'); s.value = 'auto'; s.dispatchEvent(new Event('change', { bubbles: true })); });
   check('自动画质适配软件渲染器', await page.evaluate(() => { const j = window.__jarvis; return j.stage.stats.softwareRenderer ? j.quality.tier === 'standard' && !j.quality.bloom : j.quality.tier === 'high'; }));
