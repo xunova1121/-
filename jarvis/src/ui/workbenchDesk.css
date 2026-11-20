@@ -242,10 +242,10 @@ body.workbench .wb-desk-chat > :is(.composer-message-queue,#inputbar,.wb-desk-ch
 @container workbench-area (max-width: 730px) {
   body.workbench .wb-desk { grid-template-columns: minmax(0,1fr); grid-template-rows: minmax(136px,38%) minmax(0,1fr); gap: 7px; padding: 8px; border-radius: 15px; }
   .wb-desk .work-studio-view .ws-header { min-height: 30px; padding-block: 1px; }
-  .wb-desk .work-studio-view .ws-body { display: grid; grid-template-columns: minmax(0,1.5fr) minmax(118px,.65fr); gap: 8px; }
+  .wb-desk .work-studio-view .ws-body { display: grid; grid-template-columns: minmax(0,1.34fr) minmax(118px,.8fr); gap: 8px; }
   .wb-desk .work-studio-view .ws-caption { padding: 4px 7px; flex-wrap: nowrap; }
   .wb-desk .work-studio-view .ws-scene { flex: 1 1 0; aspect-ratio: auto; min-height: 0; margin-top: 5px; }
-  .wb-desk .work-studio-view .ws-floorplan { width: min(100%, 235cqh); }
+  .wb-desk .work-studio-view .ws-floorplan { width: min(100%, 235cqh); transform: translate(-50%,7%); }
   .wb-desk .work-studio-view .ws-pose-label { display: none; }
   .wb-desk .work-studio-view .ws-timeline { margin: 5px 0 0; min-height: 0; max-height: none; }
   .wb-desk .work-studio-view .ws-action { max-width: 80%; font-size: 12px; }
