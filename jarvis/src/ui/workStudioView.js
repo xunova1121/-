@@ -114,7 +114,7 @@ export function createWorkStudioView({ workshop = false, newsFeed, newsChat, get
   const empty = node('p', 'ws-empty', '任务开始后，这里会记录实际步骤。');
   timeline.append(listHeader, list, empty);
   body.append(performance);
-  if (media) body.append(media.panel);
+  if (media) scene.append(media.panel);
   body.append(timeline);
   element.append(header, body);
 

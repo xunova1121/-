@@ -1,0 +1,5 @@
+.ws-media-panel[data-device="monitor"] .ws-media-scroll { overflow-anchor: none; }
+.ws-article-content { white-space: pre-line; overflow-wrap: anywhere; color: var(--ws-ink); font: 14px/1.7 var(--font-ui,sans-serif); }
+.ws-article-content:empty { display: none; }
+.ws-article-content p { margin: 0 0 .75em; }
+.ws-article-content p:last-child { margin-bottom: 0; }

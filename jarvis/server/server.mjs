@@ -1,4 +1,5 @@
 import { createQwenVoiceCatalog, qwenVoiceModel } from './qwenVoices.mjs';
+import { serveStaticVideo } from './staticVideo.mjs';
 import { proxyDeepseekTool } from './deepseekProxy.mjs';
 import { proxyOpenaiSearch } from './openaiSearchProxy.mjs';
 /**
@@ -45,9 +46,9 @@ import { workshopTvPlayers } from '../shared/workshopTv.js';
 import { createWorkshopNewsRoute } from './workshopNews.mjs';
 import { createRuntimeReadiness } from './runtimeReadiness.mjs';
 
-const CORS_PATHS = /^\/api\/(health|readiness|local\/metrics|workshop\/news|llm\/.+|tts\/edge|voice\/qwen\/voices)$/;
+const CORS_PATHS = /^\/api\/(health|readiness|local\/metrics|workshop\/news(?:\/article)?|llm\/.+|tts\/edge|voice\/qwen\/voices)$/;
 /** 服务器模式里允许跨域调用的接口（手机 App、电脑版连自己的服务器） */
-const SERVER_CORS = /^\/api\/(health|server\/.+|phone\/(?:devices(?:\/[a-f0-9-]{36})?|transport)|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?|work-records(\/[^/]+)?|weather(\/cities)?|sports\/scores|workshop\/news|voice\/qwen\/voices)$/;
+const SERVER_CORS = /^\/api\/(health|server\/.+|phone\/(?:devices(?:\/[a-f0-9-]{36})?|transport)|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?|work-records(\/[^/]+)?|weather(\/cities)?|sports\/scores|workshop\/news(?:\/article)?|voice\/qwen\/voices)$/;
 // PC/手机借云网关使用自己保存的搜索Key时也要先过预检，仅开放已实现的两个搜索POST。
 const SEARCH_PROXY_CORS = /^\/api\/llm\/openai-search\/(?:responses|chat-completions)$/;
 // 独立业务路由不在 /api/server 下；PC本机页面连云服务器也必须能预检。
@@ -321,9 +322,11 @@ export function createServer({
     if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(staticDir, 'index.html');
     if (!fs.existsSync(file)) return json(res, 404, { error: '未找到前端构建产物，请先运行 npm run build' });
     const ext = path.extname(file);
+    const cacheControl = file.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache';
+    if (ext === '.mp4' || ext === '.webm') return serveStaticVideo(req, res, file, MIME[ext], cacheControl);
     res.writeHead(200, {
       'Content-Type': MIME[ext] || 'application/octet-stream',
-      'Cache-Control': file.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache'
+      'Cache-Control': cacheControl
     });
     fs.createReadStream(file).pipe(res);
   }
@@ -404,6 +407,7 @@ export function createServer({
       if (pathname === '/api/fetch' && req.method === 'GET') return await handleFetch(req, res, new URL(req.url, 'http://x').searchParams.get('url'));
       if ((pathname === '/api/weather'||pathname === '/api/weather/cities')&&req.method==='GET') return json(res,200,await weather(pathname,new URL(req.url,'http://x').searchParams,req.headers));
       if (pathname === '/api/workshop/news' && req.method === 'GET') return await workshopNews(res);
+      if (pathname === '/api/workshop/news/article' && req.method === 'GET') return await workshopNews(res, new URL(req.url, 'http://x').searchParams.get('url'));
       if (pathname === '/api/sports/scores' && req.method === 'GET') {
         const { publicFetch } = await import('./taskRunner.mjs');
         const ctrl = new AbortController();
@@ -430,6 +434,7 @@ export function createServer({
 }
 
 const MIME = {
+  '.mp4': 'video/mp4', '.webm': 'video/webm',
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
   '.json': 'application/json', '.wasm': 'application/wasm', '.bin': 'application/octet-stream', '.onnx': 'application/octet-stream',
   '.task': 'application/octet-stream', '.svg': 'image/svg+xml', '.png': 'image/png', '.glb': 'model/gltf-binary'

@@ -1,4 +1,5 @@
-import { NEWS_REFRESH_MS, readWorkshopHeadlines, workshopHeadlines } from './workshopNewsSource.js';
+import { NEWS_REFRESH_MS, readWorkshopHeadlines, workshopArticleLink, workshopHeadlines } from './workshopNewsSource.js';
+import { readWorkshopArticle, validWorkshopArticle } from './workshopNewsArticle.js';
 import { withWebDeadline } from '../agent/lookup/request.js';
 
 const storageKey = 'weiyang.workshop.news.v1';
@@ -15,6 +16,7 @@ function snapshot(data, now) {
 
 export function createWorkshopNewsFeed(app, { fetchImpl = (...args) => fetch(...args), now = Date.now, storage } = {}) {
   let saved;
+  const articles = new Map();
   let revision = 0;
   try {
     storage ??= globalThis.localStorage;
@@ -23,24 +25,41 @@ export function createWorkshopNewsFeed(app, { fetchImpl = (...args) => fetch(...
   } catch { /* 受限浏览器使用本次页面的内存缓存。 */ }
 
   const peek = () => snapshot(saved, now());
-  async function read(signal) {
-    if (app.server?.workshopNews) return app.server.workshopNews(signal);
+  async function read(signal, articleUrl = '') {
+    const path = articleUrl ? route + '/article?url=' + encodeURIComponent(articleUrl) : route;
+    if (app.server?.workshopNews) return articleUrl ? app.server.workshopNewsArticle(articleUrl, signal) : app.server.workshopNews(signal);
     if (app.gateway?.origin) {
-      const response = await fetchImpl(app.gateway.origin + route, { signal, credentials: 'omit' });
+      const response = await fetchImpl(app.gateway.origin + path, { signal, credentials: 'omit' });
       if (!response.ok) throw new Error('工作台新闻暂时不可用');
       return response.json();
     }
     const native = globalThis.__jarvisNativeFetch;
-    if (native) return readWorkshopHeadlines({ signal, now, get: (url, init) => native(url, { ...init, binary: true, connectTimeout: 5000, readTimeout: 5000 }) });
+    const options = { signal, now, get: native ? (url, init) => native(url, { ...init, binary: true, connectTimeout: 5000, readTimeout: 5000 }) : fetchImpl };
+    const direct = () => articleUrl ? readWorkshopArticle(articleUrl, options) : readWorkshopHeadlines(options);
+    if (native) return direct();
     // 网页首次打开时网关探测可能尚未结束。只尝试本站同一路径，独立离线页没有网关时直读公开源。
     if (/^https?:$/.test(globalThis.location?.protocol || '')) {
-      const res = await fetchImpl(route, { signal, credentials: 'omit' });
+      const res = await fetchImpl(path, { signal, credentials: 'omit' });
       if (res.ok && res.headers.get('content-type')?.includes('application/json')) return res.json();
+      if (articleUrl && res.status !== 404 && !res.ok) throw new Error('暂时未取到正文');
     }
-    return readWorkshopHeadlines({ get: fetchImpl, signal, now });
+    return direct();
   }
 
-  return { peek, async load({ signal, force = false } = {}) {
+  async function readArticle(item, { signal } = {}) {
+    const url = workshopArticleLink(item?.url, item?.source);
+    if (!url) throw new Error('缺少有效新闻地址');
+    if (signal?.aborted) throw signal.reason ?? new DOMException('已停止', 'AbortError');
+    if (articles.has(url)) return articles.get(url);
+    const result = await withWebDeadline(active => read(active, url), { signal, timeoutMs: 10_000 });
+    if (!validWorkshopArticle(result, url)) throw new Error('来源没有返回这篇报道的正文');
+    if (articles.size >= 12) articles.delete(articles.keys().next().value);
+    const article = { url, paragraphs: result.paragraphs, truncated: result.truncated === true };
+    articles.set(url, article);
+    return article;
+  }
+
+  return { peek, readArticle, async load({ signal, force = false } = {}) {
     if (signal?.aborted) throw signal.reason ?? new DOMException('已停止', 'AbortError');
     const cached = peek();
     const observed = revision;

@@ -1,14 +1,26 @@
-.ws-tv-player:not([hidden]) {
-  width: 100%;
-  overflow: hidden;
-  border-radius: 8px;
+.ws-tv-glass > :is(.ws-tv-player,.ws-tv-standby):not([hidden]) {
+  position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; background: #14261e;
 }
-.ws-tv-player :is(video, iframe) {
-  display: block;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  max-height: min(52vh, 380px);
-  border: 0;
-  background: #13202b;
-  object-fit: contain;
+.ws-tv-glass :is(.ws-tv-player,.ws-tv-standby) :is(video,iframe) {
+  display: block; width: 100%; height: 100%; max-height: none; border: 0; object-fit: contain; background: #111b15;
+}
+.ws-tv-standby { color: #f8f4e2; text-align: center; }
+.ws-tv-standby:not([hidden]) { display: grid; align-content: center; }
+.ws-tv-standby:has(video) { display: block; }
+.ws-tv-caption { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 4px 8px; padding: 5px 8px; }
+.ws-tv-station,.ws-tv-detail { width: 100%; }
+.ws-tv-station { font: 650 clamp(13px,2.3cqw,22px)/1.2 var(--font-ui,sans-serif); }
+.ws-tv-detail { font: 12px/1.35 var(--font-ui,sans-serif); }
+.ws-tv-standby video + .ws-tv-caption {
+  position: absolute; z-index: 1; inset: 0 0 auto; padding: 7px 10px 18px;
+  display: block; text-align: left; color: #fffcef; text-shadow: 0 1px 3px #152116;
+  background: linear-gradient(#101c16c9,#101c1696 65%,transparent); pointer-events: none;
+}
+.ws-tv-standby video + .ws-tv-caption :is(.ws-tv-station,.ws-tv-detail) { display: block; }
+.ws-tv-standby video + .ws-tv-caption .ws-tv-station { font-size: clamp(12px,1.8cqw,17px); }
+@container (max-height: 170px) {
+  .ws-tv-standby video + .ws-tv-caption { padding: 3px 8px 10px; }
+  .ws-tv-standby video + .ws-tv-caption :is(.ws-tv-station,.ws-tv-detail) {
+    display: inline; margin-inline-end: 6px; font-size: 11px;
+  }
 }

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 import JSZip from 'jszip';
 import { createServer } from '../server/server.mjs';
-import { checkWorkshopTvPlayback } from './workshop-tv-playback.mjs';
+import { checkWorkshopTvPlayback, openMobileCloudRoom } from './workshop-tv-playback.mjs';
 
 const output = path.resolve(process.argv[2] || '/tmp/weiyang-workshop-media');
 const briefFile = '工作台新闻简报.docx';
@@ -49,16 +49,19 @@ async function checkLayout(room) {
     const scene = box('.ws-scene'), panel = box('.ws-media-panel:not([hidden])');
     const input = document.getElementById('prompt').getBoundingClientRect();
     const at = document.elementFromPoint(input.x + input.width / 2, input.y + input.height / 2);
+    const stage = el.querySelector('.ws-scene');
+    const overlay = el.querySelector('.ws-media-panel:not([hidden])');
     return {
-      separate: scene.bottom <= panel.top + 2 || scene.right <= panel.left + 2 || panel.right <= scene.left + 2,
+      inside: stage.contains(overlay) && panel.left >= scene.left - 2 && panel.right <= scene.right + 2 &&
+        panel.top >= scene.top - 2 && panel.bottom <= scene.bottom + 2,
       officeVisible: scene.height >= 40 && scene.width >= 45 && scene.top >= 0 && scene.bottom <= visualViewport.height + 1,
       panelVisible: panel.height >= 45 && panel.width >= 160,
       canType: !!at?.closest('#inputbar') && input.bottom <= visualViewport.height + 1,
       boxes: [scene.toJSON(), panel.toJSON(), input.toJSON()]
     };
   });
-  assert(layout.separate && layout.officeVisible && layout.panelVisible && layout.canType,
-    '打开显示器或电视时还应能看见身边工位、输入框并继续聊天 ' + JSON.stringify(layout));
+  assert(layout.inside && layout.officeVisible && layout.panelVisible && layout.canType,
+    '电视和新闻须嵌在可见的办公室画面里，输入框应可点击 ' + JSON.stringify(layout));
 }
 
 function modelResponse(request, calls) {
@@ -94,6 +97,17 @@ async function check(mobile) {
   await context.route('**/api/workshop/news', route => {
     feedCount++;
     return route.fulfill({ json: { items, updatedAt: now, stale: false } });
+  });
+  const articleText = '记者在现场看到，第一批夜读读者已入馆借阅。';
+  let failArticle = true;
+  await context.route('**/api/workshop/news/article?*', route => {
+    const url = new URL(route.request().url()).searchParams.get('url');
+    assert(items.some(item => item.url === url));
+    if (url === items[1].url && failArticle) {
+      failArticle = false;
+      return route.fulfill({ status: 503, json: { error: '测试来源暂时不可用' } });
+    }
+    return route.fulfill({ json: { url, paragraphs: [url === items[0].url ? articleText : '讲座将面向社区居民开放。'], truncated: false } });
   });
   await context.route('**/cmsdatainterface/page/news_1.jsonp', route => {
     feedCount++;
@@ -142,9 +156,20 @@ async function check(mobile) {
     await monitor.getByText(items[0].title, { exact: true }).waitFor();
     assert(feedCount > 0, '真实取闻入口发起请求');
     assert.equal(await link(monitor, '阅读原文').getAttribute('href'), items[0].url);
+    const initialUrl = page.url();
+    await link(monitor, '阅读原文').click();
+    await monitor.locator('.ws-article-content').getByText(articleText, { exact: true }).waitFor();
+    assert.equal(page.url(), initialUrl, '阅读原文留在工作台');
+    assert.equal(context.pages().length, 1, '阅读原文没有打开其他窗口');
     await button(monitor, '下一条').click();
     await monitor.getByText(items[1].title, { exact: true }).waitFor();
     assert.equal(await link(monitor, '阅读原文').getAttribute('href'), items[1].url);
+    assert(!await monitor.getByText(articleText, { exact: true }).isVisible(), '翻到另一条新闻后不残留上一篇正文');
+    await link(monitor, '阅读原文').click();
+    await link(monitor, '重试阅读').click();
+    await monitor.getByText('讲座将面向社区居民开放。', { exact: true }).waitFor();
+    assert.equal(context.pages().length, 1, '来源出错及重试均留在工作台');
+    await link(monitor, '收起原文').click();
     await checkLayout(room);
     await lamp.click();
     assert.equal(await lamp.getAttribute('aria-pressed'), lampState, '读新闻时仍可操作台灯');
@@ -197,10 +222,11 @@ async function check(mobile) {
     const reopened = await openRoom(page, mobile);
     await reopened.locator('[data-media-device="tv"]').click();
     assert.equal(await link(reopened, '去央视网观看').getAttribute('href'), 'https://tv.cctv.com/live/cctv2/', '重开仍保留上次频道');
-    if (!mobile) {
-      await button(reopened, '返回房间').click();
-      await checkWorkshopTvPlayback({ page, context, room: reopened });
-    }
+    await button(reopened, '返回房间').click();
+    if (mobile) {
+      await openMobileCloudRoom({ page, staticDir, openRoom, check: room =>
+        checkWorkshopTvPlayback({ page, context, room, output, platform }) });
+    } else await checkWorkshopTvPlayback({ page, context, room: reopened, output, platform });
     assert.deepEqual(errors, []);
     console.log(`${platform} 工作台已验证电视选台、新闻原文与切换、同一会话追问、真实 Word 读回。`);
   } catch (error) {
@@ -213,8 +239,11 @@ async function check(mobile) {
 }
 
 try {
-  await check(false);
-  await check(true);
+  const failures = [];
+  for (const mobile of [false, true]) {
+    try { await check(mobile); } catch (error) { failures.push(error); }
+  }
+  if (failures.length) throw new AggregateError(failures, '工作台跨端验收未通过');
 } finally {
   await browser.close();
   for (const server of servers) {

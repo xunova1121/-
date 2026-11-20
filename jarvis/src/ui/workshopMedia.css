@@ -1,4 +1,4 @@
-/* 热区跟随透视底图与镜头；屏幕卡片留在镜头外，所以放大场景不影响阅读。 */
+/* 热区跟随家具移动。媒体面板直接叠在同一个场景中，不参与聊天布局。 */
 .work-studio-view button.ws-device {
   position: absolute; z-index: 4; border: 0; padding: 0; min-width: 26px; min-height: 25px;
   color: #f6f8d9; cursor: pointer; background: transparent; border-radius: 4px;
@@ -21,12 +21,22 @@
 }
 .ws-monitor-ticker small { flex: none; color: #536e5c; font-size: 10px; }
 .ws-monitor-ticker span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 新闻在工作台左侧展开，右侧仍能看到和操作真实台灯。 */
 .work-studio-view .ws-media-panel {
-  display: flex; flex-direction: column; align-self: stretch; flex: none;
-  padding: 9px 12px; gap: 6px; min-width: 0; min-height: 0; box-sizing: border-box;
-  background: var(--ws-panel,#faf9f4); color: var(--ws-ink); border: 1px solid var(--ws-line);
-  border-radius: 12px; box-shadow: 0 2px 6px #1b322f18;
+  position: absolute; z-index: 5; inset: 5% auto auto 3%;
+  display: flex; flex-direction: column; gap: 7px; width: min(82%, 38rem);
+  max-height: 90%; padding: clamp(9px,2.5cqw,20px); min-width: 0; min-height: 0;
+  overflow: hidden; background: var(--ws-panel); color: var(--ws-ink);
+  border: 1px solid var(--ws-line); border-radius: 12px;
+  box-shadow: 0 7px 28px #19261750;
 }
+.work-studio-view[data-media-open] .ws-scene::after {
+  content: ''; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  background: linear-gradient(90deg,#1c281c4f,#1c281c0e);
+}
+.work-studio-view .ws-media-panel[data-device="monitor"] .ws-media-header { border-bottom: 2px solid var(--ws-on-tint); }
+.work-studio-view .ws-media-panel[data-device="monitor"] .ws-media-header h3,
+.work-studio-view .ws-media-panel[data-device="monitor"] .ws-media-title { font-family: "Songti SC","Noto Serif CJK SC",serif; }
 .work-studio-view .ws-media-panel [hidden], .work-studio-view .ws-media-panel[hidden],
 .work-studio-view .ws-monitor-ticker[hidden] { display: none !important; }
 .ws-media-header { display: flex; flex: none; align-items: center; gap: 5px; border-bottom: 1px solid var(--ws-line); padding-bottom: 5px; }
@@ -48,37 +58,116 @@
 .work-studio-view .ws-media-panel a { color: var(--ws-on-tint); text-decoration: underline; text-underline-offset: 2px; }
 .ws-media-panel :is(button,a):focus-visible, .ws-monitor-ticker:focus-visible { outline: 2px solid var(--ws-on-tint); outline-offset: -2px; }
 .ws-media-panel button:disabled { opacity: .55; cursor: default; }
-/* 面板独占一行，仍能点到桌屏、电视和家具，聊天输入栏留在原位。 */
-.wb-desk .work-studio-view[data-media-open] .ws-body {
-  display: grid; grid-template-columns: minmax(0,1fr);
-  grid-template-rows: minmax(0,1fr) auto minmax(43px,.20fr); gap: 5px;
+/* 镜头对准电视时，节目占据主要面积。右侧留出真实工位，底边是遥控器。 */
+.work-studio-view .ws-media-panel[data-device="tv"] {
+  inset: 0; width: auto; max-height: none; padding: 0; display: block;
+  border: none; border-radius: 0; box-shadow: none; background: transparent; pointer-events: none;
 }
-.wb-desk .work-studio-view[data-media-open] .ws-performance,
-.wb-desk .work-studio-view[data-media-open] .ws-timeline { margin: 0; min-height: 0; }
-.wb-desk .work-studio-view[data-media-open] .ws-scene { flex: 1 1 0; aspect-ratio: auto; }
-.wb-desk .work-studio-view[data-media-open] .ws-floorplan { width: min(100%,125cqh); --ws-floor-shift: 0%; }
-.wb-desk .work-studio-view[data-media-open] .ws-media-panel { max-height: min(35vh,330px); }
-@container workbench-area (max-width: 730px) {
-  .wb-desk .work-studio-view[data-media-open] .ws-body {
-    grid-template-columns: minmax(0,1fr) minmax(0,1.12fr);
-    grid-template-rows: minmax(0,1fr) minmax(25px,18%); gap: 4px;
+.ws-media-panel[data-device="tv"] .ws-media-header {
+  position: absolute; z-index: 1; inset: auto 2% 2% auto; padding: 0; border: 0; pointer-events: auto;
+}
+.ws-media-panel[data-device="tv"] .ws-media-header h3 { display: none; }
+.ws-media-panel[data-device="tv"] .ws-media-scroll,
+.ws-media-panel[data-device="tv"] .ws-media-tv { display: contents; }
+.ws-media-receiver {
+  position: absolute; left: 2%; top: calc(49% - 16px); transform: translateY(-50%);
+  width: min(91%, calc((98cqh - 40px) * 1.77)); min-width: 0; padding: 1% 3% 1.2% 1%;
+  box-sizing: border-box; border-radius: clamp(6px,1.9cqw,19px);
+  background: repeating-linear-gradient(0deg,transparent 0 2px,#51301d16 2px 3px),
+    linear-gradient(125deg,#d3ad75,#99673d 12%,#684227 56%,#a77542 81%,#633c24);
+  box-shadow: inset 1px 1.5px 1px #ecd1a0,inset -2px -2px 2px #513824,0 4px 9px #211b1690;
+  pointer-events: auto;
+}
+.ws-tv-glass {
+  position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; isolation: isolate;
+  border-radius: clamp(4px,1.4cqw,14px); background: #13201c; color: #eef5e9;
+  box-shadow: 0 0 0 1.5px #342c23,0 0 0 2.5px #bfa06e;
+}
+.ws-tv-grille {
+  position: absolute; right: .7%; top: 9%; bottom: 9%; width: 1.9%; border-radius: 7px;
+  background: repeating-linear-gradient(0deg,#4e3726 0 1px,transparent 2px 4px);
+}
+.ws-tv-grille::before,.ws-tv-grille::after {
+  content: ''; position: absolute; top: 0; left: 0; width: 100%; aspect-ratio: 1;
+  border-radius: 50%; background: linear-gradient(125deg,#d1bb8c,#8f704a 47%,#58452f 48%,#b69b6e 56%);
+  box-shadow: 0 1px 2px #30261e;
+}
+.ws-tv-grille::after { top: 16%; }
+.ws-media-remote {
+  position: absolute; inset: auto calc(2% + 67px) 2% 2%; gap: 4px; display: flex; align-items: center;
+  overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; pointer-events: auto;
+}
+.ws-media-remote > *, .ws-media-channels > * { flex: none; }
+.ws-media-remote .ws-media-channels { flex-wrap: nowrap; gap: 3px; }
+.work-studio-view .ws-media-panel[data-device="tv"] :is(button,a) {
+  white-space: nowrap; padding: 4px 7px; min-height: 31px; background: #fffaeb; color: #2b4033; border-color: #e2d7c5;
+}
+.work-studio-view .ws-media-panel[data-device="tv"] [aria-pressed="true"] { background: #335442; border-color: #335442; color: #fffbed; }
+@media (prefers-reduced-motion: no-preference) {
+  .ws-media-panel[data-device="tv"]:not([hidden]) .ws-media-receiver { animation: ws-tv-approach .24s ease-out; }
+  .ws-media-panel[data-device="monitor"]:not([hidden]) { animation: ws-reader-appear .16s ease-out; }
+  @keyframes ws-tv-approach { from { transform: translate(10%,-42%) scale(.82); opacity: .5; } }
+  @keyframes ws-reader-appear { from { opacity: .3; } }
+}
+/* 灯和显示器随原画一起推到右边，保留同一组可点家具。 */
+.work-studio-view[data-media-open][data-workshop] .ws-floorplan {
+  width: 125%; left: 60%; bottom: 50%; transform: translate(-50%,50%);
+}
+.work-studio-view[data-media-open] .ws-scene > .ws-room-tools { visibility: hidden; }
+.wb-desk .work-studio-view[data-media-open] .ws-scene { aspect-ratio: 1.6; }
+.work-studio-view:has(.ws-media-panel[data-device="tv"]) :is(.ws-caption,.ws-timeline,.ws-playback-controls) { display: none; }
+@container workbench-area (min-width: 731px) {
+  body.workbench .wb-desk:has(.ws-media-panel[data-device="tv"]) {
+    grid-template-columns: minmax(0,1fr); grid-template-rows: minmax(0,1fr) minmax(134px,18%); gap: 8px;
   }
-  .wb-desk .work-studio-view[data-media-open] .ws-timeline { grid-column: 1/-1; flex-flow: row; }
-  .wb-desk .work-studio-view[data-media-open] .ws-list-header { align-items: center; padding: 2px 6px; }
-  .wb-desk .work-studio-view[data-media-open] .ws-list { display: flex; overflow: auto; padding: 0; }
+  .wb-desk .work-studio-view:has(.ws-media-panel[data-device="tv"]) .ws-performance,
+  .wb-desk .work-studio-view:has(.ws-media-panel[data-device="tv"]) .ws-scene { flex: 1; }
+  .wb-desk .work-studio-view:has(.ws-media-panel[data-device="tv"]) .ws-scene { aspect-ratio: auto; margin: 0; border-radius: 14px; }
+  .wb-desk .work-studio-view:has(.ws-media-panel[data-device="tv"]) .ws-header {
+    position: absolute; z-index: 6; inset: 8px 8px auto auto; min-height: 26px; padding: 3px 7px;
+    border-radius: 8px; pointer-events: none;
+  }
+  .wb-desk .work-studio-view:has(.ws-media-panel[data-device="tv"]) .ws-heading { font-size: 12px; }
+  .wb-desk .work-studio-view:has(.ws-media-panel[data-device="tv"]) .ws-mode { display: none; }
+  .wb-desk:has(.ws-media-panel[data-device="tv"]) > .wb-desk-chat {
+    display: grid; grid-template: auto minmax(0,1fr) / minmax(0,1.2fr) minmax(260px,1fr);
+  }
+  .wb-desk:has(.ws-media-panel[data-device="tv"]) .wb-desk-chat-head {
+    grid-area: 1 / 1; min-height: 30px; padding-block: 4px;
+  }
+  .wb-desk:has(.ws-media-panel[data-device="tv"]) #transcript { grid-area: 2 / 1; }
+  .wb-desk:has(.ws-media-panel[data-device="tv"]) .wb-desk-empty { right: 46%; }
+  .wb-desk:has(.ws-media-panel[data-device="tv"]) #inputbar { grid-area: 1 / 2 / span 2; align-self: center; }
+  .wb-desk:has(.ws-media-panel[data-device="tv"]) .composer-message-queue { grid-area: 1 / 2; max-height: 54px; }
+  .wb-desk:has(.ws-media-panel[data-device="tv"]) .composer-message-queue:not([hidden]) ~ #inputbar { grid-row: 2; }
+  body.workbench .wb-desk:has(.ws-media-panel[data-device="tv"]):has(.composer-message-queue:not([hidden])) {
+    grid-template-rows: minmax(0,1fr) minmax(175px,23%);
+  }
+}
+@container workbench-area (max-width: 730px) {
+  body.workbench .wb-desk:has(.work-studio-view[data-media-open]) { grid-template-rows: minmax(180px,64%) minmax(0,1fr); }
+  .wb-desk .work-studio-view[data-media-open] .ws-body {
+    display: flex; flex-direction: column; gap: 1px;
+  }
+  .wb-desk .work-studio-view[data-media-open] .ws-performance { flex: 1; }
+  .wb-desk .work-studio-view[data-media-open] .ws-scene { flex: 1; aspect-ratio: auto; }
+  .wb-desk .work-studio-view[data-media-open] .ws-timeline { flex: none; max-height: 38px; margin-top: 2px; flex-flow: row; }
+  .wb-desk .work-studio-view[data-media-open] .ws-list { display: flex; overflow: auto; }
   .wb-desk .work-studio-view[data-media-open] .ws-list li { flex: none; }
 }
-.mobile-studio-sheet .work-studio-view[data-media-open] .ws-scene { width: min(100%,25cqh); }
-.mobile-studio-sheet .ws-media-panel {
-  padding: 6px 10px; max-height: min(28cqh,230px); border-radius: 0; border-inline: none;
+.mobile-studio-sheet .work-studio-view[data-media-open] .ws-scene {
+  width: 100%; aspect-ratio: 1.50; max-height: 42cqh;
 }
 @container mobile-workroom (max-height: 540px) {
-  .mobile-studio-sheet .work-studio-view[data-media-open] .ws-scene { width: min(100%,17cqh); }
-  .mobile-studio-sheet .ws-media-panel { max-height: 25cqh; }
+  .mobile-studio-sheet .work-studio-view[data-media-open] .ws-scene { max-height: 47cqh; }
 }
 @container mobile-workroom (min-width: 600px) and (min-aspect-ratio: 1.25) {
-  .mobile-studio-sheet .work-studio-view[data-media-open] .ws-scene { width: min(100%,41cqh); }
-  .mobile-studio-sheet .work-studio-view[data-media-open] .ws-media-panel { max-height: 40cqh; }
+  .mobile-studio-sheet .work-studio-view:has(.ws-media-panel[data-device="tv"]) { align-self: start; height: auto; }
+  .mobile-studio-sheet .work-studio-view[data-media-open] .ws-scene { max-height: 67cqh; }
+}
+@container (max-width: 560px) {
+  .ws-media-remote .ws-channel-prefix { display: none; }
+  .work-studio-view .ws-media-panel[data-device="tv"] :is(button,a) { padding-inline: 5px; }
 }
 @container (max-height: 170px) {
   .ws-monitor-ticker small { display: none; }

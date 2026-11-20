@@ -252,6 +252,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     weather: (city, signal) => req('/api/weather?' + new URLSearchParams({ latitude: String(city.latitude), longitude: String(city.longitude) }), { signal, timeout: 15000 }),
     weatherCities: (query, signal) => req('/api/weather/cities?' + new URLSearchParams({ q: String(query).slice(0, 80) }), { signal, timeout: 8000 }),
     workshopNews: signal => req('/api/workshop/news', { signal, timeout: 12500, retry: false }),
+    workshopNewsArticle: (url, signal) => req('/api/workshop/news/article?url=' + encodeURIComponent(url), { signal, timeout: 9500, retry: false }),
     sportsScores: (query, signal) => req('/api/sports/scores?' + new URLSearchParams(query), { signal, timeout: 20000 }),
     listDocumentStyles: () => req('/api/server/document-styles'),
     memoryStatus: () => req('/api/server/memory-status'),

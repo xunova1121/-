@@ -8,7 +8,7 @@ export async function getWorkshopTvPlayers(app, signal) {
     [signal],
     async (combined) => {
       const response = await fetch('/api/workshop/tv-players', { headers: { 'x-jarvis-client': '1' }, signal: combined });
-      if (!response.ok) return {};
+      if (!response.ok) throw new Error('无法读取频道配置');
       return (await response.json()).players;
     },
     5000

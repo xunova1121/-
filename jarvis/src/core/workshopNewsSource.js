@@ -11,7 +11,7 @@ const day = 24 * 60 * 60 * 1000;
 export const NEWS_REFRESH_MS = 15 * 60 * 1000;
 
 // 涵盖离线数据和网关回执，只保留用户能打开的原媒体 HTTPS 文章，不保留正文或追踪参数。
-function articleLink(value, source) {
+export function workshopArticleLink(value, source) {
   try {
     const url = new URL(value);
     if (url.protocol !== 'https:' || url.username || url.password || url.port || url.href.length > 1200) return '';
@@ -26,11 +26,12 @@ export function workshopHeadlines(items, at) {
   const rows = new Map();
   for (const row of items.slice(0, 100)) {
     if (!row || typeof row.title !== 'string') continue;
-    const url = articleLink(row.url, row.source);
+    const url = workshopArticleLink(row.url, row.source);
     const stamp = Date.parse(row.publishedAt);
     const title = newsPlain(row.title).replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
     if (!url || !title || title.length > 180 || !Number.isFinite(stamp) || stamp > at || stamp < at - day || rows.has(url)) continue;
-    rows.set(url, { title, url, source: row.source, publishedAt: new Date(stamp).toISOString() });
+    const summary = typeof row.summary === 'string' ? newsPlain(row.summary).slice(0, 350) : '';
+    rows.set(url, { title, url, source: row.source, publishedAt: new Date(stamp).toISOString(), ...(summary && summary !== title ? { summary } : {}) });
   }
   return [...rows.values()].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)).slice(0, 12);
 }
@@ -46,7 +47,7 @@ function cctvItems(text) {
     const publishedAt = stamp.replace(' ', 'T') + '+08:00';
     const timestamp = Date.parse(publishedAt);
     if (!Number.isFinite(timestamp) || new Date(timestamp + 8 * 3600_000).toISOString().slice(0, 19) !== stamp.replace(' ', 'T')) return [];
-    return [{ title: row.title, url: row.url, source: '央视网', publishedAt }];
+    return [{ title: row.title, summary: row.brief, url: row.url, source: '央视网', publishedAt }];
   });
 }
 

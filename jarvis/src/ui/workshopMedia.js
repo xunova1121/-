@@ -1,6 +1,7 @@
 import { workshopChannels, workshopChannel, selectWorkshopChannel, onWorkshopChannel } from './workshopMediaChannels.js';
 import { mediaControls } from './workshopMediaView.js';
 import { createWorkshopTvPlayer } from './workshopTvPlayer.js';
+import { createWorkshopNewsReader } from './workshopNewsReader.js';
 import './workshopMedia.css';
 
 const REFRESH = 15 * 60_000;
@@ -13,6 +14,7 @@ function clock(value) {
 export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, getPlayers }) {
   const player = createWorkshopTvPlayer({ getPlayers });
   const ui = mediaControls(scene, floor, workshopChannels, player);
+  const selectNewsArticle = createWorkshopNewsReader(ui, newsFeed);
   let device = '';
   let sessionId = '';
   let busy = false;
@@ -60,8 +62,7 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     ui.latest.textContent = feed?.updatedAt
       ? (feed.stale ? '暂未刷新 · 上次更新 ' : '上次更新 ') + clock(feed.updatedAt) : '';
     ui.actions.hidden = !article;
-    if (article) ui.original.href = article.url;
-    else ui.original.removeAttribute('href');
+    selectNewsArticle(visible && reading ? article : null);
     ui.prev.disabled = ui.next.disabled = !(feed?.items?.length > 1);
     ui.refresh.disabled = !!request;
     ui.network.href = channel.url;
