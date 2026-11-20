@@ -1,6 +1,11 @@
 // 已记录的动作决定工位；暂停和失败停在原来的工作地点。
 const poseStation = { idle: 'rest', edit: 'bench', think: 'bench', run: 'bench', repair: 'review' };
 export const stationNames = { rest: '待命区', archive: '资料架', bench: '制作台', review: '检验台' };
+export const routineStations = {
+  plan: { station: 'bench', operation: 'write' },
+  tidy: { station: 'archive', operation: 'archive' },
+  study: { station: 'review', operation: 'type' }
+};
 
 export function stationForStep(entries, index) {
   for (let i = index; i >= 0; i--) {
@@ -44,37 +49,40 @@ export function createWorkshopMotion(scene, actor) {
   }
 
   function updateHands() {
-    const { entry, working, gesture } = displayed;
-    const operation = entry && ['running', 'done'].includes(entry.status) ? entry.operation : null;
+    const { entry, working, gesture, routineOperation } = displayed;
+    const operation = routineOperation || (entry && ['running', 'done'].includes(entry.status) ? entry.operation : null);
     const acting = Boolean(operation && (working || receiptId) && !reduceMotion());
     const phase = walk ? 'travel' : !operation ? 'idle' : acting ? 'working' : 'snapshot';
     scene.dataset.operation = operation || 'none';
     scene.dataset.workPhase = phase;
     scene.dataset.workReceipt = String(Boolean(receiptId));
     scene.dataset.motion = phase === 'working' ? 'working' : gesture && !operation ? 'gesture' : 'still';
-    const id = phase === 'working' ? entry.id : null;
+    const id = phase === 'working' ? entry?.id : null;
     if (workingId !== id) {
       workingId = id;
       workingSince = performance.now();
     }
   }
 
-  function present(next) {
+  function present(next, fromLife) {
     displayed = next;
-    const mayWalk = next.travel && !receiptId && canTranslate && !reduceMotion();
+    const mayWalk = (next.travel || fromLife) && !receiptId && canTranslate && !reduceMotion();
     const changesStation = station !== next.station;
-    const from = changesStation && station && mayWalk ? actor.getBoundingClientRect() : null;
-    if (changesStation || !mayWalk) stopWalk();
+    const from = !fromLife && changesStation && station && mayWalk ? actor.getBoundingClientRect() : null;
+    if (fromLife || changesStation || !mayWalk) stopWalk();
     station = next.station;
     scene.dataset.station = station;
-    if (from) {
+    if (mayWalk && (from || fromLife)) {
       // 坐席作业和步态图的画格可以不同，两个位置都以脚下中心为准。
       scene.dataset.workPhase = 'travel';
       const to = actor.getBoundingClientRect();
       const floor = actor.parentElement;
-      const scale = floor.offsetWidth ? floor.getBoundingClientRect().width / floor.offsetWidth : 1;
-      const dx = (from.left + from.width / 2 - to.left - to.width / 2) / (scale || 1);
-      const dy = (from.bottom - to.bottom) / (scale || 1);
+      const box = floor.getBoundingClientRect();
+      const scale = (floor.offsetWidth && box.width / floor.offsetWidth) || 1;
+      const x = fromLife ? box.left + box.width * fromLife.x : from.left + from.width / 2;
+      const y = fromLife ? box.top + box.height * fromLife.y : from.bottom;
+      const dx = (x - to.left - to.width / 2) / scale;
+      const dy = (y - to.bottom) / scale;
       const distance = Math.hypot(dx, dy);
       if (distance >= 4) {
         actor.dataset.facing = dx > 0 ? 'left' : 'right';
@@ -104,7 +112,7 @@ export function createWorkshopMotion(scene, actor) {
       scene.dataset.workPhase = 'idle';
       scene.dataset.workReceipt = 'false';
     },
-    show(nextStation, options) {
+    show(nextStation, options, fromLife) {
       const { entry, mode, active, entries } = options;
       const before = latest;
       if (!before) reduced.addEventListener?.('change', preferenceChanged);
@@ -131,7 +139,7 @@ export function createWorkshopMotion(scene, actor) {
           return;
         }
       }
-      if (!receiptId) present(latest);
+      if (!receiptId) present(latest, fromLife);
     }
   };
 }

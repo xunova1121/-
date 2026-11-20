@@ -73,10 +73,27 @@
 /* 室内照明和窗外天色分开。灯的暖色落在底图真实吊灯与检验台灯上。 */
 .ws-room-light { z-index: 4; }
 .ws-room-light::before, .ws-room-light::after { content: ''; position: absolute; inset: 0; }
-.ws-room-light::before { background: #26364b; opacity: 0; }
-.ws-scene[data-lamp-lit="off"] .ws-room-light::before { opacity: .17; }
-.ws-scene[data-life-night="true"] .ws-room-light::before { opacity: .35; }
-.ws-scene[data-life-night="true"][data-lamp-lit="off"] .ws-room-light::before { opacity: .66; }
+.ws-room-light::before {
+  background: var(--room-daylight);
+  opacity: var(--room-daylight-strength);
+}
+.ws-scene[data-life-period="dawn"] {
+  --room-daylight: linear-gradient(120deg, #ffe2ad 8%, #d1c5bb 46%, #63768f 92%);
+  --room-daylight-strength: .30;
+}
+.ws-scene[data-life-period="day"] {
+  --room-daylight: linear-gradient(148deg, #fff4ce 4%, #f8faf7 41%, #65839b 96%);
+  --room-daylight-strength: .12;
+}
+.ws-scene[data-life-period="dusk"] {
+  --room-daylight: linear-gradient(225deg, #f5b176 6%, #b18b93 45%, #3a486b 92%);
+  --room-daylight-strength: .38;
+}
+.ws-scene[data-life-period="night"] {
+  --room-daylight: linear-gradient(150deg, #25344f 6%, #26364b 55%, #182239 100%);
+  --room-daylight-strength: .67;
+}
+.ws-scene[data-life-period="night"][data-lamp-lit="on"] { --room-daylight-strength: .43; }
 .ws-scene[data-life-pose="tv"][data-life-phase="settled"] .ws-room-light::before {
   mask-image: radial-gradient(ellipse 7% 6% at 85% 70%,transparent 20%,black);
 }

@@ -4,6 +4,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
+import { checkWorkshopChat, roomQuestion } from './work-studio-chat-flow.mjs';
 
 const root = path.resolve('dist-mobile');
 const requests = [];
@@ -14,11 +15,16 @@ const server = http.createServer(async (req, res) => {
     const parts = []; for await (const part of req) parts.push(part);
     const body = JSON.parse(Buffer.concat(parts)); requests.push(body);
     res.setHeader('Content-Type', 'text/event-stream');
+    if (lastUser(body) === roomQuestion && body.messages.at(-1)?.role === 'user') {
+      const tool = { index: 0, id: 'room-files', type: 'function', function: { name: 'list_files', arguments: '{}' } };
+      res.end('data: ' + JSON.stringify({ choices: [{ delta: { tool_calls: [tool] }, finish_reason: 'tool_calls' }] }) + '\n\ndata: [DONE]\n\n');
+      return;
+    }
     const text = content => res.write('data: ' + JSON.stringify({ choices: [{ delta: { content } }] }) + '\n\n');
     text('正在整理你的要求。');
     const finish = () => {
       if (!res.destroyed) {
-        text('本次任务已完成。');
+        text(lastUser(body) === roomQuestion ? '工作区文件已经核对。' : '本次任务已完成。');
         res.end('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
       }
     };
@@ -37,13 +43,17 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const base = 'http://127.0.0.1:' + server.address().port;
 let browser;
 const lastUser = request => [...request.messages].reverse().find(row => row.role === 'user')?.content;
-try {
-  browser = await chromium.launch();
+async function mobileContext() {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   await context.addInitScript(base => {
     localStorage.setItem('jarvis.settings.v1', JSON.stringify({ theme: 'day', speechOutput: false, autoMemory: false, teamMode: 'off' }));
     localStorage.setItem('jarvis.llm.v1', JSON.stringify({ provider: 'custom', models: { custom: 'queue-test' }, keys: { custom: 'fixture' }, baseURLs: { custom: base + '/v1' }, routing: { enabled: false }, hedgeBackup: false }));
   }, base);
+  return context;
+}
+try {
+  browser = await chromium.launch();
+  const context = await mobileContext();
   const page = await context.newPage(); await page.goto(base);
   await page.waitForFunction(() => window.__jarvis?.send);
   const submit = async text => { await page.fill('#prompt', text); await page.click('#btn-send'); };
@@ -107,6 +117,16 @@ try {
   await page.click('#btn-stop');
   console.log('通过：手机可见队列按乙、丙逐条执行、不污染当前上下文，取消有效，停止后暂停且只在明确继续时发送。');
   console.log('通过：切换会话不串发，回原会话明确继续，排队附件和当前草稿附件分别保留。');
+  await context.close();
+  for (const finish of held.splice(0)) finish();
+  const roomContext = await mobileContext();
+  const firstRoomRequest = requests.length;
+  await checkWorkshopChat({
+    page: await roomContext.newPage(), base,
+    requests: () => requests.slice(firstRoomRequest),
+    finishReply: () => held.shift()(),
+    shotDir: process.argv[2]
+  });
 } finally {
   for (const finish of held) finish();
   await browser?.close();

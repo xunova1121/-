@@ -1,23 +1,17 @@
 import { createWorkStudioView } from './workStudioView.js';
+import { createConversationMount } from './conversationMount.js';
 import './workbenchDesk.css';
-
-function moveNode(parent, node, before = null) {
-  // moveBefore 可以保留嵌入式预览和输入焦点，旧内核也沿用同一个 DOM 节点。
-  if (parent.moveBefore && node.isConnected && parent.isConnected) parent.moveBefore(node, before);
-  else parent.insertBefore(node, before);
-}
 
 export function createWorkbenchStudio({ getSession, activity }) {
   const transcript = document.getElementById('transcript');
   const form = document.getElementById('inputbar');
   const main = transcript.parentElement;
-  const anchor = document.createComment('conversation');
-  main.insertBefore(anchor, transcript);
   const desk = document.createElement('section');
   desk.className = 'wb-desk';
   desk.setAttribute('aria-label', '工作台');
   desk.hidden = true;
-  main.insertBefore(desk, anchor);
+  main.insertBefore(desk, transcript);
+  const conversation = createConversationMount(transcript, form);
   const chat = document.createElement('section');
   chat.className = 'wb-desk-chat';
   chat.setAttribute('aria-label', '工作对话');
@@ -65,8 +59,7 @@ export function createWorkbenchStudio({ getSession, activity }) {
 
   function show(on) {
     if (open === on) return;
-    const atEnd = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 20;
-    const scrollTop = transcript.scrollTop;
+    let restoreScroll;
     open = on;
     if (open) {
       if (!view) {
@@ -74,24 +67,14 @@ export function createWorkbenchStudio({ getSession, activity }) {
         desk.prepend(view.element);
       }
       desk.hidden = false;
-      // 从对话到输入框之间也包含建议、引导队列与回到最新。切换时完整搬入当前节点。
-      for (let item = transcript; item;) {
-        const next = item.nextElementSibling;
-        moveNode(chat, item);
-        if (item === form) break;
-        item = next;
-      }
+      restoreScroll = conversation.moveTo(chat);
       updateEmpty();
     } else {
-      for (const item of [...chat.children]) {
-        if (item !== header && item !== empty) moveNode(main, item, anchor);
-      }
-      // 归位后将定位点留在桌面布局和普通对话之间。
-      main.insertBefore(anchor, transcript);
+      restoreScroll = conversation.restore();
       desk.hidden = true;
     }
     visibility();
-    transcript.scrollTop = atEnd ? transcript.scrollHeight : scrollTop;
+    restoreScroll?.();
   }
   return { show, refresh };
 }

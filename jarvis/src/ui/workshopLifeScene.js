@@ -1,4 +1,5 @@
 import './workshopLifeScene.css';
+import { routineStations } from './workshopMotion.js';
 
 // 百分比坐标以完整车间为准。每个动作的两帧来自同一组角色、道具和镜头。
 const poses = {
@@ -46,6 +47,7 @@ export function createWorkshopLifeScene(scene, floor, onChange = () => {}) {
   let lampTimer = null;
   let latest = null;
   let displayed = '';
+  let workOrigin = null;
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   const still = () => reduced.matches || document.body.classList.contains('reduced-motion');
 
@@ -64,12 +66,14 @@ export function createWorkshopLifeScene(scene, floor, onChange = () => {}) {
 
   function show(pose) {
     if (pose === displayed) return;
-    const previous = displayed && feetInRoom(displayed === 'work' ? workActor : actor, floor);
+    const leavingFurniture = Object.hasOwn(poses, displayed);
+    const previous = displayed && feetInRoom(leavingFurniture ? actor : workActor, floor);
     stopWalk();
     displayed = pose;
     scene.dataset.lifePose = pose;
     const target = poses[pose];
     if (!target) {
+      if (leavingFurniture) workOrigin = previous;
       delete scene.dataset.lifePlace;
       return;
     }
@@ -103,15 +107,16 @@ export function createWorkshopLifeScene(scene, floor, onChange = () => {}) {
     stopWalk();
     latest = null;
     displayed = '';
+    workOrigin = null;
   }
 
   function render(state) {
-    const activity = Object.hasOwn(poses, state.activity) ? state.activity : 'work';
+    const activity = Object.hasOwn(poses, state.activity) || Object.hasOwn(routineStations, state.activity) ? state.activity : 'work';
     const switchLamp = latest && state.lightMode !== 'auto' && latest.lampOn !== state.lampOn;
     const changed = latest?.activity !== activity;
     latest = state;
     scene.dataset.lamp = state.lampOn ? 'on' : 'off';
-    scene.dataset.lifeNight = String(Boolean(state.night));
+    scene.dataset.lifePeriod = state.period;
     scene.dataset.lifeActivity = activity;
     if (changed || switchLamp || activity === 'work') {
       clearTimeout(lampTimer);
@@ -129,6 +134,9 @@ export function createWorkshopLifeScene(scene, floor, onChange = () => {}) {
       applyLamp();
       show(activity);
     }
+    const origin = workOrigin;
+    workOrigin = null;
+    return origin;
   }
 
   return { render, suspend };

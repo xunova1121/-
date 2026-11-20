@@ -24,7 +24,8 @@ export function createBackNavigation({ doc = document, win = window, minimize, t
     // 1. 弹窗：最后打开的在最上面
     const dialogs = [...doc.querySelectorAll('dialog[open]')];
     if (dialogs.length) {
-      const top = dialogs.at(-1);
+      // 工作台本身是普通页面，它的 DOM 可能晚于已创建的预览弹窗。
+      const top = dialogs.filter(dialog => dialog.id !== 'mobile-work-studio').at(-1) || dialogs.at(-1);
       const cancel = new Event('cancel', { cancelable: true });
       top.dispatchEvent(cancel);
       if (!cancel.defaultPrevented && top.open) top.close();

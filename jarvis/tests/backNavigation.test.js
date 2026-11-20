@@ -32,6 +32,18 @@ describe('返回逐层退', () => {
     expect(nav(p)()).toBe('dialog');
     expect(b.open).toBe(false); expect(a.open).toBe(true);
   });
+  it('工作台不抢 Android 返回键：先关原有的预览浮层，再退回对话', () => {
+    const p = page();
+    const preview = p.el({ matches: ['dialog[open]'], open: true, close() { this.open = false; } });
+    const studio = p.el({ id: 'mobile-work-studio', matches: ['dialog[open]'], open: true, close() { this.open = false; } });
+    const handle = nav(p);
+    expect(handle()).toBe('dialog');
+    expect(preview.open).toBe(false);
+    expect(studio.open).toBe(true);
+    preview.matches = [];
+    expect(handle()).toBe('dialog');
+    expect(studio.open).toBe(false);
+  });
   it('底部选择面板点关闭；菜单发 Esc', () => {
     const p = page(), x = p.el({ matches: ['.mp-sheet .x-btn'] });
     expect(nav(p)()).toBe('sheet'); expect(x.clicked).toBe(1);

@@ -76,15 +76,14 @@ export function createWorkshopRoom(scene, floor, onChange) {
       const state = life.snapshot();
       if (lastActivity === 'sing' && state.activity !== 'sing') stopWorkshopHum();
       lastActivity = state.activity;
-      display.render(presentingWork && confirmedShred ? { ...state, activity: 'shred' } : state);
+      const workOrigin = display.render(presentingWork && confirmedShred ? { ...state, activity: 'shred' } : state);
       if (lamp.getAttribute('aria-pressed') !== String(state.lampOn)) {
         lamp.setAttribute('aria-pressed', String(state.lampOn));
         lamp.textContent = state.lampOn ? '关灯' : '开灯';
         lamp.title = state.lampOn ? '关闭工作台台灯' : '打开工作台台灯';
       }
       for (const el of menu.children) el.disabled = presentingWork && el.dataset.roomAction !== 'lamp-auto';
-      if (scene.dataset.lifePose === 'lamp') return { ...state, label: state.lampOn ? '正在打开台灯' : '正在关掉台灯' };
-      return state;
+      return { ...state, workOrigin, label: scene.dataset.lifePose === 'lamp' ? (state.lampOn ? '正在打开台灯' : '正在关掉台灯') : state.label };
     },
     setVisible(on) {
       life.setVisible(on);

@@ -1,7 +1,7 @@
 import './workStudioView.css';
 import './workbenchWorkshopMotion.css';
 import { addWorkshopFixtures } from './workshopFixtures.js';
-import { createWorkshopMotion, stationForStep, stationNames } from './workshopMotion.js';
+import { createWorkshopMotion, routineStations, stationForStep, stationNames } from './workshopMotion.js';
 import { createWorkshopRoom } from './workshopRoom.js';
 
 const poses = {
@@ -172,21 +172,24 @@ export function createWorkStudioView({ workshop = false } = {}) {
     prop.dataset.kind = filename ? 'file' : 'action';
     const n = index();
     if (motion) {
-      const station = stationForStep(snapshot.entries, n);
+      const backgroundWork = !isReview && snapshot.otherWork && !snapshot.active;
+      const showTask = Boolean(isReview || snapshot.active || backgroundWork || justFinished !== null);
+      const state = room.render(showTask, !backgroundWork && entry?.roomOperation === 'shred' && entry.status === 'done');
+      const routine = scene.dataset.lifePose === state.activity ? routineStations[state.activity] : null;
+      const station = routine?.station || stationForStep(snapshot.entries, n);
       text(stationLabel, stationNames[station]);
       const live = !isReview && snapshot.active;
       const movingStep = !!entry && entry.status !== 'waiting' && entry.status !== 'stopped' && !['idle', 'stop', 'stomp', 'cheer'].includes(pose);
       motion.show(station, {
-        entry, entries: snapshot.entries, mode: isReview ? (playing ? 'play' : 'manual') : 'live', active: snapshot.active,
-        travel: movingStep && (live || playing),
-        working: movingStep && ((live && entry.status === 'running') || playing),
-        gesture: !isReview && (pose === 'stomp' || pose === 'cheer')
-      });
-      const backgroundWork = !isReview && snapshot.otherWork && !snapshot.active;
-      const state = room.render(Boolean(isReview || snapshot.active || backgroundWork || justFinished !== null), !backgroundWork && entry?.roomOperation === 'shred' && entry.status === 'done');
+        entry: showTask ? entry : null, entries: snapshot.entries, mode: isReview ? (playing ? 'play' : 'manual') : 'live', active: snapshot.active,
+        routineOperation: routine?.operation,
+        travel: !!routine || (movingStep && (live || playing)),
+        working: !!routine || (movingStep && ((live && entry.status === 'running') || playing)),
+        gesture: showTask && !isReview && (pose === 'stomp' || pose === 'cheer')
+      }, state.workOrigin);
       if (state.activity !== 'work') {
         text(mode, '生活中');
-        text(stationLabel, '工作台');
+        text(stationLabel, routine ? stationNames[station] : '工作台');
         text(action, state.label);
         detail.hidden = file.hidden = prop.hidden = true;
       } else if (backgroundWork) {

@@ -215,7 +215,8 @@ try {
   assert.ok(await local.evaluate(() => window.__jarvis.stage == null), '工作台的角色不拉起星系 GPU 场景');
   assert.equal(await rows(local).count(), 0, '空会话只显示待命');
   assert.equal(await stage(local).getAttribute('data-pose'), 'idle');
-  await stationPoint(local, 'rest');
+  const idleActivity = await stage(local).locator('.ws-scene').getAttribute('data-life-activity');
+  await stationPoint(local, ({ plan: 'bench', tidy: 'archive', study: 'review' })[idleActivity] || 'rest');
   const actor = stage(local).locator('.ws-floorplan .ws-actor');
   assert.notEqual(await actor.getAttribute('data-walking'), 'true', '空会话安静待命');
   await send(local, '请先读取' + localFile + '，文件不存在就写一份活动方案保存到这个位置。');
