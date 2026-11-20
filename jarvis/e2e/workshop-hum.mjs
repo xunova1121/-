@@ -3,6 +3,11 @@ import assert from 'node:assert/strict';
 // 旁路监听送往扬声器的同一份 PCM。不调用合成器私有方法，不加速音频时钟。
 export async function checkWorkshopHum(page, room, choose) {
   await page.evaluate(() => {
+    const stop = OscillatorNode.prototype.stop;
+    OscillatorNode.prototype.stop = function(at) {
+      if (this.context === window.humOutput?.context) window.humScheduledEnd = at;
+      return stop.apply(this, arguments);
+    };
     const original = AudioNode.prototype.connect;
     AudioNode.prototype.connect = function(target, ...args) {
       const result = original.call(this, target, ...args);
@@ -39,7 +44,25 @@ export async function checkWorkshopHum(page, room, choose) {
   await listen.click();
   const first = await readSong();
   assert.equal(first, advertised, '点自然作息的哼歌，听到当前显示的曲名');
-  await label.filter({ hasText: '正在哼《', hasNotText: first }).waitFor({ timeout: 30000 });
+  // headless 的音频设备在 CI 高负载时可能慢于墙钟。按实际排到声卡的末音验收，
+  // 同时限制总等待，检查没有提前切歌、漏发下一首或因切后台而静默关闭。
+  const firstVoice = await page.evaluateHandle(() => ({ context: window.humOutput.context, end: window.humScheduledEnd }));
+  const caption = await label.elementHandle();
+  try {
+    await page.waitForFunction(({ firstVoice, caption, first }) => {
+      const { context, end } = firstVoice;
+      if (!Number.isFinite(end) || document.hidden || context.state !== 'running' || context !== window.humOutput.context)
+        throw new Error('首曲意外中断，无法验收自动切歌');
+      const time = context.currentTime;
+      const changed = caption.textContent.startsWith('正在哼《') && caption.textContent !== first;
+      if ((!changed && time > end + 1) || (changed && time < end - .05))
+        throw new Error('曲名和音频结束时间不符：' + JSON.stringify({ first, shown: caption.textContent, time, end }));
+      return changed;
+    }, { firstVoice, caption, first }, { polling: 100, timeout: 90000 });
+  } finally {
+    await firstVoice.dispose();
+    await caption.dispose();
+  }
   const second = await readSong();
   await choose('sing');
   const third = await readSong();

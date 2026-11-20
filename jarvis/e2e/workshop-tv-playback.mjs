@@ -104,7 +104,7 @@ export async function checkTvActor(room, { working = false } = {}) {
   const spectator = room.locator('.ws-tv-watcher');
   if (working) assert(!await spectator.isVisible(), '执行任务时回到工位');
   else assert(!await room.locator('.ws-life-actor').isVisible(), '同一位未央在前景就座后不再重复显示在背景');
-  const { clip, glass, sample, feet, edge, receiverRight } = await actor.evaluate((el, working) => {
+  const { clip, glass, sample, feet, remoteStrip, edge, receiverRight } = await actor.evaluate((el, working) => {
     const scene = el.closest('.ws-scene');
     const stage = scene.getBoundingClientRect();
     const sprite = el.getBoundingClientRect();
@@ -123,7 +123,10 @@ export async function checkTvActor(room, { working = false } = {}) {
     const feetY = Math.ceil(receiver.bottom + 4);
     const feet = { x: feetX, y: feetY, width: Math.floor(Math.min(stage.right, sprite.right)) - feetX,
       height: Math.floor(Math.min(controls.top, stage.bottom, sprite.bottom)) - feetY };
-    return { feet, edge: sprite.left + .46 * sprite.width, receiverRight: receiver.right,
+    const remoteY = Math.ceil(controls.top);
+    const remoteStrip = { x: feetX, y: remoteY, width: feet.width,
+      height: Math.floor(Math.min(controls.bottom, stage.bottom, sprite.bottom)) - remoteY };
+    return { feet, remoteStrip, edge: sprite.left + .46 * sprite.width, receiverRight: receiver.right,
       clip: { x, y, width: Math.floor(Math.min(innerWidth, stage.right, left + sample.width)) - x,
       height: Math.floor(Math.min(innerHeight, stage.bottom, top + sample.height)) - y }, sample,
     glass: glass.toJSON() };
@@ -135,6 +138,10 @@ export async function checkTvActor(room, { working = false } = {}) {
     const chair = await actorInk(page, selector, feet, glass);
     assert(chair.pixels >= 8 && chair.width >= 4 && chair.height >= 2,
       '机壳底边以下至少五个像素处能看到真实椅脚 ' + JSON.stringify({ chair, feet }));
+    if (remoteStrip.height > 0) {
+      const overlap = await actorInk(page, selector, remoteStrip, glass);
+      assert(overlap.pixels <= 2, '椅脚在遥控条上方，房间人物不能盖住频道按钮');
+    }
   }
   const ink = await actorInk(page, selector, clip, glass);
   const faceVisible = working || (ink.width >= .72 * sample.width && ink.height >= .7 * sample.height &&
