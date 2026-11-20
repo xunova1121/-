@@ -1,7 +1,7 @@
 import './workshopNewsReader.css';
 
 // 标题索引的导语先显示。只有点开当前报道才读正文，离开新闻、换篇或关闭工作台会撤销读取。
-export function createWorkshopNewsReader(ui, feed) {
+export function createWorkshopNewsReader(ui, feed, choose) {
   const content = document.createElement('div');
   content.className = 'ws-article-content';
   content.setAttribute('aria-live', 'polite');
@@ -10,6 +10,7 @@ export function createWorkshopNewsReader(ui, feed) {
   let request;
   let expanded = false;
   let failed = false;
+  let previousItems;
 
   function showSummary() {
     ui.scroll.scrollTop = 0;
@@ -59,8 +60,28 @@ export function createWorkshopNewsReader(ui, feed) {
       if (request === pending) request = null;
     }
   };
-  return function select(next) {
-    if (item?.url === next?.url) return;
+  return function select(next, items) {
+    const summaryChanged = item?.summary !== next?.summary;
+    if (items !== previousItems || item?.url !== next?.url || summaryChanged) {
+      previousItems = items;
+      const others = next && !next.summary ? (items || []).filter(row => row.url !== next.url) : [];
+      ui.digest.hidden = !others.length;
+      ui.headlines.replaceChildren(...others.map(row => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = row.title;
+        button.onclick = () => {
+          choose(row);
+          ui.title.focus({ preventScroll: true });
+        };
+        return button;
+      }));
+    }
+    if (item?.url === next?.url) {
+      item = next;
+      if (summaryChanged && !expanded) showSummary();
+      return;
+    }
     item = next;
     reset();
     if (next) ui.original.href = next.url;

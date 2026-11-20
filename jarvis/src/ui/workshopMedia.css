@@ -21,7 +21,6 @@
 }
 .ws-monitor-ticker small { flex: none; color: #536e5c; font-size: 10px; }
 .ws-monitor-ticker span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* 新闻在工作台左侧展开，右侧仍能看到和操作真实台灯。 */
 .work-studio-view .ws-media-panel {
   position: absolute; z-index: 5; inset: 5% auto auto 3%;
   display: flex; flex-direction: column; gap: 7px; width: min(82%, 38rem);
@@ -111,9 +110,7 @@
 .work-studio-view .ws-media-panel[data-device="tv"] [aria-pressed="true"] { background: #335442; border-color: #335442; color: #fffbed; }
 @media (prefers-reduced-motion: no-preference) {
   .ws-media-panel[data-device="tv"]:not([hidden]) .ws-media-receiver { animation: ws-tv-approach .24s ease-out; }
-  .ws-media-panel[data-device="monitor"]:not([hidden]) { animation: ws-reader-appear .16s ease-out; }
   @keyframes ws-tv-approach { from { transform: translate(10%,-42%) scale(.82); opacity: .5; } }
-  @keyframes ws-reader-appear { from { opacity: .3; } }
 }
 /* 灯和显示器随原画一起推到右边，保留同一组可点家具。 */
 .work-studio-view[data-media-open][data-workshop] .ws-floorplan {
@@ -129,12 +126,34 @@
 .work-studio-view[data-workshop] .ws-scene[data-life-place]:has(.ws-media-panel[data-device="tv"]) .ws-floorplan {
   transform: translate(calc(0% - var(--life-x)),calc(0% - var(--life-ground)));
 }
-.ws-scene[data-life-pose="tv"][data-life-phase="settled"]:has(.ws-media-panel[data-device="tv"]) .ws-life-pose {
-  /* 图集左侧是坐在凳子上的未央。让她朝向放大的电视，保留呼吸动画和凳子。 */
-  clip-path: inset(0 45% 0 0); scale: -1 1; translate: -23% 0;
+/* 看电视时才把坐姿画到机壳前。走动和工作仍在房间里进行。 */
+.ws-tv-watcher { display: none; pointer-events: none; }
+.ws-scene[data-life-pose="tv"][data-life-phase="settled"]:has(.ws-media-panel[data-device="tv"]) .ws-life-actor {
+  visibility: hidden;
 }
-.ws-scene[data-life-pose="tv"]:has(.ws-media-panel[data-device="tv"]) .ws-life-shadow {
-  left: 26%; right: 24%;
+.ws-scene[data-life-pose="tv"][data-life-phase="settled"] .ws-media-panel[data-device="tv"] .ws-media-receiver {
+  --watcher-size: min(20cqw, 30cqh);
+  padding-block: .45cqw .3cqw; translate: 0 -.45cqw;
+}
+.ws-scene[data-life-pose="tv"][data-life-phase="settled"] .ws-media-panel[data-device="tv"] .ws-media-receiver::after {
+  content: ''; position: absolute; pointer-events: none;
+  left: calc(100% - 2.15cqw + var(--watcher-size) * .05);
+  bottom: calc(-8px - var(--watcher-size) * .04); width: calc(var(--watcher-size) * .47);
+  height: calc(var(--watcher-size) * .09);
+  background: radial-gradient(ellipse closest-side, #44332880, transparent);
+}
+.ws-scene[data-life-pose="tv"][data-life-phase="settled"] .ws-media-panel[data-device="tv"] .ws-tv-watcher {
+  display: block; position: absolute; z-index: 1;
+  left: calc(100% - 2.15cqw); bottom: calc(-8px - var(--watcher-size) * .068);
+  width: var(--watcher-size); aspect-ratio: 1;
+  /* 图集左半幅包含未央和凳子，镜像后面对电视；落脚点与右侧机壳重叠。 */
+  background: url('./assets/workStudio/workshop-life.webp') 40% 50% / 600% 300% no-repeat;
+  --life-frame-a: 40%; --life-frame-b: 60%;
+  clip-path: inset(0 46% 0 0); scale: -1 1; translate: -46% 0;
+}
+.ws-scene[data-life-period="night"][data-lamp-lit="off"] .ws-tv-watcher { filter: brightness(.82); }
+@media (prefers-reduced-motion: no-preference) {
+  body:not(.reduced-motion) .ws-tv-watcher { animation: ws-life-contact 4s steps(1,end) infinite; }
 }
 .work-studio-view[data-media-open] .ws-scene > .ws-room-tools { visibility: hidden; }
 .work-studio-view[data-media-open] .ws-scene:not([data-life-pose="tv"]):has(.ws-media-panel[data-device="tv"]) > .ws-room-tools {

@@ -93,7 +93,9 @@ try {
     await scene.waitFor();
     const pose = scene.locator('.ws-life-pose');
     assert(await pose.isVisible(), '生活姿势可见');
-    assert.match(await pose.evaluate(el => getComputedStyle(el).backgroundImage), /workshop-life/, '可见生活姿势加载了道具图集');
+    const quilted = activity === 'sleep' && (await scene.getAttribute('data-winter-quilt')) !== null;
+    assert.match(await pose.evaluate(el => getComputedStyle(el).backgroundImage),
+      quilted ? /workshop-winter-sleep/ : /workshop-life/, '生活姿势加载与当前场景相符的图集');
     const insideRoom = await pose.evaluate(el => {
       const p = el.getBoundingClientRect();
       const room = el.closest('.ws-scene').getBoundingClientRect();

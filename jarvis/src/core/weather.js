@@ -7,6 +7,28 @@ const CITY_KEY='jarvis.weather.city.v1',CACHE_KEY='jarvis.weather.cache.v1';
 export const POPULAR_CITIES=[['上海',31.23,121.47],['北京',39.90,116.40],['广州',23.13,113.26],['深圳',22.54,114.06],['杭州',30.27,120.15],['成都',30.57,104.07],['重庆',29.56,106.55],['武汉',30.59,114.31],['南京',32.06,118.80],['西安',34.34,108.94],['苏州',31.30,120.58],['郑州',34.75,113.63]].map(([name,latitude,longitude])=>({name,latitude,longitude}));
 export function validCity(city){return !!city&&typeof city.name==='string'&&city.name.trim().length>0&&city.name.length<=80&&typeof city.latitude==='number'&&Number.isFinite(city.latitude)&&Math.abs(city.latitude)<=90&&typeof city.longitude==='number'&&Number.isFinite(city.longitude)&&Math.abs(city.longitude)<=180;}
 export const cityKey=city=>`${city.latitude.toFixed(2)},${city.longitude.toFixed(2)}`;
+// 房间只用已选城市最近一次实测温度，不唤起天气请求或定位。
+export function readLocalClimate(now, earliestObservation) {
+  let latitude = null;
+  try {
+    const storage = globalThis.localStorage;
+    const city = JSON.parse(storage?.getItem(CITY_KEY) || 'null');
+    if (validCity(city)) {
+      latitude = city.latitude;
+      const cache = JSON.parse(storage.getItem(CACHE_KEY) || 'null');
+      if (cache?.key === cityKey(city)) {
+        const { temp, fetchedAt } = cache.data || {};
+        if (Number.isFinite(fetchedAt) && fetchedAt >= earliestObservation && fetchedAt <= now &&
+            Number.isFinite(temp) && temp >= -120 && temp <= 80) {
+          return { latitude, temp };
+        }
+      }
+    }
+  } catch {
+    // 存储受限或旧缓存损坏时，工作台仍可按季节生活。
+  }
+  return { latitude, temp: null };
+}
 const number=n=>typeof n==='number'&&Number.isFinite(n)?n:null;
 export function weatherKind(code){if(code===0||code===1)return{label:code===0?'晴':'晴间多云',icon:'sun'};if(code===2||code===3)return{label:code===2?'多云':'阴',icon:'cloud'};if(code===45||code===48)return{label:'有雾',icon:'fog'};if([51,53,55,56,57].includes(code))return{label:'毛毛雨',icon:'rain'};if([61,63,65,66,67,80,81,82].includes(code))return{label:[65,82].includes(code)?'大雨':'有雨',icon:'rain'};if([71,73,75,77,85,86].includes(code))return{label:'有雪',icon:'snow'};if([95,96,99].includes(code))return{label:'雷雨',icon:'storm'};return{label:'天气概况待更新',icon:'cloud'};}
 export function parseWeather(raw,now=Date.now()){

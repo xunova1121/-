@@ -1,5 +1,6 @@
 import {
-  getWorkshopCustomChannels, normalizeWorkshopSource, removeWorkshopSource, saveWorkshopSource
+  listWorkshopChannels, removedWorkshopChannels, setWorkshopBuiltinVisible,
+  normalizeWorkshopSource, removeWorkshopSource, saveWorkshopSource
 } from './workshopMediaChannels.js';
 import { mediaNode } from './workshopMediaView.js';
 import './workshopSourceManager.css';
@@ -26,6 +27,8 @@ export function createWorkshopSourceManager(ui, { preview, restoreChannel, selec
   header.append(heading, closeButton);
   const body = mediaNode('div', 'ws-source-body');
   const list = mediaNode('div', 'ws-source-list');
+  const listError = mediaNode('p', 'ws-source-error');
+  listError.setAttribute('role', 'alert');
   const form = mediaNode('form', 'ws-source-form');
   const name = mediaNode('input', '');
   name.maxLength = 80;
@@ -121,26 +124,58 @@ export function createWorkshopSourceManager(ui, { preview, restoreChannel, selec
     error.textContent = '';
     remove.hidden = !editingId;
     confirmRemove.hidden = cancelRemove.hidden = true;
-    returnToList.hidden = !getWorkshopCustomChannels().length;
     display('edit');
     closeButton.focus({ preventScroll: true });
   }
   function renderList() {
     const add = control('添加视频源', () => edit(null), 'ws-source-save');
     list.replaceChildren(add);
-    for (const source of getWorkshopCustomChannels()) {
+    function toggle(source, restore) {
+      const label = restore ? '恢复' : '移除';
+      const action = control(label, () => {
+        const siblings = [...list.querySelectorAll('[data-toggle]')];
+        const index = siblings.indexOf(action);
+        try {
+          listError.textContent = '';
+          setWorkshopBuiltinVisible(source.id, restore);
+          const buttons = list.querySelectorAll('[data-toggle]');
+          (buttons[index] || buttons[buttons.length - 1] || add).focus({ preventScroll: true });
+        } catch (cause) { listError.textContent = cause.message; listError.scrollIntoView({ block: 'nearest' }); }
+      }, restore ? '' : 'ws-source-remove');
+      action.dataset.toggle = source.id;
+      action.setAttribute('aria-label', label + ' ' + source.label);
+      return action;
+    }
+    const channels = listWorkshopChannels();
+    const custom = channels.filter(source => source.kind === 'custom');
+    const defaults = channels.filter(source => source.kind !== 'custom');
+    for (const source of [...custom, ...defaults]) {
+      if (source === defaults[0]) list.append(mediaNode('h5', 'ws-source-group', '默认频道'));
       const row = mediaNode('div', 'ws-source-row');
-      const tune = control(source.title, () => { reset(); selectChannel(source.id); });
-      tune.title = '播放 ' + source.title;
-      const editButton = control('编辑', () => edit(source));
-      editButton.setAttribute('aria-label', '编辑 ' + source.title);
-      row.append(tune, editButton);
+      const tune = control(source.label, () => { reset(); selectChannel(source.id); ui.manageSources.focus({ preventScroll: true }); });
+      tune.setAttribute('aria-label', '播放 ' + source.label);
+      if (source.kind === 'custom') {
+        const editButton = control('编辑', () => edit(source));
+        editButton.setAttribute('aria-label', '编辑 ' + source.label);
+        row.append(tune, editButton);
+      } else row.append(tune, toggle(source, false));
       list.append(row);
     }
+    const removed = removedWorkshopChannels();
+    if (removed.length) {
+      list.append(mediaNode('h5', 'ws-source-group', '已移除的默认频道'));
+      for (const source of removed) {
+        const row = mediaNode('div', 'ws-source-row');
+        row.append(mediaNode('span', '', source.label), toggle(source, true));
+        list.append(row);
+      }
+    }
+    list.append(listError);
   }
   function openList() {
     stopTrial();
     editingId = '';
+    listError.textContent = '';
     renderList();
     display('list');
     list.firstElementChild.focus({ preventScroll: true });
@@ -168,8 +203,7 @@ export function createWorkshopSourceManager(ui, { preview, restoreChannel, selec
       display('edit');
       save.focus({ preventScroll: true });
     } else if (!panel.hidden) dismiss(true);
-    else if (getWorkshopCustomChannels().length) openList();
-    else edit(null);
+    else openList();
   };
   panel.hidden = true;
   return {

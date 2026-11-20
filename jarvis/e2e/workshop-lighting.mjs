@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 
 // 比对屏幕上的桌面和地板与原画。使用实际镜头尺寸换算坐标，排除人物、家具和阅读/播放面板。
-async function measureRoom(page, room, label, minContrast = .78) {
-  const shot = await page.screenshot({ animations: 'disabled', scale: 'css' });
+async function measureRoom(page, room, label, { minBrightness = .79, maxBrightness = Infinity, minContrast = .78, screenshotPath } = {}) {
+  const shot = await page.screenshot({ animations: 'disabled', scale: 'css', path: screenshotPath });
   const result = await room.evaluate(async (el, encoded) => {
     const floor = el.querySelector('.ws-floorplan');
     const frame = floor.getBoundingClientRect();
@@ -47,13 +48,15 @@ async function measureRoom(page, room, label, minContrast = .78) {
       contrast: contrast(actual) / contrast(reference) };
   }, shot.toString('base64'));
   console.log(label, result);
-  assert(result.samples >= 100 && result.brightness >= .79 && result.contrast >= minContrast,
-    label + ' 可见的办公区应保有原画的亮度和纹理 ' + JSON.stringify(result));
+  assert(result.samples >= 100 && result.brightness >= minBrightness && result.brightness <= maxBrightness &&
+    result.contrast >= minContrast, label + ' 房间实测光照或纹理超出范围 ' + JSON.stringify(result));
+  return result;
 }
 
-export async function checkWorkshopLighting(page, room, platform) {
+export async function checkWorkshopLighting(page, room, platform, output) {
   const returnToRoom = room.getByRole('button', { name: '返回房间', exact: true });
   if (await returnToRoom.isVisible()) await returnToRoom.click();
+  const darkRoom = { minBrightness: .48, maxBrightness: .68, minContrast: .39 };
   for (const [hour, period, lamp] of [[12, 'day', 'off'], [21, 'night', 'on'], [23, 'night', 'off']]) {
     await page.clock.setSystemTime(await page.evaluate(h => new Date().setHours(h, 15, 0, 0), hour));
     await room.locator('[data-room-action="menu"]').click();
@@ -61,15 +64,25 @@ export async function checkWorkshopLighting(page, room, platform) {
     if (hour === 21) await page.locator('#btn-theme').dispatchEvent('click');
     assert.equal(await page.locator('html').getAttribute('data-theme'), hour === 12 ? 'light' : 'dark');
     await room.locator(`.ws-scene[data-life-period="${period}"][data-lamp-lit="${lamp}"]`).waitFor();
-    await measureRoom(page, room, platform + ' ' + period + ' 灯' + lamp, hour === 12 ? .92 : .78);
+    const limits = hour === 23 ? darkRoom : { minContrast: hour === 12 ? .92 : .78 };
+    const roomLight = await measureRoom(page, room, platform + ' ' + period + ' 灯' + lamp, limits);
     if (hour === 21) {
       for (const device of ['tv', 'monitor']) {
         await room.locator(`[data-media-device="${device}"]`).click();
         await room.locator(`.ws-media-panel[data-device="${device}"]`).waitFor();
         // 放大电视后手机仅露出很窄的一片地板，阴影边缘对其分位数更敏感。
-        await measureRoom(page, room, platform + ' 夜间' + device, device === 'tv' ? .73 : .78);
+        await measureRoom(page, room, platform + ' 夜间' + device, { minContrast: device === 'tv' ? .73 : .78 });
         await returnToRoom.click();
       }
+      const lightSwitch = room.locator('[data-room-action="light"]');
+      await lightSwitch.click();
+      await room.locator('.ws-scene[data-lamp-lit="off"]').waitFor();
+      const switchedOff = await measureRoom(page, room, platform + ' 手动关灯',
+        { ...darkRoom, screenshotPath: path.join(output, platform + '-light-off.png') });
+      assert(switchedOff.brightness < roomLight.brightness * .70, '关灯应明显暗于同一时刻的开灯画面');
+      await lightSwitch.click();
+      await room.locator('.ws-scene[data-lamp-lit="on"]').waitFor();
+      await measureRoom(page, room, platform + ' 手动开灯', { screenshotPath: path.join(output, platform + '-light-on.png') });
     }
   }
   await page.clock.setSystemTime(new Date());

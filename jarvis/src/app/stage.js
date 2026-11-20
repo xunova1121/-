@@ -23,6 +23,7 @@ import { Dashboard } from '../ui/dashboard.js';
 import { initOrbitHud } from '../ui/orbitHud.js';
 import { initCallouts } from '../ui/callouts.js';
 import { initChips } from '../ui/chips.js';
+import { stopWorkshopHum } from '../ui/workshopHum.js';
 import { $, body, now, COMPACT, lowEnd, isMobile, reducedMql, wp } from './env.js';
 
 export function createStage(app) {
@@ -286,6 +287,7 @@ export function createStage(app) {
   const DIRECTOR_STATE = { processing: 'processing', listening: 'speaking', done: 'speaking', idle: 'idle', error: 'error' };
   const ENERGY = { processing: 0.85, listening: 0.25 };
   function setTask(state, sub = '') {
+    if (state === 'processing' || state === 'listening') stopWorkshopHum();
     app.mascots?.task(state, sub);
     app.active?.bubble?.activity(state, sub);
     machine.setTaskState(state === 'listening' && !live.voiceListening ? 'listening' : state);

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 
-export async function checkWorkshopSourceManagement({ page, context, room, platform }) {
+export async function checkWorkshopSourceManagement({ page, context, room, platform, output }) {
   const address = 'https://media.example.org/workshop/test.webm';
   const offline = 'https://media.example.org/workshop/unavailable.webm';
   const clip = await readFile(new URL('../src/ui/assets/workStudio/meadow-preview.webm', import.meta.url));
@@ -24,6 +25,7 @@ export async function checkWorkshopSourceManagement({ page, context, room, platf
   try {
     await control(room, '打开电视').click();
     await manage.click();
+    await control(editor, '添加视频源').click();
     await name.fill('演播室测试');
     await url.fill('ftp://example.org/live');
     await control(editor, '试播').click();
@@ -60,6 +62,25 @@ export async function checkWorkshopSourceManagement({ page, context, room, platf
     assert(!await control(room, '已改名的电视').count(), '移除应同步工作台遥控器');
     await control(editor, '关闭视频源管理').click();
     assert.equal(await room.locator('.ws-media-channels [aria-pressed="true"]').count(), 1);
+    const stations = room.locator('.ws-media-channels button');
+    const defaults = await stations.evaluateAll(buttons => buttons.map(el => el.getAttribute('aria-label')));
+    await manage.click();
+    for (const station of defaults) {
+      await control(editor, '移除 ' + station).click();
+      assert(!await control(room.locator('.ws-media-channels'), station).count(), '移除后遥控器应同步隐藏 ' + station);
+    }
+    await control(editor, '关闭视频源管理').click();
+    assert(!await room.locator('.ws-tv-glass :is(video,iframe)').count(), '移除最后一个频道须释放播放器');
+    await control(room, '返回房间').click();
+    await control(room, '打开电视').click();
+    await page.screenshot({ path: path.join(output, platform + '-tv-empty.png') });
+    await control(room, '添加或恢复频道').click();
+    await page.screenshot({ path: path.join(output, platform + '-tv-restore.png') });
+    assert.equal(await stations.count(), 0, '重新打开电视后空频道表应保留');
+    for (const station of defaults.toReversed()) await control(editor, '恢复 ' + station).click();
+    await control(editor, '关闭视频源管理').click();
+    assert.equal(await stations.count(), defaults.length);
+    assert.equal(await stations.last().getAttribute('aria-pressed'), 'true', '恢复其他默认频道后保留当前频道');
     await control(room, '返回房间').click();
     console.log(platform + ' 工作台视频源：验证地址、试播失败和成功、保存、改名、恢复选台和移除通过');
   } finally {

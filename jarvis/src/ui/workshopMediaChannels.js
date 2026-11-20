@@ -6,11 +6,11 @@ import { loadServerSettings, normalizeUrl } from '../core/serverClient.js';
 
 const STORAGE_KEY = 'jarvis.workshopTv.channel.v1';
 const SOURCE_KEY = 'jarvis.workshopTv.source.v1:';
+const HIDDEN_KEY = 'jarvis.workshopTv.hidden.v1:';
 export const workshopChannels = WORKSHOP_TV_CHANNELS.map(channel => ({
   id: channel.id, title: channel.label, label: channel.name, number: channel.id.slice(4), url: channel.url, kind: 'cctv'
 }));
 const builtins = [...workshopPublicChannels, ...workshopChannels];
-const defaultChannel = builtins[0];
 const temporaryChoice = new Map();
 const subscribers = new Set();
 const listSubscribers = new Set();
@@ -52,8 +52,15 @@ export function getWorkshopCustomChannels() {
   return channels.sort((a, b) => a.title.localeCompare(b.title, 'zh-CN'));
 }
 
+export function removedWorkshopChannels() {
+  const prefix = HIDDEN_KEY + workshopChannelScope() + '/';
+  try { return builtins.filter(ch => globalThis.localStorage?.getItem(prefix + ch.id) === '1'); }
+  catch { return []; }
+}
+
 export function listWorkshopChannels() {
-  return [...builtins, ...getWorkshopCustomChannels()];
+  const removed = removedWorkshopChannels();
+  return [...builtins.filter(ch => !removed.includes(ch)), ...getWorkshopCustomChannels()];
 }
 
 function choiceId(scope) {
@@ -61,7 +68,7 @@ function choiceId(scope) {
   try {
     const storage = globalThis.localStorage;
     const selected = storage?.getItem(STORAGE_KEY + ':' + scope);
-    if (selected) return selected;
+    if (selected != null) return selected;
     // 老版本只保存央视槽号。允许继承这些公共偏好，后续私有频道只认自己的作用域。
     const legacy = storage?.getItem(STORAGE_KEY);
     return workshopChannels.find(ch => ch.id === legacy)?.id;
@@ -70,15 +77,21 @@ function choiceId(scope) {
 
 export function workshopChannel() {
   const id = choiceId(workshopChannelScope());
-  return listWorkshopChannels().find(ch => ch.id === id) || defaultChannel;
+  const channels = listWorkshopChannels();
+  return channels.find(ch => ch.id === id) || channels[0] || null;
+}
+
+function rememberChoice(channel) {
+  const scope = workshopChannelScope();
+  const id = channel?.id || '';
+  try {
+    globalThis.localStorage.setItem(STORAGE_KEY + ':' + scope, id);
+    temporaryChoice.delete(scope);
+  } catch { temporaryChoice.set(scope, id); }
 }
 
 function publishChoice(channel) {
-  const scope = workshopChannelScope();
-  try {
-    globalThis.localStorage.setItem(STORAGE_KEY + ':' + scope, channel.id);
-    temporaryChoice.delete(scope);
-  } catch { temporaryChoice.set(scope, channel.id); }
+  rememberChoice(channel);
   for (const notify of subscribers) notify(channel);
   return channel;
 }
@@ -107,7 +120,7 @@ export function selectWorkshopChannel(input) {
 
 export function saveWorkshopSource({ id, name, url, format } = {}) {
   const channel = normalizeWorkshopSource({ name, url, format });
-  const channels = listWorkshopChannels();
+  const channels = [...builtins, ...getWorkshopCustomChannels()];
   if (id != null && !channels.some(ch => ch.kind === 'custom' && ch.id === id)) throw new Error('这个自定义频道已不存在。');
   if (channels.some(ch => ch.id !== id && matchesName(ch, compactName(channel.title)))) throw new Error('此频道名称已被使用。');
   channel.id = id || 'custom-' + (globalThis.crypto?.randomUUID?.() ?? (Date.now().toString(36) + Math.random().toString(36).slice(2)));
@@ -127,11 +140,35 @@ export function saveWorkshopSource({ id, name, url, format } = {}) {
 export function removeWorkshopSource(id) {
   if (!getWorkshopCustomChannels().some(ch => ch.id === id)) return false;
   const scope = workshopChannelScope();
-  const selected = choiceId(scope) === id;
+  const previous = workshopChannel();
   try { globalThis.localStorage.removeItem(SOURCE_KEY + scope + '/' + id); }
   catch { throw new Error('此设备未能删除频道，请检查浏览器的存储权限。'); }
+  catalogChanged(previous);
+  return true;
+}
+
+function catalogChanged(previous) {
+  const channels = listWorkshopChannels();
+  const current = channels.find(ch => ch.id === previous?.id) || channels[0] || null;
+  const changed = previous?.id !== current?.id;
+  // 记住仍在播放的频道，恢复排在它前面的预置频道时不会抢台。
+  if (changed || current?.id !== workshopChannel()?.id) rememberChoice(current);
   for (const notify of listSubscribers) notify();
-  if (selected) publishChoice(defaultChannel);
+  if (changed) for (const notify of subscribers) notify(current, { catalogChanged: true });
+}
+
+export function setWorkshopBuiltinVisible(id, visible) {
+  const builtin = builtins.find(ch => ch.id === id);
+  if (!builtin) return false;
+  const alreadyVisible = !removedWorkshopChannels().includes(builtin);
+  if (alreadyVisible === visible) return false;
+  const previous = workshopChannel();
+  const key = HIDDEN_KEY + workshopChannelScope() + '/' + id;
+  try {
+    if (visible) globalThis.localStorage.removeItem(key);
+    else globalThis.localStorage.setItem(key, '1');
+  } catch { throw new Error('此设备未能保存频道设置，请检查浏览器的存储权限。'); }
+  catalogChanged(previous);
   return true;
 }
 
@@ -144,7 +181,8 @@ export function onWorkshopChannelListChanged(notify) {
   listSubscribers.add(notify);
   const storageChanged = event => {
     const scope = workshopChannelScope();
-    if (event.key === null || event.key === 'jarvis.server.v1' || event.key?.startsWith(SOURCE_KEY + scope + '/')) notify();
+    if (event.key === null || event.key === 'jarvis.server.v1' || event.key === STORAGE_KEY + ':' + scope ||
+        event.key?.startsWith(SOURCE_KEY + scope + '/') || event.key?.startsWith(HIDDEN_KEY + scope + '/')) notify();
   };
   globalThis.addEventListener?.('storage', storageChanged);
   return () => {

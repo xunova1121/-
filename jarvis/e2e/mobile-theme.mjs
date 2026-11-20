@@ -13,6 +13,21 @@ function check(label, passed, detail = '') {
   checks.push(passed);
   console.log(`${passed ? '✓' : '✗'} ${label} ${detail}`);
 }
+async function checkUpdatePill(page, theme) {
+  const pill = page.locator('#update-pill');
+  for (const state of ['available', 'downloading', 'ready']) {
+    await page.evaluate((state) => window.showTestUpdate({ state, version: '1.0.474', mobile: true, percent: 42 }), state);
+    const style = await pill.evaluate((node) => {
+      const computed = getComputedStyle(node);
+      return { color: computed.color, background: computed.backgroundColor, image: computed.backgroundImage };
+    });
+    check(`${theme} 设置顶栏更新按钮 ${state} 蓝底白字`,
+      await pill.isVisible() && style.color === 'rgb(255, 255, 255)' && style.background === 'rgb(36, 83, 207)' &&
+      (state !== 'downloading' || style.image.includes('42%')), JSON.stringify(style));
+  }
+  await page.screenshot({ path: path.join(output, `theme-update-${theme}.png`) });
+  await page.evaluate(() => window.showTestUpdate({ state: 'latest', mobile: true }));
+}
 const types = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript',
@@ -94,6 +109,13 @@ try {
       hasTouch: true,
       reducedMotion: 'reduce'
     });
+    if (width === 390) {
+      await context.addInitScript(() => {
+        window.__jarvisAppUpdater = {
+          state: { state: 'latest', mobile: true }, onUpdate(callback) { window.showTestUpdate = callback; }, start() {}
+        };
+      });
+    }
     await context.addInitScript(() => {
       if (window.top !== window) return;
       localStorage.setItem('jarvis.settings.v1', JSON.stringify({ theme: 'day', speechOutput: false }));
@@ -270,6 +292,7 @@ try {
       }
 
     }
+    if (width === 390) await checkUpdatePill(page, 'light');
     await page.click('#btn-theme');
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
     check(
@@ -280,6 +303,7 @@ try {
           getComputedStyle(document.querySelector('#panel')).color === 'rgb(240, 239, 250)'
       )
     );
+    if (width === 390) await checkUpdatePill(page, 'dark');
     await page.screenshot({ path: path.join(output, `theme-dark-${width}.png`) });
     await page.click('#btn-theme');
     await page.click('#btn-side-back');

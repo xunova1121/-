@@ -25,7 +25,7 @@ function inlineVideo(label) {
 }
 
 // 频道和本地短片共用一块玻璃屏，始终只保留一份解码资源。
-export function createWorkshopTvPlayer({ getPlayers, loadHls = () => import('hls.js') } = {}) {
+export function createWorkshopTvPlayer({ getPlayers, openSources, loadHls = () => import('hls.js') } = {}) {
   const element = playerPart('div', 'ws-tv-player');
   const standby = playerPart('div', 'ws-tv-standby');
   element.hidden = standby.hidden = true;
@@ -194,6 +194,11 @@ export function createWorkshopTvPlayer({ getPlayers, loadHls = () => import('hls
     const channel = listWorkshopChannels().find(item => item.id === id);
     if (channel) return tune(channel, retry);
     close();
+    if (id == null) {
+      standby.replaceChildren(signalCard('暂无频道', '在视频源中添加直播地址，或恢复已移除的默认频道。',
+        [action('添加或恢复频道', openSources)]));
+      standby.hidden = false;
+    }
   }
 
   function preview(channel) {

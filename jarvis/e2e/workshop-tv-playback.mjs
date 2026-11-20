@@ -65,32 +65,10 @@ async function checkProgramArea(video, label) {
   console.log(label + ' 节目占房间 ' + (geometry.fraction * 100).toFixed(1) + '%' + desk);
 }
 
-// 角色是透明图集。比较同一帧构图隐藏人物前后的房间像素，排除电视节目自身的变化。
-export async function checkTvActor(room, { working = false } = {}) {
-  const page = room.page();
-  const selector = working ? '.ws-scene:not([data-life-place]) .ws-actor .ws-sprite' :
-    '.ws-scene[data-life-pose="tv"][data-life-phase="settled"] .ws-life-pose';
-  const actor = room.locator(selector);
-  await actor.waitFor({ state: 'visible', timeout: 10000 });
-  const { clip, glass, sample } = await actor.evaluate((el, working) => {
-    const scene = el.closest('.ws-scene');
-    const stage = scene.getBoundingClientRect();
-    const sprite = el.getBoundingClientRect();
-    // 坐姿图集另一侧画了小电视，只取头发和脸，避免把露出的道具算成人物。
-    const mirrored = parseFloat(getComputedStyle(el).scale) < 0;
-    const left = sprite.left + (working ? 0 : mirrored ? .53 : .07) * sprite.width;
-    const top = sprite.top + (working ? 0 : .12) * sprite.height;
-    const sample = { width: sprite.width * (working ? 1 : .4), height: sprite.height * (working ? 1 : .46) };
-    const x = Math.ceil(Math.max(0, stage.left, left));
-    const y = Math.ceil(Math.max(0, stage.top, top));
-    return { clip: { x, y, width: Math.floor(Math.min(innerWidth, stage.right, left + sample.width)) - x,
-      height: Math.floor(Math.min(innerHeight, stage.bottom, top + sample.height)) - y }, sample,
-    glass: scene.querySelector('.ws-media-screen').getBoundingClientRect().toJSON() };
-  }, working);
-  assert(clip.width > 0 && clip.height > 0, '人物须在现场镜头内 ' + JSON.stringify(clip));
+async function actorInk(page, selector, clip, glass) {
   const shown = await page.screenshot({ clip, scale: 'css' });
   const hidden = await page.screenshot({ clip, scale: 'css', style: selector + ' { opacity: 0 !important; }' });
-  const ink = await page.evaluate(async ({ frames, clip, glass }) => {
+  return page.evaluate(async ({ frames, clip, glass }) => {
     const colors = await Promise.all(frames.map(async base64 => {
       const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
       const image = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
@@ -114,6 +92,51 @@ export async function checkTvActor(room, { working = false } = {}) {
     }
     return { pixels, width: right - left + 1, height: bottom - top + 1 };
   }, { frames: [shown, hidden].map(frame => frame.toString('base64')), clip, glass });
+}
+
+// 角色是透明图集。比较同一帧构图隐藏人物前后的房间像素，排除电视节目自身的变化。
+export async function checkTvActor(room, { working = false } = {}) {
+  const page = room.page();
+  const selector = working ? '.ws-scene:not([data-life-place]) .ws-actor .ws-sprite' :
+    '.ws-scene[data-life-pose="tv"][data-life-phase="settled"] .ws-tv-watcher';
+  const actor = room.locator(selector);
+  await actor.waitFor({ state: 'visible', timeout: 10000 });
+  const spectator = room.locator('.ws-tv-watcher');
+  if (working) assert(!await spectator.isVisible(), '执行任务时回到工位');
+  else assert(!await room.locator('.ws-life-actor').isVisible(), '同一位未央在前景就座后不再重复显示在背景');
+  const { clip, glass, sample, feet, edge, receiverRight } = await actor.evaluate((el, working) => {
+    const scene = el.closest('.ws-scene');
+    const stage = scene.getBoundingClientRect();
+    const sprite = el.getBoundingClientRect();
+    // 坐姿图集另一侧画了小电视，只取头发和脸，避免把露出的道具算成人物。
+    const mirrored = parseFloat(getComputedStyle(el).scale) < 0;
+    const left = sprite.left + (working ? 0 : mirrored ? .53 : .07) * sprite.width;
+    const top = sprite.top + (working ? 0 : .12) * sprite.height;
+    const sample = { width: sprite.width * (working ? 1 : .4), height: sprite.height * (working ? 1 : .46) };
+    const x = Math.ceil(Math.max(0, stage.left, left));
+    const y = Math.ceil(Math.max(0, stage.top, top));
+    const glass = scene.querySelector('.ws-media-screen').getBoundingClientRect();
+    const receiver = scene.querySelector('.ws-media-receiver').getBoundingClientRect();
+    const controls = scene.querySelector('.ws-media-remote').getBoundingClientRect();
+    // 仅取机壳底边以下的椅脚，取样区域止于遥控栏，软影始终保留作为背景。
+    const feetX = Math.ceil(Math.max(glass.right + 1, sprite.left, stage.left));
+    const feetY = Math.ceil(receiver.bottom + 4);
+    const feet = { x: feetX, y: feetY, width: Math.floor(Math.min(stage.right, sprite.right)) - feetX,
+      height: Math.floor(Math.min(controls.top, stage.bottom, sprite.bottom)) - feetY };
+    return { feet, edge: sprite.left + .46 * sprite.width, receiverRight: receiver.right,
+      clip: { x, y, width: Math.floor(Math.min(innerWidth, stage.right, left + sample.width)) - x,
+      height: Math.floor(Math.min(innerHeight, stage.bottom, top + sample.height)) - y }, sample,
+    glass: glass.toJSON() };
+  }, working);
+  assert(clip.width > 0 && clip.height > 0, '人物须在现场镜头内 ' + JSON.stringify(clip));
+  if (!working) {
+    assert(edge >= glass.right - 4 && edge < receiverRight, '角色仅压住右机壳和屏幕最边缘');
+    assert(feet.width >= 4 && feet.height >= 2, '电视底边与遥控器间有椅脚落地空间');
+    const chair = await actorInk(page, selector, feet, glass);
+    assert(chair.pixels >= 8 && chair.width >= 4 && chair.height >= 2,
+      '机壳底边以下至少五个像素处能看到真实椅脚 ' + JSON.stringify({ chair, feet }));
+  }
+  const ink = await actorInk(page, selector, clip, glass);
   const faceVisible = working || (ink.width >= .72 * sample.width && ink.height >= .7 * sample.height &&
     ink.pixels >= .28 * sample.width * sample.height);
   assert(ink.pixels >= 160 && ink.width >= 14 && ink.height >= 18 && faceVisible,

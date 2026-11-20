@@ -1,6 +1,6 @@
 import { createWorkshopLife } from '../app/workshopLife.js';
 import { createWorkshopLifeScene } from './workshopLifeScene.js';
-import { playWorkshopHum, stopWorkshopHum } from './workshopHum.js';
+import { playWorkshopHum, stopWorkshopHum, suggestWorkshopTune, workshopHumTitle } from './workshopHum.js';
 import './workshopRoom.css';
 
 const choices = [
@@ -52,9 +52,12 @@ export function createWorkshopRoom(scene, floor, onChange) {
   menu.className = 'ws-room-menu';
   menu.hidden = true;
   for (const [key, label] of choices) menu.append(button(key, label));
-  tools.append(lamp, open, menu);
+  const listen = button('listen', '听听');
+  listen.hidden = true;
+  tools.append(listen, lamp, open, menu);
   scene.append(tools);
   let lastActivity;
+  let suggested = '';
 
   function dismiss(restoreFocus) {
     if (!menu.hidden) {
@@ -83,10 +86,15 @@ export function createWorkshopRoom(scene, floor, onChange) {
     document.addEventListener('keydown', escape, true);
   };
   lamp.onclick = toggleLight;
+  listen.onclick = () => {
+    const title = suggested;
+    if (life.perform('sing')) playWorkshopHum(title);
+  };
   menu.onclick = (event) => {
     const cmd = event.target.closest('button')?.dataset.roomAction;
+    const title = suggested;
     if (!cmd || !life.perform(cmd)) return;
-    if (cmd === 'sing') playWorkshopHum();
+    if (cmd === 'sing') playWorkshopHum(title);
     dismiss(true);
     if (cmd === 'tv') scene.dispatchEvent(new Event('workshop:open-tv'));
   };
@@ -96,8 +104,9 @@ export function createWorkshopRoom(scene, floor, onChange) {
     render(presentingWork, confirmedShred) {
       life.setBusy(presentingWork);
       const state = life.snapshot();
-      if (lastActivity === 'sing' && state.activity !== 'sing') stopWorkshopHum();
+      const leftSong = lastActivity === 'sing' && state.activity !== 'sing';
       lastActivity = state.activity;
+      if (leftSong) stopWorkshopHum();
       const workOrigin = display.render(presentingWork && confirmedShred ? { ...state, activity: 'shred' } : state);
       if (lamp.getAttribute('aria-pressed') !== String(state.lampOn)) {
         lamp.setAttribute('aria-pressed', String(state.lampOn));
@@ -107,14 +116,25 @@ export function createWorkshopRoom(scene, floor, onChange) {
       }
       cupTarget.disabled = seatTarget.disabled = Boolean(presentingWork);
       for (const el of menu.children) el.disabled = presentingWork && el.dataset.roomAction !== 'lamp-auto';
-      return { ...state, workOrigin, label: scene.dataset.lifePose === 'lamp' ? (state.lampOn ? '正在打开台灯' : '正在关掉台灯') : state.label };
+      let label = state.label;
+      const playing = workshopHumTitle();
+      const automaticSong = state.activity === 'sing' && !state.manual;
+      suggested = automaticSong ? suggested || suggestWorkshopTune() : '';
+      listen.hidden = !suggested || Boolean(playing);
+      if (suggested) listen.textContent = '听《' + suggested + '》';
+      if (state.activity === 'sing' && (playing || suggested)) label = '正在哼《' + (playing || suggested) + '》';
+      if (scene.dataset.lifePose === 'lamp') label = state.lampOn ? '正在打开台灯' : '正在关掉台灯';
+      return { ...state, workOrigin, label };
     },
     setVisible(on) {
+      if (on) window.addEventListener('jarvis:workshop-song', onChange);
+      else window.removeEventListener('jarvis:workshop-song', onChange);
       life.setVisible(on);
       if (!on) {
         life.setBusy(false);
         dismiss(false);
         display.suspend();
+        suggested = '';
         if (lastActivity === 'sing') stopWorkshopHum();
       }
     }

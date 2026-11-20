@@ -1,6 +1,6 @@
 import { getWorkshopLife, dispatchWorkshopCommand } from './workshopLife.js';
 import { selectWorkshopChannel } from '../ui/workshopMediaChannels.js';
-import { playWorkshopHum, stopWorkshopHum } from '../ui/workshopHum.js';
+import { playWorkshopHum, stopWorkshopHum, suggestWorkshopTune, workshopHumTitle } from '../ui/workshopHum.js';
 
 // 只接本人对未央房间说的完整短句，保留搜索、生成音乐、文档内容与真实文件管理的原有路由。
 const actions = [
@@ -59,12 +59,14 @@ export function answerWorkshopCommand(command, { busy, otherWork, taskTitle, tas
   if (command === 'status') {
     if (busy) return taskTitle ? `我还在处理任务，当前步骤是“${taskTitle}”${taskFile ? '（' + taskFile + '）' : ''}。` : '我正在处理当前任务。';
     if (otherWork) return '我正在后台处理另一段对话的任务。';
-    return `我在工作台，${state.label}。`;
+    const title = state.activity === 'sing' && (workshopHumTitle() || (!state.manual && suggestWorkshopTune()));
+    return title ? `我在工作台，正在哼《${title}》。` : `我在工作台，${state.label}。`;
   }
   if (!dispatchWorkshopCommand(command, { busy: working }))
     return otherWork && !busy ? '我正在处理另一段对话的任务，忙完就能休息。' : '我还在处理当前任务，做完就能回房间休息。';
   if (command === 'sing') {
-    if (!playWorkshopHum()) return '我在工作台哼歌。这个设备暂时无法播放哼声。';
+    const title = playWorkshopHum(state.activity === 'sing' && !state.manual ? suggestWorkshopTune() : undefined);
+    return title ? `我在工作台，正在哼《${title}》。` : '我在工作台哼歌。这个设备暂时无法播放哼声。';
   } else if (!command.startsWith('lamp-')) stopWorkshopHum();
   const next = getWorkshopLife({ busy: working });
   if (command === 'lamp-on' || command === 'lamp-off') return next.lampOn ? '工作台的台灯已经打开了。' : '工作台的台灯已经关了。';

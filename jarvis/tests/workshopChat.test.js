@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { answerWorkshopCommand, createWorkshopChat, shouldAnswerWorkshopCommand, workshopCommand } from '../src/app/workshopChat.js';
 import { dispatchWorkshopCommand, getWorkshopLife } from '../src/app/workshopLife.js';
-import { playWorkshopHum } from '../src/ui/workshopHum.js';
+import { playWorkshopHum, suggestWorkshopTune } from '../src/ui/workshopHum.js';
 
-vi.mock('../src/ui/workshopHum.js', () => ({ playWorkshopHum: vi.fn(), stopWorkshopHum: vi.fn() }));
+vi.mock('../src/ui/workshopHum.js', () => ({ playWorkshopHum: vi.fn(), stopWorkshopHum: vi.fn(), suggestWorkshopTune: vi.fn(), workshopHumTitle: vi.fn() }));
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -35,10 +35,20 @@ it.each([
 it('家中无人打扰时自动作息不会发声；直接明确点唱复用本地音效', () => {
   expect(answerWorkshopCommand('status')).toContain('午饭');
   expect(playWorkshopHum).not.toHaveBeenCalled();
-  playWorkshopHum.mockReturnValueOnce(true);
-  expect(answerWorkshopCommand('sing')).toContain('正在哼歌');
+  playWorkshopHum.mockReturnValueOnce('茉莉花');
+  expect(answerWorkshopCommand('sing')).toContain('正在哼《茉莉花》');
   expect(playWorkshopHum).toHaveBeenCalledTimes(1);
   expect(answerWorkshopCommand('sing')).toContain('暂时无法播放');
+});
+
+it('自然哼歌时只报候选曲名，用户点唱才接着唱这一首', () => {
+  vi.setSystemTime(new Date(2026, 10, 20, 10, 36));
+  suggestWorkshopTune.mockReturnValueOnce('凤阳花鼓').mockReturnValueOnce('凤阳花鼓');
+  expect(answerWorkshopCommand('status')).toContain('正在哼《凤阳花鼓》');
+  expect(playWorkshopHum).not.toHaveBeenCalled();
+  playWorkshopHum.mockReturnValueOnce('凤阳花鼓');
+  expect(answerWorkshopCommand('sing')).toContain('正在哼《凤阳花鼓》');
+  expect(playWorkshopHum).toHaveBeenCalledWith('凤阳花鼓');
 });
 
 it('默认输入的纯状态询问即时答，明确排队的状态询问保留在队列，穿插指令遵循工作优先', () => {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
+import { checkNewsEntrance } from './workshop-news-zoom.mjs';
 import JSZip from 'jszip';
 import { createServer } from '../server/server.mjs';
 import { checkWorkshopTvPlayback, checkTvActor, openMobileCloudRoom } from './workshop-tv-playback.mjs';
@@ -137,7 +138,7 @@ async function check(mobile) {
   const calls = [], errors = [], externals = [];
   const firstQuestion = Promise.withResolvers();
   const firstAnswer = Promise.withResolvers();
-  let feedCount = 0;
+  let feedCount = 0, articleRequests = 0;
   await context.route('https://**/*', route => {
     externals.push(route.request().url());
     return route.abort();
@@ -157,6 +158,7 @@ async function check(mobile) {
     '试运行结束后，各社区阅览室将根据借阅情况分别调整晚间服务。最新安排会同时公布在馆内告示栏和图书馆网站。'];
   let failArticle = true;
   await context.route('**/api/workshop/news/article?*', route => {
+    articleRequests++;
     const url = new URL(route.request().url()).searchParams.get('url');
     assert(items.some(item => item.url === url));
     if (url === items[1].url && failArticle) {
@@ -213,13 +215,20 @@ async function check(mobile) {
     await button(tv, '返回房间').click();
     assert.ok(!externals.some(u => new URL(u).hostname === 'tv.cctv.com'), '用户选择官方入口前不播放');
 
-    await device('monitor').click();
+    await checkNewsEntrance({ page, room, platform, output });
     await monitor.getByText(items[0].title, { exact: true }).waitFor();
+    const digest = monitor.getByRole('navigation', { name: '本期其他报道' });
+    await button(digest, items[1].title).click();
+    assert.equal(await monitor.locator('.ws-media-title:visible').innerText(), items[1].title);
+    assert.equal(await link(monitor, '阅读原文').getAttribute('href'), items[1].url);
+    await button(digest, items[0].title).click();
+    assert.equal(articleRequests, 0, '点选已载入简报中的标题无需请求正文');
     assert(feedCount > 0, '真实取闻入口发起请求');
     assert.equal(await link(monitor, '阅读原文').getAttribute('href'), items[0].url);
     const initialUrl = page.url();
     await link(monitor, '阅读原文').click();
     await monitor.locator('.ws-article-content').getByText(articleText, { exact: true }).waitFor();
+    assert(!await digest.isVisible(), '正文阅读空间留给当前报道');
     assert.equal(page.url(), initialUrl, '阅读原文留在工作台');
     assert.equal(context.pages().length, 1, '阅读原文没有打开其他窗口');
     const lines = await checkReadingSpace(monitor, mobile ? 5 : 7);
@@ -302,7 +311,7 @@ async function check(mobile) {
     const actualWord = await readBrief(page);
     assert(actualWord.includes(items[0].title) && !actualWord.includes(items[1].title), '切换新闻不改写队列中那份简报的原文');
     await page.waitForFunction(() => !document.body.classList.contains('generating'));
-    await checkWorkshopLighting(page, room, platform);
+    await checkWorkshopLighting(page, room, platform, output);
     await page.reload();
     await page.waitForFunction(() => window.__jarvis?.send);
     const reopened = await openRoom(page, mobile);

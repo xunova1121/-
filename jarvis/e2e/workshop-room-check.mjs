@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { checkWorkshopHum } from './workshop-hum.mjs';
 
 // 从实际聊天和房间控件操作，在同一个页面核对时钟、灯与角色，不向模型发请求。
 export async function checkWorkshopRoom({ page, enter, send, output }) {
@@ -61,21 +62,20 @@ export async function checkWorkshopRoom({ page, enter, send, output }) {
     if (action === 'tv') await room.getByRole('button', { name: '返回房间' }).click();
   }
   assert.equal(await room.locator('[data-entry-id]').filter({ hasText: '移入回收站' }).count(), 0, '桌面废纸没有产生文件变更');
-  // 记录真正启动的 Web Audio 节点，不替换合成器；普通自动作息不会主动播放。
-  await page.evaluate(() => {
-    window.playedWorkshopNotes = 0;
-    const start = OscillatorNode.prototype.start;
-    OscillatorNode.prototype.start = function(...args) {
-      window.playedWorkshopNotes++;
-      return start.apply(this, args);
-    };
-  });
-  await choose('sing');
-  assert.ok(await page.evaluate(() => window.playedWorkshopNotes >= 2), '点唱启动了真实音高序列');
-  await page.locator('.wb-tabs button').first().click();
+  await checkWorkshopHum(page, room, choose);
   await page.clock.setFixedTime(new Date('2026-11-21T02:10:00+08:00'));
   await enter(page);
   await when('sleep');
+  const quilt = scene.locator('.ws-life-pose');
+  const winterSheet = await quilt.evaluate(async el => {
+    const style = getComputedStyle(el);
+    const image = new Image();
+    image.src = style.backgroundImage.slice(5, -2);
+    await image.decode();
+    return [image.naturalWidth, image.naturalHeight, style.backgroundSize, style.animationName];
+  });
+  assert.deepEqual(winterSheet.slice(0, 3), [512, 256, '200% 100%'], '寒夜使用两帧厚被睡姿');
+  assert.match(winterSheet[3], /ws-life-breath/);
   await send(page, '你现在在做什么？');
   await page.locator('#transcript .msg.agent').filter({ hasText: '睡' }).waitFor();
   await page.screenshot({ path: path.join(output, 'pc-room-night.png') });
@@ -87,6 +87,7 @@ export async function checkWorkshopRoom({ page, enter, send, output }) {
     await page.clock.setFixedTime(new Date('2026-11-21T' + time + ':00+08:00'));
     await enter(page);
     await room.locator(`.ws-scene[data-life-period="${period}"][data-lamp-lit="off"]`).waitFor();
+    if (period === 'dawn') assert.equal(await scene.getAttribute('data-winter-quilt'), null, '晨起收被');
     const wash = await scene.locator('.ws-room-light').evaluate(layer => {
       const ambient = getComputedStyle(layer, '::before');
       return { image: ambient.backgroundImage, opacity: Number(ambient.opacity), width: layer.getBoundingClientRect().width };

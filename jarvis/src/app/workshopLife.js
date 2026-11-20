@@ -1,3 +1,6 @@
+import { readLocalClimate } from '../core/weather.js';
+
+export const WORKSHOP_HUM_MINUTES = 3;
 const MINUTE = 60000;
 const STORAGE_KEY = 'jarvis.workshopLife.v1';
 const activities = {
@@ -8,7 +11,7 @@ const activities = {
   tv: { label: '正在看电视', minutes: 15 },
   news: { label: '正在电脑前查看新闻显示器', minutes: 10 },
   think: { label: '安静地想事情', minutes: 8 },
-  sing: { label: '正在哼歌', minutes: 3 },
+  sing: { label: '正在哼歌', minutes: WORKSHOP_HUM_MINUTES },
   shred: { label: '正在把桌上的废纸放进碎纸机', minutes: 0.25 }
 };
 
@@ -71,6 +74,13 @@ function routineAt(date) {
     period = entry;
   }
   const [start, activity, label] = period;
+  if (activity === 'sleep') {
+    // 零点仍是前一晚那次睡眠，午睡则从自己的作息段开始。
+    const bedtime = new Date(date);
+    const previousEvening = routine[routine.length - 1][0] - 24 * 60;
+    bedtime.setHours(0, start === 0 ? previousEvening : start, 0, 0);
+    return { activity, label: label ?? activities.sleep.label, bedtime: bedtime.getTime() };
+  }
   if (activity !== 'quiet') return { activity, label: label ?? activities[activity].label };
   // 同一天重复进出房间时保持连贯，不会每次打开就换动作。
   const slot = (Math.floor((minute - start) / 22) + date.getDate()) % 3;
@@ -123,6 +133,15 @@ function daylightAt(hour) {
   return 'dusk';
 }
 
+function needsWinterQuilt(now, bedtime) {
+  // 入睡前三小时及睡眠期间的实测可指导这次用被；缓存到期不惊动熟睡的人。
+  const { temp, latitude } = readLocalClimate(now, bedtime - 3 * 60 * MINUTE);
+  if (temp !== null) return temp <= 18;
+  const month = new Date(bedtime).getMonth() + 1;
+  if (latitude !== null && Math.abs(latitude) < 23.5) return false;
+  return latitude !== null && latitude < 0 ? month >= 5 && month <= 9 : month >= 11 || month <= 3;
+}
+
 function stateAt(now, busy, prefs) {
   const date = new Date(now);
   const hour = date.getHours();
@@ -136,7 +155,9 @@ function stateAt(now, busy, prefs) {
   if (state.activity === 'tv' && televisionOff) state = { activity: 'rest', label: activities.rest.label };
   const needsLamp = (hour < 7 || hour >= 18) && state.activity !== 'sleep';
   const lampOn = prefs.lightMode === 'auto' ? needsLamp : prefs.lightMode === 'on';
-  return { ...state, manual, period, night: period === 'night', lightMode: prefs.lightMode, lampOn, televisionOff };
+  const { activity, label } = state;
+  const winterQuilt = activity === 'sleep' && needsWinterQuilt(now, manual ? prefs.startedAt : state.bedtime);
+  return { activity, label, manual, period, night: period === 'night', lightMode: prefs.lightMode, lampOn, televisionOff, winterQuilt };
 }
 
 export function getWorkshopLife({ busy = false } = {}) {

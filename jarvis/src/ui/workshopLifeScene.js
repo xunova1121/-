@@ -107,6 +107,7 @@ export function createWorkshopLifeScene(scene, floor, onChange = () => {}) {
     const switchLamp = latest && state.lightMode !== 'auto' && latest.lampOn !== state.lampOn;
     const changed = latest?.activity !== activity;
     latest = state;
+    scene.toggleAttribute('data-winter-quilt', state.winterQuilt);
     scene.dataset.lamp = state.lampOn ? 'on' : 'off';
     scene.dataset.lifePeriod = state.period;
     scene.dataset.lifeActivity = activity;

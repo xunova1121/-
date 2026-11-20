@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createWorkshopLife, dispatchWorkshopCommand, getWorkshopLife } from '../src/app/workshopLife.js';
+import { createWeatherClient, WEATHER_TTL } from '../src/core/weather.js';
 
 const key = 'jarvis.workshopLife.v1';
 const opened = [];
@@ -31,6 +32,61 @@ function open(onChange = () => {}) {
   room.setVisible(true);
   return room;
 }
+
+it('冬被跟随睡眠和首页的同城实测温度；醒来、接到任务或天暖时使用原姿势', async () => {
+  vi.setSystemTime(new Date(2026, 6, 20, 23));
+  const city = { name: '北京', latitude: 39.9, longitude: 116.4 };
+  let temp = 15;
+  const forecast = vi.fn(async () => ({ ok: true, json: async () => ({ current: { temperature_2m: temp } }) }));
+  const weather = createWeatherClient({ fetchImpl: forecast });
+  const room = open();
+  expect(room.snapshot().winterQuilt).toBe(false);
+  await weather.select(city);
+  expect(room.snapshot().winterQuilt).toBe(true);
+  room.perform('rest');
+  expect(room.snapshot().winterQuilt).toBe(false);
+  room.perform('sleep');
+  room.setBusy(true);
+  expect(room.snapshot().winterQuilt).toBe(false);
+  room.setBusy(false);
+  expect(room.snapshot().winterQuilt).toBe(true);
+  vi.advanceTimersByTime(WEATHER_TTL + 1);
+  expect(room.snapshot().winterQuilt).toBe(true);
+  vi.setSystemTime(new Date(2026, 10, 20, 23));
+  temp = 26;
+  await weather.refresh({ force: true });
+  expect(room.snapshot().winterQuilt).toBe(false);
+  localStorage.setItem('jarvis.weather.city.v1', JSON.stringify({ ...city, latitude: 35 }));
+  expect(room.snapshot().winterQuilt).toBe(true);
+  expect(forecast).toHaveBeenCalledTimes(2);
+});
+
+it('入睡前三小时内的温度在跨午夜后继续生效，醒来后下一次小睡重新判断', async () => {
+  const city = { name: '北京', latitude: 39.9, longitude: 116.4 };
+  const fetchImpl = async () => ({ ok: true, json: async () => ({ current: { temperature_2m: 18 } }) });
+  const weather = createWeatherClient({ fetchImpl });
+  const observe = async at => { vi.setSystemTime(at); await weather.select(city); };
+  await observe(new Date(2026, 6, 20, 19, 29, 59, 999));
+  vi.setSystemTime(new Date(2026, 6, 20, 22, 30));
+  expect(getWorkshopLife().winterQuilt).toBe(false);
+  await observe(new Date(2026, 6, 20, 19, 30));
+  vi.setSystemTime(new Date(2026, 6, 21, 5, 59));
+  expect(getWorkshopLife().winterQuilt).toBe(true);
+  vi.setSystemTime(new Date(2026, 6, 21, 13, 5));
+  expect(getWorkshopLife().winterQuilt).toBe(false);
+});
+
+it('没有气温时采用所选城市的季节，北半球冬季的自动午睡和手动小睡也盖被', () => {
+  at(13, 5);
+  expect(getWorkshopLife()).toMatchObject({ activity: 'sleep', winterQuilt: true });
+  at(15);
+  dispatchWorkshopCommand('sleep');
+  expect(getWorkshopLife().winterQuilt).toBe(true);
+  localStorage.setItem('jarvis.weather.city.v1', JSON.stringify({ name: '悉尼', latitude: -33.9, longitude: 151.2 }));
+  expect(getWorkshopLife().winterQuilt).toBe(false);
+  vi.setSystemTime(new Date(2026, 6, 20, 23));
+  expect(getWorkshopLife().winterQuilt).toBe(true);
+});
 
 it.each([
   [0, 15, 'sleep', false],

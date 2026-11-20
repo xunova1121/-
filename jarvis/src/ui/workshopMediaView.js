@@ -49,7 +49,7 @@ export function mediaControls(scene, floor, channels, player) {
   const tv = device('tv', '打开电视');
   tv.replaceChildren();
   const ticker = button('', 'ws-monitor-ticker');
-  const tickerLabel = mediaNode('small', '', '桌面新闻');
+  const tickerLabel = mediaNode('small', '', '新闻简报');
   const tickerText = mediaNode('span', '');
   ticker.append(tickerLabel, tickerText);
   const panel = mediaNode('section', 'ws-media-panel');
@@ -62,6 +62,7 @@ export function mediaControls(scene, floor, channels, player) {
   const scroll = mediaNode('div', 'ws-media-scroll');
   const news = mediaNode('div', 'ws-media-news');
   const title = mediaNode('h4', 'ws-media-title');
+  title.tabIndex = -1;
   const credit = mediaNode('p', 'ws-media-credit');
   const latest = mediaNode('small', 'ws-media-updated');
   const original = link('阅读原文');
@@ -76,14 +77,21 @@ export function mediaControls(scene, floor, channels, player) {
   nav.append(prev, next, refresh);
   const newsTools = mediaNode('div', 'ws-news-tools');
   newsTools.append(actions, nav);
-  news.append(title, credit, latest);
+  const digest = mediaNode('nav', 'ws-news-digest');
+  digest.hidden = true;
+  digest.setAttribute('aria-label', '本期其他报道');
+  const headlines = mediaNode('div', 'ws-news-headlines');
+  digest.append(mediaNode('h4', '', '本期其他报道'), headlines);
+  news.append(title, credit, latest, digest);
   const television = mediaNode('div', 'ws-media-tv');
   const receiver = mediaNode('div', 'ws-media-receiver');
   const glass = mediaNode('div', 'ws-tv-glass ws-media-screen');
   glass.append(player.element, player.standby);
   const grille = mediaNode('span', 'ws-tv-grille');
   grille.setAttribute('aria-hidden', 'true');
-  receiver.append(glass, grille);
+  const watcher = mediaNode('span', 'ws-tv-watcher');
+  watcher.setAttribute('aria-hidden', 'true');
+  receiver.append(glass, grille, watcher);
   const channelButtons = mediaNode('div', 'ws-media-channels');
   channelButtons.setAttribute('role', 'group');
   channelButtons.setAttribute('aria-label', '电视频道');
@@ -108,6 +116,6 @@ export function mediaControls(scene, floor, channels, player) {
   panel.append(header, scroll, newsTools);
   scene.append(ticker);
   return { monitor, mini, tv, ticker, tickerLabel, tickerText, panel, heading, back, switchScreen,
-    news, newsTools, title, credit, latest, original, actions, ask, brief, prev, next, refresh,
+    news, newsTools, title, credit, latest, digest, headlines, original, actions, ask, brief, prev, next, refresh,
     television, channelButtons, manageSources, network, power, task, taskTitle, taskDetail, scroll };
 }

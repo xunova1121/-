@@ -14,10 +14,15 @@ function clock(value) {
 }
 
 export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, getPlayers }) {
-  const player = createWorkshopTvPlayer({ getPlayers });
+  const player = createWorkshopTvPlayer({ getPlayers, openSources: () => ui.manageSources.click() });
   const ui = mediaControls(scene, floor, listWorkshopChannels(), player);
-  const selectNewsArticle = createWorkshopNewsReader(ui, newsFeed);
+  const selectNewsArticle = createWorkshopNewsReader(ui, newsFeed, row => {
+    article = row;
+    draw();
+  });
   let device = '';
+  let monitorEntrance;
+  let monitorTrigger;
   let sessionId = '';
   let busy = false;
   let taskTitle = '';
@@ -34,20 +39,20 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
   const workOnMonitor = () => busy && !readDuringWork;
   const sources = createWorkshopSourceManager(ui, {
     preview: candidate => player.preview(candidate),
-    restoreChannel: () => player.select(channel.id),
+    restoreChannel: () => player.select(channel?.id),
     selectChannel: selectWorkshopChannel,
     updateChannelState
   });
 
   function updateChannelState() {
     const testing = sources.testing();
-    ui.network.hidden = testing || !channel.url;
-    if (channel.url) ui.network.href = channel.url;
+    ui.network.hidden = testing || !channel?.url;
+    if (channel?.url) ui.network.href = channel.url;
     else ui.network.removeAttribute('href');
-    ui.network.textContent = channel.kind === 'cctv' ? '央视网' : '频道官网';
-    ui.network.setAttribute('aria-label', channel.kind === 'cctv' ? '去央视网观看' : '打开频道官网');
+    ui.network.textContent = channel?.kind === 'cctv' ? '央视网' : '频道官网';
+    ui.network.setAttribute('aria-label', channel?.kind === 'cctv' ? '去央视网观看' : '打开频道官网');
     for (const el of ui.channelButtons.children) {
-      el.setAttribute('aria-pressed', String(!testing && el.dataset.channel === channel.id));
+      el.setAttribute('aria-pressed', String(!testing && el.dataset.channel === channel?.id));
     }
   }
   function refreshChannels() {
@@ -59,7 +64,7 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     if (scope !== workshopChannelScope()) { syncChannelScope(); return; }
     channel = workshopChannel();
     refreshChannels();
-    if (visible && device === 'tv' && !sources.testing()) player.select(channel.id);
+    if (visible && device === 'tv' && !sources.testing()) player.select(channel?.id);
   }
   function syncChannelScope() {
     const next = workshopChannelScope();
@@ -69,7 +74,7 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     player.close();
     channel = workshopChannel();
     refreshChannels();
-    if (visible && device === 'tv') player.select(channel.id);
+    if (visible && device === 'tv') player.select(channel?.id);
   }
 
   function bind(item) {
@@ -83,10 +88,10 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     ui.panel.hidden = !device;
     scene.closest('.work-studio-view')?.toggleAttribute('data-media-open', Boolean(device));
     ui.panel.dataset.device = device;
-    ui.panel.setAttribute('aria-label', device === 'tv' ? '电视' : '工作显示器');
+    ui.panel.setAttribute('aria-label', device === 'tv' ? '电视' : reading ? '新闻简报' : '工作显示器');
     ui.monitor.setAttribute('aria-expanded', String(device === 'monitor'));
     ui.tv.setAttribute('aria-expanded', String(device === 'tv'));
-    ui.heading.textContent = device === 'tv' ? '电视频道' : reading ? '桌面新闻' : '工作进度';
+    ui.heading.textContent = device === 'tv' ? '电视频道' : reading ? '新闻简报' : '工作进度';
     ui.switchScreen.hidden = !busy || device !== 'monitor';
     ui.switchScreen.textContent = reading ? '查看进度' : '切到新闻';
     ui.news.hidden = !reading;
@@ -98,14 +103,14 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     const headline = article?.title || (request ? '正在读取新闻…' : '暂未收到新闻');
     ui.mini.textContent = busy ? taskTitle : headline;
     ui.ticker.hidden = !!device;
-    ui.tickerLabel.textContent = busy ? '工位' : '桌面新闻';
+    ui.tickerLabel.textContent = busy ? '工位' : '新闻简报';
     ui.tickerText.textContent = busy ? taskTitle : headline;
     ui.title.textContent = headline;
     ui.credit.textContent = article ? [article.source, clock(article.publishedAt)].filter(Boolean).join(' · ') : '';
     ui.latest.textContent = feed?.updatedAt
       ? (feed.stale ? '暂未刷新 · 上次更新 ' : '上次更新 ') + clock(feed.updatedAt) : '';
     ui.actions.hidden = !article;
-    selectNewsArticle(visible && reading ? article : null);
+    selectNewsArticle(visible && reading ? article : null, feed?.items);
     ui.prev.disabled = ui.next.disabled = !(feed?.items?.length > 1);
     ui.refresh.disabled = !!request;
     updateChannelState();
@@ -171,8 +176,8 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
           !document.body.classList.contains('reduced-motion') && !matchMedia('(prefers-reduced-motion: reduce)').matches) setArticle(1);
     }, 18_000);
   }
-  function selectChannel(next) {
-    if (!visible) return;
+  function selectChannel(next, change) {
+    if (!visible || change?.catalogChanged) return;
     sources.reset();
     channel = next;
     if (device !== 'tv') { show('tv'); return; }
@@ -180,24 +185,46 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     player.select(channel.id);
     draw();
   }
-  function show(next, perform = true) {
+  function monitorOrigin(trigger) {
+    // 打开后会切换镜头。近看其他工位时，电脑可能在画外，此时从被点击的简报条展开。
+    const screen = ui.mini.getBoundingClientRect(), view = scene.getBoundingClientRect();
+    const left = Math.max(screen.left, view.left), top = Math.max(screen.top, view.top);
+    const width = Math.min(screen.right, view.right) - left, height = Math.min(screen.bottom, view.bottom) - top;
+    return width > 0 && height > 0 ? { left, top, width, height } : trigger.getBoundingClientRect();
+  }
+  function show(next, perform = true, trigger = ui.monitor) {
+    const screen = next === 'monitor' && device !== 'monitor' ? monitorOrigin(trigger) : null;
+    monitorEntrance?.cancel();
     syncChannelScope();
     sources.reset();
     device = next;
     if (next === 'tv') {
       if (perform) room.perform('tv');
-      player.select(channel.id);
+      player.select(channel?.id);
     } else {
+      monitorTrigger = trigger;
       player.close();
       if (perform && !busy) room.perform('news');
     }
     draw();
+    if (screen?.width && screen.height && ui.panel.animate &&
+        !document.body.classList.contains('reduced-motion') && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const page = ui.panel.getBoundingClientRect();
+      if (page.width && page.height) {
+        const dx = screen.left - page.left, dy = screen.top - page.top;
+        monitorEntrance = ui.panel.animate([
+          { transform: `translate(${dx}px,${dy}px) scale(${screen.width / page.width},${screen.height / page.height})`, opacity: 0.65 },
+          { transform: 'none', opacity: 1 }
+        ], { duration: 380, easing: 'cubic-bezier(.22,.67,.25,1)' });
+      }
+    }
     ui.scroll.scrollTop = 0;
     ui.back.focus({ preventScroll: true });
   }
   function close(restoreFocus = true) {
     if (!device) return false;
-    const trigger = device === 'tv' ? ui.tv : ui.monitor;
+    const trigger = device === 'tv' ? ui.tv : monitorTrigger;
+    monitorEntrance?.cancel();
     const wasReadingDuringWork = readDuringWork;
     readDuringWork = false;
     device = '';
@@ -209,7 +236,7 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     return true;
   }
   ui.tv.onclick = () => show('tv');
-  ui.monitor.onclick = ui.ticker.onclick = () => show('monitor');
+  ui.monitor.onclick = ui.ticker.onclick = event => show('monitor', true, event.currentTarget);
   ui.back.onclick = () => close();
   ui.power.onclick = () => { room.perform('tv-off'); close(); };
   ui.channelButtons.onclick = event => {
@@ -242,8 +269,9 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
         refreshChannels();
         unsubscribe = onWorkshopChannel(selectChannel);
         unsubscribeList = onWorkshopChannelListChanged(catalogChanged);
-        if (device === 'tv') player.select(channel.id);
+        if (device === 'tv') player.select(channel?.id);
       } else {
+        monitorEntrance?.cancel();
         unsubscribe?.();
         unsubscribeList?.();
         sources.suspend();

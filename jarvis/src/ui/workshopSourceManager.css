@@ -19,6 +19,8 @@
 .ws-source-list, .ws-source-form { display: grid; gap: 7px; }
 .ws-source-list > button { justify-self: start; }
 .ws-source-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 6px; }
+.ws-source-group { margin: 4px 0 0; font-size: 13px; }
+.ws-source-row > span { align-self: center; font-size: 13px; }
 .work-studio-view .ws-source-row button:first-child { justify-content: flex-start; white-space: normal; overflow-wrap: anywhere; }
 .ws-source-field { display: grid; grid-template-columns: 4.5em minmax(0,1fr); align-items: center; gap: 5px; font-size: 12px; }
 .ws-source-field :is(input,select) {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { getWorkshopCustomChannels, listWorkshopChannels, normalizeWorkshopSource, onWorkshopChannel, onWorkshopChannelListChanged,
-  removeWorkshopSource, saveWorkshopSource, selectWorkshopChannel, workshopChannel } from '../src/ui/workshopMediaChannels.js';
+  removedWorkshopChannels, removeWorkshopSource, saveWorkshopSource, selectWorkshopChannel, setWorkshopBuiltinVisible, workshopChannel } from '../src/ui/workshopMediaChannels.js';
 
 const source = { name: '我的直播台', url: 'https://media.example/live/main.m3u8?token=a%2Bb' };
 const listeners = [];
@@ -71,6 +71,47 @@ it('独立移除未选频道不换台，移除正播频道回到默认源，不�
   expect(removeWorkshopSource(first.id)).toBe(true);
   expect(workshopChannel().id).toBe('retrostrange-tv');
   expect(observer).toHaveBeenCalledOnce();
+});
+
+it('默认电影、演示、央视均可逐台移除；清空后重载仍停播，恢复频道不抢台', async () => {
+  const original = listWorkshopChannels();
+  for (const channel of original) {
+    expect(workshopChannel().id).toBe(channel.id);
+    expect(setWorkshopBuiltinVisible(channel.id, false)).toBe(true);
+    expect(selectWorkshopChannel(channel.label)).toBeNull();
+  }
+  expect(workshopChannel()).toBeNull();
+  expect(removedWorkshopChannels()).toEqual(original);
+  vi.resetModules();
+  expect((await import('../src/ui/workshopMediaChannels.js')).workshopChannel()).toBeNull();
+  expect(setWorkshopBuiltinVisible('cctv9', true)).toBe(true);
+  expect(workshopChannel().id).toBe('cctv9');
+  expect(setWorkshopBuiltinVisible(original[0].id, true)).toBe(true);
+  expect(workshopChannel().id).toBe('cctv9');
+  expect(setWorkshopBuiltinVisible(original[0].id, true)).toBe(false);
+  expect(() => saveWorkshopSource({ ...source, name: '央视1' })).toThrow();
+});
+
+it('默认台的移除记录依本机、服务器及使用者隔离，选中的个人频道也能删到空', () => {
+  const builtins = listWorkshopChannels();
+  const saved = saveWorkshopSource(source);
+  selectWorkshopChannel(saved.id);
+  for (const channel of builtins) setWorkshopBuiltinVisible(channel.id, false);
+  expect(listWorkshopChannels()).toEqual([saved]);
+  expect(removeWorkshopSource(saved.id)).toBe(true);
+  expect(workshopChannel()).toBeNull();
+  const switchTo = (url, user) => storage.setItem('jarvis.server.v1', JSON.stringify({ url, enabled: true, userId: 'u_' + user.repeat(24) }));
+  switchTo('https://one.example', 'a');
+  expect(listWorkshopChannels()).toEqual(builtins);
+  setWorkshopBuiltinVisible('cctv1', false);
+  switchTo('https://one.example', 'b');
+  expect(removedWorkshopChannels()).toEqual([]);
+  switchTo('https://two.example', 'a');
+  expect(removedWorkshopChannels()).toEqual([]);
+  switchTo('https://one.example', 'a');
+  expect(removedWorkshopChannels().map(ch => ch.id)).toEqual(['cctv1']);
+  storage.removeItem('jarvis.server.v1');
+  expect(workshopChannel()).toBeNull();
 });
 
 it('本机、不同服务器、同机成员的频道和最后选择互相隔离', () => {

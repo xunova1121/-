@@ -84,7 +84,8 @@ var contentdate = '<p>[!--begin:htmlVideoCode--]ID[!--end:htmlVideoCode--]</p><p
   it('在房间内重试、翻篇和收起，不将迟到的前篇正文写回蒙层', async () => {
     const content = { setAttribute: vi.fn(), replaceChildren: vi.fn() };
     vi.stubGlobal('document', { createElement: tag => tag === 'div' ? content : {} });
-    const ui = { original: { setAttribute: vi.fn(), removeAttribute: vi.fn() }, news: { append: vi.fn() }, scroll: { scrollTop: 120 } };
+    const ui = { original: { setAttribute: vi.fn(), removeAttribute: vi.fn() }, news: { append: vi.fn() },
+      digest: {}, headlines: { replaceChildren: vi.fn() }, scroll: { scrollTop: 120 } };
     let finish;
     const readArticle = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
       .mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ paragraphs: ['新文章正文'] });
