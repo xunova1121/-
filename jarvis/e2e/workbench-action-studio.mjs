@@ -188,7 +188,7 @@ try {
   assert.equal(roomModelCalls, 0, '工作台查询、控灯和生活操作都在本机完成');
   await roomPage.context().close();
   let modelCalls = 0;
-  const local = await open(desktop, { viewport: { width: 1440, height: 900 } }, null, async route => {
+  const local = await open(desktop, { viewport: { width: 1440, height: 900 }, timezoneId: 'Asia/Shanghai' }, null, async route => {
     modelCalls++;
     const messages = route.request().postDataJSON().messages;
     const count = messages.filter(m => m.role === 'tool').length;
@@ -210,12 +210,15 @@ try {
     const chunk = { choices: [{ delta, finish_reason: result ? 'stop' : 'tool_calls' }] };
     await route.fulfill({ contentType: 'text/event-stream', body: 'data: ' + JSON.stringify(chunk) + '\n\ndata: [DONE]\n\n' });
   });
+  // 固定在电脑前整理笔记的时段，和写文件用的制作台明确区分；任务计时与动画仍往前走。
+  await local.clock.setSystemTime(new Date('2026-11-20T11:11:00+08:00'));
   assert.ok(await local.evaluate(() => window.__jarvis.stage == null), '普通对话不创建经典 WebGL 场景');
   await enter(local);
   assert.ok(await local.evaluate(() => window.__jarvis.stage == null), '工作台的角色不拉起星系 GPU 场景');
   assert.equal(await rows(local).count(), 0, '空会话只显示待命');
   assert.equal(await stage(local).getAttribute('data-pose'), 'idle');
   const idleActivity = await stage(local).locator('.ws-scene').getAttribute('data-life-activity');
+  assert.equal(idleActivity, 'study', '11:11 的个人作息在电脑前');
   await stationPoint(local, ({ plan: 'bench', tidy: 'archive', study: 'review' })[idleActivity] || 'rest');
   const actor = stage(local).locator('.ws-floorplan .ws-actor');
   assert.notEqual(await actor.getAttribute('data-walking'), 'true', '空会话安静待命');
@@ -260,6 +263,7 @@ try {
   const review = await stationPoint(local, 'review');
   await stage(local).locator('[data-action="live"]').click();
   assert.equal(await stage(local).getAttribute('data-pose'), 'cheer');
+  await stage(local).locator('[data-entry-id][data-pose="cheer"]').click();
   await stationPoint(local, 'bench'); // 核验后还写了回复，庆祝应在最后一次实际工作的地方。
   for (const [a, b] of [[archive, bench], [archive, review], [bench, review]]) {
     assert.ok(Math.hypot(a.x - b.x, a.y - b.y) > .08, '读取、修改和复核有不同的实际站位');
@@ -290,6 +294,10 @@ try {
   await local.fill('#prompt', '');
   await local.setViewportSize({ width: 1024, height: 600 });
   await checkFit(local);
+  assert.equal(await stage(local).locator('.ws-scene').getAttribute('data-life-activity'), 'study', '重开后实时视图恢复当前作息');
+  await stationPoint(local, 'review');
+  await edits.click();
+  assert.equal(await stage(local).locator('.ws-scene').getAttribute('data-operation'), 'write', '窄屏回看真实写入步骤');
   await stationPoint(local, 'bench');
   await local.screenshot({ path: path.join(output, 'pc-studio-compact.png') });
   await local.setViewportSize({ width: 768, height: 620 });
