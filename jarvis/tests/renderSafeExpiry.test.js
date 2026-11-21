@@ -25,12 +25,15 @@ describe('兼容显示限时', () => {
     expect(firstPaint({ saved: 'true' })).toBe(true);
     expect(firstPaint({ saved: 'false' })).toBe(false);
   });
-  it('原生：崩溃和内存提醒不再写永久开关，自动软件绘制限 3 天，手动选择单独保存', () => {
+  it('原生：轻量显示与临时软件救援分别取值，旧崩溃记录不能直接开启整窗软件绘制', () => {
     const main = fs.readFileSync(path.join(ROOT, 'android/app/src/main/java/com/xunova/jarvis/MainActivity.java'), 'utf8');
     const plugin = fs.readFileSync(path.join(ROOT, 'android/app/src/main/java/com/xunova/jarvis/CrashLogPlugin.java'), 'utf8');
     expect(main).not.toContain('putBoolean("safeDisplay",true)');
     expect(main).toContain('RenderRecovery.safeDisplayActive(');
     expect(main).toContain('RenderRecovery.softwareLayerNow(');
+    const startup = main.slice(main.indexOf('protected void load()'), main.indexOf('void restoreDefaultDrawing()'));
+    expect(startup).toContain('getLong("softwareRescueAt", 0)');
+    for (const oldSetting of ['lastCrash', 'lastRenderer', 'softwareRecoveryVersion']) expect(startup).not.toContain(oldSetting);
     expect(main).toContain('remove("safeDisplay").putBoolean("safeDisplayLimited", true)');
     expect(plugin).toContain('putBoolean("safeDisplayManual",safe)');
     expect(plugin).toContain('putLong("lastTrim",0)');

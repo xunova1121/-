@@ -9,37 +9,46 @@ public class RenderRecoveryTest {
     @Test public void changedClockDoesNotReuseStreak(){assertEquals(1,RenderRecovery.nextCount(9000,8,1000));assertFalse(RenderRecovery.recent(9000,1000,60000));}
 
     private static final String VERSION = "114.0.5.302";
-    private static final String REPORT = "2026-11-21 13:31:51 App=1.0.480，WebView=114.0.5.302，didCrash=true，priority=2，"
-            + "可用内存=4713MB，lowMemory=false，JavaHeap=8/384MB，连续=1，软件绘制=false，HUAWEI ADY-AL00，"
-            + "崩溃前界面=对话 · 已打开 1 分 10 秒 · 消息 4 条 · 动画 1 个 · 元素 3263 个 · 兼容显示开 · 最后操作：发消息（25 秒前）";
-
-    @Test public void affectedProviderChangesPathOnlyAfterCrashingInSafeMode() {
-        assertTrue(RenderRecovery.useSoftwareOnRecovery("huawei", VERSION, true, true, false));
-        assertFalse(RenderRecovery.useSoftwareOnRecovery("HUAWEI", VERSION, false, true, false));
-        assertFalse(RenderRecovery.useSoftwareOnRecovery("HUAWEI", VERSION, true, false, false));
-        assertFalse(RenderRecovery.useSoftwareOnRecovery("HUAWEI", VERSION, true, true, true));
-        assertFalse(RenderRecovery.useSoftwareOnRecovery("HUAWEI", "134.0", true, true, false));
-        assertFalse(RenderRecovery.useSoftwareOnRecovery("other", VERSION, true, true, false));
-        assertFalse(RenderRecovery.useSoftwareOnRecovery("HUAWEI", null, true, true, false));
+    @Test public void onlyForegroundHardwareCrashesOnTheAffectedProviderCount() {
+        assertTrue(RenderRecovery.eligibleHardwareCrash("huawei", VERSION, true, false, false, true, false));
+        assertFalse(RenderRecovery.eligibleHardwareCrash("HUAWEI", VERSION, false, false, false, true, false));
+        assertFalse(RenderRecovery.eligibleHardwareCrash("HUAWEI", VERSION, true, true, false, true, false));
+        assertFalse(RenderRecovery.eligibleHardwareCrash("HUAWEI", VERSION, true, false, true, true, false));
+        assertFalse(RenderRecovery.eligibleHardwareCrash("HUAWEI", VERSION, true, false, false, false, false));
+        assertFalse(RenderRecovery.eligibleHardwareCrash("HUAWEI", VERSION, true, false, false, true, true));
+        assertFalse(RenderRecovery.eligibleHardwareCrash("HUAWEI", "134.0", true, false, false, true, false));
+        assertFalse(RenderRecovery.eligibleHardwareCrash("other", VERSION, true, false, false, true, false));
+        assertFalse(RenderRecovery.eligibleHardwareCrash("HUAWEI", null, true, false, false, true, false));
     }
 
-    @Test public void version480ReportCarriesRecoveryAcrossAppUpdate() {
-        assertTrue(RenderRecovery.matchesPreviousCrash("HUAWEI", VERSION, REPORT));
-        assertFalse(RenderRecovery.matchesPreviousCrash("HUAWEI", "114.0.5.303", REPORT));
-        assertFalse(RenderRecovery.matchesPreviousCrash("other", VERSION, REPORT));
-        assertFalse(RenderRecovery.matchesPreviousCrash("HUAWEI", VERSION, ""));
-        for (String field : new String[]{"didCrash=true", "lowMemory=false", "软件绘制=false", "兼容显示开"}) {
-            assertFalse(field, RenderRecovery.matchesPreviousCrash("HUAWEI", VERSION, REPORT.replace(field, "")));
-        }
+    @Test public void singleOrLegacyCrashLeavesLightweightChatOnSystemDrawing() {
+        long now = 90000;
+        assertTrue(RenderRecovery.safeDisplayActive(false, now - 1, 0, now));
+        // 480–485 的报告、旧内核号与 lastCrash 仍可用于诊断，但当时没有软件救援开始时间。
+        assertFalse(RenderRecovery.softwareLayerNow(false, "HUAWEI", VERSION, VERSION, 0, now));
+        assertFalse(RenderRecovery.repeatedHardwareCrash(VERSION, "", true, now - 1, now));
+    }
+
+    @Test public void onlyTwoConsecutiveHardwareCrashesWithinFiveMinutesActivateRescue() {
+        long last = 1000, now = 2500;
+        assertTrue(RenderRecovery.repeatedHardwareCrash(VERSION, VERSION, true, last, now));
+        assertFalse(RenderRecovery.repeatedHardwareCrash(VERSION, VERSION, false, last, now));
+        assertFalse(RenderRecovery.repeatedHardwareCrash("", VERSION, true, last, now));
+        assertFalse(RenderRecovery.repeatedHardwareCrash("", "", true, last, now));
+        assertFalse(RenderRecovery.repeatedHardwareCrash(VERSION, "114.0.5.303", true, last, now));
+        assertFalse(RenderRecovery.repeatedHardwareCrash(VERSION, VERSION, true, last, last - 1));
+        assertFalse(RenderRecovery.repeatedHardwareCrash(VERSION, VERSION, true, last, last + RenderRecovery.WINDOW_MS));
+        assertFalse(RenderRecovery.repeatedHardwareCrash(VERSION, VERSION, true, 0, now));
     }
 
     @Test public void manualChoiceRemainsAvailableAndAutomaticChoiceExpiresOnProviderUpdate() {
-        assertTrue(RenderRecovery.useSavedSoftwareLayer(false, "Huawei", VERSION, VERSION));
-        assertFalse(RenderRecovery.useSavedSoftwareLayer(false, "Huawei", VERSION, ""));
-        assertFalse(RenderRecovery.useSavedSoftwareLayer(false, "Huawei", "114.0.5.303", VERSION));
-        assertFalse(RenderRecovery.useSavedSoftwareLayer(false, "Huawei", null, VERSION));
-        assertFalse(RenderRecovery.useSavedSoftwareLayer(false, "other", VERSION, VERSION));
-        assertTrue(RenderRecovery.useSavedSoftwareLayer(true, "other", null, ""));
+        long last = 1000, now = 2500;
+        assertTrue(RenderRecovery.softwareLayerNow(false, "Huawei", VERSION, VERSION, last, now));
+        assertFalse(RenderRecovery.softwareLayerNow(false, "Huawei", VERSION, "", last, now));
+        assertFalse(RenderRecovery.softwareLayerNow(false, "Huawei", "114.0.5.303", VERSION, last, now));
+        assertFalse(RenderRecovery.softwareLayerNow(false, "Huawei", null, VERSION, last, now));
+        assertFalse(RenderRecovery.softwareLayerNow(false, "other", VERSION, VERSION, last, now));
+        assertTrue(RenderRecovery.softwareLayerNow(true, "other", null, "", 0, now));
     }
 
     // 2026-11-21 用户：手机特别卡。崩溃和内存提醒不能把兼容显示、软件绘制永久打开。
@@ -54,9 +63,12 @@ public class RenderRecoveryTest {
         assertFalse(RenderRecovery.safeDisplayActive(false, 0, now - 7 * 60 * 60 * 1000L, now));
     }
 
-    @Test public void automaticSoftwareDrawingLastsThreeDaysAfterCrashManualStays() {
+    @Test public void automaticSoftwareDrawingStopsAfterFiveMinutesManualStays() {
         long now = 100 * DAY;
-        assertTrue(RenderRecovery.softwareLayerNow(false, "HUAWEI", VERSION, VERSION, now - DAY, now));
+        assertTrue(RenderRecovery.softwareLayerNow(false, "HUAWEI", VERSION, VERSION, now - RenderRecovery.WINDOW_MS + 1, now));
+        assertFalse(RenderRecovery.softwareLayerNow(false, "HUAWEI", VERSION, VERSION, now - RenderRecovery.WINDOW_MS, now));
+        assertFalse(RenderRecovery.softwareLayerNow(false, "HUAWEI", VERSION, VERSION, now - DAY, now));
+        assertFalse(RenderRecovery.softwareLayerNow(false, "HUAWEI", VERSION, VERSION, now + 1, now));
         assertFalse(RenderRecovery.softwareLayerNow(false, "HUAWEI", VERSION, VERSION, now - 3 * DAY, now));
         assertFalse(RenderRecovery.softwareLayerNow(false, "HUAWEI", VERSION, VERSION, 0, now));
         assertFalse(RenderRecovery.softwareLayerNow(false, "HUAWEI", VERSION, "", now - DAY, now));

@@ -40,6 +40,19 @@ describe('手机自动更新', () => {
     expect(plugin.calls.install).toBe(1);
   });
 
+  it('覆盖安装的内测版只升级到编号更高的正式版', async () => {
+    const plugin = fakePlugin();
+    let latest = '1.0.485';
+    const updater = createAppUpdater({ current: '1.0.486-test', plugin, storage: mem(), getText: async () => yml(latest) });
+    expect((await updater.check()).state).toBe('latest');
+    expect(plugin.calls.download).toHaveLength(0);
+    expect(versionFromYml(yml('1.0.487-test'))).toBeNull();
+    expect(isNewer('1.0.487-test', '1.0.486')).toBe(false);
+    latest = '1.0.487';
+    expect((await updater.check()).state).toBe('ready');
+    expect(plugin.calls.download).toEqual([apkUrl('1.0.487')]);
+  });
+
   it('已是最新版本、调试版都不下载', async () => {
     const plugin = fakePlugin();
     expect((await createAppUpdater({ current: '1.0.64', plugin, storage: mem(), getText: async () => yml('1.0.64') }).check()).state).toBe('latest');

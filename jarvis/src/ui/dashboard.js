@@ -36,7 +36,7 @@ function gauge(id, label) {
 }
 
 export class Dashboard {
-  constructor(root, { onEmotionPick } = {}) {
+  constructor(root, { onEmotionPick, pointerEffects = true } = {}) {
     this.root = root;
     this.onEmotionPick = onEmotionPick;
     this.motion = true;
@@ -44,6 +44,7 @@ export class Dashboard {
     this.turns = 0;
     this.task = 'idle';
     this.connected = false;
+    this.chartsVisible = false;
     root.innerHTML = `
       <div class="dash-tilt">
         <section class="panel" data-panel="status">
@@ -90,10 +91,15 @@ export class Dashboard {
     this.rotX = new Spring(0);
     this.rotY = new Spring(0);
     this.raf = 0;
-    this.#bindPointer();
+    if (pointerEffects) this.#bindPointer();
     this.#bindPicker();
-    this.#resizeCanvases();
-    new ResizeObserver(() => { this.#resizeCanvases(); this.#drawMem(); this.#drawTask(); }).observe(root);
+    new ResizeObserver(([entry]) => {
+      this.chartsVisible = entry.contentRect.width > 0 && entry.contentRect.height > 0;
+      if (!this.chartsVisible) return;
+      this.#resizeCanvases();
+      this.#drawMem();
+      this.#drawTask();
+    }).observe(root);
   }
 
   setMotion(on) {
@@ -189,6 +195,7 @@ export class Dashboard {
   }
 
   #drawMem() {
+    if (!this.chartsVisible) return;
     const c = this.root.querySelector('#c-mem');
     const g = c.getContext('2d');
     const { width: w, height: h } = c;
@@ -221,6 +228,7 @@ export class Dashboard {
 
   /** 任务活跃度：点阵波形，振幅随任务状态变化（静态绘制，不做持续动画） */
   #drawTask() {
+    if (!this.chartsVisible) return;
     const c = this.root.querySelector('#c-task');
     if (!c) return;
     const g = c.getContext('2d');

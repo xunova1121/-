@@ -90,6 +90,16 @@ try{
   await page.click('.home-suggestions-head button');check('推荐可轮换而不重复天气入口',await page.locator('.home-suggestions').textContent().then(t=>t.includes('创作灵感')));
   await page.click('.home-start');check('创作卡片填写任务，继续复用原发送入口',await page.inputValue('#prompt').then(t=>t.includes('目标')));await page.fill('#prompt','');await page.locator('#prompt').blur();await page.waitForFunction(()=>!document.querySelector('#inputbar').classList.contains('composer-editing'));
   check('手机版实际产物启用陪伴感布局',await page.evaluate(()=>document.body.classList.contains('compact')&&!document.body.classList.contains('workbench')&&window.__jarvis.stage===null));
+  check('抽屉收起后头像停止动画，首页指针不驱动隐藏的立体仪表', await page.evaluate(async () => {
+    const dashboard = document.getElementById('dashboard');
+    let writes = 0;
+    const observer = new MutationObserver(changes => { writes += changes.length; });
+    observer.observe(dashboard, { attributes: true, attributeFilter: ['style'], subtree: true });
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 25, clientY: 25, pointerType: 'mouse' }));
+    await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)));
+    observer.disconnect();
+    return writes === 0 && getComputedStyle(document.querySelector('.drawer .wy-mascot')).animationName === 'none';
+  }));
   check('手机蓝白底色，保留清楚的未央图标',await page.evaluate(()=>{const r=document.querySelector('.brand-mark').getBoundingClientRect();return r.width>=44&&r.height>=44&&getComputedStyle(document.body).getPropertyValue('--bg').trim()==='#f4f7fc';}));
   check('手机空白输入栏一排显示＋、转文字和电话，模型与发送收起',await page.evaluate(()=>['btn-attach','btn-mic','btn-call'].every(id=>{const r=document.getElementById(id).getBoundingClientRect();return r.width>=32&&r.height>=36;})&&document.getElementById('btn-send').hidden&&!document.querySelector('#inputbar').classList.contains('composer-editing')));
   await page.click('#btn-attach');
@@ -148,6 +158,9 @@ try{
   await page.setViewportSize({width:390,height:844});
   check('对话正文两侧保留至少 20px 阅读留白',await page.locator('.msg.agent').last().evaluate(el=>{const r=el.getBoundingClientRect();return r.left>=20&&r.right<=innerWidth-20;}));
   check('手机完成后的短回复使用紧凑单头像，不留大块空白或固定的话',await page.locator('.msg.agent').last().evaluate(el=>{const who=el.querySelector('.who');return who.querySelectorAll('.wy-mascot').length===1&&who.querySelector('.wy-mascot').getBoundingClientRect().height>=30&&who.querySelector('.wy-mascot').getBoundingClientRect().height<=36&&!who.querySelector('.wy-reply-greeting');}));
+  check('手机阅读已结束的回答时动画释放，保留静态头像', await page.locator('.msg.agent').last().evaluate(el =>
+    getComputedStyle(el.querySelector('.who-mood')).animationName === 'none' &&
+    !el.getAnimations().some(animation => animation.playState === 'finished')));
   check('手机消息角色不遮昵称，正文在标题下方且没有横向溢出',await page.locator('.msg.agent').last().evaluate(el=>{const r=x=>x.getBoundingClientRect(),head=r(el.querySelector('.who')),avatar=r(el.querySelector('.who-mood')),name=r(el.querySelector('.who-name')),body=r(el.querySelector('.body'));return avatar.right<=name.left+1&&head.bottom<=body.top+1&&body.left>=20&&body.right<=innerWidth-20&&document.querySelector('#transcript').scrollWidth<=document.querySelector('#transcript').clientWidth+1;}));
   await page.fill('#prompt','需要补充的要求');await page.click('#prompt');await page.evaluate(()=>window.__resizeKeyboard(444));await page.waitForTimeout(80);
   check('键盘弹出时角色缩小且发送按钮保持可见',await page.evaluate(()=>{const r=document.querySelector('.msg.agent:last-child .who .wy-mascot').getBoundingClientRect(),send=document.getElementById('btn-send').getBoundingClientRect();return document.body.classList.contains('wy-keyboard-open')&&r.height<=60&&send.bottom<=445&&send.top>=0;}));
@@ -258,6 +271,42 @@ try{
   check('历史对话默认只列 8 条，其余收在“展开更多”里',await again.locator('.drawer-item').count()===8&&(await again.locator('.drawer-more').textContent()).includes('还有 4 条'));
   await again.click('.drawer-more');await again.waitForFunction(()=>document.querySelectorAll('.drawer-item').length===12);
   await again.click('.drawer-more.inline');await again.waitForFunction(()=>document.querySelectorAll('.drawer-item').length===8);
+  check('手机留在首页时不挂载整份历史',await again.locator('#session-list .session').count()===0);
+  await again.evaluate(async()=>{
+    const db=await new Promise((resolve,reject)=>{const request=indexedDB.open('jarvis');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+    const now=Date.now()-86400000;
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction('sessions','readwrite'),store=tx.objectStore('sessions');
+      for(let i=0;i<52;i++)store.put({id:'paged-'+i,title:'旧记录 '+i,titleSet:true,createdAt:now-i,updatedAt:now-i,pinned:false,messages:[{role:'user',content:i===51?'saffronneedle':'旧记录 '+i,ts:now-i}]});
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
+    });
+    db.close();
+  });
+  await again.locator('.drawer-feat').filter({hasText:'全部对话'}).click();
+  await again.waitForFunction(()=>document.querySelector('#session-count').textContent==='64 段');
+  check('打开全部对话时只绘制一页',await again.locator('#session-list .session').count()===30);
+  await again.locator('#session-list').getByRole('button',{name:'下一页'}).click();
+  await again.locator('#session-list').getByRole('button',{name:'下一页'}).click();
+  check('最后一页仍可访问更早的全部对话',await again.locator('#session-list .session').count()===4&&await again.locator('#session-list').getByText('旧记录 51',{exact:true}).isVisible());
+  await again.locator('#session-search').fill('saffronneedle');
+  await again.waitForFunction(()=>document.querySelectorAll('#session-list .session').length===1);
+  const remove = again.locator('#session-list').getByRole('button',{name:'删除',exact:true});
+  await remove.click();await remove.click();
+  await again.waitForFunction(()=>document.querySelector('#session-count').textContent==='63 段'&&!document.querySelector('#session-list .session'));
+  await again.locator('#session-trash summary').click();
+  await again.locator('#session-trash-list .session').filter({hasText:'旧记录 51'}).getByRole('button',{name:'恢复'}).click();
+  await again.waitForFunction(()=>document.querySelector('#session-count').textContent==='64 段'&&document.querySelector('#session-list .session-title')?.textContent==='旧记录 51'&&!document.querySelector('#session-trash-list .session'));
+  check('较早对话搜索、删除与回收站恢复可用',await again.locator('#session-trash-list .session').count()===0);
+  await again.locator('#set-save-sessions').uncheck();await again.locator('#set-save-sessions').check();
+  check('全部对话仍可切换保存设置',await again.locator('#set-save-sessions').isChecked());
+  await again.locator('#session-list .session').click();
+  await again.waitForFunction(()=>!document.body.classList.contains('side-open')&&document.querySelector('#transcript .msg.user')?.textContent.includes('saffronneedle'));
+  check('点全部对话中的记录直接回到聊天并打开原文',await again.locator('#prompt').isVisible());
+  await again.waitForFunction(()=>document.querySelector('#session-list').childElementCount===0);
+  await again.evaluate(()=>{window.__jarvis.showPanel('sessions');document.querySelector('#btn-side-back').click();});
+  await again.waitForTimeout(300);
+  check('快速返回后晚到的数据不会重新填入隐藏面板',await again.locator('#session-list > *, #session-trash-list > *').count()===0);
+  check('回到聊天以后释放历史行与抽屉列表',await again.locator('.drawer-history .drawer-row').count()===0);
   await again.evaluate(()=>localStorage.setItem('jarvis.pendingTasks.v1',JSON.stringify({'relaunch-3':{turnId:1,text:'生成一页纸汇报 Word',title:'历史对话 4',ts:Date.now()-60000,steps:['读取文件'],files:[]}})));
   await again.goto(BASE);await again.waitForFunction(()=>[...document.querySelectorAll('#transcript .msg.user')].some(m=>m.textContent.includes('上次 App 被关掉')),null,{timeout:15000});
   check('App 被关掉时没做完的任务：再打开回到那个对话，带着做过的步骤接着做',await again.evaluate(()=>document.querySelector('#transcript').textContent.includes('第 4 段')&&[...document.querySelectorAll('#transcript .msg.user')].at(-1).textContent.includes('已经做过的步骤：读取文件')));

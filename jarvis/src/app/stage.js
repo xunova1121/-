@@ -240,7 +240,8 @@ export function createStage(app) {
 
   // ---------------------------------------------------------------- 仪表
   const dashboard = new Dashboard($('#dashboard'), {
-    onEmotionPick: (v) => applyEmotionOverride(v)
+    onEmotionPick: (v) => applyEmotionOverride(v),
+    pointerEffects: !COMPACT
   });
   const poller = new MetricsPoller({
     onData: (m) => {

@@ -2,6 +2,9 @@ package com.xunova.jarvis;
 
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebView;
 import android.view.View;
@@ -28,6 +31,9 @@ public class MainActivity extends BridgeActivity {
     private boolean rendererGone = false;
     private volatile boolean softwareDrawing;
     private final WorkshopDrawing workshopDrawing = new WorkshopDrawing();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Runnable endRescue = this::restoreDefaultDrawing;
+    private long rescueEndsElapsed;
     private boolean foreground;
     public boolean isRendererGone(){return rendererGone;}
     boolean usesSoftwareDrawing(){return softwareDrawing;}
@@ -50,29 +56,42 @@ public class MainActivity extends BridgeActivity {
     @Override protected void load() {
         SharedPreferences prefs = health();
         WebView web = findViewById(com.getcapacitor.android.R.id.webview);
-        if (web != null && safeDisplay(this)) {
-            String version = webViewVersion();
-            String previous = prefs.getString("softwareRecoveryVersion", "");
-            if (previous.isEmpty() && prefs.getLong("lastCrash", 0) > 0
-                    && RenderRecovery.matchesPreviousCrash(Build.MANUFACTURER, version, prefs.getString("lastRenderer", ""))) {
-                previous = version;
-                prefs.edit().putString("softwareRecoveryVersion", version).apply();
-            }
-            if (RenderRecovery.softwareLayerNow(prefs.getBoolean("softwareLayer", false), Build.MANUFACTURER, version, previous, prefs.getLong("lastCrash", 0), System.currentTimeMillis())) {
+        if (web != null) {
+            boolean manual = prefs.getBoolean("softwareLayer", false);
+            long now = System.currentTimeMillis();
+            long rescueStarted = prefs.getLong("softwareRescueAt", 0);
+            String version = rescueStarted > 0 ? webViewVersion() : "";
+            if (RenderRecovery.softwareLayerNow(manual, Build.MANUFACTURER, version, prefs.getString("hardwareCrashVersion", ""), rescueStarted, now)) {
                 web.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+                if (!manual) {
+                    long remaining = RenderRecovery.WINDOW_MS - (now - rescueStarted);
+                    rescueEndsElapsed = SystemClock.elapsedRealtime() + remaining;
+                }
             }
         }
         softwareDrawing = web != null && web.getLayerType() == View.LAYER_TYPE_SOFTWARE;
         super.load();
+        scheduleRescueExpiry();
     }
 
     void restoreDefaultDrawing() {
+        mainHandler.removeCallbacks(endRescue);
+        if (rescueEndsElapsed > 0 && !rendererGone) health().edit().remove("softwareRescueAt").apply();
+        rescueEndsElapsed = 0;
         workshopDrawing.userChoseDefault();
         if (!rendererGone && getBridge() != null && softwareDrawing) {
             WebView web = getBridge().getWebView();
             web.setLayerType(View.LAYER_TYPE_NONE, null);
             softwareDrawing = web.getLayerType() == View.LAYER_TYPE_SOFTWARE;
         }
+    }
+
+    private void scheduleRescueExpiry() {
+        if (rescueEndsElapsed == 0) return;
+        mainHandler.removeCallbacks(endRescue);
+        long remaining = rescueEndsElapsed - SystemClock.elapsedRealtime();
+        if (remaining > 0) mainHandler.postDelayed(endRescue, remaining);
+        else restoreDefaultDrawing();
     }
 
     JSObject setWorkshopDrawing(boolean visible, long revision) {
@@ -108,7 +127,13 @@ public class MainActivity extends BridgeActivity {
     @Override public void onResume() {
         super.onResume();
         foreground = true;
+        // postDelayed 不计深度睡眠，回到前台时按实际剩余时间重排。
+        scheduleRescueExpiry();
         if (workshopDrawing.requested()) applyWorkshopDrawing();
+    }
+    @Override public void onDestroy() {
+        mainHandler.removeCallbacks(endRescue);
+        super.onDestroy();
     }
     @Override public void onPause() {
         foreground = false;
@@ -147,13 +172,16 @@ public class MainActivity extends BridgeActivity {
                 String version = webViewVersion();
                 boolean crashed = detail != null && detail.didCrash();
                 boolean wasSafe = safeDisplay(MainActivity.this);
-                boolean fallback = !softwareDrawing && RenderRecovery.useSoftwareOnRecovery(
-                        Build.MANUFACTURER, version, wasSafe, crashed, memory.lowMemory);
+                String crashVersion = RenderRecovery.eligibleHardwareCrash(Build.MANUFACTURER, version, foreground,
+                        workshopDrawing.active(), softwareDrawing, crashed, memory.lowMemory) ? version : "";
+                boolean fallback = RenderRecovery.repeatedHardwareCrash(crashVersion, prefs.getString("hardwareCrashVersion", ""),
+                        wasSafe, prefs.getLong("lastCrash", 0), now);
                 SharedPreferences.Editor record = prefs.edit().putLong("lastCrash",now).putInt("consecutive",count);
                 if (crashed && !memory.lowMemory && workshopDrawing.active()) {
                     record.putLong("workshopCrashAt", now).putString("workshopCrashVersion", version);
                 }
-                if (fallback) record.putString("softwareRecoveryVersion", version);
+                record.putString("hardwareCrashVersion", crashVersion);
+                if (fallback) record.putLong("softwareRescueAt", now); else record.remove("softwareRescueAt");
                 String report="WebView="+version+"，didCrash="+crashed+"，priority="+(detail==null?-1:detail.rendererPriorityAtExit())+"，可用内存="+memory.availMem/1048576+"MB，lowMemory="+memory.lowMemory+"，JavaHeap="+(runtime.totalMemory()-runtime.freeMemory())/1048576+"/"+runtime.maxMemory()/1048576+"MB，连续="+count+"，软件绘制="+softwareDrawing+"，"+Build.MANUFACTURER+" "+Build.MODEL+"，崩溃前界面="+prefs.getString("lastScreen","未知");
                 if (workshopDrawing.active()) report += "，小屋前台绘制";
                 record.putString("lastRenderer",new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",java.util.Locale.CHINA).format(new java.util.Date(now))+" App="+CrashLog.appVersion(MainActivity.this)+"，"+report).commit();
@@ -185,7 +213,7 @@ public class MainActivity extends BridgeActivity {
         LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);layout.setGravity(Gravity.CENTER_VERTICAL);layout.setPadding(dp(26),dp(30),dp(26),dp(30));layout.setBackgroundColor(Color.rgb(252,251,255));
         TextView title=new TextView(this);title.setText("先稳住，再继续");title.setTextSize(24);title.setTypeface(null,Typeface.BOLD);title.setTextColor(Color.rgb(45,42,66));layout.addView(title);
         TextView message=new TextView(this);message.setText("界面连续异常，已停止自动重启。\n\n可以用兼容显示重新打开；还是不行就试试软件绘制。已保存的对话、文件和设置仍在本机；正在执行但尚未保存的内容需要检查后继续。");message.setTextSize(16);message.setTextColor(Color.rgb(93,87,113));message.setLineSpacing(dp(5),1);message.setPadding(0,dp(20),0,dp(24));layout.addView(message);
-        Button retry=new Button(this);retry.setText("用兼容显示重新打开");retry.setOnClickListener(v->{health().edit().putInt("consecutive",0).putLong("lastCrash",0).putBoolean("safeDisplayManual",true).remove("softwareRecoveryVersion").putBoolean("softwareLayer",false).commit();recreate();});layout.addView(retry);
+        Button retry=new Button(this);retry.setText("用兼容显示重新打开");retry.setOnClickListener(v->{health().edit().putInt("consecutive",0).putLong("lastCrash",0).putBoolean("safeDisplayManual",true).remove("hardwareCrashVersion").remove("softwareRescueAt").putBoolean("softwareLayer",false).commit();recreate();});layout.addView(retry);
         // 兼容显示还是会崩时试这个：整个界面改用软件绘制，绕开手机图形驱动；以后在设置里关掉兼容显示就恢复正常绘制
         Button software=new Button(this);software.setText("用软件绘制重新打开（更稳，会慢一些）");software.setOnClickListener(v->{health().edit().putInt("consecutive",0).putLong("lastCrash",0).putBoolean("safeDisplayManual",true).putBoolean("softwareLayer",true).commit();CrashLog.write(this,"用户选择软件绘制重新打开");recreate();});layout.addView(software);
         Button copy=new Button(this);copy.setText("复制诊断信息");copy.setOnClickListener(v->{((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("未央异常诊断",CrashLog.peek(this)));copy.setText("诊断已复制");});layout.addView(copy);

@@ -9,17 +9,15 @@ public final class RenderRecovery {
     }
     public static boolean shouldReduceDisplay(int level){return level==15 || level>=60;}
     public static boolean autoRestart(int count) { return count == 1; }
-    // 2026-11-21 用户：手机特别卡。原来崩过一次或系统提醒一次内存紧张，兼容显示就永久打开；
-    // 华为 114 内核崩过还会一直用软件绘制（整个界面由处理器画），要等系统组件更新才解除。改成限时：
-    // 崩溃后的兼容显示与自动软件绘制最多保持 3 天，内存紧张只临时开 6 小时；手动选择的不受限。
+    // 限制页面特效可以保留较久；整窗软件绘制单独判断。
     public static final long CRASH_PROTECT_MS = 3 * 24 * 60 * 60 * 1000L;
     public static final long TRIM_PROTECT_MS = 6 * 60 * 60 * 1000L;
     public static boolean safeDisplayActive(boolean manual, long lastCrash, long lastTrim, long now) {
         return manual || recent(lastCrash, now, CRASH_PROTECT_MS) || recent(lastTrim, now, TRIM_PROTECT_MS);
     }
-    /** 本次启动是否用软件绘制：手动选择一直有效；自动的只在最近一次崩溃后 3 天内有效。 */
-    static boolean softwareLayerNow(boolean manual, String manufacturer, String version, String recoveryVersion, long lastCrash, long now) {
-        return manual || (useSavedSoftwareLayer(false, manufacturer, version, recoveryVersion) && recent(lastCrash, now, CRASH_PROTECT_MS));
+    /** 自动软件绘制只认已经确认的连续硬件绘制崩溃，单次崩溃或旧恢复版本号不能开启它。 */
+    static boolean softwareLayerNow(boolean manual, String manufacturer, String version, String crashVersion, long rescueStarted, long now) {
+        return manual || (affectedProvider(manufacturer, version) && version.equals(crashVersion) && recent(rescueStarted, now, WINDOW_MS));
     }
     public static boolean recent(long previousTime, long now, long window) {
         return previousTime > 0 && now >= previousTime && now - previousTime < window;
@@ -30,20 +28,15 @@ public final class RenderRecovery {
         return "HUAWEI".equalsIgnoreCase(manufacturer) && version != null && version.startsWith("114.");
     }
 
-    static boolean useSavedSoftwareLayer(boolean manual, String manufacturer, String version, String recoveryVersion) {
-        return manual || (affectedProvider(manufacturer, version) && version.equals(recoveryVersion));
+    static boolean eligibleHardwareCrash(String manufacturer, String version, boolean foreground,
+                                        boolean room, boolean software, boolean didCrash, boolean lowMemory) {
+        return affectedProvider(manufacturer, version) && foreground && !room && !software && didCrash && !lowMemory;
     }
 
-    static boolean useSoftwareOnRecovery(String manufacturer, String version, boolean wasSafe,
-                                         boolean didCrash, boolean lowMemory) {
-        return wasSafe && didCrash && !lowMemory && affectedProvider(manufacturer, version);
-    }
-
-    // 1.0.480 只保存了上一次原生报告。升级后可以直接承接相同故障，不要求再崩一次。
-    static boolean matchesPreviousCrash(String manufacturer, String version, String report) {
-        if (!useSoftwareOnRecovery(manufacturer, version, true, true, false) || report == null) return false;
-        return report.contains("，WebView=" + version + "，didCrash=true，")
-                && report.contains("，lowMemory=false，") && report.contains("，软件绘制=false，")
-                && report.contains("兼容显示开");
+    // 两次相邻故障均须符合条件，第二次发生时已经在用兼容显示。
+    static boolean repeatedHardwareCrash(String currentCrashVersion, String previousCrashVersion,
+                                         boolean wasSafe, long previousCrash, long now) {
+        return wasSafe && !currentCrashVersion.isEmpty() && currentCrashVersion.equals(previousCrashVersion)
+                && recent(previousCrash, now, WINDOW_MS);
     }
 }

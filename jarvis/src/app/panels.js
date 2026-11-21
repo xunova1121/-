@@ -173,6 +173,7 @@ export function createPanels(app) {
     const releaseClosedPane = () => {
       const active = body.classList.contains('side-open') ? currentPane : null;
       if (previous === active) return;
+      if (previous === 'sessions') app.sessionsPanel?.release();
       if (previous === 'workspace') panels.releaseFiles();
       if (previous === 'mind') $('#mind-list').replaceChildren();
       if (previous === 'skills') skillsPanel.releaseLists();

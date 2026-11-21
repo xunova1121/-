@@ -164,3 +164,8 @@
 :root body.compact.companion-edition.wy-paused .wy-mascot {
   animation-play-state: paused !important;
 }
+/* 抽屉关闭后仍在屏外，设置覆盖首页时首页也仍然挂载。只在可见处画角色。 */
+:root body.compact.companion-edition:not(.drawer-open) .drawer .wy-mascot,
+:root body.compact.companion-edition:is(.side-open, .drawer-open) :is(.main .home-pet, .topbar .brand-mark) .wy-mascot {
+  animation: none !important;
+}

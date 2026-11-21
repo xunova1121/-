@@ -21,8 +21,10 @@ export function parseVersion(v) {
   const m = String(v ?? '').trim().replace(/^v/, '').match(/^(\d+)\.(\d+)\.(\d+)$/);
   return m ? m.slice(1).map(Number) : null;
 }
+// 同证书内测包保留 -test 标识，自动更新仍只读取数字版本的正式安装包。
+function installedVersion(v) { return parseVersion(String(v ?? '').trim().replace(/-test$/, '')); }
 export function isNewer(latest, current) {
-  const a = parseVersion(latest), b = parseVersion(current);
+  const a = parseVersion(latest), b = installedVersion(current);
   if (!a || !b) return false;
   for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
   return false;
@@ -44,7 +46,7 @@ export const ymlUrl = (repo = REPO) => `${releases(repo)}/latest/download/latest
  */
 export function createAppUpdater({ getText, plugin, current, metered = () => false, storage = globalThis.localStorage }) {
   const listeners = new Set();
-  let state = { state: parseVersion(current) ? 'idle' : 'dev', current, mobile: true };
+  let state = { state: installedVersion(current) ? 'idle' : 'dev', current, mobile: true };
   let busy = null;
   const set = (patch) => { state = { ...state, ...patch }; for (const f of listeners) f(state); return state; };
   const read = () => { try { return storage?.getItem(KEY) || ''; } catch { return ''; } };

@@ -14,6 +14,36 @@ import static org.junit.Assert.*;
 
 @RunWith(AndroidJUnit4.class)
 public class RenderLayerTest {
+    @Test public void upgradeAfterOneReportedCrashKeepsLightweightUiWithSystemDrawing() {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        SharedPreferences prefs = context.getSharedPreferences("render-health", Context.MODE_PRIVATE);
+        String[] keys = {"safeDisplayManual", "safeDisplayLimited", "lastCrash", "softwareLayer",
+                "softwareRecoveryVersion", "lastRenderer", "hardwareCrashVersion", "softwareRescueAt"};
+        java.util.Map<String, ?> previous = prefs.getAll();
+        prefs.edit().putBoolean("safeDisplayManual", false).putBoolean("safeDisplayLimited", true)
+                .putLong("lastCrash", System.currentTimeMillis()).putBoolean("softwareLayer", false)
+                .putString("softwareRecoveryVersion", "114.0.5.302")
+                .putString("lastRenderer", "App=1.0.480，WebView=114.0.5.302，didCrash=true，lowMemory=false，连续=1，软件绘制=false，兼容显示开")
+                .remove("hardwareCrashVersion").remove("softwareRescueAt").commit();
+        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+            scenario.onActivity(activity -> {
+                assertTrue(MainActivity.safeDisplay(activity));
+                assertEquals(View.LAYER_TYPE_NONE, activity.getBridge().getWebView().getLayerType());
+                assertFalse(activity.usesSoftwareDrawing());
+            });
+        } finally {
+            SharedPreferences.Editor restore = prefs.edit();
+            for (String key : keys) {
+                Object value = previous.get(key);
+                if (value instanceof Boolean b) restore.putBoolean(key, b);
+                else if (value instanceof Long n) restore.putLong(key, n);
+                else if (value instanceof String s) restore.putString(key, s);
+                else restore.remove(key);
+            }
+            restore.commit();
+        }
+    }
+
     @Test public void recoveryAppliesSoftwareLayerToActualChatViewAndRestoresDefault() {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SharedPreferences prefs = context.getSharedPreferences("render-health", Context.MODE_PRIVATE);

@@ -38,6 +38,13 @@
 :root body.compact.companion-edition .msg.agent > .who .wy-reply-greeting {
   display: none;
 }
+/* 消息入场后释放动画。旧回复只保留当时的头像，正在输出的那条继续动。 */
+:root body.compact.companion-edition :is(.msg, .welcome) {
+  animation-fill-mode: backwards;
+}
+:root body.compact.companion-edition .msg.agent:not(.streaming) > .who .who-mood {
+  animation: none;
+}
 :root body.compact.companion-edition .msg.agent .body {
   font-size: 0.875rem;
   line-height: 1.65;

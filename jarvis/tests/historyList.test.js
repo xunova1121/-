@@ -2,12 +2,19 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadHistory, HISTORY_REFRESH_MS, STALE_HINT, LOGIN_HINT, EMPTY_HINT, refreshInterval } from '../src/ui/historyList.js';
+import { loadHistory, HISTORY_REFRESH_MS, STALE_HINT, LOGIN_HINT, EMPTY_HINT, refreshInterval, sessionListRow } from '../src/ui/historyList.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const timeout = () => Promise.reject(Object.assign(new Error('连服务器超时（5 秒没有回应）'), { kind: 'timeout' }));
 
 describe('对话列表读不到时不清空', () => {
+  it('列表副本只保留显示所需的元数据，兼容本机会话、云端计数和旧角色名', () => {
+    const local = sessionListRow({ id: 'a', messages: [{ role: 'agent', ts: 42, content: '原回复' }, { role: 'user', ts: 45 }] });
+    expect(local).toMatchObject({ id: 'a', count: 2, lastReplyAt: 42 });
+    expect(local).not.toHaveProperty('messages');
+    const server = { id: 'b', messages: [], count: 90, lastReplyAt: 99, taskStatus: 'queued', agentId: 'news' };
+    expect(sessionListRow(server)).toMatchObject({ id: 'b', count: 90, lastReplyAt: 99, taskStatus: 'queued', agentId: 'news' });
+  });
   it('读到了：用新列表', async () => {
     expect(await loadHistory({ list: async () => [{ id: 'a' }], shown: () => [{ id: 'old' }] })).toEqual({ rows: [{ id: 'a' }], stale: false, hint: '' });
   });

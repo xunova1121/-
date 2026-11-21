@@ -15,6 +15,15 @@ export const STALE_HINT = '暂时连不上服务器，显示的是上次的对�
 export const LOGIN_HINT = '登录已失效，请到设置重新登录。';
 export const EMPTY_HINT = '暂时读不到对话列表（网络不好？），稍后会自动重试';
 
+/** 列表只用标题、条数和活动时间；离开面板后无需留下所有历史正文和附件。 */
+export function sessionListRow(s) {
+  return {
+    id: s.id, title: s.title, pinned: s.pinned, createdAt: s.createdAt, updatedAt: s.updatedAt,
+    count: s.count ?? s.messages?.length ?? 0, snippet: s.snippet, agentId: s.agentId,
+    taskId: s.taskId, taskStatus: s.taskStatus,
+    lastReplyAt: s.lastReplyAt ?? s.messages?.findLast(m => m.role === 'assistant' || m.role === 'agent')?.ts
+  };
+}
 /**
  * @param {{ list: () => Promise<any[]>, cached?: () => any[] | null, shown?: () => any[] | null }} o
  * @returns {Promise<{ rows: any[] | null, stale: boolean, hint: string }>}

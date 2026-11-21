@@ -2,6 +2,7 @@
  * 手机左侧抽屉（取代底部菜单栏）：标题 → 开启新对话 → 功能宫格（原底部菜单） → 历史对话（按今天 / 昨天 / 更早分组）。
  * 点左上角菜单按钮或从屏幕左边缘向右滑打开；点遮罩、向左滑或选了某一项后关闭。
  */
+import { sessionListRow } from './historyList.js';
 // [面板, 名字, 图标色相]：每个功能一种颜色，一眼能分开
 const FEATURES = [
   ['workspace', '工作区', 210], ['knowledge', '知识库', 165], ['mind', '记忆进化', 280], ['skills', '技能', 38],
@@ -118,25 +119,36 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, cached
 
   let expanded = false;
   let lastList = [];
+  let scope = source();
   let loading = 0;
   let refreshTimer;
   let refreshing = false;
   /** 先用手机上留的那份马上画出来，再从服务器取最新的重画（服务器慢时不用干等） */
   async function refresh() {
+    if (drawer.getAttribute('aria-hidden') === 'true') return;
+    const origin = source();
+    if (scope !== origin) {
+      scope = origin;
+      lastList = [];
+      history.replaceChildren();
+      refreshing = false;
+    }
     if (refreshing) return;
     refreshing = true;
-    const origin = source();
     const scrollTop = history.parentElement.scrollTop;
-    const cached = cachedSessions();
-    if (cached?.length) render(cached);
-    else if (!lastList.length) history.replaceChildren(el('p', { className: 'drawer-empty', textContent: '正在读取对话…' }));
+    if (!history.childElementCount) {
+      const cached = cachedSessions();
+      if (cached?.length) render(cached.map(sessionListRow));
+      else if (lastList.length) render(lastList);
+      else history.replaceChildren(el('p', { className: 'drawer-empty', textContent: '正在读取对话…' }));
+    }
     const mine = ++loading;
     const list = await listSessions().catch(() => null);
-    refreshing = false;
-    if (origin !== source()) { if (document.body.classList.contains('drawer-open')) refresh(); return; }
     if (mine !== loading) return; // 又刷新了一次：以后来的为准
-    if (list) render(list);
-    else if (!cached?.length && !lastList.length) history.replaceChildren(el('p', { className: 'drawer-empty', textContent: '读不到对话列表（网络不好？），稍后再打开菜单试试' }));
+    refreshing = false;
+    if (origin !== source()) { refresh(); return; }
+    if (list) render(list.map(sessionListRow));
+    else if (!lastList.length) history.replaceChildren(el('p', { className: 'drawer-empty', textContent: '读不到对话列表（网络不好？），稍后再打开菜单试试' }));
     history.parentElement.scrollTop = scrollTop;
     onRendered();
   }
@@ -228,9 +240,9 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, cached
     expanded = false;
     search.value = '';
     renderAgentPicks();
-    refresh();
     document.body.classList.add('drawer-open');
     drawer.setAttribute('aria-hidden', 'false');
+    refresh();
     scrim.hidden = false;
     clearInterval(refreshTimer);
     // 只在菜单可见时刷新小列表；不轮询正文、不启动任务、不后台常驻。
@@ -239,12 +251,15 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, cached
     }, 5000);
   }
   function close() {
+    loading++;
+    refreshing = false;
     clearInterval(refreshTimer);
     clearTimeout(searchTimer);
     searchSeq++;
     document.body.classList.remove('drawer-open');
     drawer.setAttribute('aria-hidden', 'true');
     scrim.hidden = true;
+    history.replaceChildren();
   }
   scrim.addEventListener('click', close);
   drawer.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });

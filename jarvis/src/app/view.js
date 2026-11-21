@@ -175,8 +175,11 @@ export function createView(app) {
     $('#hud-time').textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     $('#hud-date').textContent = `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())} · 星期${WEEK[d.getDay()]}`;
   }
-  tickClock();
-  setInterval(tickClock, 1000);
+  // 手机没有粒子舞台，隐藏的仪表时钟不需要每秒更新页面。
+  if (!COMPACT) {
+    tickClock();
+    setInterval(tickClock, 1000);
+  }
 
   const PANE_TITLE = {
     sessions: '对话',

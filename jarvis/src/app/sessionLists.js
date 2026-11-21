@@ -10,9 +10,16 @@ import { $, COMPACT, toast } from './env.js';
 export function createSessionLists(app) {
   /** “对话”面板（启动时创建） */
   function initSessionsPanel() {
+    const mobilePanelOpen = () => document.body.classList.contains('side-open') && !$('[data-pane="sessions"]').hidden;
     app.sessionsPanel = createSessionsPanel({
+      isVisible: () => !COMPACT || mobilePanelOpen(),
+      pageSize: COMPACT ? 30 : Infinity,
+      source: () => app.server,
       getCurrentId: () => app.session.id,
-      onOpen: (id) => app.openSession(id),
+      onOpen: (id) => {
+        if (COMPACT && mobilePanelOpen()) app.closeSide();
+        return app.openSession(id);
+      },
       onNew: () => app.newSession(),
       onDeleted: (id) => {
         if (id === app.session.id) app.switchTo(sessionsApi.create());
@@ -46,7 +53,7 @@ export function createSessionLists(app) {
       listSessions: () => sessionsApi.list(),
       cachedSessions: () => sessionsApi.cachedList(),
       currentId: () => app.session.id,
-      source: () => (app.server ? `server:${app.server.base}` : 'local'),
+      source: () => app.server,
       rowState: (row) => {
         const turn = [app.active, ...(app.backgroundTurns || [])].find((t) => t?.session.id === row.id && !t.streamDone && !t.ctrl.signal.aborted);
         return activity.state(row, {
