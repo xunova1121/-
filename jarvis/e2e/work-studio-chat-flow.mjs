@@ -39,14 +39,17 @@ export async function checkWorkshopChat({ page, base, requests, finishReply, sho
     const rect = await sheet.evaluate(async el => {
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const bounds = sel => el.querySelector(sel).getBoundingClientRect().toJSON();
-      const actor = el.querySelector('.ws-actor');
+      const scene = el.querySelector('.ws-scene');
+      const nest = scene.dataset.roomView === 'nest';
+      const actor = scene.querySelector(nest ? 'img.ws-nest-art' : '.ws-actor');
       const box = actor.getBoundingClientRect();
       const visibleAt = (x, y, selector) => Boolean(document.elementFromPoint(x, y)?.closest(selector));
       const prompt = bounds('#prompt');
       const transcript = bounds('#transcript');
       return {
         actor: box.toJSON(), scene: bounds('.ws-scene'), prompt, transcript, chat: bounds('.mobile-studio-chat'),
-        width: innerWidth, height: visualViewport.height, actorVisible: getComputedStyle(actor).visibility === 'visible',
+        width: innerWidth, height: visualViewport.height,
+        actorVisible: getComputedStyle(actor).visibility === 'visible' && (!nest || actor.naturalWidth > 0),
         stageAtActor: visibleAt(box.left + box.width / 2, box.top + box.height / 2, '.ws-scene'),
         historyVisible: visibleAt(transcript.left + transcript.width / 2, transcript.top + transcript.height / 2, '#transcript'),
         promptTouchable: visibleAt(prompt.left + prompt.width / 2, prompt.top + prompt.height / 2, '#inputbar')
@@ -76,10 +79,6 @@ export async function checkWorkshopChat({ page, base, requests, finishReply, sho
   await prompt.fill('保留草稿');
   await checkNestControls(page, sheet);
   await queue.locator('li').filter({ hasText: followUp }).waitFor();
-  await prompt.fill('');
-  await openTaskFloor(sheet);
-  await checkVisibleLayout();
-  await shot('mobile-room-chat.png');
   await prompt.focus();
   // Android WebView can shrink only the visual viewport. Exercise the real resize/focus handler.
   await page.evaluate(() => {
@@ -88,12 +87,22 @@ export async function checkWorkshopChat({ page, base, requests, finishReply, sho
   });
   await page.waitForFunction(() => document.body.classList.contains('wy-keyboard-open'));
   await checkVisibleLayout();
+  await checkNestControls(page, sheet);
+  assert.equal(await prompt.inputValue(), '保留草稿');
+  await queue.locator('li').filter({ hasText: followUp }).waitFor();
+  await openTaskFloor(sheet);
+  await prompt.focus();
+  await checkVisibleLayout();
   await shot('mobile-room-chat-short.png', { x: 0, y: 0, width: 390, height: 480 });
   await page.evaluate(() => {
     delete visualViewport.height;
     visualViewport.dispatchEvent(new Event('resize'));
     document.activeElement.blur();
   });
+  await checkVisibleLayout();
+  await shot('mobile-room-chat.png');
+  await prompt.fill('');
+  await prompt.blur();
   await page.setViewportSize({ width: 844, height: 390 });
   await checkVisibleLayout(true);
   await shot('mobile-room-chat-landscape.png');

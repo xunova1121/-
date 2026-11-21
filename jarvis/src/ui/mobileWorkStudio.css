@@ -144,6 +144,20 @@
   .mobile-studio-sheet .ws-caption { min-height: 28px; padding-block: 0; }
   .mobile-studio-sheet .ws-detail, .mobile-studio-sheet .ws-timeline { display: none; }
   .mobile-studio-sheet .ws-room-menu { grid-template-columns: repeat(2,auto); }
+  /* 键盘和待发队列都在屏幕里时，给正在流式生成的回复留出阅读空间。 */
+  .wy-keyboard-open .mobile-studio-sheet .work-studio-view[data-workshop] .ws-scene[data-room-view="floor"] {
+    width: min(100%,43cqh);
+  }
+  .wy-keyboard-open .mobile-studio-sheet .work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] {
+    width: min(100%,52cqh);
+  }
+  /* 短屏中把跳转按钮放在标题行，它仍可点击，同时不会盖住正文第一行。 */
+  .wy-keyboard-open #mobile-work-studio .mobile-studio-chat:has(.wy-jump-latest:not([hidden])) .mobile-studio-chat-head {
+    padding-inline-end: 8em;
+  }
+  .wy-keyboard-open #mobile-work-studio .wy-jump-latest {
+    position: absolute; top: 0; right: 8px; margin: 0; padding: 2px 9px; min-height: 24px;
+  }
 }
 @container mobile-workroom (min-width: 600px) and (min-aspect-ratio: 1.25) {
   .mobile-studio-sheet > .work-studio-view { grid-column: 1; grid-row: 1; height: 100%; border: none; border-right: 1px solid var(--room-line); }
