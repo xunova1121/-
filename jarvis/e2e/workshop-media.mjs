@@ -116,12 +116,16 @@ async function checkReadingSpace(monitor, minimumLines) {
 }
 
 function modelResponse(request, calls) {
-  const lastIndex = request.messages.findLastIndex(row => row.role === 'user');
-  const question = request.messages[lastIndex]?.content;
+  const marker = '\n\n〔工作台新闻〕\n';
+  const lastIndex = request.messages.findLastIndex(row => row.role === 'user' && row.content?.includes(marker));
+  assert(lastIndex >= 0, '实际模型须收到带新闻引用的用户请求');
+  const question = request.messages[lastIndex].content;
   calls.push(question);
-  const wantsFile = /Word|docx/i.test(question);
+  const [instruction, reference] = question.split(marker, 2);
+  const wantsFile = instruction.includes('核实后生成一份可下载的 Word 简报（.docx）');
   if (wantsFile && !request.messages.slice(lastIndex + 1).some(m => m.role === 'tool')) {
-    const item = items.find(row => question.includes(row.url));
+    const url = /^原文：(https?:\/\/\S+)$/mu.exec(reference)?.[1];
+    const item = items.find(row => row.url === url);
     assert(item, '实际模型须收到简报原文链接');
     const args = { format: 'docx', path: briefFile, content: `# 工作台新闻简报\n\n## 新闻摘要\n\n${item.title}。\n\n## 来源\n\n${item.source} ${item.url}`, requirements: '根据选中的新闻整理成一份 Word 简报' };
     return { delta: { tool_calls: [{ index: 0, type: 'function', id: 'workshop-news-doc', function: { name: 'create_document', arguments: JSON.stringify(args) } }] }, finish_reason: 'tool_calls' };
@@ -144,6 +148,19 @@ async function check(mobile) {
   await context.route('https://**/*', route => {
     externals.push(route.request().url());
     return route.abort();
+  });
+  // 桌面搜索通过同源网关发出。使用带 keyword 参数的实际 RSS 格式，
+  // 确认搜索证据里的英文子串不会把单纯的新闻追问变成文档请求。
+  if (!mobile) await context.route('**/api/fetch?*', route => {
+    const target = new URL(new URL(route.request().url()).searchParams.get('url') || '/', base);
+    const query = target.searchParams.get('q') || target.searchParams.get('wd') || '';
+    if (!query.includes(items[1].title)) return route.fallback();
+    if (target.pathname === '/search' && /^(?:cn|www)\.bing\.com$/.test(target.hostname) && target.searchParams.get('format') === 'rss') {
+      const rows = ['报名', '时间', '地点', '交通'].map((topic, i) => `<item><title>${items[1].title}：${topic}</title><link>https://news.cctv.com/science/${i}?keyword=lecture</link><description>社区科学讲堂活动信息和报名说明。</description></item>`);
+      return route.fulfill({ contentType: 'application/rss+xml', body: `<rss version="2.0"><channel>${rows.join('')}</channel></rss>` });
+    }
+    if (target.hostname === 'www.baidu.com' && target.pathname === '/s') return route.fulfill({ contentType: 'text/html', body: '<html></html>' });
+    return route.fallback();
   });
   await context.route('**/api/workshop/news', route => {
     feedCount++;
@@ -191,6 +208,7 @@ async function check(mobile) {
   try {
     await page.goto(base);
     await page.waitForFunction(() => window.__jarvis?.send);
+    if (!mobile) await page.waitForFunction(() => window.__jarvis.gateway?.origin === location.origin);
     const room = await openRoom(page, mobile);
     const device = type => room.locator(`[data-media-device="${type}"]`);
     const panel = type => room.locator(`.ws-media-panel[data-device="${type}"]`);
@@ -288,6 +306,7 @@ async function check(mobile) {
     await Promise.race([firstQuestion.promise, page.waitForFunction(() => document.querySelector('.msg.agent .body')?.textContent.includes('出错了'))]);
     assert(calls.some(content => content.includes(items[1].title) && content.includes(items[1].url)));
     assert(!calls.some(content => content.includes(items[0].url)));
+    if (!mobile) assert(calls[0].includes('?keyword=lecture'), '桌面首轮应把搜索网关的固定资料交给模型');
     // 真实回答尚在进行时，打开电视仍可见当下工作的精灵。
     await button(monitor, '返回房间').click();
     await device('tv').click();
@@ -311,7 +330,9 @@ async function check(mobile) {
     await button(monitor, '下一条').click();
     assert.equal(await link(monitor, '阅读原文').getAttribute('href'), items[1].url);
     firstAnswer.resolve();
-    await page.locator('#transcript .msg.agent').filter({ hasText: '收到，开始讨论你选择的报道。' }).waitFor();
+    const discussion = page.locator('#transcript .msg.agent').first();
+    await discussion.filter({ hasText: '收到，开始讨论你选择的报道。' }).waitFor();
+    assert(!(await discussion.innerText()).includes(briefFile), '普通新闻追问不应生成 Word');
     const actualWord = await readBrief(page);
     assert(actualWord.includes(items[0].title) && !actualWord.includes(items[1].title), '切换新闻不改写队列中那份简报的原文');
     await page.waitForFunction(() => !document.body.classList.contains('generating'));
