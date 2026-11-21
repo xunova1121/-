@@ -221,6 +221,24 @@ describe('边收边显示的路不通时自动退回', () => {
   const sse = (evs) => new Response(evs.map((e) => `data: ${JSON.stringify(e)}\n\n`).join(''), { status: 200 });
   const hang = (signal) => new Response(new ReadableStream({ start(c) { signal?.addEventListener('abort', () => { try { c.error(new Error('aborted')); } catch { /* 已关 */ } }); } }), { status: 200 });
 
+  it('合并分片后的游标能跨空闲心跳继续，批次结束标记分段接收也不算断线', async () => {
+    const text = { seq: 1, type: 'text', delta: '你好' };
+    const done = { seq: 2, type: 'task_state', status: 'done' };
+    const payloads = [[frame(text), ': bat', 'ch-end\n\n'], [': batch-end\n\n'], [frame(text), frame(done)]];
+    const cursors = [], seen = [];
+    const client = { streaming: false, getTask: async () => ({}), events: async (_, after) => {
+      cursors.push(after);
+      const parts = payloads.shift();
+      return new Response(new ReadableStream({ start(controller) {
+        for (const part of parts) controller.enqueue(new TextEncoder().encode(part));
+        controller.close();
+      } }));
+    } };
+    await followTask(client, 't1', { onEvent: e => seen.push(e), maxConsecutiveFailures: 1 });
+    expect(cursors).toEqual([0, 1, 1]);
+    expect(seen).toEqual([text, done]);
+  });
+
   it('边收边显示几秒收不到任何东西：改用一次给全的方式拿到回答，不会一直转圈', async () => {
     const calls = [];
     let streaming = true;

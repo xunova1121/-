@@ -604,14 +604,18 @@ async function reinforce(list) {
 
 /** 为当前问题取出：核心记忆、相关记忆、相关的过往对话、教训、技能 */
 export async function contextFor(query, { vector = true } = {}) {
-  // 向量和读库同时进行；闲聊（你好、在吗）不按意思检索，只用关键词，不等向量服务
-  const [ms, ls, ss, eps, core, vec] = await Promise.all([memories.all(), lessons.all(), skills.all(), episodes.all(), getCore(), vector ? embedOne(query) : null]);
+  const [ms, ls, ss, eps, core] = await Promise.all([memories.all(), lessons.all(), skills.all(), episodes.all(), getCore()]);
   // 像注入指令的条目不交给模型（原文保留在库里，面板上标“可疑，未使用”）
   const active = ms.map(upgrade).filter(current).filter(m => m.category !== 'doc_style').filter(safe((m) => m.content));
   const usableLessons = ls.filter(safe(l => `${l.content}\n${l.context ?? ''}`));
   const selectedCommunication = communicationRecords([...active, ...usableLessons], query);
   const selectedStyles = selectedCommunication.filter(item => active.includes(item));
   const cur = active.filter(m => !recordScope(m) || selectedStyles.includes(m));
+  const usableEpisodes = eps.filter(safe(e => e.summary));
+  const model = memoryState().embedder?.model;
+  const hasVector = item => item.embedding?.length && item.embModel === model;
+  // 空库、旧模型向量和仅关键词的闲聊都无需在回复前请求向量服务。
+  const vec = vector && model && (cur.some(hasVector) || usableEpisodes.some(hasVector)) ? await embedOne(query) : null;
   const relevant = score(cur, query, (m) => m.content, { k: 6, vec });
   // 基本情况（年龄、称呼、住址、家人、工作……）：每轮都带上，不和偏好抢名额，也不靠和问题像不像
   const basics = basicFacts(cur);
@@ -626,7 +630,7 @@ export async function contextFor(query, { vector = true } = {}) {
     core: cleanCore(core),
     basics,
     memories: [...basics, ...mem], // 含基本情况（旧调用方照旧拿得到）；拼提示时基本情况单独一节，这里的不重复列
-    episodes: score(eps.filter(safe((e) => e.summary)), query, (e) => `${e.summary} ${(e.topics || []).join(' ')}`, { k: 2, vec, weights: false }).filter((e) => e.relevance >= 0.2),
+    episodes: score(usableEpisodes, query, (e) => `${e.summary} ${(e.topics || []).join(' ')}`, { k: 2, vec, weights: false }).filter((e) => e.relevance >= 0.2),
     lessons: [...new Map([...scopedLessons, ...relatedLessons].map(l => [l.id, l])).values()].slice(0,3),
     skills: score(ss.filter(safe(skillText)), query, (s) => `${s.name} ${s.description}`, { k: 3, weights: false })
   };

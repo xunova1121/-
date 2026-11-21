@@ -29,8 +29,11 @@ public class CrashLogPlugin extends Plugin {
     @PluginMethod public void setDisplayMode(PluginCall call) {
         boolean safe=call.getBoolean("safe",true);
         android.content.SharedPreferences.Editor edit=getContext().getSharedPreferences("render-health",android.content.Context.MODE_PRIVATE).edit().putBoolean("safeDisplay",safe);
-        if(!safe)edit.putLong("lastCrash",0).putInt("consecutive",0).putBoolean("softwareLayer",false);
-        edit.apply();call.resolve();
+        if(!safe)edit.putLong("lastCrash",0).putInt("consecutive",0).putBoolean("softwareLayer",false).remove("softwareRecoveryVersion");
+        edit.apply();
+        if (!safe && getActivity() instanceof MainActivity activity) {
+            activity.runOnUiThread(() -> { activity.restoreDefaultDrawing(); call.resolve(); });
+        } else call.resolve();
     }
     /** 网页每隔几秒报一次当前界面（只是界面名和规模），渲染进程崩溃时写进异常记录 */
     @PluginMethod public void note(PluginCall call){
@@ -43,7 +46,7 @@ public class CrashLogPlugin extends Plugin {
         result.put("app",CrashLog.appVersion(getContext()));result.put("sdk",android.os.Build.VERSION.SDK_INT);
         result.put("device",android.os.Build.MANUFACTURER+" "+android.os.Build.MODEL);
         result.put("safeDisplay",MainActivity.safeDisplay(getContext()));
-        result.put("softwareLayer",getContext().getSharedPreferences("render-health",android.content.Context.MODE_PRIVATE).getBoolean("softwareLayer",false));
+        result.put("softwareLayer",getActivity() instanceof MainActivity activity && activity.usesSoftwareDrawing());
         result.put("exitDetails",ExitReasons.since(getContext(),0));
         result.put("lastRenderer",getContext().getSharedPreferences("render-health",android.content.Context.MODE_PRIVATE).getString("lastRenderer",""));
         android.content.SharedPreferences share=getContext().getSharedPreferences("share-return",android.content.Context.MODE_PRIVATE);

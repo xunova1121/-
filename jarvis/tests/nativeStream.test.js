@@ -66,3 +66,40 @@ describe('手机原生网络：大模型回答边收边显示', () => {
     expect(calls).toEqual(['{"stream":true}', 'GET']);
   });
 });
+
+it('安装原生流插件的手机可直接订阅已选服务器，首段到达时尾段仍未提交', async () => {
+  const { wrapFetch } = await import('../src/mobile/nativeFetch.js');
+  let finish;
+  const calls = [];
+  const plugin = fakePlugin((id, emit) => {
+    emit('head', { id, status: 200 });
+    emit('data', { id, data: b64('首段') });
+    finish = () => emit('end', { id });
+  });
+  const g = { Capacitor: { isPluginAvailable: name => name === 'NativeStream' } };
+  const fetch = wrapFetch(async () => { calls.push('web'); return new Response(); }, nativeStreamFetcher(plugin), 'https://localhost', g);
+  g.__jarvisPreferNative('d.example.com');
+  const response = await fetch('https://d.example.com/events', { stream: true, headers: { Accept: 'text/event-stream' } });
+  const reader = response.body.getReader();
+  expect(new TextDecoder().decode((await reader.read()).value)).toBe('首段');
+  finish();
+  expect((await reader.read()).done).toBe(true);
+  expect(calls).toEqual([]);
+  expect(plugin.started).toHaveLength(1);
+});
+
+it('监听尚未就绪时取消不会启动网络，已结束的订阅不再响应旧信号', async () => {
+  const ctrl = new AbortController();
+  const pending = fakePlugin(() => {});
+  const request = nativeStreamFetcher(pending)('https://example.com/events', { signal: ctrl.signal });
+  ctrl.abort();
+  await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+  expect(pending.started).toEqual([]);
+
+  const finished = fakePlugin((id, emit) => { emit('head', { id, status: 200 }); emit('end', { id }); });
+  const next = new AbortController();
+  const res = await nativeStreamFetcher(finished)('https://example.com/events', { signal: next.signal });
+  await res.text();
+  next.abort();
+  expect(finished.cancelled).toEqual([]);
+});

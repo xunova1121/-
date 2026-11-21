@@ -1,14 +1,21 @@
 /** 诊断只含运行规模、版本与错误类型，不收集聊天正文、服务地址或密钥。 */
-export function renderSnapshot({ doc = document, perf = globalThis.performance } = {}) {
-  const messages=[...doc.querySelectorAll('#transcript .msg')];
+function screenSize(doc, messages) {
   return {
-    safeDisplay:doc.documentElement.classList.contains('safe-render'),
-    pane:doc.body.classList.contains('side-open') ? doc.querySelector('[data-pane]:not([hidden])')?.dataset.pane || 'panel' : 'chat',
-    messages:messages.length,
-    characters:messages.reduce((n,el)=>n+(el.querySelector('.body')?.textContent.length||0),0),
-    nodes:doc.getElementsByTagName('*').length,
-    jsHeapMB:perf?.memory ? Math.round(perf.memory.usedJSHeapSize/1048576) : null,
-    hidden:doc.hidden
+    safeDisplay: doc.documentElement.classList.contains('safe-render'),
+    pane: doc.body.classList.contains('side-open') ? doc.querySelector('[data-pane]:not([hidden])')?.dataset.pane || 'panel' : 'chat',
+    messages: messages.length,
+    nodes: doc.getElementsByTagName('*').length,
+    hidden: doc.hidden
+  };
+}
+export function renderSnapshot({ doc = document, perf = globalThis.performance } = {}) {
+  const messages = doc.querySelectorAll('#transcript .msg');
+  let characters = 0;
+  for (const message of messages) characters += message.querySelector('.body')?.textContent.length || 0;
+  return {
+    ...screenSize(doc, messages),
+    characters,
+    jsHeapMB: perf?.memory ? Math.round(perf.memory.usedJSHeapSize / 1048576) : null
   };
 }
 export function recordRenderError(event, storage=globalThis.localStorage) {
@@ -33,15 +40,16 @@ export async function copyRenderDiagnostics({ plugin=globalThis.__jarvisRenderHe
  * 崩溃后把上一次记下的这行附在异常记录里，用来判断是启动时、首页空闲、对话中还是面板里崩的。
  */
 export function describeScreen({ doc = document, startedAt = 0, now = Date.now() } = {}) {
-  const view = renderSnapshot({ doc, perf: null });
+  const view = screenSize(doc, doc.querySelectorAll('#transcript .msg'));
   const where = doc.getElementById?.('app-splash') ? '启动页' : view.pane !== 'chat' ? `面板（${view.pane}）` : view.messages ? '对话' : '首页';
   const sec = Math.max(0, Math.round((now - startedAt) / 1000));
   const opened = sec >= 60 ? `${Math.floor(sec / 60)} 分 ${sec % 60} 秒` : `${sec} 秒`;
-  const anims = typeof doc.getAnimations === 'function' ? doc.getAnimations().length : null;
+  const replying = view.safeDisplay && doc.body.classList.contains('generating');
+  const anims = !replying && !view.hidden && typeof doc.getAnimations === 'function' ? doc.getAnimations().length : null;
   // 最后一次操作（发消息、切换对话、语音、看图片……）：闪退后能对上是哪一步出的事
   const act = globalThis.__jarvisLastAction;
   const lastAct = act?.what ? `最后操作：${act.what}（${Math.max(0, Math.round((now - act.at) / 1000))} 秒前）` : '';
-  return [where, `已打开 ${opened}`, `消息 ${view.messages} 条`, anims === null ? '' : `动画 ${anims} 个`, `元素 ${view.nodes} 个`,
+  return [where, `已打开 ${opened}`, `消息 ${view.messages} 条`, replying ? '正在回复' : anims === null ? '' : `动画 ${anims} 个`, `元素 ${view.nodes} 个`,
     view.safeDisplay ? '兼容显示开' : '兼容显示关', view.hidden ? '在后台' : '', lastAct].filter(Boolean).join(' · ');
 }
 
@@ -63,7 +71,7 @@ export function startScreenTrail({ storage = globalThis.localStorage, doc = docu
     try { storage.setItem(SCREEN_KEY, screen); } catch { /* 存不了就不记 */ }
     try { note(screen); } catch { /* 旧安装包没有这个方法 */ }
   };
-  timer(tick, every);
+  timer(() => { if (!doc.hidden) tick(); }, every);
   doc.addEventListener?.('visibilitychange', tick);
   return prev;
 }

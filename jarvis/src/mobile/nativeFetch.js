@@ -1,7 +1,5 @@
 /**
- * 安卓 App 的网络：先用 WebView 自己的 fetch（能流式显示回答）；
- * 服务商不允许网页跨域调用时（fetch 直接报 TypeError），改用系统原生网络请求（一次性拿到完整回答）。
- * 失败过的域名之后直接走原生网络，不再先试一次。
+ * 安卓 App 按域名选择 WebView 或原生网络。支持 NativeStream 的设备可逐段接收服务器回复。
  */
 
 /** 系统返回的响应头里可能有状态行（键为空）或不合规的名字 / 值，构造 Response 时会直接报错：只留合规的 */
@@ -47,7 +45,17 @@ export function nativeFetcher(http) {
     const binary = Boolean(init.binary);
     // 带密钥的搜索明确禁止重定向时，也必须约束系统网络层；仅检查返回状态已经太晚。
     const req = http.request({ url, method: init.method || 'GET', headers, data, dataType, responseType: binary ? 'arraybuffer' : 'text', connectTimeout: init.connectTimeout || 20000, readTimeout: init.readTimeout || 180000, ...(init.redirect === 'error' && { disableRedirects: true }) });
-    const res = await (signal ? Promise.race([req, new Promise((_, rej) => signal.addEventListener('abort', () => rej(new DOMException('Aborted', 'AbortError')), { once: true }))]) : req);
+    let abort;
+    let res;
+    try {
+      res = signal ? await Promise.race([req, new Promise((_, reject) => {
+        abort = () => reject(new DOMException('Aborted', 'AbortError'));
+        if (signal.aborted) abort();
+        else signal.addEventListener('abort', abort, { once: true });
+      })]) : await req;
+    } finally {
+      if (abort) signal.removeEventListener('abort', abort);
+    }
     if (init.redirect === 'error' && res.status >= 300 && res.status < 400)
       throw Object.assign(new Error('此请求不允许重定向'), { code: 'REDIRECT_BLOCKED', kind: 'api' });
     // 原生插件：arraybuffer 时正文是 Base64；出错（4xx/5xx）或 JSON 时仍是文字 / 对象
@@ -71,12 +79,21 @@ export function wrapFetch(webFetch, native, selfOrigin, g = globalThis) {
   return async (input, init = {}) => {
     const url = new URL(typeof input === 'string' ? input : input.url, selfOrigin);
     if (url.origin === selfOrigin || !/^https?:$/.test(url.protocol)) return webFetch(input, init);
-    // 要边收边显示的（服务器推回答的事件流）：原生网络要等整个回答结束才一次给，所以先用 WebView；它连不上再退回原生
     // 付费提交失败后可能已被上游接收，选一条传输线路，不自动重发。
     if (init.noNetworkRetry) {
       return init.stream && !nativeHosts.has(url.host) ? webFetch(input, init) : native(url.href, init);
     }
     if (init.stream) {
+      const get = (init.method || input?.method || 'GET').toUpperCase() === 'GET';
+      // 已选原生网络的服务器可直接订阅事件。旧安装包仍优先使用能逐段返回的 WebView。
+      if (get && nativeHosts.has(url.host) && wantsStream(init) && g.Capacitor?.isPluginAvailable?.('NativeStream')) {
+        try {
+          return await native(url.href, init);
+        } catch (error) {
+          if (!(error instanceof TypeError) || init.signal?.aborted) throw error;
+          return webFetch(input, init);
+        }
+      }
       try {
         return await webFetch(input, init);
       } catch (e) {
@@ -128,25 +145,58 @@ export function nativeStreamFetcher(plugin) {
     const headers = Object.fromEntries(new Headers(init.headers || {}).entries());
     if (init.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     let controller;
-    let settled = false;
-    const stream = new ReadableStream({ start(c) { controller = c; }, cancel() { plugin.cancel({ id }).catch(() => {}); off(); } });
+    let finished = false;
+    let started = false;
+    let receivedHead = false;
     const subs = [];
-    const off = () => { for (const s of subs) Promise.resolve(s).then((h) => h?.remove?.()).catch(() => {}); };
+    const off = () => {
+      finished = true;
+      init.signal?.removeEventListener('abort', abort);
+      for (const sub of subs) Promise.resolve(sub).then((handle) => handle?.remove?.()).catch(() => {});
+    };
+    const cancel = () => { if (started) plugin.cancel({ id }).catch(() => {}); };
+    let abort;
+    const stream = new ReadableStream({
+      start(c) { controller = c; },
+      cancel() { if (!finished) { off(); cancel(); } }
+    });
     return new Promise((resolve, reject) => {
-      const fail = (err) => { if (!settled) { settled = true; reject(err); } try { controller.error(err); } catch { /* 已经关了 */ } off(); };
-      const on = (name, fn) => subs.push(plugin.addListener(name, (e) => { if (e?.id === id) fn(e); }));
-      on('head', (e) => {
-        settled = true;
-        resolve(new Response([204, 205, 304].includes(e.status) ? null : stream, { status: e.status || 200, headers: safeHeaders(e.headers) }));
-      });
-      on('data', (e) => { try { controller.enqueue(b64ToBytes(e.data || '')); } catch { /* 读的一方已经取消 */ } });
-      on('end', () => { try { controller.close(); } catch { /* 已经关了 */ } off(); });
-      on('error', (e) => fail(new TypeError(e.message || '网络请求失败')));
-      init.signal?.addEventListener('abort', () => { plugin.cancel({ id }).catch(() => {}); fail(new DOMException('Aborted', 'AbortError')); }, { once: true });
-      // 先把监听都挂好再发请求，免得最前面的事件漏掉
-      Promise.all(subs)
-        .then(() => plugin.start({ id, url, method: init.method || 'GET', headers, body: init.body }))
-        .catch((e) => fail(e));
+      const fail = (error) => {
+        if (finished) return;
+        off();
+        controller.error(error);
+        reject(error);
+      };
+      abort = () => { cancel(); fail(new DOMException('Aborted', 'AbortError')); };
+      const on = (name, fn) => subs.push(plugin.addListener(name, (event) => {
+        if (finished || event?.id !== id) return;
+        try { fn(event); } catch (error) { cancel(); fail(error); }
+      }));
+      try {
+        on('head', (e) => {
+          const response = new Response([204, 205, 304].includes(e.status) ? null : stream, {
+            status: e.status || 200, headers: safeHeaders(e.headers)
+          });
+          receivedHead = true;
+          resolve(response);
+        });
+        on('data', (e) => controller.enqueue(b64ToBytes(e.data || '')));
+        on('end', () => {
+          if (!receivedHead) return fail(new TypeError('连接在返回响应头之前已结束'));
+          off();
+          controller.close();
+        });
+        on('error', (e) => fail(new TypeError(e.message || '网络请求失败')));
+        init.signal?.addEventListener('abort', abort, { once: true });
+        // 安装监听期间取消的订阅绝不能在之后启动。
+        Promise.all(subs).then(() => {
+          if (finished) return;
+          started = true;
+          return plugin.start({ id, url, method: init.method || 'GET', headers, body: init.body });
+        }).catch(fail);
+      } catch (error) {
+        fail(error);
+      }
     });
   };
 }

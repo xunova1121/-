@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
+import { checkDenseReply, checkStreaming } from './transcript-streaming.mjs';
 const server = await createServer({
   configFile: false,
   server: { host: '127.0.0.1', port: 0 },
@@ -76,6 +77,8 @@ try {
     assert.ok(!result.text.includes('正在读取'));
   }
   console.log('通过：正常收尾不留下空卡片、红叉或虚增步骤，真实连接故障仍可查看。');
+  for (const progress of [true, false]) await checkStreaming(page, progress);
+  await checkDenseReply(page);
 } finally {
   await browser?.close();
   await server.close();

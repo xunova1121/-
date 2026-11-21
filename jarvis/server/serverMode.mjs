@@ -245,7 +245,7 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
     json(res, 200, security.login(req, body.password));
   }
 
-  function streamEvents(req, res, id, after) {
+  function streamEvents(req, res, id, after, batch) {
     const backlog = runner.events(id, after);
     if (!backlog) return json(res, 404, { error: '找不到这个任务（可能已经做完很久了，结果在对话记录里）' });
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store, no-transform', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' });
@@ -257,18 +257,29 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
     const finished = (ev) => ev?.type === 'task_state' && ['done', 'error', 'stopped'].includes(ev.status);
     if (finished(last)) return res.end();
     let sent = last?.seq ?? after;
+    // 某些代理和旧手机要在连接关闭后才交出响应体。只在客户端降级时，
+    // 空闲等事件，收到后合并 180ms 的分片再关闭；不让每个字触发一次请求。
+    let batchTimer;
+    const endBatch = () => { cleanup(); res.end(': batch-end\n\n'); };
+    const collectBatch = () => {
+      if (batch && !batchTimer) batchTimer = setTimeout(endBatch, 180);
+    };
     const unsubscribe = runner.subscribe(id, (ev) => {
       if (ev.seq <= sent) return;
       sent = ev.seq;
       send(ev);
       if (finished(ev)) { cleanup(); res.end(); }
+      else collectBatch();
     });
     if (!unsubscribe) return res.end();
     // 心跳：中间的 Nginx / 手机网络长时间没数据会断开连接
-    const beat = setInterval(() => res.write(': ping\n\n'), 20_000);
-    const unwatch = security.onRevoke(id => { if (security.authenticate(req)?.id === id) { cleanup(); res.end(); } });
-    const cleanup = () => { clearInterval(beat); unsubscribe(); unwatch(); };
-    req.on('close', cleanup);
+    const beat = batch ? setTimeout(endBatch, 8000) : setInterval(() => res.write(': ping\n\n'), 20_000);
+    const device = security.authenticate(req)?.id;
+    const unwatch = security.onRevoke(id => { if (device === id) { cleanup(); res.end(); } });
+    const cleanup = () => { clearTimeout(batchTimer); clearInterval(beat); unsubscribe(); unwatch(); res.off('close', cleanup); };
+    res.once('close', cleanup);
+    if (backlog.length) collectBatch();
+    else if (!batch) res.write(': connected\n\n'); // 按游标恢复时可能没有新事件，立即证明流可达。
   }
 
   const tenderRoutes = createTenderRoutes({ center: tenders, readJson, json });
@@ -499,7 +510,7 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
         json(res,200,await runner.start({sessionId:task.sessionId,text,requestId:requestId??null,targetTaskId:t[1], ...(principal.role === 'evaluation' && { evaluationId: task.evaluationId, evaluationAuthorization: { id: principal.id } })}));return true;
       }
       if (!t[2] && req.method === 'GET') { const info = runner.get(t[1]); info ? json(res, 200, info) : json(res, 404, { error: '找不到这个任务' }); return true; }
-      if (t[2] === '/events' && req.method === 'GET') { streamEvents(req, res, t[1], Number(url.searchParams.get('after') || req.headers['last-event-id'] || 0)); return true; }
+      if (t[2] === '/events' && req.method === 'GET') { streamEvents(req, res, t[1], Number(url.searchParams.get('after') || req.headers['last-event-id'] || 0), url.searchParams.get('batch') === '1'); return true; }
       if (t[2] === '/stop' && req.method === 'POST') { json(res, 200, { ok: runner.stop(t[1]) }); return true; }
     }
     if (pathname === '/api/sessions/import' && req.method === 'POST') {

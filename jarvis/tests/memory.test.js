@@ -68,6 +68,20 @@ describe('记忆写入：新增 / 合并 / 更新', () => {
 });
 
 describe('检索与打分', () => {
+  it('没有可匹配向量时直接准备上下文，只有同模型的记忆或历史摘要才请求查询向量', async () => {
+    let calls = 0;
+    memory.configureMemory({ embedder: { model: 'current', embed: async () => { calls++; return [[0, 1]]; } } });
+    await memory.contextFor('周末的计划');
+    await collection('memories').put({ id: 'old', content: '周末去爬山', embedding: [0, 1], embModel: 'previous' });
+    expect((await memory.contextFor('爬山')).memories.map(m => m.id)).toContain('old');
+    expect(calls).toBe(0);
+    await collection('episodes').put({ id: 'ep', summary: '讨论过出游', embedding: [0, 1], embModel: 'current' });
+    await memory.contextFor('周末的计划', { vector: false });
+    expect(calls).toBe(0);
+    expect((await memory.contextFor('登高')).episodes.map(e => e.id)).toContain('ep');
+    expect(calls).toBe(1);
+  });
+
   it('相关度为主，重要度与新近度加权；钉住的即使不相关也会带上', async () => {
     const at = Date.now();
     const items = [

@@ -15,12 +15,13 @@ import { initLocalModelsPanel } from '../ui/localModelsPanel.js';
 import { initMcpPanel } from '../ui/mcpPanel.js';
 import { initSkillsPanel } from '../ui/skillsPanel.js';
 import { noteAction } from '../mobile/renderDiagnostics.js';
-import { $, body, narrow, toast } from './env.js';
+import { $, body, COMPACT, narrow, toast } from './env.js';
 
 export const PANES = ['sessions', 'workspace', 'knowledge', 'mind', 'skills', 'models', 'system', 'settings'];
 
 export function createPanels(app) {
   let currentPane = null;
+  const paneVisible = (name) => !COMPACT || (currentPane === name && body.classList.contains('side-open'));
   function showPanel(name, { toggle = false } = {}) {
     noteAction(`打开面板：${name}`);
     if (toggle && name === currentPane && (narrow.matches ? body.classList.contains('side-open') : !body.classList.contains('side-closed'))) {
@@ -71,6 +72,7 @@ export function createPanels(app) {
   let routingPanel = null;
   const panels = initPanels({
     toast: (t) => toast(t),
+    paneVisible,
     settings: app.settings,
     getGateway: () => app.gateway,
     searchFetch: () => app.fetchViaGateway(),
@@ -153,6 +155,7 @@ export function createPanels(app) {
   });
   const skillsPanel = initSkillsPanel({
     toast: (t) => toast(t),
+    isVisible: () => paneVisible('skills'),
     onUse: (name) => {
       $('#prompt').value = `/${name} `;
       if (body.classList.contains('workbench')) body.classList.add('side-closed');
@@ -164,6 +167,20 @@ export function createPanels(app) {
       $('#hud-skills').textContent = `${list.filter((p) => p.enabled).length} 个启用`;
     }
   });
+  if (COMPACT) {
+    // 返回聊天的入口包括系统返回键、抽屉和技能快捷操作。只在实际离开面板时释放列表。
+    let previous = null;
+    const releaseClosedPane = () => {
+      const active = body.classList.contains('side-open') ? currentPane : null;
+      if (previous === active) return;
+      if (previous === 'workspace') panels.releaseFiles();
+      if (previous === 'mind') $('#mind-list').replaceChildren();
+      if (previous === 'skills') skillsPanel.releaseLists();
+      previous = active;
+    };
+    addEventListener('jarvis:panel', releaseClosedPane);
+    new MutationObserver(releaseClosedPane).observe(body, { attributes: true, attributeFilter: ['class'] });
+  }
   /** 手机：关掉整页面板，回到对话 */
   function closeSide() {
     body.classList.remove('side-open');

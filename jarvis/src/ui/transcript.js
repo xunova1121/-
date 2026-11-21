@@ -12,16 +12,54 @@ import { createSongCard } from './songCard.js';
 import { foldExtraFiles } from './finalFiles.js';
 import './mobileImprovements.css';
 import { parseMarkdown, inline, toPlainText } from '../core/markdown.js';
-import { stripEmotionTags } from '../../shared/emotionTag.js';
+import { EMOTIONS, stripEmotionTags } from '../../shared/emotionTag.js';
 import { createMascot, setMascotState, poseForEmotion, poseForTask } from './mascot.js';
 
 const LABEL = { user: '你', agent: '未央' };
 
 const nextFrame = (f) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(f) : setTimeout(f, 16));
 const cancelFrame = (id) => (typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame(id) : clearTimeout(id));
+const emotionWord = new RegExp(['emotion', ...EMOTIONS].join('|'), 'i');
+
+// 回执有时在同一帧里成批到达。日志只追加新行，摘要只显示这一帧的最后一条。
+function toolLog(pre, updateSummary, pendingLogs) {
+  const node = document.createTextNode('');
+  pre.append(node);
+  let lines = [], frame = 0, result = null;
+  function flush() {
+    if (frame) cancelFrame(frame);
+    frame = 0;
+    pendingLogs.delete(flush);
+    if (!lines.length) return;
+    node.appendData((node.length ? '\n· ' : '· ') + lines.join('\n· '));
+    updateSummary(lines[lines.length - 1]);
+    lines = [];
+  }
+  return {
+    progress(text) {
+      if (result) return;
+      lines.push(text);
+      if (!frame) {
+        pendingLogs.add(flush);
+        frame = nextFrame(flush);
+      }
+    },
+    finish(output) {
+      flush();
+      const text = (node.length ? '\n\n' : '') + (output ?? '');
+      if (result) result.data = text;
+      else { result = document.createTextNode(text); pre.append(result); }
+    },
+    discard() {
+      lines = [];
+      flush();
+    }
+  };
+}
 
 export function renderBlocks(container, text) {
   text = stripEmotionTags(text); // 旧对话里可能存着写错的情绪标签
+  const safe = document.documentElement?.classList.contains('safe-render');
   container.replaceChildren(...parseMarkdown(text).map((b) => {
     if (b.type === 'code') {
       // 代码块：语言标签 + 复制按钮
@@ -57,34 +95,70 @@ export function renderBlocks(container, text) {
       return h;
     }
     if (b.type === 'table') {
-      const wrap = document.createElement('div');
-      wrap.className = 'table-wrap';
-      const table = document.createElement('table');
-      b.rows.forEach((r, i) => {
-        const tr = document.createElement('tr');
-        for (const c of r) {
-          const cell = document.createElement(i === 0 ? 'th' : 'td');
-          cell.append(...inline(c).map(span));
-          tr.append(cell);
-        }
-        table.append(tr);
+      const columns = safe ? b.rows.reduce((max, row) => Math.max(max, row.length), 1) : 1;
+      return pagedBlock(Math.max(0, b.rows.length - 1), safe ? Math.max(1, Math.floor(240 / columns)) : Infinity, (start, end) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'table-wrap';
+        const table = document.createElement('table');
+        const rows = b.rows.slice(start + 1, end + 1);
+        if (b.rows.length) rows.unshift(b.rows[0]);
+        rows.forEach((r, i) => {
+          const tr = document.createElement('tr');
+          for (const c of r) {
+            const cell = document.createElement(i === 0 ? 'th' : 'td');
+            cell.append(...inline(c).map(span));
+            tr.append(cell);
+          }
+          table.append(tr);
+        });
+        wrap.append(table);
+        return wrap;
       });
-      wrap.append(table);
-      return wrap;
     }
     if (b.type === 'list') {
-      const list = document.createElement(b.ordered ? 'ol' : 'ul');
-      for (const spans of b.items) {
-        const li = document.createElement('li');
-        li.append(...spans.map(span));
-        list.append(li);
-      }
-      return list;
+      return pagedBlock(b.items.length, safe ? 80 : Infinity, (start, end) => {
+        const list = document.createElement(b.ordered ? 'ol' : 'ul');
+        if (b.ordered && start) list.start = start + 1;
+        for (const spans of b.items.slice(start, end)) {
+          const li = document.createElement('li');
+          li.append(...spans.map(span));
+          list.append(li);
+        }
+        return list;
+      });
     }
     const p = document.createElement('p');
     p.append(...b.spans.map(span));
     return p;
   }));
+}
+
+// 兼容模式的大表/长清单只挂载当前页。链接与表头随页渲染，复制、分享仍读整条原文。
+function pagedBlock(count, size, render) {
+  if (count <= size * 2) return render(0, count);
+  const wrap = document.createElement('div');
+  const nav = document.createElement('div');
+  nav.className = 'msg-pages';
+  const prev = Object.assign(document.createElement('button'), { type: 'button', className: 'msg-unfold', textContent: '上一页' });
+  const next = Object.assign(document.createElement('button'), { type: 'button', className: 'msg-unfold', textContent: '下一页' });
+  const range = document.createElement('span');
+  range.setAttribute('aria-live', 'polite');
+  nav.append(prev, range, next);
+  let page = 0;
+  function show(index) {
+    page = index;
+    const start = page * size, end = Math.min(count, start + size);
+    const rows = render(start, end);
+    if (wrap.firstChild) wrap.firstChild.replaceWith(rows);
+    else wrap.append(rows, nav);
+    range.textContent = `${start + 1}–${end} / ${count}`;
+    prev.disabled = start === 0;
+    next.disabled = end === count;
+  }
+  prev.onclick = () => show(page - 1);
+  next.onclick = () => show(page + 1);
+  show(0);
+  return wrap;
 }
 
 function span(s) {
@@ -381,15 +455,31 @@ export class Transcript {
     let curRaw = text;
     let frame = 0;
     let tail = null; // 正在输出的那段文字的文本节点
+    let pendingText = '';
+    let formatted = false;
+    let mightHaveTags = emotionWord.test(text), tagSuffix = text.slice(-6);
+    const pendingLogs = new Set();
     const paint = () => {
       frame = 0;
-      const s = stripEmotionTags(curRaw);
       if (role === 'agent') sizeReply(raw);
-      if (tail && tail.parentNode === cur && s.startsWith(tail.data)) tail.appendData(s.slice(tail.data.length));
-      else { cur.textContent = s; tail = cur.firstChild; }
+      if (!mightHaveTags && tail?.parentNode === cur) tail.appendData(pendingText);
+      else {
+        const visible = mightHaveTags ? stripEmotionTags(curRaw) : curRaw;
+        if (tail?.parentNode === cur && visible.startsWith(tail.data)) tail.appendData(visible.slice(tail.length));
+        else { cur.textContent = visible; tail = cur.firstChild; }
+      }
+      pendingText = '';
       self.#scroll();
     };
-    const stopPaint = () => { if (frame) { cancelFrame(frame); paint(); } tail = null; }; // 还没刷出来的字先刷上，再交给排版
+    const formatCurrent = (preview) => {
+      if (frame) { cancelFrame(frame); frame = 0; }
+      if (role === 'agent' && curRaw) {
+        if (preview || !formatted) renderBlocks(cur, preview || curRaw);
+        formatted = true;
+        pendingText = '';
+        tail = null;
+      } else if (pendingText) paint();
+    };
     let files = null; // 生成的文件按钮
     let sports = null;
     let markets = null;
@@ -467,25 +557,22 @@ export class Transcript {
       p.list.scrollTop = p.list.scrollHeight; // 执行中卡片高度固定，步骤在里面滚动，停在最新一步
       const t1 = Date.now();
       self.#scroll();
-      let log = '';
+      const log = toolLog(pre, text => { tx.querySelector('small').textContent = text.slice(0, 40); }, pendingLogs);
       return {
         omit() {
           if (!li.parentNode) return;
+          log.discard();
           li.remove();
           p.n--;
           p.count.textContent = `第 ${p.n} 步`;
           if (!p.n) { clearInterval(p.timer); p.box.remove(); prog = null; }
         },
-        progress(text) {
-          log += `${log ? '\n' : ''}· ${text}`;
-          pre.textContent = log;
-          tx.querySelector('small').textContent = text.slice(0, 40);
-        },
+        progress: log.progress,
         done(ok, output, ms) {
+          log.finish(output);
           li.dataset.st = ok ? 'ok' : 'fail';
           if (!ok) tx.querySelector('small').textContent = String(output || '执行失败，点开查看详情').split('\n')[0].slice(0, 100);
           tm.textContent = fmt(ms ?? Date.now() - t1);
-          pre.textContent = log ? `${log}\n\n${output}` : output;
           p.done++;
           p.list.scrollTop = p.list.scrollHeight;
           self.#scroll();
@@ -535,17 +622,25 @@ export class Transcript {
       },
       activity(state, detail = '') { present(poseForTask(state, detail), state==='error' ? '这次没有完成，我们再试一次。' : ''); },
       append(d) {
+        if (!d) return;
+        const first = !raw;
         if (el.dataset.status !== '正在写回答…') setStatus('正在写回答…');
+        if (!mightHaveTags) {
+          const probe = tagSuffix + d;
+          mightHaveTags = emotionWord.test(probe);
+          tagSuffix = probe.slice(-6); // “emotion”可能被分在两个流事件中
+        }
         raw += d;
         curRaw += d;
-        // 每一帧最多刷新一次，只把新增的字接在后面：逐字重排整段回答在手机上很慢，回答越长越卡
-        frame ||= nextFrame(paint);
+        pendingText += d;
+        formatted = false;
+        if (first && !self.batching) paint();
+        else frame ||= nextFrame(paint);
       },
       /** 工具执行卡片：执行中显示动画，结束后可展开查看输出 */
       toolCard(name, args) {
         present(poseForTask('processing',toolLabel(name)));
-        stopPaint();
-        if (role === 'agent' && curRaw) renderBlocks(cur, curRaw);
+        formatCurrent();
         if (self.progress) return progressStep(name, args);
         const card = document.createElement('details');
         card.className = 'tool-card';
@@ -565,6 +660,8 @@ export class Transcript {
           el.append(next);
           cur = next;
           curRaw = '';
+          mightHaveTags = false;
+          tagSuffix = '';
         }
         const g = group;
         g.list.append(card);
@@ -573,29 +670,28 @@ export class Transcript {
         g.last.textContent = `${toolLabel(name)} ${summarizeArgs(name, args)}`;
         g.list.scrollTop = g.list.scrollHeight;
         self.#scroll();
-        let log = '';
+        const log = toolLog(pre, text => {
+          card.classList.add('live');
+          tm.textContent = text.slice(0, 24);
+          self.#scroll();
+        }, pendingLogs);
         return {
           omit() {
             if (!card.parentNode) return;
+            log.discard();
             card.remove();
             g.n--;
             g.count.textContent = `第 ${g.n} 步`;
             g.last.textContent = '';
             if (!g.n) { g.box.remove(); if (group === g) group = null; }
           },
-          progress(text) {
-            card.classList.add('live');
-            log += `${log ? '\n' : ''}· ${text}`;
-            pre.textContent = log;
-            tm.textContent = text.slice(0, 24);
-            self.#scroll();
-          },
+          progress: log.progress,
           done(ok, output, ms) {
+            log.finish(output);
             card.classList.remove('live');
             card.classList.add(ok ? 'ok' : 'fail');
             if (!ok) ta.textContent = String(output || '执行失败，点开查看详情').split('\n')[0].slice(0, 100);
             tm.textContent = ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
-            pre.textContent = log ? `${log}\n\n${output}` : output;
             self.#scroll();
           }
         };
@@ -605,8 +701,7 @@ export class Transcript {
        * @param {Array<{ roleName: string, title: string }>} steps
        */
       teamCard(steps) {
-        stopPaint();
-        if (role === 'agent' && curRaw) renderBlocks(cur, curRaw);
+        formatCurrent();
         const card = document.createElement('div');
         card.className = 'team-card';
         const head = document.createElement('div');
@@ -781,17 +876,17 @@ export class Transcript {
           sizeReply(raw);
         }
         el.classList.remove('streaming');
+        for (const flush of pendingLogs) flush();
         finishProgress();
         closeGroups();
-        stopPaint();
         const preview = role === 'agent' && curRaw && fold ? foldPreview(stripEmotionTags(curRaw)) : null;
+        formatCurrent(preview);
         if (preview) {
-          renderBlocks(cur, preview);
           const full = curRaw, target = cur;
           const more = Object.assign(document.createElement('button'), { type: 'button', className: 'msg-unfold', textContent: `展开全文（共 ${stripEmotionTags(full).length} 字）` });
           more.addEventListener('click', () => { renderBlocks(target, full); more.remove(); });
           cur.after(more);
-        } else if (role === 'agent' && curRaw) renderBlocks(cur, curRaw);
+        }
         for (const b of el.querySelectorAll('.body')) if (!b.textContent.trim() && !b.children.length) b.remove();
         if (files) { foldExtraFiles(files); el.append(files); } // 文件按钮放在回答最后；只摆最终版，其余收进“其他文件”
         const m = document.createElement('div');

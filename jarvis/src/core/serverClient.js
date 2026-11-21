@@ -203,13 +203,13 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     }
   }
   let warmedAt = -Infinity, warming = null;
-  // 回答边收边显示（WebView 收事件流）：有的手机网络下 WebView 连不上或收不到，试过不行就退回原生网络（一次给全），记一天
+  // 流式连接失败的设备改用分批响应，按已有游标续接；旧服务器仍可返回普通 SSE。
   const streamKey = `jarvis.server.noStream:${root}`;
   let streaming = true;
   try { streaming = !(Number(globalThis.localStorage?.getItem(streamKey)) > Date.now() - 86_400_000); } catch { /* 读不了就照常试 */ }
   return {
     get streaming() { return streaming; },
-    /** 边收边显示这次没收到东西：之后改用一次给全的方式（返回 true 表示刚切换） */
+    /** 边收边显示这次没收到东西：之后改用分批响应（返回 true 表示刚切换） */
     streamFailed() {
       if (!streaming) return false;
       streaming = false;
@@ -278,7 +278,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     getTask: (id) => quickRead(`/api/tasks/${id}`),
     stopTask: (id) => req(`/api/tasks/${id}/stop`, { method: 'POST' }),
     // 要求事件流：手机 App 退到原生网络时也边收边显示（见 mobile/nativeFetch.js 的 wantsStream）
-    events: (id, after, signal) => req(`/api/tasks/${id}/events?after=${after}`, { raw: true, stream: streaming, signal, timeout: streaming ? STREAM_FIRST_MS : timeoutMs, headers: { Accept: 'text/event-stream' } }),
+    events: (id, after, signal) => req(`/api/tasks/${id}/events?after=${after}${streaming ? '' : '&batch=1'}`, { raw: true, stream: streaming, signal, timeout: streaming ? STREAM_FIRST_MS : timeoutMs, headers: { Accept: 'text/event-stream' } }),
     listSessions: () => quickRead('/api/sessions'),
     /** 服务器上的技能和技能运行器状态 */
     listSchedules: () => req('/api/server/schedules'),
@@ -390,7 +390,7 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
       attempt = new AbortController();
       const epoch = wakeEpoch;
       touched = Date.now();
-      let got = false, firstTimer = null, fastRetry = false;
+      let got = false, batchEnded = false, firstTimer = null, fastRetry = false;
       const trying = Boolean(client.streaming);
       const downgrade = () => {
         if (!trying || got || downgraded) return;
@@ -418,6 +418,7 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
           const input = buf + dec.decode(value, { stream: true });
           const { events, rest } = parseSse(input);
           buf = rest;
+          if (!trying && /(?:^|\n): batch-end\n\n/.test(input)) batchEnded = true;
           // 只认有效事件或SSE心跳；HTTP 200 空响应/错误页不能冒充恢复。
           if (events.length || /(?:^|\n):[^\n]*\n/.test(input)) {
             got = true;
@@ -432,13 +433,15 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
             if (ev.type === 'task_state' && ['done', 'error', 'stopped'].includes(ev.status)) return ev;
           }
         }
+        // 有意结束的一批（包括空闲心跳）立即续接同一个任务。无结束标记的断流仍走故障重试。
+        if (batchEnded && !attempt.signal.aborted) continue;
       } catch (e) {
         if (signal?.aborted) throw aborted();
         if (finalFailure) throw finalFailure;
         const denied = terminal(e);
         if (denied) throw denied;
         if (e.final) throw e;
-        // 边收边显示的路一点东西都没收到就断了：马上改用一次给全的方式重连，不再原样重试
+        // 边收边显示的路一点东西都没收到就断了：马上换传输方式重连。
         if (epoch === wakeEpoch) downgrade();
         // 观察连接自行中断（含失活检测）时继续按序号重连。
       } finally {

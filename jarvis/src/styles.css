@@ -255,6 +255,8 @@ body.reduced-motion .cl-mask, body.reduced-motion .callout, body.reduced-motion 
 .msg-act svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .msg-act:active { background: var(--accent-soft); }
 .msg-unfold { display: block; margin: 6px 0 2px; padding: 6px 12px; border: 0; border-radius: 10px; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); font: inherit; font-size: 13px; }
+.msg-pages { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+.msg-pages button:disabled { opacity: .45; }
 .msg-act:hover, .msg-act[aria-pressed="true"] { color: var(--accent); }
 .msg.user .meta { justify-content: flex-end; }
 /* 对话文字可以长按 / 拖选（手机 App 里也一样） */

@@ -144,7 +144,8 @@ try {
   /* ignore */
 }
 if (narrow.matches) body.classList.add('side-closed');
-app.showPanel(PANES.includes(startPane) ? startPane : 'workspace');
+// 手机启动时显示对话，等用户从抽屉打开面板再查询文件、绘制列表。
+if (!MOBILE || !narrow.matches) app.showPanel(PANES.includes(startPane) ? startPane : 'workspace');
 if (narrow.matches) body.classList.remove('side-open');
 app.setTask('idle');
 app.renderWelcome();

@@ -21,7 +21,7 @@ const el = (tag, props = {}, ...kids) => {
 /**
  * @param {{ toast: (t: string) => void, onUse: (name: string) => void, onChange?: () => void }} o
  */
-export function initSkillsPanel({ toast, onUse, onChange }) {
+export function initSkillsPanel({ toast, onUse, onChange, isVisible = () => true }) {
   const status = $('#skill-status');
   let installed = [];
   // 服务器模式：服务器上自己装的技能（对话里让未央装的）本机没有，也列出来，能搜、能删
@@ -47,13 +47,14 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
   async function refresh() {
     installed = await packs.list().catch(() => []);
     $('#skill-count').textContent = `${installed.filter((p) => p.enabled).length} / ${installed.length} 个启用`;
+    onChange?.(installed);
+    if (!isVisible()) return;
     const list = $('#skill-list');
     const mine = new Set(installed.map((p) => p.name));
     const extra = serverOnly.filter((p) => !mine.has(p.name)).map(serverCard);
     list.replaceChildren(...(installed.length || extra.length ? [...installed.map(card), ...extra] : [el('li', { className: 'empty', textContent: '还没有安装技能。从下方推荐里一键安装，或粘贴 GitHub 地址。' })]));
     bulk.apply();
     renderRecommend();
-    onChange?.(installed);
   }
 
   // 任何地方装 / 卸 / 同步了技能（对话里、推荐列表、另一台设备）都自动刷新
@@ -202,6 +203,7 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
     syncBtn.disabled = false;
   });
   async function refreshServer() {
+    if (!isVisible()) return;
     const c = server();
     serverLine.hidden = syncBtn.hidden = !c?.listSkills;
     if (!c?.listSkills) return;
@@ -277,8 +279,13 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
   let sel = 0;
   function updateMenu() {
     const m = prompt.value.match(/^\/([^\s/]*)$/);
+    if (!m) {
+      items = [];
+      menu.hidden = true;
+      return;
+    }
     const on = installed.filter((p) => p.enabled && skillCompatibility(p, { mobile: MOBILE }).status !== 'blocked');
-    items = m ? on.filter((p) => p.name.toLowerCase().includes(m[1].toLowerCase())).slice(0, 8) : [];
+    items = on.filter((p) => p.name.toLowerCase().includes(m[1].toLowerCase())).slice(0, 8);
     menu.hidden = !items.length;
     if (!items.length) return;
     sel = Math.min(sel, items.length - 1);
@@ -317,5 +324,9 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
   // 首次启动：预置常用技能
   // 手机首屏小，这条提示会正好盖住首页的任务卡；手机上不弹（技能在左边栏“技能”里能看到，输入 / 也会列出来）
   packs.seedBuiltins().then((added) => { if (added.length && !MOBILE) toast(`已预置 ${added.length} 个常用技能，输入 / 可以点名使用`); }).catch(() => {}).finally(refresh);
-  return { refresh, installFile, get installed() { return installed; } };
+  function releaseLists() {
+    $('#skill-list').replaceChildren();
+    $('#skill-recommend').replaceChildren();
+  }
+  return { refresh, releaseLists, installFile, get installed() { return installed; } };
 }

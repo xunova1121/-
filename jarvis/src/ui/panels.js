@@ -25,7 +25,7 @@ const el = (tag, props = {}, ...kids) => {
   return e;
 };
 
-export function initPanels({ toast, getGateway, onConfigChange, getHistory, settings, onReflect, onAutoMemory, searchFetch, getWorkRecords, getWorkspaceScope = () => 'local', getWorkspace = () => ws, onOpenSession, onRenameWorkRecord, onRemoveWorkRecord }) {
+export function initPanels({ toast, getGateway, onConfigChange, getHistory, settings, onReflect, onAutoMemory, searchFetch, getWorkRecords, getWorkspaceScope = () => 'local', getWorkspace = () => ws, onOpenSession, onRenameWorkRecord, onRemoveWorkRecord, paneVisible = () => true }) {
   const fresh = new Set();
   let current = null; // 当前预览的文件
   let objectUrls = [];
@@ -63,7 +63,9 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   }
 
   async function refreshFiles() {
+    if (!paneVisible('workspace')) return;
     const generation = ++fileRefresh;
+    const isCurrent = () => generation === fileRefresh && paneVisible('workspace');
     if (wsTab === 'changes') changes.refresh();
     const list = $('#file-list');
     list.setAttribute('aria-busy', 'true');
@@ -74,15 +76,16 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     $('#ws-mode').textContent = mode === 'server' ? '云服务器' : mode === 'folder' ? `本地：${ws.folderName()}` : '浏览器内';
     $('#ws-mode').classList.toggle('on', mode === 'folder');
     const restore = await source.restoreFolder().catch(() => null);
+    if (!isCurrent()) return;
     const btn = $('#btn-folder');
     btn.hidden = !source.canUseFolders();
     btn.textContent = mode === 'folder' ? '断开文件夹' : restore?.pending ? `恢复连接「${restore.pending}」` : '连接本地文件夹';
     btn.dataset.pending = restore?.pending ? '1' : '';
     let files;
-    try { files = await source.list(); } catch (e) { if (e.code === 'WORKSPACE_CHANGED') return; files = []; toast(`读取工作区失败：${e.message}`); }
-    if (generation !== fileRefresh) return;
-    const result = await workspaceView.render(files, { category: fileCategory, query: fileQuery, fresh, current, source, isCurrent: () => generation === fileRefresh });
-    if (!result || generation !== fileRefresh) return;
+    try { files = await source.list(); } catch (e) { if (e.code === 'WORKSPACE_CHANGED' || !isCurrent()) return; files = []; toast(`读取工作区失败：${e.message}`); }
+    if (!isCurrent()) return;
+    const result = await workspaceView.render(files, { category: fileCategory, query: fileQuery, fresh, current, source, isCurrent });
+    if (!result || !isCurrent()) return;
     list.setAttribute('aria-busy', 'false');
     list.inert = false;
     $('.ws-batch').inert = false;
@@ -313,7 +316,9 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   // ================================================================ 记忆与进化
   let mindTab = 'memories';
   async function refreshMind() {
+    if (!paneVisible('mind')) return;
     const [all, docs] = await Promise.all([memory.listAll(), kb.listDocuments()]);
+    if (!paneVisible('mind')) return;
     const tasks = all.events.filter((e) => e.kind === 'task').length;
     const lv = memory.levelOf({ memories: all.memories.length, lessons: all.lessons.length, skills: all.skills.length, docs: docs.length, tasks, episodes: all.episodes.length });
     $('#level-num').textContent = lv.level;
@@ -562,6 +567,17 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
 
   return {
     refreshFiles,
+    releaseFiles() {
+      ++fileRefresh;
+      const list = $('#file-list');
+      list.replaceChildren();
+      list.setAttribute('aria-busy', 'false');
+      list.inert = false;
+      $('.ws-batch').replaceChildren();
+      $('.ws-batch').hidden = true;
+      $('.ws-batch').inert = false;
+      workspaceView.setHidden(true);
+    },
     onWorkspaceToolEnd(event) {
       if ((event.name === 'trash_files' || event.name === 'restore_file') && /^\s*\{\s*"changedCount"\s*:\s*[1-9]\d*\s*[,}]/.test(event.output)
         && !$('[data-pane="workspace"]').hidden) refreshFiles();
