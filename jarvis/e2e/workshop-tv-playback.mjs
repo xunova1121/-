@@ -56,7 +56,7 @@ export async function checkProgramArea(video, label) {
     const fraction = pixels / (stage.width * stage.height);
     const desk = el.closest('.wb-desk')?.getBoundingClientRect();
     const top = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
-    const portrait = el.closest('.ws-scene').dataset.nestLayout === 'portrait';
+    const portrait = el.closest('.ws-scene').matches('[data-room-view=nest][data-nest-layout=portrait]');
     return { portrait, actualWidth: el.videoWidth * scale / stage.width, fraction, deskFraction: desk && pixels / (desk.width * desk.height), front: top === el,
       stage: [stage.width, stage.height], screen: [rect.width, rect.height] };
   });
