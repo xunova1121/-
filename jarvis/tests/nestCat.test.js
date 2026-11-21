@@ -69,6 +69,23 @@ describe('小窝橘猫', () => {
     kitty.interact(awake);
     expect(kitty.snapshot(awake).withCat).toBe(false);
   });
+  it('直接靠近一次，愿意的猫在闻手示好后自己蹭入掌心', () => {
+    const kitty = cat();
+    kitty.interact(morning);
+    kitty.advance(after(morning, 2300));
+    expect(kitty.snapshot(after(morning, 2300)).state).toBe('welcome');
+    kitty.advance(after(morning, 3500));
+    expect(kitty.snapshot(after(morning, 3500))).toMatchObject({ state: 'pet', withCat: true });
+    kitty.advance(after(morning, 15500));
+    expect(kitty.snapshot(after(morning, 15500)).state).toBe('rest');
+  });
+  it('不碰它也会在清醒时自行舔爪，然后抬头张望', () => {
+    const kitty = cat();
+    const groom = after(morning, 92000), alert = after(morning, 99000);
+    expect(kitty.snapshot(morning).nextAt).toBe(+groom);
+    expect(kitty.snapshot(groom)).toMatchObject({ state: 'groom', withCat: false, nextAt: +alert });
+    expect(kitty.snapshot(alert).state).toBe('alert');
+  });
   it('有工作时可以中断闻手；挂起很久后回来也不会继续旧互动', () => {
     const kitty = cat();
     kitty.interact(morning);

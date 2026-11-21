@@ -59,7 +59,7 @@ function drawRoute(canvas, count) {
 
 const tabs = { folder: '文件夹', draft: '草稿纸', trip: '旅行手账' };
 
-export function createNestDesk({ scene, perform, getWorkspace, getScope, openWorkspace, openFile }) {
+export function createNestDesk({ scene, deskHost, perform, getWorkspace, getScope, openWorkspace, openFile }) {
   const panel = node('section', '', 'ws-nest-desk');
   panel.hidden = true;
   panel.dataset.nestDesk = '';
@@ -75,7 +75,7 @@ export function createNestDesk({ scene, perform, getWorkspace, getScope, openWor
   const message = node('p', '', 'ws-nest-desk-message');
   message.setAttribute('role', 'status');
   panel.append(head, nav, content, message);
-  scene.append(panel);
+  deskHost.append(panel);
 
   let scope = '', tab = '', opener = null, version = 0, notebook, draftDirty = false;
   const scopeNow = () => getScope?.() || '';
@@ -100,6 +100,7 @@ export function createNestDesk({ scene, perform, getWorkspace, getScope, openWor
     version++;
     tab = '';
     panel.hidden = true;
+    delete deskHost.dataset.deskOpen;
     content.replaceChildren();
     notebook = null;
     draftDirty = false;
@@ -243,6 +244,7 @@ export function createNestDesk({ scene, perform, getWorkspace, getScope, openWor
       try { notebook = readNestNotebook(scope); } catch { notebook = { draft: '', trip: defaultNestTrip() }; }
     }
     opener = trigger || opener;
+    deskHost.dataset.deskOpen = 'true';
     panel.hidden = false;
     select(kind);
     back.focus({ preventScroll: true });
@@ -251,5 +253,5 @@ export function createNestDesk({ scene, perform, getWorkspace, getScope, openWor
   panel.addEventListener('keydown', event => {
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
   });
-  return { open, close, render() { if (tab && scope !== scopeNow()) close(false); }, setVisible(on) { if (!on) close(false); } };
+  return { open, close, isOpen: () => Boolean(tab), render() { if (tab && scope !== scopeNow()) close(false); }, setVisible(on) { if (!on) close(false); } };
 }

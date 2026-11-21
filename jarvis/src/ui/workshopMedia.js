@@ -196,8 +196,8 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     return width > 0 && height > 0 ? { left, top, width, height } : trigger.getBoundingClientRect();
   }
   function show(next, perform = true, trigger = ui.monitor) {
-    scene.dispatchEvent(new Event('workshop:media-opening'));
     const screen = next === 'monitor' && device !== 'monitor' ? monitorOrigin(trigger) : null;
+    scene.dispatchEvent(new CustomEvent('workshop:media-opening', { detail: { device: next } }));
     monitorEntrance?.cancel();
     syncChannelScope();
     sources.reset();
@@ -236,7 +236,10 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     player.close();
     if (wasReadingDuringWork) syncTimers();
     draw();
-    if (restoreFocus) trigger.focus({ preventScroll: true });
+    if (restoreFocus) {
+      const target = trigger.closest('.ws-room-menu[hidden]') ? scene.querySelector('[data-room-action="menu"]') : trigger;
+      target?.focus({ preventScroll: true });
+    }
     return true;
   }
   ui.tv.onclick = () => show('tv');
@@ -265,6 +268,15 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
 
   return {
     panel: ui.panel,
+    setNest(on) {
+      // 在小窝可点实物电脑；新闻标题只在主动打开互动菜单后显示。
+      const host = on ? scene.querySelector('.ws-room-menu') : scene;
+      host.append(ui.ticker);
+      for (const target of [ui.monitor, ui.tv]) {
+        if (on) target.removeAttribute('title');
+        else target.title = target.getAttribute('aria-label');
+      }
+    },
     setVisible(on) {
       if (visible === on) return;
       visible = on;

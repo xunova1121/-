@@ -1,4 +1,5 @@
 import { createCatBehavior } from '../app/nestCat.js';
+import { createNestCatSound } from './nestCatSound.js';
 import { mediaNode } from './workshopMediaView.js';
 import sleepLit from './assets/nestRoom/sleepcat-lit.webp';
 import sleepDark from './assets/nestRoom/sleepcat-dark.webp';
@@ -12,158 +13,147 @@ const patches = {
   asleep: [sleepLit, sleepDark], deep: [sleepLit, sleepDark], listening: [sleepLit, sleepDark],
   groom: [groomLit, groomDark], rest: [groomLit, groomDark], sniff: [sniffLit, sniffDark]
 };
-const copy = {
-  asleep: ['蜷在地毯上睡觉', '它把鼻子埋在尾巴里。', '轻声唤它', '让它继续睡'],
-  listening: ['耳朵轻轻动了一下', '等等看，它可能还想睡。', '', '让它继续睡'],
-  deep: ['它又把头埋进尾巴', '等它睡醒再来陪它吧。', '', '让它继续睡'],
-  alert: ['醒着，正四下张望', '停住手，等橘猫自己靠近。', '伸手让它闻闻', '安静陪着'],
-  sniff: ['正在闻未央的手', '未央把手放低，留给它一点时间。', '', '把手收回'],
-  welcome: ['主动蹭了蹭未央的手', '它仰起头，把下巴送过来。', '轻挠下巴', '收回手'],
-  pet: ['眯着眼睛让未央轻挠', '它把头靠过来，眼睛眯成一条缝。', '再摸一下', '让它自在一会儿'],
-  rest: ['收回爪子，开始洗脸', '橘猫低头舔起前爪，未央给它留点空间。', '', '让它自己待着'],
-  groom: ['正慢慢舔着前爪', '橘猫还在梳理毛发。', '', '安静陪着']
+const labels = {
+  asleep: '蜷在地毯上睡觉', listening: '耳朵轻轻动了一下', deep: '又把头埋进尾巴',
+  alert: '醒着，正四下张望', sniff: '正在闻未央的手', welcome: '主动蹭了蹭未央的手',
+  pet: '眯着眼睛让未央轻挠', rest: '收回爪子，开始洗脸', groom: '正慢慢舔着前爪'
 };
 
-function choice(key, label) {
-  const el = mediaNode('button', '', label);
-  el.type = 'button';
-  el.dataset.catChoice = key;
-  return el;
+function read(key) {
+  try { return globalThis.localStorage?.getItem(key); } catch { return null; }
+}
+function write(key, value) {
+  try { globalThis.localStorage?.setItem(key, value); } catch { /* 禁用存储时，本次选择仍然有效。 */ }
+}
+
+function createCatPicture(floor) {
+  const art = floor.querySelector('.ws-nest-art');
+  const picture = mediaNode('div', 'ws-nest-cat-motion');
+  picture.setAttribute('aria-hidden', 'true');
+  const layers = ['body', 'face', 'hand'].map(part => {
+    const layer = mediaNode('img', 'ws-nest-cat-' + part);
+    layer.alt = '';
+    layer.draggable = false;
+    picture.append(layer);
+    return layer;
+  });
+  floor.append(picture);
+  let pose, dark, lastImage;
+  function draw() {
+    const replacement = patches[pose]?.[dark ? 1 : 0];
+    const url = replacement || art?.getAttribute('src');
+    if (url && lastImage !== url) {
+      for (const layer of layers) layer.src = url;
+      lastImage = url;
+    }
+    picture.hidden = !url;
+    picture.dataset.source = replacement ? 'patch' : 'room';
+    picture.dataset.pose = pose;
+  }
+  const observer = new MutationObserver(draw);
+  return {
+    draw(nextPose, nextDark) { pose = nextPose; dark = nextDark; draw(); },
+    setVisible(on) {
+      if (on && art) { observer.observe(art, { attributes: true, attributeFilter: ['src'] }); }
+      else { observer.disconnect(); picture.hidden = true; }
+    }
+  };
 }
 
 export function createNestCat({ scene, floor, closePanels, onChange }) {
-  const behavior = createCatBehavior({
-    read(key) { try { return globalThis.localStorage?.getItem(key); } catch { return null; } },
-    write(key, value) { try { globalThis.localStorage?.setItem(key, value); } catch { /* 禁用存储时仍保留本次心情。 */ } }
-  });
-  const patch = mediaNode('img', 'ws-nest-cat-patch');
-  patch.alt = '';
-  patch.hidden = true;
-  floor.append(patch);
-  const panel = mediaNode('section', 'ws-nest-cat-panel');
-  panel.dataset.nestPanel = 'cat';
-  panel.setAttribute('role', 'dialog');
-  panel.setAttribute('aria-label', '地毯上的橘猫');
-  panel.hidden = true;
-  const header = mediaNode('header', '');
-  const dismiss = choice('close', '×');
-  dismiss.setAttribute('aria-label', '关闭橘猫互动');
-  header.append(mediaNode('h3', '', '地毯上的橘猫'), dismiss);
-  const caption = mediaNode('strong', '');
-  caption.setAttribute('role', 'status');
-  const description = mediaNode('p', '');
-  const actions = mediaNode('div', 'ws-nest-cat-actions');
-  const main = choice('main', ''), leave = choice('leave', '');
-  actions.append(main, leave);
-  panel.append(header, caption, description, actions);
-  scene.append(panel);
+  const behavior = createCatBehavior({ read, write });
+  const picture = createCatPicture(floor);
+  const sound = createNestCatSound(scene);
+  const muteKey = 'jarvis.nest.cat.muted.v1';
+  let muted = read(muteKey) === '1';
+  const soundButton = mediaNode('button', 'ws-nest-cat-audio', '猫咪互动声音');
+  soundButton.type = 'button';
+  soundButton.setAttribute('aria-pressed', String(!muted));
+  scene.querySelector('.ws-room-menu')?.append(soundButton);
+  soundButton.onclick = () => {
+    muted = !muted;
+    write(muteKey, muted ? '1' : '0');
+    soundButton.setAttribute('aria-pressed', String(!muted));
+    if (muted) sound.release();
+  };
 
   let visible = false, busy = false, dark = false, allowVisit = true, lastActivity = '';
-  let opener, timer, timerAt = 0, lastPatch, lastState;
+  let requested = false, lastState, timer, timerAt = 0;
 
   function clearTimer() {
     clearTimeout(timer);
     timerAt = 0;
   }
-
   function update() {
     const now = new Date();
     behavior.advance(now);
     if (visible && !document.hidden && !busy && allowVisit && lastActivity === 'cat-visit') behavior.visitOnce(now);
     const cat = behavior.snapshot(now);
-    const [label, detail, command, secondary] = copy[cat.state];
-    const image = patches[cat.state]?.[dark ? 1 : 0];
-    if (lastPatch !== image) {
-      lastPatch = image;
-      patch.hidden = !image;
-      if (image) patch.src = image;
-    }
+    if (visible && !document.hidden) picture.draw(cat.state, dark);
     scene.dataset.catState = cat.state;
-    patch.dataset.pose = cat.state;
     if (lastState !== cat.state) {
+      if (cat.state === 'pet' && requested && !muted) sound.play();
+      if (!cat.withCat) { requested = false; sound.stop(); }
       lastState = cat.state;
-      caption.textContent = label;
-      description.textContent = detail;
-      main.textContent = command;
-      if (!command && document.activeElement === main) leave.focus({ preventScroll: true });
-      main.hidden = !command;
-      leave.textContent = secondary;
     }
     if (visible && !document.hidden && timerAt !== cat.nextAt) {
       clearTimer();
       timerAt = cat.nextAt;
       timer = setTimeout(changed, Math.max(1, timerAt - now.getTime()));
     }
+    const label = labels[cat.state];
     return { state: cat.state, label, withCat: cat.withCat, activityLabel: cat.state === 'pet' ? '未央在地毯上轻挠橘猫的下巴' : label };
   }
-
   function changed() {
     update();
     onChange?.();
   }
-
-  function hidePanel(restoreFocus) {
-    panel.hidden = true;
-    document.removeEventListener('keydown', escape, true);
-    if (restoreFocus && opener?.isConnected) opener.focus({ preventScroll: true });
-    opener = null;
-  }
-
-  function close(restoreFocus = false) {
-    const changedPose = behavior.snapshot(new Date()).withCat;
-    behavior.leave(new Date());
-    hidePanel(restoreFocus);
-    if (changedPose) changed();
+  function close() {
+    const now = new Date();
+    const hadContact = behavior.snapshot(now).withCat;
+    requested = false;
+    behavior.leave(now);
+    sound.stop();
+    if (hadContact) changed();
     else update();
   }
-
-  function escape(event) {
-    if (event.key !== 'Escape') return;
-    event.preventDefault();
-    event.stopPropagation();
-    close(true);
-  }
-
-  function open(trigger) {
+  function open() {
     if (busy || !visible || document.hidden) return;
-    closePanels?.('cat');
-    opener = trigger;
-    panel.hidden = false;
-    update();
-    document.addEventListener('keydown', escape, true);
-    (main.hidden ? leave : main).focus({ preventScroll: true });
-  }
-
-  function render(lifeState, working, options = {}) {
-    // 用户也可能通过聊天给房间下指令；自动陪猫同样应当立即让出姿态。
-    const leftCatRoutine = lastActivity === 'cat-visit' && lifeState.activity !== lastActivity;
-    const choseActivity = lifeState.manual && lastActivity && lifeState.activity !== lastActivity;
-    if (choseActivity || (leftCatRoutine && panel.hidden)) {
-      behavior.leave(new Date());
-      if (!panel.hidden) hidePanel(false);
+    closePanels?.();
+    const now = new Date();
+    const state = behavior.snapshot(now).state;
+    if (state === 'alert' || state === 'sniff' || state === 'welcome') {
+      requested = true;
+      if (!muted) sound.prepare();
     }
+    behavior.interact(now);
+    changed();
+  }
+  function render(lifeState, working, options = {}) {
+    const leftRoutine = lastActivity === 'cat-visit' && lifeState.activity !== lastActivity;
+    const changedManually = lifeState.manual && lastActivity && lifeState.activity !== lastActivity;
     lastActivity = lifeState.activity;
     busy = working;
     dark = options.dark ?? (!lifeState.lampOn && lifeState.night);
     allowVisit = options.allowVisit !== false;
-    if (busy || (!allowVisit && panel.hidden)) {
-      behavior.leave(new Date());
-      if (!panel.hidden) hidePanel(false);
-    }
+    if (busy || changedManually || !allowVisit || (leftRoutine && !requested)) behavior.leave(new Date());
     return update();
   }
-
   function syncVisibility() {
     clearTimer();
-    if (!visible || document.hidden) {
-      behavior.leave(new Date());
-      hidePanel(false);
-    } else {
+    const shown = visible && !document.hidden;
+    picture.setVisible(shown);
+    if (shown) {
+      muted = read(muteKey) === '1';
+      soundButton.setAttribute('aria-pressed', String(!muted));
       behavior.resume(new Date());
       changed();
+    } else {
+      requested = false;
+      behavior.leave(new Date());
+      sound.release();
     }
   }
-
   function setVisible(on) {
     if (visible === on) return;
     visible = on;
@@ -171,8 +161,5 @@ export function createNestCat({ scene, floor, closePanels, onChange }) {
     else document.removeEventListener('visibilitychange', syncVisibility);
     syncVisibility();
   }
-
-  main.onclick = () => { behavior.interact(new Date()); changed(); };
-  leave.onclick = dismiss.onclick = () => close(true);
-  return { render, open, close, isOpen: () => !panel.hidden, setVisible, dispose: () => setVisible(false) };
+  return { render, open, close, isOpen: () => behavior.snapshot(new Date()).withCat, setVisible, dispose: () => setVisible(false) };
 }

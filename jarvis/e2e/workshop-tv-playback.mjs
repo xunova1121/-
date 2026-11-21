@@ -44,7 +44,7 @@ async function requireReleased(handle) {
   await handle.dispose();
 }
 
-async function checkProgramArea(video, label) {
+export async function checkProgramArea(video, label) {
   const geometry = await video.evaluate(async el => {
     const set = el.closest('.ws-media-receiver');
     await Promise.all((set?.getAnimations() || []).map(animation => animation.finished));

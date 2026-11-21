@@ -22,7 +22,6 @@
 .nest-window-menu [hidden], .nest-photo-controls [hidden] { display: none !important; }
 .nest-window-view { position: relative; width: 100%; height: 100%; min-height: 0; overflow: hidden; }
 .nest-window-view img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.nest-window-view [data-nest-window="back"] { position: absolute; bottom: 8px; left: 8px; }
 @media(prefers-reduced-motion: reduce) {
   .nest-window-glass { transition: none; } .nest-window-drape { animation: none !important; }
 }

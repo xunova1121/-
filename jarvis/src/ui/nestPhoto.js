@@ -45,12 +45,6 @@ export function createNestPhoto({ world, panel }) {
 
   const controls = document.createElement('div');
   controls.className = 'nest-photo-controls';
-  const preview = document.createElement('img');
-  preview.className = 'nest-photo-preview';
-  preview.alt = '当前照片';
-  preview.hidden = true;
-  const hint = document.createElement('p');
-  hint.textContent = '照片保存在本机。可选 12 MB 以内的 JPG、PNG 或 WebP。';
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
   fileInput.dataset.nestPhoto = 'file';
@@ -65,7 +59,7 @@ export function createNestPhoto({ world, panel }) {
   restore.textContent = '恢复原画';
   const feedback = document.createElement('p');
   feedback.setAttribute('role', 'status');
-  controls.append(hint, preview, fileInput, choose, restore, feedback);
+  controls.append(fileInput, choose, restore, feedback);
 
   let visible = false;
   let key = '';
@@ -78,11 +72,9 @@ export function createNestPhoto({ world, panel }) {
   function draw(blob) {
     const old = url;
     url = blob instanceof Blob ? URL.createObjectURL(blob) : '';
-    for (const img of [wall, preview]) {
-      img.hidden = !url;
-      if (url) img.src = url;
-      else img.removeAttribute('src');
-    }
+    wall.hidden = !url;
+    if (url) wall.src = url;
+    else wall.removeAttribute('src');
     if (old) URL.revokeObjectURL(old);
     choose.textContent = url ? '更换照片' : '选择照片';
     restore.disabled = !url;
@@ -134,7 +126,7 @@ export function createNestPhoto({ world, panel }) {
       try { localStorage.setItem(changedKey, JSON.stringify([target, Date.now(), Math.random()])); } catch { /* 重新进入时会读盘。 */ }
       if (ticket === generation && target === scopedKey() && visible) {
         draw(blob);
-        feedback.textContent = blob ? '照片已经挂好。' : '相框已恢复原画。';
+        feedback.textContent = '';
       }
     } catch {
       if (ticket === generation) feedback.textContent = '本机未能保存更改，请重试。';

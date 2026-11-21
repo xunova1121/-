@@ -61,6 +61,7 @@ export function createWorkStudioView({ workshop = false, newsFeed, newsChat, get
 
   const body = node('div', 'ws-body');
   const performance = node('div', 'ws-performance');
+  const caption = node('div', 'ws-caption');
   const scene = node('div', 'ws-scene');
   const actor = node('div', 'ws-actor');
   actor.setAttribute('aria-hidden', 'true');
@@ -80,9 +81,9 @@ export function createWorkStudioView({ workshop = false, newsFeed, newsChat, get
     motion = createWorkshopMotion(scene, actor);
     room = createWorkshopRoom(scene, floor, update);
     media = createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, getPlayers });
-    nest = createNestStage({scene, floor, room, onChange: update, nestDeskOptions});
+    nest = createNestStage({scene, floor, room, caption, deskHost: performance, onChange: update, nestDeskOptions});
+    media.setNest(true);
   } else scene.append(chip, prop, actor);
-  const caption = node('div', 'ws-caption');
   const action = node('strong', 'ws-action');
   const detail = node('span', 'ws-detail');
   const file = node('span', 'ws-file');
@@ -111,6 +112,7 @@ export function createWorkStudioView({ workshop = false, newsFeed, newsChat, get
       const useNest = scene.dataset.roomView !== 'nest';
       media.close(false);
       room.setNest(useNest);
+      media.setNest(useNest);
       nest.setActive(useNest);
       heading.textContent = useNest ? '未央小窝' : viewTitle;
       floorToggle.textContent = useNest ? '任务工位' : '回小窝';
@@ -121,7 +123,8 @@ export function createWorkStudioView({ workshop = false, newsFeed, newsChat, get
     };
     caption.append(floorToggle, zoom);
   }
-  performance.append(scene, caption);
+  performance.prepend(scene);
+  performance.append(caption);
 
   const timeline = node('aside', 'ws-timeline');
   const listHeader = node('div', 'ws-list-header');

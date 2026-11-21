@@ -1,12 +1,13 @@
 import { createNestCat } from './nestCat.js';
 import { createNestDesk } from './nestDesk.js';
+import { createNestLiving } from './nestLiving.js';
 import { createNestWindow } from './nestWindow.js';
 import { createNestPhoto } from './nestPhoto.js';
 import { nestArt, nestFigure, nestIsDark, nestNeedsSprite, nestFurniture } from './nestArt.js';
 import { createNestPanel } from './nestPanel.js';
 import './nestStage.css';
 
-export function createNestStage({scene, floor, room, onChange, nestDeskOptions}) {
+export function createNestStage({scene, floor, room, caption, deskHost, onChange, nestDeskOptions}) {
   const art = document.createElement('img');
   art.className = 'ws-nest-art';
   art.alt = '';
@@ -17,20 +18,25 @@ export function createNestStage({scene, floor, room, onChange, nestDeskOptions})
   seat.alt = '';
   seat.hidden = true;
   seat.draggable = false;
-  floor.prepend(art, seat);
-  const panel = createNestPanel(scene, () => {
+  const loveseat = document.createElement('div');
+  loveseat.className = 'ws-nest-loveseat';
+  loveseat.setAttribute('aria-hidden', 'true');
+  floor.prepend(art, seat, loveseat);
+  const panel = createNestPanel(scene, caption, () => {
     desk.close(false);
     cat.close();
-  }, () => Boolean(scene.querySelector('.ws-media-panel:not([hidden]), [data-nest-desk]:not([hidden]), [data-nest-panel="cat"]:not([hidden])')));
-  const desk = createNestDesk({scene, ...nestDeskOptions, perform: room.perform});
+  }, () => desk.isOpen() || Boolean(scene.querySelector('.ws-media-panel:not([hidden])')));
+  const desk = createNestDesk({scene, deskHost, ...nestDeskOptions, perform: room.perform});
   const cat = createNestCat({scene, floor, onChange, closePanels: closeExceptCat});
   const sash = createNestWindow({world: floor, panel, art});
   const photo = createNestPhoto({world: floor, panel});
   const controls = floor.querySelector('.ws-furniture-controls');
+  const living = createNestLiving(floor);
   let active = false;
   let visible = false;
   let lastPose = '';
   let lastDark;
+  let lastViewing = '';
   for (const [kind, label] of nestFurniture) {
     if (kind === 'trip') continue; // 手账可从草稿本及房间互动进入。
     const hit = document.createElement('button');
@@ -38,8 +44,7 @@ export function createNestStage({scene, floor, room, onChange, nestDeskOptions})
     hit.className = 'ws-nest-hit';
     hit.dataset.furniture = kind;
     hit.setAttribute('aria-label', label);
-    hit.setAttribute('aria-haspopup','dialog');
-    hit.title = label;
+    if (kind === 'folder' || kind === 'draft') hit.setAttribute('aria-haspopup','dialog');
     hit.onclick = () => open(kind, hit);
     controls.append(hit);
   }
@@ -58,16 +63,17 @@ export function createNestStage({scene, floor, room, onChange, nestDeskOptions})
   }
   function open(kind, trigger) {
     if (!active) return;
+    if (kind === 'cat') return cat.open();
     closePanels(false);
     scene.dispatchEvent(new Event('workshop:close-media'));
-    if (kind === 'cat') cat.open(trigger);
-    else if (kind === 'window') sash.open(trigger);
+    if (kind === 'window') sash.open(trigger);
     else if (kind === 'photo') photo.open(trigger);
     else desk.open(kind, trigger);
     onChange();
   }
   function syncVisibility() {
     const shown = active && visible;
+    living.setVisible(shown);
     cat.setVisible(shown);
     sash.setVisible(shown);
     photo.setVisible(shown);
@@ -98,31 +104,34 @@ export function createNestStage({scene, floor, room, onChange, nestDeskOptions})
       const catState = cat.render(state, busy, {dark, allowVisit: cat.isOpen() || !panel.isOpen()});
       catHit.disabled = busy;
       const catHint = '橘猫 · ' + catState.label;
-      if (catHit.title !== catHint) {
-        catHit.title = catHint;
-        catHit.setAttribute('aria-label', catHint);
-      }
+      if (catHit.getAttribute('aria-label') !== catHint) catHit.setAttribute('aria-label', catHint);
       const pose = nestFigure(state.activity, station, catState.withCat, busy, operation);
-      if (pose !== lastPose || dark !== lastDark) {
+      const viewing = !busy && (pose === 'tv' || pose === 'news' && state.activity === 'news') ? pose : '';
+      if (pose !== lastPose || dark !== lastDark || viewing !== lastViewing) {
         const sprite = nestNeedsSprite(pose);
-        const url = nestArt(pose, dark);
+        const url = nestArt(viewing ? 'work' : pose, dark);
         if (art.getAttribute('src') !== url) art.src = url;
-        seat.hidden = !sprite;
-        if (sprite) {
-          const emptySeat = nestArt('tv', dark);
+        seat.hidden = !sprite && !viewing;
+        if (!seat.hidden) {
+          const emptySeat = nestArt('sleep', dark);
           if (seat.getAttribute('src') !== emptySeat) seat.src = emptySeat;
         }
+        if (viewing) scene.dataset.nestViewing = viewing;
+        else delete scene.dataset.nestViewing;
         scene.dataset.nestPose = pose;
         scene.dataset.nestLight = dark ? 'off' : 'on';
         scene.toggleAttribute('data-nest-sprite', sprite);
         floor.classList.toggle('night', dark);
         lastPose = pose;
         lastDark = dark;
+        lastViewing = viewing;
       }
+      living.render(viewing ? '' : pose, state, art.getAttribute('src'));
       sash.render({lampOn: !dark});
       photo.render({lampOn: !dark});
       desk.render(state, busy);
       if (catState.withCat) return catState.activityLabel;
+      if (viewing === 'news') return '正在小沙发上读新闻';
       return !busy && state.activity === 'cat-visit' ? '未央在沙发上歇着看电视，橘猫想自己待一会儿' : null;
     }
   };

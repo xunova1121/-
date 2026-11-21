@@ -2,10 +2,11 @@ import { createWorkshopLife } from '../app/workshopLife.js';
 import { nestFurniture, nestIsDark } from './nestArt.js';
 import { createWorkshopLifeScene } from './workshopLifeScene.js';
 import { playWorkshopHum, stopWorkshopHum, suggestWorkshopTune, workshopHumTitle } from './workshopHum.js';
+import { createNestRadio } from './nestRadio.js';
 import './workshopRoom.css';
 
 const nextClock = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
-const availableDuringWork = new Set(['light', 'lamp-auto', 'photo', 'window', 'folder', 'draft', 'trip', 'tv']);
+const availableDuringWork = new Set(['light', 'lamp-auto', 'photo', 'window', 'folder', 'draft', 'trip', 'tv', 'radio', 'radio-next']);
 
 const choices = [
   ['coffee', '泡咖啡'], ['eat', '吃饭'], ['rest', '歇一会儿'],
@@ -35,7 +36,6 @@ export function createWorkshopRoom(scene, floor, onChange) {
     el.type = 'button';
     el.dataset.furniture = place;
     el.setAttribute('aria-label', label);
-    el.title = label;
     el.onclick = activate;
     targets.append(el);
     return el;
@@ -47,8 +47,15 @@ export function createWorkshopRoom(scene, floor, onChange) {
     dismiss(true);
   };
   const lampTarget = furniture('lamp', '控制桌上的台灯', toggleLight);
-  const cupTarget = furniture('cup', '去茶水桌泡咖啡', () => life.perform('coffee'));
-  const seatTarget = furniture('sofa', '坐到沙发上休息', () => life.perform('rest'));
+  function startActivity(action) {
+    if (nest) {
+      scene.dispatchEvent(new Event('workshop:nest-interrupt'));
+      scene.dispatchEvent(new Event('workshop:close-media'));
+    }
+    return life.perform(action);
+  }
+  const cupTarget = furniture('cup', '在桌上泡咖啡', () => startActivity('coffee'));
+  const seatTarget = furniture('sofa', '坐到沙发上休息', () => startActivity('rest'));
   let pullStart = null;
   let pulledAt = -Infinity;
   lampTarget.onpointerdown = event => {
@@ -83,6 +90,14 @@ export function createWorkshopRoom(scene, floor, onChange) {
   const extraActions = [...nestActions].map(([key, label]) => button(key, label));
   menu.append(...extraActions);
   for (const [key, label] of choices) menu.append(button(key, label));
+  const dial = furniture('radio', '播放收音机');
+  dial.removeAttribute('title');
+  const radioToggle = button('radio', '播放收音机');
+  const radioNext = button('radio-next', '收音机换首歌');
+  menu.append(radioToggle, radioNext);
+  const radio = createNestRadio({ scene, dial, toggle: radioToggle, next: radioNext, onMusic() {
+    if (life.snapshot().activity === 'sing') life.perform('rest');
+  } });
   const listen = button('listen', '听听');
   listen.hidden = true;
   tools.append(listen, lamp, open, menu);
@@ -102,6 +117,7 @@ export function createWorkshopRoom(scene, floor, onChange) {
   function outside(event) {
     if (!tools.contains(event.target)) dismiss(false);
   }
+  scene.addEventListener('workshop:media-opening', () => dismiss(false));
   function escape(event) {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -132,13 +148,18 @@ export function createWorkshopRoom(scene, floor, onChange) {
     const cmd = event.target.closest('button')?.dataset.roomAction;
     const title = suggested;
     if (!cmd || cmd === 'listen' || cmd === 'light') return;
+    if (nest && (cmd === 'radio' || cmd === 'radio-next')) {
+      if (cmd === 'radio') radio.flip();
+      else radio.next();
+      dismiss(true);
+      return;
+    }
     if (nest && nestActions.has(cmd)) {
       dismiss(true);
       scene.dispatchEvent(new CustomEvent('workshop:nest-open', { detail: { kind: cmd, trigger: open } }));
       return;
     }
-    scene.dispatchEvent(new Event('workshop:nest-interrupt'));
-    if (!life.perform(cmd)) return;
+    if (!startActivity(cmd)) return;
     if (cmd === 'sing') playWorkshopHum(title);
     dismiss(true);
     if (cmd === 'tv') scene.dispatchEvent(new Event('workshop:open-tv'));
@@ -148,6 +169,8 @@ export function createWorkshopRoom(scene, floor, onChange) {
     perform: life.perform,
     setNest(value) {
       nest = value;
+      cupTarget.setAttribute('aria-label', value ? '在桌上泡咖啡' : '去茶水桌泡咖啡');
+      radio.setNest(value);
       dismiss(false);
       for (const action of extraActions) action.hidden = !value;
       schedule.hidden = !value;
@@ -159,7 +182,7 @@ export function createWorkshopRoom(scene, floor, onChange) {
       lastActivity = state.activity;
       if (leftSong) stopWorkshopHum();
       const workOrigin = display.render(presentingWork && confirmedShred ? { ...state, activity: 'shred' } : state);
-      const compact = nest && Boolean(scene.closest('.mobile-studio-sheet'));
+      const compact = nest;
       if (compact && lamp.parentElement !== menu) menu.prepend(lamp, listen);
       else if (!compact && lamp.parentElement === menu) tools.prepend(listen, lamp);
       const menuLabel = compact ? '互动' : '房间互动';
@@ -177,7 +200,7 @@ export function createWorkshopRoom(scene, floor, onChange) {
         lamp.title = lit ? '关闭工作台台灯' : '打开工作台台灯';
       }
       cupTarget.disabled = seatTarget.disabled = Boolean(presentingWork);
-      for (const el of menu.querySelectorAll('button')) {
+      for (const el of menu.querySelectorAll('button[data-room-action]')) {
         el.disabled = Boolean(presentingWork) && !availableDuringWork.has(el.dataset.roomAction);
       }
       let label = state.label;
@@ -191,6 +214,7 @@ export function createWorkshopRoom(scene, floor, onChange) {
       return { ...state, workOrigin, label };
     },
     setVisible(on) {
+      radio.setVisible(on);
       if (on) window.addEventListener('jarvis:workshop-song', onChange);
       else window.removeEventListener('jarvis:workshop-song', onChange);
       life.setVisible(on);

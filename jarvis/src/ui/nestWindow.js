@@ -41,17 +41,15 @@ export function createNestWindow({ world, panel, art }) {
 
   const controls = document.createElement('div');
   controls.className = 'nest-window-menu';
-  const state = document.createElement('p');
-  state.setAttribute('role', 'status');
   const toggle = actionButton('', 'toggle');
   const latch = actionButton('关窗落闩', 'latch');
   const look = actionButton('看看窗外', 'look');
-  controls.append(state, toggle, latch, look);
+  controls.append(toggle, latch, look);
   const view = document.createElement('div');
   view.className = 'nest-window-view';
   const landscape = document.createElement('img');
   const back = actionButton('回到窗边', 'back');
-  view.append(landscape, back);
+  view.append(landscape);
 
   let scope = '';
   let mode = 'ajar';
@@ -72,8 +70,6 @@ export function createNestWindow({ world, panel, art }) {
       const src = lit ? openLit : openDark;
       if (glass.getAttribute('src') !== src) glass.src = drape.src = src;
     }
-    state.textContent = mode === 'latched' ? '窗闩已扣好。' :
-      gust ? '风推开了窗扇，窗帘正轻轻摆动。' : open ? '木窗开着。' : '木窗虚掩着，风可以吹进来。';
     toggle.textContent = open ? '关窗落闩' : '推开窗';
     latch.hidden = mode !== 'ajar' || gust;
   }
@@ -140,7 +136,7 @@ export function createNestWindow({ world, panel, art }) {
   latch.onclick = () => choose('latched');
   look.onclick = () => {
     updateView();
-    panel.open({ title: '窗外', kind: 'view', content: view, trigger: opener });
+    panel.open({ title: '窗外', kind: 'view', content: view, actions: back, trigger: opener });
     back.focus({ preventScroll: true });
   };
   back.onclick = () => {

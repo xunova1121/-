@@ -10,21 +10,73 @@
   background: none; opacity: 0; pointer-events: none;
 }
 .ws-scene[data-room-view="nest"] .ws-monitor-ticker { max-width: min(65%,33em); }
+.ws-nest-loveseat { display: none; }
+.ws-scene[data-room-view="nest"] .ws-nest-loveseat {
+  display: block; position: absolute; z-index: 1; pointer-events: none;
+  left: 27.5%; top: 40.4%; width: 21.4%; aspect-ratio: 1;
+  background: url('./assets/nestRoom/loveseat.webp') 0 0 / 300% 100% no-repeat;
+  filter: drop-shadow(0 .45cqw .32cqw #45301865);
+  /* 地毯在沙发前面。顺着原画猫的肩、耳朵与下巴保留前景轮廓。 */
+  clip-path: polygon(0 0,100% 0,100% 100%,69.7% 100%,73.1% 95.5%,74.2% 90.9%,67% 84.6%,63.4% 82.7%,61.1% 76.8%,57.3% 84.2%,53.1% 81.6%,51.8% 81.8%,47.8% 96.2%,40.4% 92.6%,33.5% 91.1%,26.5% 91.7%,18.7% 94.1%,12.6% 100%,0 100%);
+}
+.ws-scene[data-nest-light="off"] .ws-nest-loveseat {
+  filter: brightness(.43) saturate(.62) drop-shadow(0 .4cqw .3cqw #120e0c88);
+}
+.ws-scene[data-nest-viewing="tv"] .ws-nest-loveseat { --viewer-frame: 50%; }
+.ws-scene[data-nest-viewing="news"] .ws-nest-loveseat { --viewer-frame: 100%; }
+.ws-scene[data-nest-viewing] .ws-nest-loveseat::after {
+  content: ''; position: absolute; inset: 0;
+  background: inherit; background-position: var(--viewer-frame) 0;
+  /* 呼吸只带动手臂与身体，木扶手和沙发脚留在原地。 */
+  clip-path: polygon(35% 39%,35% 31%,38% 26%,37% 14%,47% 11%,52% 14%,54% 15%,63% 14%,66% 24%,70% 26%,70% 42%,83% 40%,85% 46%,74% 50%,70% 52%,74% 61%,68% 65%,42% 65%,41% 58%,43% 50%,46% 43%);
+  transform-origin: 59% 61%;
+}
+@media (prefers-reduced-motion:no-preference) {
+  body:not(.reduced-motion) .work-studio-view[data-visible="true"] .ws-scene[data-nest-viewing] .ws-nest-loveseat::after {
+    animation: ws-movie-breath 4.4s ease-in-out infinite;
+  }
+}
+@keyframes ws-movie-breath { 50% { transform: scale(1.004,1.015) rotate(-.45deg); } }
 .work-studio-view[data-workshop][data-visible="true"] .ws-scene[data-room-view="nest"][data-media-device="tv"] {
-  --tv-width: min(52cqw,calc((100cqh - 44px) * 1.7778));
   background: var(--room-wall,#534737);
+}
+.wb-desk .work-studio-view[data-workshop][data-media-open] .ws-scene[data-room-view="nest"][data-media-device="tv"] {
+  width: 100%; align-self: stretch;
+}
+@container workbench-area (min-width:731px) {
+  /* 电视向工作台两侧展开，聊天仍使用原来的左右留白。 */
+  .wb-desk > .work-studio-view:has(.ws-scene[data-room-view="nest"][data-media-device="tv"]) {
+    width: auto; margin-inline: calc(3px - clamp(10px,1.25vw,21px));
+  }
 }
 .work-studio-view[data-media-open][data-workshop] .ws-scene[data-room-view="nest"][data-media-device] .ws-floorplan {
   width: max(100%,150cqh); height: auto; aspect-ratio: 3 / 2;
   inset: 50% auto auto 50%; transform: translate(-50%,-50%); translate: none;
 }
 .ws-scene[data-room-view="nest"][data-media-device="tv"] .ws-media-panel .ws-media-receiver {
-  inset-inline: auto max(1%,8px); top: calc(50% - 15px); translate: none; padding: .5% 1.5% .65% .5%;
+  inset-inline: auto var(--tv-inset); translate: none;
+}
+/* 镜头在小屋内平移，前景的绿沙发和猫留在屏幕左侧，播放区域沿用原版尺寸。 */
+.work-studio-view[data-media-open][data-workshop] .ws-scene[data-room-view="nest"][data-media-device]:not([data-media-work="true"]) .ws-floorplan {
+  width: max(155%,165cqh);
+  left: 7.4%; top: calc(61% - 15px); transform: translate(-39.6%,-60%);
+}
+.work-studio-view[data-media-open][data-workshop] .ws-scene[data-room-view="nest"][data-media-device="monitor"]:not([data-media-work="true"]) .ws-floorplan {
+  left: 15.4%;
+}
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"][data-media-device="monitor"]:not([data-media-work="true"]) .ws-media-panel[data-device="monitor"] {
+  inset: 4.5% 1% 4.5% 25.5%;
 }
 /* 工作中人物在窗边，屏幕移到另一侧，仍能看见手上的事情。 */
-.ws-scene[data-room-view="nest"][data-media-device="tv"][data-media-work="true"] .ws-media-receiver {
+.ws-scene[data-room-view="nest"][data-media-device="tv"][data-media-work="true"] .ws-media-panel .ws-media-receiver {
   inset-inline: max(1%,8px) auto;
 }
+.work-studio-view[data-media-open][data-workshop] .ws-scene[data-room-view="nest"][data-media-device="tv"][data-media-work="true"] .ws-floorplan {
+  width: max(155%,165cqh); left: 93%; top: 45%;
+  transform: translate(var(--nest-working-offset,-62%),-44%);
+}
+.ws-scene[data-room-view="nest"][data-nest-pose="archive"] { --nest-working-offset: -50%; }
+.ws-scene[data-room-view="nest"][data-nest-sprite] { --nest-working-offset: -64%; }
 .work-studio-view .ws-scene[data-room-view="nest"][data-media-device="tv"] .ws-media-panel[data-device="tv"] .ws-tv-watcher,
 .work-studio-view .ws-scene[data-room-view="nest"][data-media-device="tv"] .ws-media-panel[data-device="tv"] .ws-media-receiver::after {
   display: none;

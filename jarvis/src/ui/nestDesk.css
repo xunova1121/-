@@ -1,5 +1,5 @@
 .ws-nest-desk[hidden]{display:none}
-.ws-nest-desk{position:absolute;z-index:12;inset:7% auto auto 50%;transform:translateX(-50%);width:min(68%,560px);max-height:86%;overflow:auto;overscroll-behavior:contain;background:#fbf7ec;color:#38392d;border:1px solid #bdb49c;border-radius:14px;box-shadow:0 8px 30px #241d1855;padding:clamp(10px,1.8vw,23px);text-align:left;color-scheme:light}
+.ws-nest-desk{box-sizing:border-box;width:100%;min-width:0;max-height:min(48vh,440px);overflow:auto;overscroll-behavior:contain;background:#fbf7ec;color:#38392d;border:1px solid #bdb49c;border-radius:14px;padding:clamp(10px,1.8vw,23px);text-align:left;color-scheme:light}
 .ws-nest-desk header,.ws-nest-desk nav,.ws-nest-trip-checks,.ws-nest-trip-places{display:flex;align-items:center;gap:8px}
 .ws-nest-desk header{justify-content:space-between}
 .ws-nest-desk h3{font:600 clamp(18px,2vw,27px)/1.2 'Noto Serif CJK SC',serif;margin:0}
@@ -26,4 +26,17 @@
 .ws-nest-trip-route li+li::before{content:'→';margin-inline-end:8px;color:#6d805a}
 .ws-nest-trip-checks{flex-wrap:wrap;margin-bottom:8px}
 .ws-nest-trip-checks label{display:inline-flex;align-items:center;gap:3px}
-@media(max-width:720px){.ws-nest-desk{inset:3% 3% auto;transform:none;width:auto;max-height:94%;padding:9px 11px}.ws-nest-desk nav{margin:5px 0}.ws-nest-desk button{font-size:12px;padding:5px 8px}.ws-nest-desk textarea{min-height:60px}.ws-nest-trip-route{padding:5px 8px}}
+@media(max-width:720px){.ws-nest-desk{padding:9px 11px}.ws-nest-desk nav{margin:5px 0}.ws-nest-desk button{font-size:12px;padding:5px 8px}.ws-nest-desk textarea{min-height:60px}.ws-nest-trip-route{padding:5px 8px}}
+
+/* 写手账时书桌有独立的阅读区。宽屏并排，窄屏翻到书桌页，聊天仍在原处。 */
+.work-studio-view[data-workshop] .ws-performance[data-desk-open] > .ws-scene { display:none; }
+@media(min-width:900px) {
+  .wb-desk .work-studio-view[data-workshop] .ws-performance[data-desk-open] {
+    display:grid; grid-template-columns:minmax(0,1fr) minmax(270px,.78fr); align-items:start; gap:0 8px;
+  }
+  .wb-desk .work-studio-view[data-workshop] .ws-performance[data-desk-open] > .ws-scene {
+    display:block; width:100%; margin:0; align-self:start;
+  }
+  .wb-desk .ws-performance[data-desk-open] > .ws-caption { grid-column:1/-1; }
+}
+.mobile-studio-sheet .ws-nest-desk { max-height:min(44cqh,380px); border-radius:0; }

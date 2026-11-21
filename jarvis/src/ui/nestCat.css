@@ -1,34 +1,60 @@
-.ws-nest-cat-patch {
-  position: absolute; z-index: 2; pointer-events: none; left: 20.83333%; top: 54.19922%;
-  width: 40.49479%; height: 30.27344%; max-width: none; object-fit: fill;
-  -webkit-mask-image: radial-gradient(ellipse 28% 44% at 38% 61%, #000 82%, transparent);
-  mask-image: radial-gradient(ellipse 28% 44% at 38% 61%, #000 82%, transparent);
+/* 原画保持固定。各局部叠回同一机位，呼吸只动胸背，洗脸、闻手与挠下巴各有自己的支点。 */
+.ws-nest-cat-motion {
+  position: absolute; z-index: 2; inset: 0; pointer-events: none; user-select: none;
+  --fur: radial-gradient(ellipse 9.8% 8.6% at 36.5% 73%, #000 86%, transparent);
+  --face: radial-gradient(ellipse 3.5% 5.7% at 40.3% 69.3%, #000 74%, transparent);
+  --chest-origin: 37% 79%; --face-origin: 39.3% 73%;
 }
-.ws-nest-cat-patch[data-pose="sniff"] {
-  -webkit-mask-image: radial-gradient(ellipse 30% 48% at 48% 57%, #000 78%, transparent);
-  mask-image: radial-gradient(ellipse 30% 48% at 48% 57%, #000 78%, transparent);
+.ws-nest-cat-motion[data-source="patch"] {
+  --fur: radial-gradient(ellipse 28% 44% at 38% 61%, #000 84%, transparent);
+  --face: radial-gradient(ellipse 8% 13% at 46% 68%, #000 66%, transparent);
+  --chest-origin: 37% 83%; --face-origin: 45% 76%;
 }
-.ws-nest-cat-panel {
-  position:absolute; z-index:16; inset:8px 8px auto auto; width:min(285px,78%); max-height:calc(100% - 16px);
-  overflow:auto; overscroll-behavior:contain; padding:12px 15px; box-sizing:border-box;
-  color:#34392e; background:#fbf7ec; border:1px solid #c6baa1; border-radius:13px; box-shadow:0 5px 17px #201b1540;
-  font:normal 14px/1.45 system-ui,sans-serif; text-align:left;
+.ws-nest-cat-motion:is([data-pose="groom"],[data-pose="rest"]) {
+  --face: radial-gradient(ellipse 10% 23% at 49% 51%, #000 66%, transparent);
+  --face-origin: 44% 69%;
 }
-.ws-nest-cat-panel header, .ws-nest-cat-actions { display:flex; gap:7px; align-items:center; }
-.ws-nest-cat-panel header { justify-content:space-between; margin:0 0 5px; }
-.ws-nest-cat-panel h3, .ws-nest-cat-panel strong, .ws-nest-cat-panel p { color:inherit; margin:0; }
-.ws-nest-cat-panel h3 { font-size:16px; }
-.ws-nest-cat-panel p { margin:5px 0 9px; font-size:13px; }
-.ws-nest-cat-panel button {
-  font:inherit; color:inherit; cursor:pointer; border:1px solid #c6baa1; background:#fffcf4;
-  border-radius:9px; min-height:34px; padding:4px 10px;
+.ws-nest-cat-motion[data-pose="sniff"] {
+  --fur: radial-gradient(ellipse 30% 48% at 48% 57%, #000 78%, transparent);
+  --face: radial-gradient(ellipse 10% 16% at 42% 49%, #000 67%, transparent);
+  --face-origin: 37% 65%;
 }
-.ws-nest-cat-panel button[data-cat-choice="main"] { background:#344a36; color:#fff; border-color:#344a36; }
-.ws-nest-cat-panel button[data-cat-choice="close"] { font-size:22px; padding:1px; width:35px; }
-.ws-nest-cat-panel button:focus-visible { outline:2px solid #895910; outline-offset:1px; }
-.ws-nest-cat-patch[hidden], .ws-nest-cat-panel[hidden], .ws-nest-cat-panel button[hidden] { display:none!important; }
-@media(max-width:720px) {
-  .ws-nest-cat-panel { inset:4px 4px auto auto; max-height:calc(100% - 8px); padding:8px 10px; font-size:13px; }
-  .ws-nest-cat-panel h3 { font-size:14px; }
-  .ws-nest-cat-panel p { font-size:12px; margin:3px 0 6px; }
+.ws-nest-cat-motion:is([data-pose="welcome"],[data-pose="pet"]) {
+  --face: radial-gradient(ellipse 3.2% 4.6% at 38.5% 68.9%, #000 68%, transparent);
+  --face-origin: 38.1% 73.1%;
 }
+.ws-nest-cat-motion img { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; object-fit: fill; }
+.ws-nest-cat-motion[data-source="patch"] img { left: 20.83333%; top: 54.19922%; width: 40.49479%; height: 30.27344%; }
+.ws-nest-cat-body {
+  -webkit-mask-image: var(--fur); mask-image: var(--fur); transform-origin: var(--chest-origin);
+  animation: nest-cat-breathe 3.6s ease-in-out infinite;
+}
+.ws-nest-cat-face {
+  -webkit-mask-image: var(--face); mask-image: var(--face); transform-origin: var(--face-origin);
+  animation: nest-cat-look 9.1s ease-in-out infinite;
+}
+.ws-nest-cat-motion[data-pose="sniff"] .ws-nest-cat-face { animation: nest-cat-sniff .72s ease-in-out infinite; }
+.ws-nest-cat-motion:is([data-pose="groom"],[data-pose="rest"]) .ws-nest-cat-face { animation: nest-cat-wash 2.4s ease-in-out infinite; }
+.ws-nest-cat-motion:is([data-pose="asleep"],[data-pose="deep"]) .ws-nest-cat-body { animation-duration: 4.2s; }
+.ws-nest-cat-motion:is([data-pose="asleep"],[data-pose="deep"]) .ws-nest-cat-face { animation: none; }
+.ws-nest-cat-motion[data-pose="listening"] .ws-nest-cat-face { animation: nest-cat-ear .6s ease-out 2; }
+.ws-nest-cat-motion:is([data-pose="welcome"],[data-pose="pet"]) .ws-nest-cat-face { animation: nest-cat-nuzzle 1.5s ease-in-out infinite; }
+.ws-nest-cat-hand { display: none; }
+.ws-nest-cat-motion[data-pose="pet"] .ws-nest-cat-hand {
+  display: block; --hand: radial-gradient(ellipse 2.45% 2.65% at 42.1% 71.6%, #000 68%, transparent);
+  -webkit-mask-image: var(--hand); mask-image: var(--hand); transform-origin: 44.5% 73%;
+  animation: nest-cat-stroke 1.5s ease-in-out infinite;
+}
+@keyframes nest-cat-breathe { 0%,100% {transform: none} 44% {transform: scale(1.006,1.038)} }
+@keyframes nest-cat-look { 0%,13%,37%,74%,100% {transform: none} 24% {transform: rotate(3.8deg)} 82% {transform: rotate(-2.7deg)} }
+@keyframes nest-cat-sniff { 0%,100% {transform:none} 50% {transform: translate(.48%,-.28%) rotate(2deg)} }
+@keyframes nest-cat-wash { 0%,35%,78%,100% {transform:none} 18%,57% {transform: translate(.1%,.8%) rotate(4deg)} }
+@keyframes nest-cat-ear { 50% {transform: translateY(-.5%) rotate(-5deg)} }
+@keyframes nest-cat-nuzzle { 0%,100% {transform:none} 56% {transform: rotate(3.7deg) translateY(-.21%)} }
+@keyframes nest-cat-stroke { 0%,100% {transform:none} 51% {transform: translate(-.15%,-.25%) rotate(7deg)} }
+.ws-nest-cat-motion[hidden], .ws-scene[data-room-view="floor"] :is(.ws-nest-cat-motion,.ws-nest-cat-audio) { display:none!important; }
+.ws-nest-cat-audio[aria-pressed="false"] { text-decoration: line-through; opacity: .78; }
+@media (prefers-reduced-motion: reduce) {
+  .ws-scene .ws-nest-cat-motion img { animation: none !important; }
+}
+body.reduced-motion .ws-nest-cat-motion img { animation: none !important; }

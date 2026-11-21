@@ -38,7 +38,10 @@ export function createCatBehavior({ read, write }) {
     if (now < resting) return 'rest';
     if (now < sleeping) return 'deep';
     if (now < alert) return 'alert';
-    return naturalCatState(date);
+    const natural = naturalCatState(date);
+    // 清醒时偶尔舔一下前爪。午睡不被这个小动作打断。
+    const second = (date.getMinutes() % 3) * 60 + date.getSeconds();
+    return natural === 'alert' && second >= 92 && second < 99 ? 'groom' : natural;
   }
 
   function resume(date) {
@@ -111,10 +114,11 @@ export function createCatBehavior({ read, write }) {
       const willing = (date.getDate() + date.getHours() + Math.floor(date.getMinutes() / 6)) % 5 !== 0;
       if (!willing) return leave(date, true);
       phase = 'welcome';
-      deadline = now + (automatic ? 4500 : 40000);
-    } else if (phase === 'welcome' && automatic) {
+      deadline = now + (automatic ? 4500 : 1200);
+    } else if (phase === 'welcome') {
       phase = 'pet';
-      deadline = now + 14000;
+      strokes = 1;
+      deadline = now + (automatic ? 14000 : 12000);
     } else {
       leave(date, true);
     }
@@ -126,6 +130,11 @@ export function createCatBehavior({ read, write }) {
     const naturalBoundary = new Date(date);
     naturalBoundary.setMinutes((Math.floor(date.getMinutes() / 12) + 1) * 12, 0, 0);
     const boundaries = [naturalBoundary.getTime(), deadline, resting, sleeping, alert];
+    if (!phase && naturalCatState(date) === 'alert') {
+      const second = (date.getMinutes() % 3) * 60 + date.getSeconds();
+      const next = second < 92 ? 92 : second < 99 ? 99 : 272;
+      boundaries.push(now + (next - second) * 1000 - date.getMilliseconds());
+    }
     return { state, withCat: activeVisits.has(state), nextAt: Math.min(...boundaries.filter((time) => time > now)) };
   }
 

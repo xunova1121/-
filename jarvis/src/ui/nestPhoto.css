@@ -5,9 +5,5 @@
   filter: sepia(.09) saturate(.89) brightness(.96);
 }
 .nest-wall-photo.nest-photo-dark { filter: brightness(.43) saturate(.64); }
-.nest-wall-photo[hidden], .nest-photo-preview[hidden] { display: none !important; }
-.nest-photo-controls .nest-photo-preview {
-  display: block; max-width: 100%; max-height: clamp(48px,13vh,118px);
-  object-fit: contain; border: 3px solid #735c3f;
-}
+.nest-wall-photo[hidden] { display: none !important; }
 .nest-photo-controls p[role="status"]:empty { display: none; }

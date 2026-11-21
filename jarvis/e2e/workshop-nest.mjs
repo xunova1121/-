@@ -4,6 +4,8 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { checkNestControls } from './workshop-test-view.mjs';
+import { checkProgramArea } from './workshop-tv-playback.mjs';
+import { checkCoffee, checkLivingMotion, checkRadio, checkUnobstructed, checkViewingPlace, listenForCat } from './workshop-nest-actions.mjs';
 import { chromium } from 'playwright';
 import { createServer } from '../server/server.mjs';
 
@@ -61,6 +63,7 @@ async function checkRoomLighting(page, scene, hit) {
 
 async function checkWindow(room, hit, shot, closePanel) {
   await hit('window').click();
+  await checkUnobstructed(room.locator('.ws-scene'), '调整窗扇');
   const toggleWindow = room.locator('[data-nest-window=toggle]');
   await toggleWindow.click();
   await room.locator('[data-window-state=open]').waitFor({ state: 'attached' });
@@ -77,6 +80,7 @@ async function checkWindow(room, hit, shot, closePanel) {
 
 async function checkDeskAndPhoto(page, room, hit, button, reloadAt, closePanel, shot) {
   await hit('photo').click();
+  await checkUnobstructed(room.locator('.ws-scene'), '更换相框照片');
   const upload = page.waitForEvent('filechooser');
   await room.locator('[data-nest-photo=choose]').click();
   await (await upload).setFiles({ name: '相框测试.png', mimeType: 'image/png', buffer: framePhoto() });
@@ -124,19 +128,39 @@ async function checkDeskAndPhoto(page, room, hit, button, reloadAt, closePanel, 
   await button(desk, '回到小窝').click();
 }
 
-async function checkCat(page, room, scene, hit, waitPose) {
-  await hit('cat').click();
-  const cat = room.locator('[data-nest-panel="cat"]');
-  const stroke = cat.locator('[data-cat-choice="main"]');
-  await stroke.click();
+async function checkCat(page, room, scene, hit, waitPose, shot) {
+  const output = await listenForCat(page);
+  const cat = hit('cat');
+  const radio = room.locator('audio.ws-radio-audio');
+  await hit('radio').click();
+  await page.waitForFunction(() => document.querySelector('.work-studio[data-visible=true] audio.ws-radio-audio')?.currentTime > .05);
+  const original = await radio.evaluate(el => ({ volume: el.volume, time: el.currentTime, src: el.currentSrc }));
+  await cat.click();
   await room.locator('[data-cat-state="sniff"]').waitFor({ state: 'attached' });
+  await checkUnobstructed(scene, '闻手');
   await page.clock.fastForward(3500);
   await room.locator('[data-cat-state="welcome"]').waitFor({ state: 'attached' });
-  await stroke.click();
+  await page.clock.fastForward(1500);
+  await room.locator('[data-cat-state="pet"]').waitFor({ state: 'attached' });
   await waitPose('cat');
-  for (let i = 0; i < 4 && await scene.getAttribute('data-cat-state') === 'pet'; i++) await stroke.click();
+  await page.waitForFunction(original => {
+    const el = document.querySelector('.work-studio[data-visible=true] audio.ws-radio-audio');
+    return !el.paused && el.volume > 0 && el.volume < original / 2;
+  }, original.volume);
+  await checkUnobstructed(scene, '亲近橘猫');
+  await page.waitForFunction(log => log.sounds.some(s => s.voice > .004 && s.meow > .004), output);
+  assert.equal(await output.evaluate(log => log.sounds.length), 1, '真实抚摸播放一次语音和回应');
+  await shot('亲近橘猫');
+  await output.evaluate(log => log.restore());
+  await output.dispose();
+  await page.waitForFunction(original => {
+    const el = document.querySelector('.work-studio[data-visible=true] audio.ws-radio-audio');
+    return !el.paused && el.volume === original.volume && el.currentSrc === original.src && el.currentTime > original.time;
+  }, original);
+  await hit('radio').click();
+  for (let i = 0; i < 4 && await scene.getAttribute('data-cat-state') === 'pet'; i++) await cat.click();
   await room.locator('[data-cat-state="rest"]').waitFor({ state: 'attached' });
-  await cat.locator('[data-cat-choice="leave"]').click();
+  await checkUnobstructed(scene, '猫自己休息');
 }
 
 async function checkMedia(page, room, button, shot) {
@@ -144,6 +168,9 @@ async function checkMedia(page, room, button, shot) {
   const news = room.locator('.ws-media-panel[data-device=monitor]');
   await news.getByText(newsItem.title, { exact: true }).first().waitFor();
   assert.equal(await news.getByRole('link', { name: '阅读原文', exact: true }).getAttribute('href'), newsItem.url);
+  await news.evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished)));
+  await checkViewingPlace(room, 'news');
+  await shot('看新闻');
   await button(news, '返回房间').click();
   await room.locator('[data-media-device="tv"]').click();
   const tv = room.locator('.ws-media-panel[data-device=tv]');
@@ -152,17 +179,10 @@ async function checkMedia(page, room, button, shot) {
     const video = document.querySelector('.work-studio[data-visible=true] .ws-tv-standby video');
     return video && video.videoWidth > 0 && !video.paused && video.currentTime > 0;
   });
+  await checkProgramArea(tv.locator('.ws-tv-standby video'), '小窝内置节目');
   await room.locator('.ws-scene[data-life-phase="settled"][data-nest-pose="tv"]').waitFor();
   assert.equal(await tv.locator('.ws-tv-watcher').isVisible(), false, '小窝只显示沙发上的一位未央');
-  const geometry = await room.locator('.ws-scene').evaluate(el => {
-    const floor = el.querySelector('.ws-floorplan').getBoundingClientRect();
-    const scene = el.getBoundingClientRect();
-    const cabinet = el.querySelector('.ws-media-receiver').getBoundingClientRect();
-    const face = [floor.left + floor.width * .41, floor.top + floor.height * .43];
-    const inside = rect => face[0] >= rect.left && face[0] <= rect.right && face[1] >= rect.top && face[1] <= rect.bottom;
-    return { visible: inside(scene), covered: inside(cabinet), face };
-  });
-  assert(geometry.visible && !geometry.covered, '电视没有盖住沙发上的未央 ' + JSON.stringify(geometry));
+  await checkViewingPlace(room, 'tv');
   await shot('看电视');
   await button(tv, '返回房间').click();
 }
@@ -228,13 +248,17 @@ async function check(mobile, width) {
       await page.setViewportSize({ width, height: 844 });
     }
     await shot('小窝');
+    await checkLivingMotion(page, scene);
     const { bright, dark } = await checkRoomLighting(page, scene, hit);
+    await checkCoffee(page, room, scene, hit, shot);
 
     const dayGarden = await checkWindow(room, hit, shot, closePanel);
 
     await checkDeskAndPhoto(page, room, hit, button, reloadAt, closePanel, shot);
 
-    await checkCat(page, room, scene, hit, waitPose);
+    await checkCat(page, room, scene, hit, waitPose, shot);
+
+    await checkRadio(page, room, scene, hit);
 
     await checkMedia(page, room, button, shot);
 
@@ -243,6 +267,10 @@ async function check(mobile, width) {
     await reloadAt('23:00');
     await waitPose('sleep');
     await room.locator('[data-nest-light="off"]').waitFor({ state: 'attached' });
+    const quilt = room.locator('[data-idle-pose="sleep"] .ws-nest-idle-detail .ws-nest-idle-paint');
+    await quilt.waitFor();
+    assert(await quilt.evaluate(el => el.getAnimations().some(a => a.playState === 'running' &&
+      a.effect.getKeyframes().some(frame => frame.transform && frame.transform !== 'none'))), '睡着时被面应随呼吸起伏');
     await shot('夜里盖被子');
     await hit('window').click();
     await room.locator('[data-nest-window=toggle]').click();
@@ -254,12 +282,11 @@ async function check(mobile, width) {
     await waitPose('trip');
     await reloadAt('13:00', '21');
     await hit('cat').click();
-    const catPanel = room.locator('[data-nest-panel="cat"]');
-    await button(catPanel, '轻声唤它').click();
     await page.clock.fastForward(2500);
     await room.locator('[data-cat-state="deep"]').waitFor({ state: 'attached' });
-    assert.equal(await catPanel.locator('[data-cat-choice="main"]').isVisible(), false);
-    await catPanel.locator('[data-cat-choice="leave"]').click();
+    await hit('cat').click();
+    assert.equal(await scene.getAttribute('data-cat-state'), 'deep', '睡猫可以继续睡');
+    await checkUnobstructed(scene, '猫继续睡觉');
     await reloadAt('18:42');
     await page.clock.fastForward(4000);
     await room.locator('[data-cat-state="rest"]').waitFor({ state: 'attached' });

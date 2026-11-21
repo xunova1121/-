@@ -1,24 +1,26 @@
-// 相框和窗景与房间共用一个对话框，切换家具时归还键盘焦点。
-export function createNestPanel(scene, closeOthers, otherPanelOpen) {
+// 家具的操作放在画面外的原状态行。远眺只替换画面，关闭后归还键盘焦点。
+export function createNestPanel(scene, caption, closeOthers, otherPanelOpen) {
   const element = document.createElement('section');
   element.className = 'ws-nest-panel';
   element.hidden = true;
-  element.setAttribute('role', 'dialog');
-  const header = document.createElement('header');
-  const heading = document.createElement('h3');
+  element.setAttribute('role', 'group');
   const back = document.createElement('button');
   back.type = 'button';
-  back.textContent = '回到房间';
+  back.className = 'nest-controls-close';
+  back.setAttribute('aria-label', '回到房间');
+  back.textContent = '×';
   const body = document.createElement('div');
   body.className = 'ws-nest-panel-body';
-  header.append(heading, back);
-  element.append(header, body);
-  scene.append(element);
-  let trigger;
+  element.append(body, back);
+  caption.append(element);
+  let trigger, vista;
   function close(restoreFocus = true) {
     if (element.hidden) return false;
     element.hidden = true;
+    delete caption.dataset.nestControls;
     delete element.dataset.nestPanel;
+    vista?.remove();
+    vista = null;
     body.replaceChildren();
     if (restoreFocus && trigger?.isConnected) trigger.focus({preventScroll: true});
     trigger = null;
@@ -35,12 +37,15 @@ export function createNestPanel(scene, closeOthers, otherPanelOpen) {
     open(options) {
       closeOthers();
       trigger = options.trigger || trigger;
-      heading.textContent = options.title;
+      vista?.remove();
+      vista = options.kind === 'view' ? options.content : null;
       element.setAttribute('aria-label', options.title);
       element.dataset.nestPanel = options.kind;
-      body.replaceChildren(options.content);
+      caption.dataset.nestControls = options.kind;
+      if (vista) scene.append(vista);
+      body.replaceChildren(vista ? options.actions : options.content);
       element.hidden = false;
-      back.focus({preventScroll: true});
+      (body.querySelector('button:not([disabled]):not([hidden])') || back).focus({preventScroll: true});
     },
     close,
     isOpen: kind => kind ? !element.hidden && element.dataset.nestPanel === kind : !element.hidden || otherPanelOpen()
