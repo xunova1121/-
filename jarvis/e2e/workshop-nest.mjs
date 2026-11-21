@@ -288,6 +288,11 @@ async function check(mobile, width, clockOnly = false) {
         assert(await page.locator('#mobile-work-studio').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
       }
       await page.setViewportSize({ width, height: 844 });
+      // 横竖切换会替换房间图片，等竖屏原图真正解码后再保存截图。
+      await room.locator('.ws-scene[data-nest-layout=portrait] img.ws-nest-art').evaluate(async img => {
+        await img.decode();
+        await new Promise(requestAnimationFrame);
+      });
     }
     await shot('小窝');
     assert.equal(await isPortraitNest(scene), mobile, '手机竖屏应进入全屏小窝');
