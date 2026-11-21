@@ -36,6 +36,7 @@ export function initCompanionAppearance(navigation = {}) {
     const unzoomedHeight = height * (viewport?.scale || 1);
     keyboardOpen = layout.height - unzoomedHeight > 120 && (focused || keyboardOpen);
     body.classList.toggle('wy-keyboard-open', keyboardOpen);
+    body.style.setProperty('--wy-layout-height', `${Math.round(layout.height)}px`);
     body.style.setProperty('--wy-viewport-height', `${Math.round(height)}px`);
     body.style.setProperty('--wy-viewport-top', `${Math.round(viewport?.offsetTop || 0)}px`);
   };

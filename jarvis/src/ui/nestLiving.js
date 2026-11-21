@@ -84,9 +84,10 @@ export function createNestLiving(floor) {
     }
   }
 
-  function render(pose, state, artwork) {
+  function render(pose, state, artwork, frontSleeper = '') {
     if (!visible) return;
     if (pose === 'coffee') {
+      delete layer.dataset.sleepSeat;
       const key = (state.manual ? '手动' : '作息') + state.nextAt;
       if (key !== activityKey) {
         activityKey = key;
@@ -103,6 +104,16 @@ export function createNestLiving(floor) {
     clearTimeout(timer);
     timer = null;
     delete layer.dataset.coffeePhase;
+    if (frontSleeper) {
+      layer.dataset.idlePose = 'sleep';
+      layer.dataset.sleepSeat = 'front';
+      // 被子属于这一位睡着的人。后墙沙发和前排沙发底图都留在原位。
+      detail.removeAttribute('style');
+      detail.firstChild.style.cssText = '';
+      detail.firstChild.style.backgroundImage = 'url("' + frontSleeper + '")';
+      return;
+    }
+    delete layer.dataset.sleepSeat;
     const regions = idleRegions[pose];
     if (!regions) {
       delete layer.dataset.idlePose;

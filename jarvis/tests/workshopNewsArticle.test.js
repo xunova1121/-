@@ -14,6 +14,28 @@ const answer = { url, paragraphs: ['原报道第一段。', '第二段。'], tru
 afterEach(() => vi.unstubAllGlobals());
 
 describe('工作台内读报道', () => {
+  it('切换报道即撤下旧配图，图片失败时正文仍可读', () => {
+    const create = () => ({ setAttribute: vi.fn(), remove: vi.fn(), replaceChildren: vi.fn() });
+    vi.stubGlobal('document', { createElement: create });
+    const ui = { original: { setAttribute: vi.fn(), removeAttribute: vi.fn() }, news: { append: vi.fn(), insertBefore: vi.fn() },
+      digest: {}, headlines: { replaceChildren: vi.fn() }, scroll: {} };
+    const select = createWorkshopNewsReader(ui, {});
+    const image = 'https://p3.img.cctvpic.com/photoworkspace/example.jpg';
+    select({ ...item, title: '甲', image });
+    const img = ui.news.insertBefore.mock.calls[0][0];
+    expect(img.src).toBe(image);
+    expect(img.hidden).toBe(true);
+    img.onload();
+    expect(img.hidden).toBe(false);
+    select({ url: cns, source: '中新网', title: '乙', summary: '乙的正文导语' });
+    expect(img.remove).toHaveBeenCalledOnce();
+    expect(ui.news.insertBefore).toHaveBeenCalledTimes(1);
+    expect(ui.news.append.mock.calls[0][0].textContent).toContain('乙的正文导语');
+    select({ ...item, title: '甲', image });
+    const retry = ui.news.insertBefore.mock.calls[1][0];
+    retry.onerror();
+    expect(retry.remove).toHaveBeenCalledOnce();
+  });
   it('区分索引导语、正文和视频占位，不执行央视新版正文模板脚本', async () => {
     const now = Date.parse('2026-11-20T18:30:00+08:00');
     const list = [{ title: '报道标题', url, brief: '来源的实际导语。', focus_date: '2026-11-20 18:10:22' }];

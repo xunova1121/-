@@ -37,62 +37,124 @@
   }
 }
 @keyframes ws-movie-breath { 50% { transform: scale(1.004,1.015) rotate(-.45deg); } }
-.work-studio-view[data-workshop][data-visible="true"] .ws-scene[data-room-view="nest"][data-media-device="tv"] {
-  background: var(--room-wall,#534737);
+
+/* 房间与沙发始终使用日常机位。只给播放器、简报做打开/收起变换。 */
+.ws-scene[data-room-view="nest"] .ws-media-panel { transform-origin: top left; }
+.work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] {
+  --tv-width: min(78cqw,calc((67cqh - 34px) * 1.76));
+  inset: 1% 1% auto auto; width: var(--tv-width); box-sizing: border-box;
+  padding: 3px; overflow: visible; pointer-events: auto;
+  border: 1px solid #795636; border-radius: 10px;
+  color: #fff8eb; background: #39291f; box-shadow: 0 4px 12px #1f130c66;
 }
-.wb-desk .work-studio-view[data-workshop][data-media-open] .ws-scene[data-room-view="nest"][data-media-device="tv"] {
-  width: 100%; align-self: stretch;
+.ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"]::before,
+.ws-scene[data-room-view="nest"] .ws-media-panel .ws-tv-grille,
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] .ws-tv-watcher,
+.work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] .ws-media-receiver::after { display:none; }
+.work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] .ws-media-receiver {
+  position: relative; inset: auto; width: 100%; padding: 0; margin: 0; transform: none;
+  translate: none; background: transparent; box-shadow: none; animation: none;
 }
-@container workbench-area (min-width:731px) {
-  /* 电视向工作台两侧展开，聊天仍使用原来的左右留白。 */
-  .wb-desk > .work-studio-view:has(.ws-scene[data-room-view="nest"][data-media-device="tv"]) {
+.ws-scene[data-room-view="nest"] .ws-tv-glass { border-radius: 6px; box-shadow: none; }
+.ws-scene[data-room-view="nest"] .ws-media-remote {
+  position: relative; inset: auto; margin-inline-end: 34px; min-height: 32px;
+}
+.ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] .ws-media-header { inset: auto 3px 3px auto; }
+.work-studio-view .ws-scene[data-room-view="nest"] .ws-media-remote > button,
+.work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] .ws-media-back {
+  min-height: 32px; padding-inline: 9px; color: #fff5df; background: transparent; border: 0;
+}
+.ws-scene[data-room-view="nest"] .ws-media-panel .ws-media-back {
+  font-size: 0; min-width: 32px; min-height: 32px;
+}
+.ws-scene[data-room-view="nest"] .ws-media-panel .ws-media-back::before { content: '×'; font: 22px/1 sans-serif; }
+.ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] .ws-media-back::before {
+  content: ''; width: 8px; height: 8px; border: solid currentColor; border-width: 0 2px 2px 0;
+  transform: translateY(-2px) rotate(45deg);
+}
+.ws-scene[data-room-view="nest"] .ws-tv-controls .ws-tv-stations {
+  position: absolute; z-index: 2; inset: auto 0 100%; flex-wrap: wrap;
+  max-height: min(40cqh,170px); overflow: auto; padding: 7px;
+  border-radius: 8px; background: #312820; box-shadow: 0 2px 7px #21160d55;
+}
+.ws-scene[data-room-view="nest"] .ws-tv-stations .ws-media-channels {
+  display: contents;
+}
+.ws-scene[data-room-view="nest"] .ws-source-manager { inset: auto auto 35px 3px; width: calc(100% - 6px); max-height: min(68cqh,420px); }
+.work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="monitor"] {
+  inset: 1% 1% 35%; border-color: #c8ac89; border-radius: 14px;
+  --ws-panel:#fff7e7; --ws-ink:#38291e; --ws-dim:#675440; --ws-line:#d5c3a9; --ws-on-tint:#73502d;
+  background:var(--ws-panel); color:var(--ws-ink);
+}
+/* 固定纵向全景，下半的沙发给未央留座。节目保留本身的宽高比。 */
+.work-studio-view .ws-scene[data-room-view="nest"][data-nest-layout="portrait"] .ws-media-panel[data-device="tv"] {
+  --tv-width: min(95cqw,calc((49cqh - 38px) * 1.76));
+  inset: max(52px,calc(37% - var(--tv-width) * .4)) auto auto calc(50% - var(--tv-width) / 2);
+}
+.work-studio-view .ws-scene[data-room-view="nest"][data-nest-layout="portrait"] .ws-media-panel[data-device="monitor"] {
+  inset: max(54px,9%) 5% 47%; border-radius: 15px;
+  padding: clamp(12px,3cqw,19px);
+}
+.ws-scene[data-room-view="nest"][data-media-device="tv"] > .ws-room-tools,
+.ws-scene[data-room-view="nest"][data-media-device="monitor"] > .ws-room-tools { visibility: hidden; }
+
+@container workbench-area (min-width: 731px) {
+  /* 进入小窝就留出完整电视墙。点设备时上下分区与房间机位都不动。 */
+  .wb-desk > .work-studio-view[data-wide-workshop]:has(.ws-scene[data-room-view="nest"]) {
     width: auto; margin-inline: calc(3px - clamp(10px,1.25vw,21px));
   }
+  .wb-desk .work-studio-view[data-wide-workshop][data-workshop] .ws-scene[data-room-view="nest"] {
+    width:100%; flex:1; aspect-ratio:auto; align-self:stretch; margin:0;
+  }
+  .wb-desk .work-studio-view[data-wide-workshop] .ws-timeline:not(:has(.ws-list:empty)) {
+    flex:none; max-height:68px; overflow:auto;
+  }
+  body.workbench .wb-desk:has(.ws-scene[data-room-view="nest"]) {
+    padding-block: 6px; grid-template-rows:minmax(0,1fr) minmax(112px,14%); gap:6px;
+  }
+  .wb-desk .work-studio-view[data-wide-workshop]:has(.ws-scene[data-room-view="nest"]) .ws-header {
+    inset:6px auto auto 6px; pointer-events:auto;
+  }
+  .wb-desk .work-studio-view[data-wide-workshop]:has(.ws-scene[data-room-view="nest"]) .ws-performance {
+    position:relative;
+  }
+  .wb-desk .work-studio-view[data-wide-workshop]:has(.ws-scene[data-room-view="nest"]) .ws-caption {
+    position:absolute; z-index:6; bottom:5px; right:5px; width:auto; max-width:calc(100% - 10px);
+    min-height:28px; padding:3px 6px; border-radius:7px;
+  }
+  .wb-desk .work-studio-view[data-wide-workshop] .ws-scene[data-room-view="nest"] {
+    background:#573522 url('./assets/nestRoom/portrait/ceiling-lit.webp') top center / 100% auto no-repeat;
+  }
+  .wb-desk .work-studio-view[data-wide-workshop] .ws-scene[data-room-view="nest"][data-nest-light="off"] {
+    background-image:url('./assets/nestRoom/portrait/ceiling-off.webp');
+  }
+  /* 保留原画全宽。额外上沿是真实绘制的天花，下方露出前排沙发和猫。 */
+  .wb-desk .work-studio-view[data-wide-workshop] .ws-scene[data-room-view="nest"] > .ws-floorplan {
+    width:100%; left:0; top:min(11cqw,16cqh); bottom:auto; transform:scale(var(--ws-scene-scale,1));
+  }
+  .wb-desk .work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] {
+    --tv-width:min(83.8cqw,158cqh); inset:1% .6% auto auto;
+  }
+  .wb-desk .work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="monitor"] {
+    inset:1% 1% 35.5% 1%;
+  }
+  .wb-desk .ws-scene[data-room-view="nest"] .ws-media-remote {
+    position:absolute; inset:4px auto auto 4px; margin:0; border-radius:6px; background:#30251bd9;
+  }
+  .wb-desk .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] .ws-media-header {
+    inset:4px 4px auto auto; border-radius:6px; background:#30251bd9;
+  }
+  .wb-desk .ws-scene[data-room-view="nest"] .ws-tv-controls .ws-tv-stations {
+    inset:100% auto auto 0; width:min(64cqw,25rem);
+  }
+  .wb-desk .ws-scene[data-room-view="nest"] .ws-source-manager { inset:39px auto auto 4px; width:min(90%,25rem); }
 }
-.work-studio-view[data-media-open][data-workshop] .ws-scene[data-room-view="nest"][data-media-device] .ws-floorplan {
-  width: max(100%,150cqh); height: auto; aspect-ratio: 3 / 2;
-  inset: 50% auto auto 50%; transform: translate(-50%,-50%); translate:none !important;
-}
-.ws-scene[data-room-view="nest"][data-media-device="tv"] .ws-media-panel .ws-media-receiver {
-  inset-inline: auto var(--tv-inset); translate: none;
-}
-/* 镜头框住前排沙发及猫脸，播放器和新闻阅读区域沿用原尺寸。 */
-.work-studio-view[data-media-open][data-workshop] .ws-scene[data-room-view="nest"][data-media-device]:not([data-media-work="true"]) .ws-floorplan {
-  width:calc((100cqw - var(--tv-width) - var(--tv-inset)) * 4.25);
-  left:.6%; top:calc(52% - 15px); transform:translate(-21.4%,-59%);
-}
-.work-studio-view[data-media-open][data-workshop] .ws-scene[data-room-view="nest"][data-media-device="monitor"]:not([data-media-work="true"]) .ws-floorplan {
-  width:101%; left:1.8%;
-}
-/* 不同宽高比退镜时，用同幅原画的屋顶和地板连续铺到边缘，只绘静止纹理。 */
-.work-studio-view[data-workshop][data-visible="true"] .ws-scene[data-room-view="nest"][data-nest-viewing][data-media-device] {
-  background:var(--room-wall,#534737) var(--nest-view-art) center / cover;
-}
-.ws-scene[data-room-view="nest"][data-nest-viewing][data-media-device] .ws-floorplan::before,
-.ws-scene[data-room-view="nest"][data-nest-viewing][data-media-device] .ws-floorplan::after {
-  content:''; pointer-events:none; position:absolute; z-index:-1; left:0; width:100%; height:100%;
-  background-image:var(--nest-view-art); background-repeat:no-repeat; transform:scaleY(-1);
-}
-.ws-scene[data-room-view="nest"][data-nest-viewing][data-media-device] .ws-floorplan::before {
-  bottom:100%; background-position:center top; background-size:100% 1200%;
-}
-.ws-scene[data-room-view="nest"][data-nest-viewing][data-media-device] .ws-floorplan::after {
-  top:100%; background-position:center bottom; background-size:100% 660%;
-}
-.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"][data-media-device="monitor"]:not([data-media-work="true"]) .ws-media-panel[data-device="monitor"] {
-  inset: 4.5% 1% 4.5% 25.5%;
-}
-/* 工作中人物在窗边，屏幕移到另一侧，仍能看见手上的事情。 */
-.ws-scene[data-room-view="nest"][data-media-device="tv"][data-media-work="true"] .ws-media-panel .ws-media-receiver {
-  inset-inline: max(1%,8px) auto;
-}
-.work-studio-view[data-media-open][data-workshop] .ws-scene[data-room-view="nest"][data-media-device="tv"][data-media-work="true"] .ws-floorplan {
-  width: max(155%,165cqh); left: 93%; top: 45%;
-  transform: translate(var(--nest-working-offset,-62%),-44%);
-}
-.ws-scene[data-room-view="nest"][data-nest-pose="archive"] { --nest-working-offset: -50%; }
-.ws-scene[data-room-view="nest"][data-nest-sprite] { --nest-working-offset: -64%; }
-.work-studio-view .ws-scene[data-room-view="nest"][data-media-device="tv"] .ws-media-panel[data-device="tv"] .ws-tv-watcher,
-.work-studio-view .ws-scene[data-room-view="nest"][data-media-device="tv"] .ws-media-panel[data-device="tv"] .ws-media-receiver::after {
-  display: none;
+
+@media (max-height:720px) {
+  @container workbench-area (min-width:731px) {
+    /* 矮窗口可以下滚到对话，避免全景仅剩天花和电视上沿。 */
+    body.workbench .wb-desk:has(.ws-scene[data-room-view="nest"]) {
+      grid-template-rows:minmax(63cqw,1fr) minmax(112px,16vh); overflow:auto;
+    }
+  }
 }

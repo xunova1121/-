@@ -68,7 +68,9 @@ export function createNestClock(floor, art) {
     foreground = true;
     syncTime();
   }
-  const onArtLoad = () => restoreDial(dial, art);
+  const onArtLoad = () => {
+    if (floor.parentElement?.dataset.nestLayout !== 'portrait') restoreDial(dial, art);
+  };
   function setVisible(shown) {
     if (visible === shown) return;
     visible = shown;

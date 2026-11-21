@@ -21,6 +21,17 @@ function fixture() {
 }
 afterEach(() => vi.unstubAllGlobals());
 
+it('手机新闻阅读栏里直接提问绑定起草时的报道；关闭后普通提问不附带来源', () => {
+  const { app, chat } = fixture();
+  app.prompt.hasAttribute = (key) => key === 'data-nest-news';
+  chat.draftChanged('鸟为什么不飞走？');
+  chat.select('s', b);
+  expect(chat.bind('鸟为什么不飞走？')).toContain(a.url);
+  expect(chat.bind('普通语音指令', true)).toBe('普通语音指令');
+  app.prompt.hasAttribute = () => false;
+  expect(chat.bind('帮我写一封信')).toBe('帮我写一封信');
+});
+
 it('对话中「这条」附带当时显示的来源和时间，无关的输入不附带', () => {
   const { chat } = fixture();
   for (const text of ['请看看这条新闻', '这条对我们有什么影响？', '把这条整理成简报', '屏幕上的报道怎么解读？']) {

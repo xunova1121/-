@@ -15,13 +15,10 @@
   width: min(100%,150cqh); aspect-ratio: 3 / 2; height: auto;
   top: 50%; bottom: auto; left: 50%; background: #3a3023;
   transform: translate(-50%,-50%) scale(var(--ws-scene-scale,1));
-  /* 从平面图切回时忽略未结束的旧跟拍，工作区的镜头只随用户打开的设备取景。 */
+  /* 只按用户选择的倍率近看；坐下、看电视或回桌边时都共用同一镜头轴心。 */
   translate:none !important;
-  transform-origin: var(--nest-aim-x,59%) var(--nest-aim-y,45%);
+  transform-origin:50% 50%;
 }
-.ws-scene[data-room-view="nest"]:is([data-nest-pose="sleep"],[data-nest-pose="tv"]) { --nest-aim-x: 38%; --nest-aim-y: 46%; }
-.ws-scene[data-room-view="nest"][data-nest-pose="cat"] { --nest-aim-x: 43%; --nest-aim-y: 72%; }
-.ws-scene[data-room-view="nest"][data-nest-sprite] { --nest-aim-x: 61%; --nest-aim-y: 67%; }
 .ws-nest-art,.ws-nest-seat { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; user-select:none; }
 .ws-nest-seat {
   mask-image: radial-gradient(ellipse 13.5% 22% at 62.5% 47%,black 71%,transparent 100%);

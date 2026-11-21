@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
+import { checkPortraitViewer, isPortraitNest } from './workshop-fixed-nest.mjs';
 import { checkViewerPixels } from './workshop-room-furniture.mjs';
 
 async function pixels(png) {
@@ -12,8 +13,11 @@ async function pixels(png) {
 
 // 定在相同动画进度对照两张真实截图，单测中定时器触发本身不能证明角色在动。
 export async function checkLivingMotion(page, scene) {
-  await scene.locator('.ws-nest-living[data-idle-pose="work"]').waitFor();
-  const parts = scene.locator('.ws-nest-idle-paint,.ws-nest-cat-body,.ws-nest-cat-face');
+  const portrait = await isPortraitNest(scene);
+  const parts = portrait ? scene.locator('.ws-nest-portrait-actor,.ws-nest-portrait-cat')
+    : scene.locator('.ws-nest-idle-paint,.ws-nest-cat-body,.ws-nest-cat-face');
+  if (portrait) await scene.locator('.ws-nest-portrait-actor[data-picture="work"]').waitFor();
+  else await scene.locator('.ws-nest-living[data-idle-pose="work"]').waitFor();
   await parts.evaluateAll(els => Promise.all(els.filter(el => el instanceof HTMLImageElement && el.currentSrc).map(el => el.decode())));
   async function frame(fraction) {
     await parts.evaluateAll((els, fraction) => {
@@ -35,7 +39,11 @@ export async function checkLivingMotion(page, scene) {
     }
     return count;
   };
-  const motion = { person: changed([.55,.32,.70,.56]), cat: changed([.29,.65,.44,.82]), wall: changed([.07,.13,.16,.25]) };
+  const regions = portrait ? await parts.evaluateAll(els => els.map(el => {
+    const b = el.getBoundingClientRect(), scene = el.closest('.ws-scene').getBoundingClientRect();
+    return [(b.left-scene.left)/scene.width,(b.top-scene.top)/scene.height,(b.right-scene.left)/scene.width,(b.bottom-scene.top)/scene.height].map(n => Math.max(0,Math.min(1,n)));
+  })) : [[.55,.32,.70,.56],[.29,.65,.44,.82]];
+  const motion = { person: changed(regions[0]), cat: changed(regions[1]), wall: changed([.07,.13,.16,.25]) };
   assert(motion.person >= 8 && motion.cat >= 8 && motion.wall <= 2, '人物、橘猫各自有动作，背景书架应保持静止 ' + JSON.stringify(motion));
   await parts.evaluateAll(els => els.forEach(el => el.getAnimations().forEach(animation => animation.play())));
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -44,6 +52,15 @@ export async function checkLivingMotion(page, scene) {
   // 分别验证每个姿势的实际样式；闻手、理毛和蹭手的选择器比普通待机层更具体。
   const poses = ['alert', 'asleep', 'listening', 'deep', 'groom', 'rest', 'sniff', 'welcome', 'pet'];
   async function movingCatParts() {
+    if (portrait) return scene.evaluate((el, list) => {
+      const original = el.dataset.catState;
+      try {
+        return list.filter(pose => {
+          el.dataset.catState = pose;
+          return getComputedStyle(el.querySelector('.ws-nest-portrait-cat')).animationName !== 'none';
+        });
+      } finally { el.dataset.catState = original; }
+    }, poses);
     return scene.locator('.ws-nest-cat-motion').evaluate((cat, list) => {
       const probe = cat.cloneNode(true);
       cat.after(probe);
@@ -100,7 +117,8 @@ export async function checkCoffee(page, room, scene, hit, shot) {
     const style = getComputedStyle(el);
     return { x, y, mugX, mugY, frame: style.backgroundPosition, art: style.backgroundImage };
   });
-  assert(geometry.x > .64 && geometry.x < .83 && geometry.y > .4 && geometry.y < .58 && geometry.art !== 'none',
+  const pourRegion = await isPortraitNest(scene) ? [.82,.98,.41,.50] : [.64,.83,.4,.58];
+  assert(geometry.x > pourRegion[0] && geometry.x < pourRegion[1] && geometry.y > pourRegion[2] && geometry.y < pourRegion[3] && geometry.art !== 'none',
     '水流落到桌面杯中 ' + JSON.stringify(geometry));
   assert(geometry.mugX > .25 && geometry.mugX < .46 && geometry.mugY > .04 && geometry.mugY < .17,
     '杯底应落在固定茶桌左侧的实际桌面内 ' + JSON.stringify(geometry));
@@ -233,7 +251,11 @@ export async function checkRadio(page, room, scene, hit) {
   const audio = room.locator('audio.ws-radio-audio');
   const dial = await radio.boundingBox();
   const tv = await room.locator('[data-media-device="tv"]').boundingBox();
-  assert(dial && tv && dial.y + dial.height / 2 < tv.y && dial.x < tv.x + tv.width && dial.x + dial.width > tv.x,
+  if (await isPortraitNest(scene)) {
+    const floor = await scene.locator('.ws-floorplan').boundingBox();
+    assert(dial && tv && dial.x > tv.x + tv.width/2 && dial.x < floor.x + floor.width * .40 && dial.y + dial.height/2 < tv.y + tv.height,
+      '收音机应在照片墙下、矮柜上电视的右手边');
+  } else assert(dial && tv && dial.y + dial.height / 2 < tv.y && dial.x < tv.x + tv.width && dial.x + dial.width > tv.x,
     '收音机点击区域要在真实电视上方');
   await radio.click();
   const first = await readRadioSignal(page, audio);
@@ -253,6 +275,17 @@ export async function checkRadio(page, room, scene, hit) {
 export async function checkViewingPlace(room, device) {
   const scene = room.locator(`[data-nest-viewing="${device}"]`);
   await scene.waitFor();
+  if (await isPortraitNest(scene)) {
+    const actor = scene.locator('.ws-nest-portrait-actor');
+    await actor.waitFor();
+    await actor.evaluate(img => img.decode());
+    const screen = await scene.locator(device === 'tv' ? '.ws-media-receiver' : '.ws-media-panel').boundingBox();
+    const stage = await scene.boundingBox();
+    assert(screen.width > stage.width * (device === 'tv' ? .88 : .64), '电视或新闻必须在手机内展开并清楚可看');
+    if (device === 'news') assert(Math.abs(screen.x + screen.width / 2 - stage.x - stage.width / 2) < 2, '新闻位于小窝中央');
+    await checkPortraitViewer(scene, device);
+    return;
+  }
   const shot = await scene.evaluate((el, device) => {
     const rect = selector => el.querySelector(selector).getBoundingClientRect();
     const furniture = el.querySelector('.ws-nest-loveseat');

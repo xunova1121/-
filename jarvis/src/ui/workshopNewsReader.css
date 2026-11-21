@@ -7,6 +7,11 @@
   flex: 1 1 auto; overflow-anchor: none; scrollbar-width: thin; scrollbar-gutter: stable; padding-inline-end: 2px;
 }
 .ws-media-panel .ws-media-news { gap: clamp(4px,1cqw,8px); }
+.ws-media-news .ws-article-photo {
+  display:block; width:100%; height:auto; max-height:min(20cqh,180px);
+  object-fit:contain; object-position:left center; border-radius:5px;
+}
+.ws-media-news .ws-article-photo[hidden] { display:none; }
 .ws-media-panel .ws-media-news .ws-media-title { font-size: clamp(18px,3.7cqw,26px); }
 .ws-media-news:has(.ws-article-content:not([hidden])) .ws-news-digest { display: none; }
 .ws-news-digest { margin-top: .8em; }

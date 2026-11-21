@@ -21,6 +21,24 @@ export function workshopArticleLink(value, source) {
   return '';
 }
 
+// 配图只显示原媒体随报道提供的静态图片。网关缓存与直接读源走同样的校验。
+export function workshopNewsImage(value, article) {
+  if (typeof value !== 'string' || !value || value.length > 700) return '';
+  try {
+    const url = new URL(value, article.url);
+    if (url.protocol !== 'https:' || url.username || url.password || url.port ||
+        !/\.(?:jpe?g|png|webp)$/i.test(url.pathname)) return '';
+    const host = url.hostname;
+    const publisher = new URL(article.url).hostname;
+    if (host === publisher ||
+        article.source === '央视网' && /^(?:p\d+\.)?img\.cctvpic\.com$/.test(host) ||
+        article.source === '中新网' && /^i\d*\.chinanews\.com(?:\.cn)?$/.test(host)) {
+      return url.origin + url.pathname;
+    }
+  } catch { /* 允许无配图的报道照常展示。 */ }
+  return '';
+}
+
 export function workshopHeadlines(items, at) {
   if (!Array.isArray(items)) return [];
   const rows = new Map();
@@ -31,7 +49,9 @@ export function workshopHeadlines(items, at) {
     const title = newsPlain(row.title).replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
     if (!url || !title || title.length > 180 || !Number.isFinite(stamp) || stamp > at || stamp < at - day || rows.has(url)) continue;
     const summary = typeof row.summary === 'string' ? newsPlain(row.summary).slice(0, 350) : '';
-    rows.set(url, { title, url, source: row.source, publishedAt: new Date(stamp).toISOString(), ...(summary && summary !== title ? { summary } : {}) });
+    const image = workshopNewsImage(row.image, { url, source: row.source });
+    rows.set(url, { title, url, source: row.source, publishedAt: new Date(stamp).toISOString(),
+      ...(summary && summary !== title ? { summary } : {}), ...(image ? { image } : {}) });
   }
   return [...rows.values()].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)).slice(0, 12);
 }
@@ -47,7 +67,7 @@ function cctvItems(text) {
     const publishedAt = stamp.replace(' ', 'T') + '+08:00';
     const timestamp = Date.parse(publishedAt);
     if (!Number.isFinite(timestamp) || new Date(timestamp + 8 * 3600_000).toISOString().slice(0, 19) !== stamp.replace(' ', 'T')) return [];
-    return [{ title: row.title, summary: row.brief, url: row.url, source: '央视网', publishedAt }];
+    return [{ title: row.title, summary: row.brief, image: row.image, url: row.url, source: '央视网', publishedAt }];
   });
 }
 

@@ -40,6 +40,8 @@ function createCatPicture(floor) {
   floor.append(picture);
   let pose, dark, lastImage;
   function draw() {
+    // 竖幅的独立橘猫由竖幅舞台渲染，切姿势无需重解码整幅横版房间。
+    if (floor.parentElement?.dataset.nestLayout === 'portrait') { picture.hidden = true; return; }
     const replacement = patches[pose]?.[dark ? 1 : 0];
     const url = replacement || art?.getAttribute('src');
     if (url && lastImage !== url) {

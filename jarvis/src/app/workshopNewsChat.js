@@ -7,6 +7,8 @@ export function createWorkshopNewsChat(app) {
   const scope = () => app.messageQueue?.scope();
   const inRoom = () => !document.hidden && Boolean(app.prompt?.closest('.wb-desk:not([hidden]), #mobile-work-studio[open]'));
   const current = (item) => item && item.session === app.session && item.scope === scope() && inRoom();
+  // 手机上阅读页的输入栏明确标为「追问这条新闻」，可以直接写问题。
+  const readingHere = () => app.prompt?.hasAttribute?.('data-nest-news') === true;
   function clear() {
     selected = null;
     draft = null;
@@ -54,13 +56,13 @@ export function createWorkshopNewsChat(app) {
     clear,
     select,
     draftChanged(text) {
-      if (!refersToWorkshopNews(text)) draft = null;
+      if (!text.trim() || (!readingHere() && !refersToWorkshopNews(text))) draft = null;
       else if (!current(draft) && current(selected)) draft = selected;
     },
     bind(text, byVoice = false) {
       const item = !byVoice && current(draft) ? draft : selected;
       if (!byVoice) draft = null;
-      return current(item) && refersToWorkshopNews(text) ? withWorkshopNews(text, item.article) : text;
+      return current(item) && (refersToWorkshopNews(text) || (!byVoice && readingHere())) ? withWorkshopNews(text, item.article) : text;
     },
     ask(sessionId, article) {
       if (!actionTarget(sessionId, article)) return;

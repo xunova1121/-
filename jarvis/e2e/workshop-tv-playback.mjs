@@ -56,9 +56,16 @@ export async function checkProgramArea(video, label) {
     const fraction = pixels / (stage.width * stage.height);
     const desk = el.closest('.wb-desk')?.getBoundingClientRect();
     const top = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
-    return { fraction, deskFraction: desk && pixels / (desk.width * desk.height), front: top === el,
+    const portrait = el.closest('.ws-scene').dataset.nestLayout === 'portrait';
+    return { portrait, actualWidth: el.videoWidth * scale / stage.width, fraction, deskFraction: desk && pixels / (desk.width * desk.height), front: top === el,
       stage: [stage.width, stage.height], screen: [rect.width, rect.height] };
   });
+  // 同一份 16:9 节目在整张竖屏小窝里以真实解码图像的宽度核算；不能靠拉伸或裁切凑面积。
+  if (geometry?.portrait) {
+    assert(geometry.front && geometry.actualWidth >= .88 && geometry.actualWidth <= 1, label + ' 竖屏实际节目应接近满宽 ' + JSON.stringify(geometry));
+    console.log(label + ' 实际节目宽度占竖屏小窝 ' + (geometry.actualWidth * 100).toFixed(1) + '%');
+    return;
+  }
   assert(geometry?.front && geometry.fraction > .5, label + ' 节目实际画面须占场景一半以上 ' + JSON.stringify(geometry));
   if (geometry.deskFraction != null) assert(geometry.deskFraction > .5, label + ' 节目实际画面须占宽屏工作台一半以上 ' + JSON.stringify(geometry));
   const desk = geometry.deskFraction == null ? '' : '，占整个工作台 ' + (geometry.deskFraction * 100).toFixed(1) + '%';

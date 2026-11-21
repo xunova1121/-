@@ -57,6 +57,7 @@ export function mediaControls(scene, floor, channels, player) {
   const header = mediaNode('div', 'ws-media-header');
   const heading = mediaNode('h3', '');
   const back = button('返回房间', 'ws-media-back');
+  back.setAttribute('aria-label', '返回房间');
   const switchScreen = button('切到新闻');
   header.append(heading, switchScreen, back);
   const scroll = mediaNode('div', 'ws-media-scroll');
@@ -106,7 +107,10 @@ export function mediaControls(scene, floor, channels, player) {
   const stations = mediaNode('div', 'ws-tv-stations');
   stations.append(channelButtons, network, power);
   const remote = mediaNode('div', 'ws-media-remote ws-tv-controls');
-  remote.append(manageSources, stations);
+  const tune = button('换台', 'ws-tv-tune');
+  tune.hidden = true;
+  tune.setAttribute('aria-expanded', 'false');
+  remote.append(tune, manageSources, stations);
   television.append(receiver, remote);
   const task = mediaNode('div', 'ws-media-work');
   const taskTitle = mediaNode('h4', 'ws-media-title');
@@ -117,5 +121,5 @@ export function mediaControls(scene, floor, channels, player) {
   scene.append(ticker);
   return { monitor, mini, tv, ticker, tickerLabel, tickerText, panel, heading, back, switchScreen,
     news, newsTools, title, credit, latest, digest, headlines, original, actions, ask, brief, prev, next, refresh,
-    television, channelButtons, manageSources, network, power, task, taskTitle, taskDetail, scroll };
+    television, watcher, tune, stations, channelButtons, manageSources, network, power, task, taskTitle, taskDetail, scroll };
 }

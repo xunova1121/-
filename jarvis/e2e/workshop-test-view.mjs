@@ -2,9 +2,16 @@
 export async function openTaskFloor(room) {
   const scene = room.locator('.ws-scene');
   if (await scene.getAttribute('data-room-view') === 'nest') {
-    await room.locator('[data-action="work-floor"]').click();
+    await clickViewControl(room, room.locator('[data-action="work-floor"]'));
     await room.locator('.ws-scene:not([data-room-view="nest"])').waitFor();
   }
+}
+
+export async function clickViewControl(room, button) {
+  if (!await button.isVisible() && await room.locator('.ws-scene[data-nest-layout="portrait"][data-room-view="nest"]').count()) {
+    await room.locator('[data-room-action="menu"]').click();
+  }
+  await button.click();
 }
 
 // 手机的互动浮层展开、滚动和收起，都不能挤压对话或替换当前输入。

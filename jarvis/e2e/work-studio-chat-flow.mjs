@@ -41,17 +41,20 @@ export async function checkWorkshopChat({ page, base, requests, finishReply, sho
       const bounds = sel => el.querySelector(sel).getBoundingClientRect().toJSON();
       const scene = el.querySelector('.ws-scene');
       const nest = scene.dataset.roomView === 'nest';
+      const floating = el.hasAttribute('data-nest-immersive');
       const actor = scene.querySelector(nest ? 'img.ws-nest-art' : '.ws-actor');
       const box = actor.getBoundingClientRect();
       const visibleAt = (x, y, selector) => Boolean(document.elementFromPoint(x, y)?.closest(selector));
       const prompt = bounds('#prompt');
       const transcript = bounds('#transcript');
+      const bubble = el.querySelector('#transcript > .msg.agent[data-nest-recent] > .body:not(:empty)')?.getBoundingClientRect();
       return {
-        actor: box.toJSON(), scene: bounds('.ws-scene'), prompt, transcript, chat: bounds('.mobile-studio-chat'),
+        floating, actor: box.toJSON(), scene: bounds('.ws-scene'), prompt, transcript, chat: bounds('.mobile-studio-chat'),
         width: innerWidth, height: visualViewport.height,
         actorVisible: getComputedStyle(actor).visibility === 'visible' && (!nest || actor.naturalWidth > 0),
-        stageAtActor: visibleAt(box.left + box.width / 2, box.top + box.height / 2, '.ws-scene'),
-        historyVisible: visibleAt(transcript.left + transcript.width / 2, transcript.top + transcript.height / 2, '#transcript'),
+        stageAtActor: visibleAt(box.left + box.width / 2, floating ? Math.min(box.top + box.height / 2, visualViewport.height / 3) : box.top + box.height / 2, '.ws-scene'),
+        historyVisible: floating && bubble ? visibleAt(bubble.left + bubble.width / 2, bubble.top + bubble.height / 2, '#transcript')
+          : visibleAt(transcript.left + transcript.width / 2, transcript.top + transcript.height / 2, '#transcript'),
         promptTouchable: visibleAt(prompt.left + prompt.width / 2, prompt.top + prompt.height / 2, '#inputbar')
       };
     });
@@ -59,6 +62,7 @@ export async function checkWorkshopChat({ page, base, requests, finishReply, sho
     assert(rect.historyVisible && rect.transcript.height >= 36, '回复区至少应能阅读一行 ' + JSON.stringify(rect));
     assert(rect.promptTouchable && rect.prompt.top >= 0 && rect.prompt.bottom <= rect.height + 1, '输入框应可见并能点击 ' + JSON.stringify(rect));
     if (landscape) assert(rect.scene.right <= rect.chat.left + 2, '横屏车间和对话应左右并排 ' + JSON.stringify(rect));
+    else if (rect.floating) assert(rect.scene.top <= 1 && rect.scene.bottom >= rect.prompt.bottom, '小窝应完整铺在输入框的后面');
     else assert(rect.scene.bottom <= rect.prompt.top + 1, '竖屏输入时车间应该仍在输入框上方');
   }
 
@@ -80,6 +84,7 @@ export async function checkWorkshopChat({ page, base, requests, finishReply, sho
   await checkNestControls(page, sheet);
   await queue.locator('li').filter({ hasText: followUp }).waitFor();
   await prompt.focus();
+  const roomBeforeKeyboard = await sheet.locator('.ws-scene').boundingBox();
   // Android WebView can shrink only the visual viewport. Exercise the real resize/focus handler.
   await page.evaluate(() => {
     Object.defineProperty(visualViewport, 'height', { configurable: true, value: 480 });
@@ -87,6 +92,7 @@ export async function checkWorkshopChat({ page, base, requests, finishReply, sho
   });
   await page.waitForFunction(() => document.body.classList.contains('wy-keyboard-open'));
   await checkVisibleLayout();
+  assert.deepEqual(await sheet.locator('.ws-scene').boundingBox(), roomBeforeKeyboard, '键盘只移动对话层，房间机位保持原样');
   await checkNestControls(page, sheet);
   assert.equal(await prompt.inputValue(), '保留草稿');
   await queue.locator('li').filter({ hasText: followUp }).waitFor();
@@ -116,7 +122,8 @@ export async function checkWorkshopChat({ page, base, requests, finishReply, sho
   await assertSharedChat();
   assert.equal(requests().length, 2, '运行中切换显示不应重新开始任务');
   finishReply();
-  await reply.filter({ hasText: '工作区文件已经核对。' }).waitFor();
+  // 下一轮接着发出时上一轮会收入历史，完整正文仍须留在同一个 transcript。
+  await reply.filter({ hasText: '工作区文件已经核对。' }).waitFor({ state: 'attached' });
   await chat.locator('.msg.user').filter({ hasText: followUp }).waitFor();
   await reply.nth(1).filter({ hasText: '正在整理你的要求' }).waitFor();
   assert.equal(requests().length, 3);

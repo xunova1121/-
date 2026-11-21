@@ -5,6 +5,8 @@ import path from 'node:path';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { checkNestControls } from './workshop-test-view.mjs';
 import { checkLocalWallClock, checkRestingFurniture } from './workshop-room-furniture.mjs';
+import { captureFurniture, capturePortraitFurniture, checkFloatingChat, checkFurniturePixels, checkFurnitureStayed, isPortraitNest } from './workshop-fixed-nest.mjs';
+import { checkNearNestCamera } from './workshop-nest-camera.mjs';
 import { checkProgramArea } from './workshop-tv-playback.mjs';
 import { checkCoffee, checkLivingMotion, checkRadio, checkUnobstructed, checkViewingPlace, listenForCat } from './workshop-nest-actions.mjs';
 import { chromium } from 'playwright';
@@ -16,7 +18,7 @@ const browser = await chromium.launch({ executablePath: process.env.WORKSHOP_CHR
 const services = [];
 const now = (clock, date = '20') => new Date('2026-11-' + date + 'T' + clock + ':00+08:00');
 const newsItem = { title: '城市图书馆开放晚间阅读', url: 'https://news.cctv.com/2026/11/20/ARTIworkshoptest.shtml',
-  source: '央视网', publishedAt: now('07:00').toISOString() };
+  source: '央视网', image: 'https://p1.img.cctvpic.com/workshop/library.png', publishedAt: now('07:00').toISOString() };
 const folderFile = '资料/小窝验收旅行笔记.md';
 
 async function host(mobile) {
@@ -165,14 +167,33 @@ async function checkCat(page, room, scene, hit, waitPose, shot) {
 }
 
 async function checkMedia(page, room, button, shot) {
+  const scene = room.locator('.ws-scene');
+  const portrait = await isPortraitNest(scene);
+  const initial = await captureFurniture(scene);
+  const fabric = portrait && await capturePortraitFurniture(scene);
+  async function fixed(action) {
+    await checkFurnitureStayed(scene, initial, action);
+    if (portrait) checkFurniturePixels(fabric, await capturePortraitFurniture(scene), action);
+  }
   await room.locator('[data-media-device="monitor"]').click();
   const news = room.locator('.ws-media-panel[data-device=monitor]');
   await news.getByText(newsItem.title, { exact: true }).first().waitFor();
+  const articlePhoto = news.getByRole('img', { name: /央视网.*配图/ });
+  await articlePhoto.waitFor();
+  assert.deepEqual(await articlePhoto.evaluate(async img => {
+    await img.decode();
+    return [img.currentSrc, img.naturalWidth, img.naturalHeight];
+  }), [newsItem.image, 120, 80], '显示并解码本篇报道的原媒体配图');
+  if (portrait) assert.equal(await page.locator('#prompt').getAttribute('placeholder'), '追问这条新闻…');
   assert.equal(await news.getByRole('link', { name: '阅读原文', exact: true }).getAttribute('href'), newsItem.url);
   await news.evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished)));
   await checkViewingPlace(room, 'news');
+  await fixed('打开新闻');
   await shot('看新闻');
   await button(news, '返回房间').click();
+  await news.waitFor({ state:'hidden' });
+  await fixed('收起新闻');
+  if (portrait) assert.equal(await page.locator('#prompt').getAttribute('placeholder'), '和未央说说话…');
   await room.locator('[data-media-device="tv"]').click();
   const tv = room.locator('.ws-media-panel[data-device=tv]');
   // 老工作区的走路镜头会在开机前几百毫秒把整间小窝移到电视后面。
@@ -180,6 +201,8 @@ async function checkMedia(page, room, button, shot) {
   const shift = await room.locator('.ws-scene[data-nest-viewing="tv"]').evaluate(scene =>
     getComputedStyle(scene.querySelector('.ws-floorplan')).translate);
   assert(shift === 'none' || /^0px(?: 0px)?$/.test(shift), '打开电视时房间不应被工作区走路镜头平移 ' + shift);
+  await fixed('展开电视');
+  await button(tv, '换台').click();
   await button(tv, 'CCTV-2 财经').click();
   await page.waitForFunction(() => {
     const video = document.querySelector('.work-studio[data-visible=true] .ws-tv-standby video');
@@ -191,6 +214,8 @@ async function checkMedia(page, room, button, shot) {
   await checkViewingPlace(room, 'tv');
   await shot('看电视');
   await button(tv, '返回房间').click();
+  await tv.waitFor({ state:'hidden' });
+  await fixed('收起电视');
 }
 
 async function check(mobile, width, clockOnly = false) {
@@ -200,6 +225,7 @@ async function check(mobile, width, clockOnly = false) {
     isMobile: mobile, hasTouch: mobile, timezoneId: clockOnly ? 'Asia/Kathmandu' : 'Asia/Shanghai' });
   const errors = [];
   await context.route('https://**/*', route => route.abort());
+  await context.route(newsItem.image, route => route.fulfill({ contentType: 'image/png', body: framePhoto() }));
   await context.route('**/api/workshop/news', route => route.fulfill({ json: { items: [newsItem], updatedAt: +now('08:00'), stale: false } }));
   await context.route('**/cmsdatainterface/page/news_1.jsonp', route => route.fulfill({
     contentType: 'text/plain', headers: { 'Access-Control-Allow-Origin': '*' },
@@ -247,7 +273,7 @@ async function check(mobile, width, clockOnly = false) {
     }
     await waitPose('work');
     const art = room.locator('.ws-nest-art');
-    assert.deepEqual(await art.evaluate(img => [img.naturalWidth, img.naturalHeight]), mobile ? [1080, 720] : [1536, 1024]);
+    assert.deepEqual(await art.evaluate(img => [img.naturalWidth, img.naturalHeight]), mobile ? [810, 1440] : [1536, 1024]);
     assert(await scene.evaluate(el => el.getBoundingClientRect().width >= 280));
     assert.equal(await page.locator('#inputbar').count(), 1);
     if (mobile) {
@@ -260,6 +286,7 @@ async function check(mobile, width, clockOnly = false) {
       await page.setViewportSize({ width, height: 844 });
     }
     await shot('小窝');
+    assert.equal(await isPortraitNest(scene), mobile, '手机竖屏应进入全屏小窝');
     await checkLocalWallClock(page, scene);
     await checkRestingFurniture(room, scene, hit, shot);
     await checkLivingMotion(page, scene);
@@ -275,13 +302,19 @@ async function check(mobile, width, clockOnly = false) {
     await checkRadio(page, room, scene, hit);
 
     await checkMedia(page, room, button, shot);
+    if (!mobile) await checkNearNestCamera(room, scene);
 
     await room.locator('[data-room-action="menu"]').click();
     await room.locator('[data-room-action="lamp-auto"]').click();
     await reloadAt('23:00');
     await waitPose('sleep');
     await room.locator('[data-nest-light="off"]').waitFor({ state: 'attached' });
-    const quilt = room.locator('[data-idle-pose="sleep"] .ws-nest-idle-detail .ws-nest-idle-paint');
+    const quilt = mobile ? room.locator('.ws-nest-portrait-actor') : room.locator('[data-idle-pose="sleep"] .ws-nest-idle-detail .ws-nest-idle-paint');
+    if (mobile) {
+      const seat = await hit('sofa').boundingBox();
+      const sleeper = await quilt.boundingBox();
+      assert(seat && sleeper && sleeper.x + sleeper.width * .5 < seat.x + seat.width && sleeper.x + sleeper.width * .5 > seat.x, '夜间要在前景的固定沙发上入睡');
+    }
     await quilt.waitFor();
     assert(await quilt.evaluate(el => el.getAnimations().some(a => a.playState === 'running' &&
       a.effect.getKeyframes().some(frame => frame.transform && frame.transform !== 'none'))), '睡着时被面应随呼吸起伏');
@@ -305,6 +338,7 @@ async function check(mobile, width, clockOnly = false) {
     await page.clock.fastForward(4000);
     await room.locator('[data-cat-state="rest"]').waitFor({ state: 'attached' });
     assert.notEqual(await scene.getAttribute('data-nest-pose'), 'cat', '猫闻手后拒绝，未央留出距离');
+    if (mobile) await checkFloatingChat(page, room, scene, shot);
     assert.deepEqual(errors, []);
     console.log(platform, '室内亮度', bright.toFixed(1), '→', dark.toFixed(1), '窗景、相框、草稿、旅行、猫、新闻、电视和当地作息通过');
   } catch (err) {

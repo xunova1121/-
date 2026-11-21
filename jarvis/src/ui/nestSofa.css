@@ -18,3 +18,8 @@
 .work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] [data-furniture="sofa"]:hover:not(:focus-visible) {
   background:transparent; box-shadow:none;
 }
+/* 转场中让行走的人接手画面，进入沙发后再绘制坐姿或睡姿。 */
+.ws-scene[data-room-view="nest"][data-sofa-walk] :is(.ws-nest-portrait-actor,.ws-nest-living[data-sleep-seat="front"]) { visibility:hidden; }
+.ws-scene[data-room-view="nest"][data-sofa-walk][data-nest-viewing] .ws-nest-loveseat { background-position:0 0; }
+.ws-scene[data-room-view="nest"][data-sofa-walk][data-nest-viewing] .ws-nest-loveseat::after { visibility:hidden; }
+.ws-scene[data-room-view="nest"][data-sofa-walk] .ws-nest-sofa-walk { z-index:4; }

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { clickViewControl } from './workshop-test-view.mjs';
 
 export async function checkNewsEntrance({ page, room, platform, output }) {
   const ticker = room.getByRole('button', { name: /新闻简报/ });
@@ -11,7 +12,7 @@ export async function checkNewsEntrance({ page, room, platform, output }) {
     if (preference === 'closeup') {
       await room.getByRole('button', { name: '坐到沙发上休息' }).click();
       await room.locator('.ws-scene[data-life-place="lounge"][data-life-phase="settled"]').waitFor();
-      await room.getByRole('button', { name: '近看操作' }).click();
+      await clickViewControl(room, room.getByRole('button', { name: '近看操作' }));
     }
     await page.emulateMedia({ reducedMotion: preference === 'system' ? 'reduce' : 'no-preference' });
     await page.locator('#set-motion').evaluate((select, value) => {
@@ -69,6 +70,6 @@ export async function checkNewsEntrance({ page, room, platform, output }) {
     }
     await news.getByRole('button', { name: '返回房间' }).press('Escape');
     assert(await trigger.evaluate(el => el === document.activeElement), '退出新闻回到原来的入口');
-    if (preference === 'closeup') await room.getByRole('button', { name: '看全景' }).click();
+    if (preference === 'closeup') await clickViewControl(room, room.getByRole('button', { name: '看全景' }));
   }
 }

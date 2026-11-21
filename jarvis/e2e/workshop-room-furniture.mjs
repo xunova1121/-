@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { captureFurniture, checkFurnitureStayed, isPortraitNest } from './workshop-fixed-nest.mjs';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 
 // 家具和人物坐标都以同一张原画为准，PC 与窄屏无需分别设阈值。
@@ -43,6 +44,23 @@ async function checkTailInFront(scene, seat) {
 }
 
 export async function checkRestingFurniture(room, scene, hit, shot) {
+  if (await isPortraitNest(scene)) {
+    const stationary = await captureFurniture(scene);
+    const seat = await roomBox(hit('sofa'));
+    assert(seat.right > .66 && seat.bottom > .68 && seat.x > .32, '前景沙发在地毯右侧 ' + JSON.stringify(seat));
+    await hit('sofa').click();
+    await room.locator('.ws-scene[data-nest-pose="rest"][data-life-phase="settled"]').waitFor();
+    const actor = scene.locator('.ws-nest-portrait-actor');
+    await actor.waitFor();
+    const sitting = await roomBox(actor);
+    assert(sitting.x + (sitting.right - sitting.x) / 2 > .4 && sitting.bottom > .61, '未央应该坐在前景沙发上');
+    assert.equal(await scene.locator('.ws-life-actor').isVisible(), false, '休息时不绘制备用凳子');
+    await checkFurnitureStayed(scene, stationary, '回到沙发');
+    await shot('回到沙发休息');
+    await room.locator('[data-room-action="menu"]').click();
+    await room.locator('[data-room-action="auto"]').click();
+    return;
+  }
   const seat = scene.locator('.ws-nest-loveseat');
   const table = scene.locator('.ws-nest-coffee-table');
   await seat.waitFor();
@@ -73,7 +91,8 @@ export async function checkLocalWallClock(page, scene) {
   const clock = scene.locator('time.nest-wall-clock');
   await clock.waitFor();
   const dial = await roomBox(clock);
-  assert(Math.abs((dial.x + dial.right) / 2 - .3695) < .009 && Math.abs((dial.y + dial.bottom) / 2 - .1343) < .012,
+  const [cx, cy] = await isPortraitNest(scene) ? [305 / 941, 413 / 1672] : [.3695, .1343];
+  assert(Math.abs((dial.x + dial.right) / 2 - cx) < .009 && Math.abs((dial.y + dial.bottom) / 2 - cy) < .012,
     '真实指针应覆盖原画挂钟 ' + JSON.stringify(dial));
   async function readHands() {
     return clock.evaluate(el => {

@@ -53,9 +53,9 @@ async function released(handle) {
 
 async function televisionLayers(room) {
   return room.locator('.ws-scene[data-media-device="tv"]').evaluate(async scene => {
-    const seat = scene.querySelector('img.ws-nest-seat');
+    const seat = scene.querySelector('.ws-nest-portrait-actor');
     await seat.decode();
-    const ornaments = '.ws-nest-living,.ws-nest-cat-motion,.ws-nest-loveseat,.nest-window-drape,.ws-life-pose,.ws-life-steam,.ws-life-notes';
+    const ornaments = '.ws-nest-portrait-actor,.ws-nest-portrait-cat,.ws-nest-living,.ws-nest-cat-motion,.ws-nest-loveseat,.nest-window-drape,.ws-life-pose,.ws-life-steam,.ws-life-notes';
     const animations = Array.from(scene.querySelectorAll(ornaments)).flatMap(el => el.getAnimations({ subtree: true }));
     const style = getComputedStyle(seat);
     return { width: seat.naturalWidth, mask: style.maskImage || style.webkitMaskImage,
@@ -134,10 +134,13 @@ async function check(browser, base, safe) {
     const art = room.locator('img.ws-nest-art');
     await art.waitFor();
     report.roomArt = await art.evaluate(async img => { await img.decode(); return [img.naturalWidth, img.naturalHeight]; });
-    assert.deepEqual(report.roomArt, [1080, 720]);
+    assert.deepEqual(report.roomArt, [810, 1440]);
     await button(room, '打开电视').click();
     const channel = room.locator('[data-channel="retrostrange-tv"]');
-    if (await channel.getAttribute('aria-pressed') !== 'true') await channel.click();
+    if (await channel.getAttribute('aria-pressed') !== 'true') {
+      await button(room, '换台').click();
+      await channel.click();
+    }
     const feedback = room.locator('.ws-tv-feedback:visible');
     await feedback.getByText('正在连接频道…').waitFor();
     const retry = button(room, '重新连接');
@@ -164,7 +167,9 @@ async function check(browser, base, safe) {
     assert(requested.some(name => /\.(ts|m4s)$/.test(name)));
     report.stream = streamed.info;
     report.layers = await televisionLayers(room);
-    assert.deepEqual(report.layers, { width: 416, mask: 'none', activeAnimations: [] });
+    assert(report.layers.width > 100 && report.layers.width < report.roomArt[0], '播放时仅绘制小块人物纹理');
+    assert.equal(report.layers.mask, 'none');
+    assert.deepEqual(report.layers.activeAnimations, [], '播放时装饰层停止循环渲染');
     await released(clip.video);
     await page.evaluate(() => dispatchEvent(new CustomEvent('jarvis:foreground', { detail: { active: false } })));
     await released(streamed.video);
@@ -174,6 +179,7 @@ async function check(browser, base, safe) {
     await page.evaluate(() => dispatchEvent(new CustomEvent('jarvis:foreground', { detail: { active: true } })));
     const resumed = await visibleFrame(page, room.locator('.ws-tv-player video'), 'resumed-' + safe, true);
     assert.deepEqual([resumed.info.width, resumed.info.height], [256, 144]);
+    await button(room, '换台').click();
     await button(room, '关闭电视').click();
     await released(resumed.video);
     assert.equal(await room.locator('video[src], iframe').count(), 0);
@@ -186,16 +192,17 @@ async function check(browser, base, safe) {
     await openRoom();
     assert.equal(await page.inputValue('#prompt'), '今天看了电视');
     await art.waitFor();
-    const awakeCat = room.locator('.ws-nest-cat-motion[data-source="room"]');
-    await awakeCat.waitFor({ state: 'attached' });
-    report.cat = await awakeCat.evaluate(el => {
-      const image = el.querySelector('img').getBoundingClientRect();
+    const awakeCat = room.locator('.ws-nest-portrait-cat[data-picture="cat"]');
+    await awakeCat.waitFor();
+    report.cat = await awakeCat.evaluate(async el => {
+      await el.decode();
+      const image = el.getBoundingClientRect();
       const floor = el.closest('.ws-floorplan').getBoundingClientRect();
-      return { cropped: CSS.supports('object-view-box: inset(0)'), visible: !!(image.width && image.height),
+      return { visible: !!(image.width && image.height), width: el.naturalWidth, moving: el.getAnimations().some(a => a.playState === 'running'),
         area: image.width * image.height / (floor.width * floor.height) };
     });
-    if (safe) assert.equal(report.cat.visible, false);
-    else if (report.cat.cropped) assert(report.cat.visible && report.cat.area <= .08, '清醒时猫的运动图层应局部绘制');
+    assert(report.cat.visible && report.cat.width < report.roomArt[0] && report.cat.area <= .08, '猫是一张小的独立裁片');
+    if (safe) assert.equal(report.cat.moving, false, '兼容显示的静态猫不循环渲染');
     await room.locator('[data-furniture="cat"]').click();
     await room.locator('[data-cat-state="sniff"]').waitFor({ state: 'attached' });
     await button(room, '返回对话').click();

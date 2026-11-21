@@ -1,5 +1,6 @@
 import { createWorkStudioView } from './workStudioView.js';
 import { createConversationMount } from './conversationMount.js';
+import { createMobileNestChat } from './mobileNestChat.js';
 import { createWorkshopDrawing } from '../mobile/workshopDrawing.js';
 import './mobileWorkStudio.css';
 
@@ -45,6 +46,7 @@ export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsCh
   chat.append(heading, empty);
   sheet.append(back, chat);
   const conversation = createConversationMount(transcript, document.getElementById('inputbar'));
+  const nestChat = createMobileNestChat(sheet, chat, transcript);
   const appElement = document.querySelector('.app');
   document.body.append(sheet);
   let view;
@@ -63,6 +65,7 @@ export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsCh
       }
       const keepFocus = document.activeElement === back;
       view.element.querySelector('.ws-header').prepend(back);
+      nestChat.attach(view.element);
       refresh();
       if (!sheet.open) return;
       view.setVisible(true);
@@ -109,6 +112,7 @@ export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsCh
       const name = session?.title || '';
       title.textContent = name === '新对话' ? '' : name;
       empty.hidden = Boolean(transcript.querySelector('.msg, .wy-history-pages, .wy-agent-start, .wy-studio-start'));
+      nestChat.refresh();
       view?.render(snapshot);
     }
   }
@@ -141,7 +145,7 @@ export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsCh
       || sheet.querySelector('[data-room-action="menu"][aria-expanded="true"]');
     if (control) { control.click(); return true; }
     if (chat.querySelector('.quick-menu')) { chat.querySelector('#btn-quick').click(); return true; }
-    return view?.closeMedia() || false;
+    return false;
   }
   function backInRoom() {
     if (closeInnerMenu()) return;
@@ -149,6 +153,8 @@ export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsCh
       document.activeElement.blur();
       return;
     }
+    if (nestChat.back()) return;
+    if (view?.closeMedia()) return;
     exitStudio();
   }
   sheet.addEventListener('cancel', (e) => { e.preventDefault(); backInRoom(); });
@@ -171,11 +177,13 @@ export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsCh
   window.addEventListener('jarvis:panel', closeForPanel);
   function leave() {
     restoreEntryScroll = null;
+    const restoreReading = nestChat.close();
     setRoomActive(false);
     view?.setVisible(false, { preserveMedia: false });
     appElement.inert = false;
     const restoreScroll = conversation.restore();
     restoreScroll?.();
+    restoreReading?.();
   }
   function exitStudio() {
     leave();

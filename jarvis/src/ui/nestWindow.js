@@ -53,7 +53,7 @@ export function createNestWindow({ world, panel, art }) {
 
   let scope = '';
   let mode = 'ajar';
-  let lit = true;
+  let lit = true, portrait = false;
   let visible = false;
   let inViewport = !('IntersectionObserver' in window);
   let gust = false;
@@ -67,7 +67,7 @@ export function createNestWindow({ world, panel, art }) {
     sash.classList.toggle('nest-window-open', open);
     sash.classList.toggle('nest-window-wind', gust);
     if (open) {
-      const src = lit ? openLit : openDark;
+      const src = portrait ? (lit ? outsideDay : outsideNight) : (lit ? openLit : openDark);
       if (glass.getAttribute('src') !== src) glass.src = drape.src = src;
     }
     toggle.textContent = open ? '关窗落闩' : '推开窗';
@@ -174,9 +174,9 @@ export function createNestWindow({ world, panel, art }) {
   }
   return {
     open, setVisible,
-    render({ lampOn }) {
+    render({ lampOn, portrait: nextPortrait = false }) {
       if (visible && scope !== workshopChannelScope()) readChoice();
-      if (lit !== lampOn) { lit = lampOn; draw(); }
+      if (lit !== lampOn || portrait !== nextPortrait) { lit = lampOn; portrait = nextPortrait; draw(); }
       if (panel.isOpen('view')) updateView();
     },
     dispose() { setVisible(false); sash.remove(); }

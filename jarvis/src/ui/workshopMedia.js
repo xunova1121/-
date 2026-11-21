@@ -14,6 +14,21 @@ function clock(value) {
   return value && Number.isFinite(date.getTime()) ? localTime.format(date) : '';
 }
 
+// 只缩放节目/新闻这一层；动画起止坐标与实际可见设备一致。
+export function animateWorkshopPanel(panel, screen, opening) {
+  if (!screen?.width || !screen.height || !panel.animate ||
+      document.documentElement.classList.contains('safe-render') ||
+      document.body.classList.contains('reduced-motion') || matchMedia('(prefers-reduced-motion: reduce)').matches) return null;
+  const page = panel.getBoundingClientRect();
+  if (!page.width || !page.height) return null;
+  const dx = screen.left - page.left, dy = screen.top - page.top;
+  const small = { transform: `translate(${dx}px,${dy}px) scale(${screen.width / page.width},${screen.height / page.height})`, opacity: .65 };
+  const full = { transform: 'none', opacity: 1 };
+  return panel.animate(opening ? [small, full] : [full, small], {
+    duration: opening ? 350 : 160, easing: opening ? 'cubic-bezier(.22,.67,.25,1)' : 'ease-in'
+  });
+}
+
 export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, getPlayers }) {
   const player = createWorkshopTvPlayer({ getPlayers, openSources: () => ui.manageSources.click() });
   const ui = mediaControls(scene, floor, listWorkshopChannels(), player);
@@ -22,7 +37,8 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     draw();
   });
   let device = '';
-  let monitorEntrance;
+  let motion;
+  let folding = false;
   let monitorTrigger;
   let sessionId = '';
   let busy = false;
@@ -89,7 +105,13 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     ui.panel.hidden = !device;
     scene.dataset.mediaDevice = device;
     scene.dataset.mediaWork = String(busy);
-    scene.closest('.work-studio-view')?.toggleAttribute('data-media-open', Boolean(device));
+    const studio = scene.closest('.work-studio-view');
+    if (studio) {
+      studio.toggleAttribute('data-media-open', Boolean(device));
+      studio.toggleAttribute('data-wide-workshop', scene.dataset.roomView === 'nest' || device === 'tv');
+      if (device && scene.dataset.roomView === 'floor') studio.dataset.floorMedia = device;
+      else delete studio.dataset.floorMedia;
+    }
     ui.panel.dataset.device = device;
     ui.panel.setAttribute('aria-label', device === 'tv' ? '电视' : reading ? '新闻简报' : '工作显示器');
     ui.monitor.setAttribute('aria-expanded', String(device === 'monitor'));
@@ -188,17 +210,28 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     player.select(channel.id);
     draw();
   }
-  function monitorOrigin(trigger) {
-    // 打开后会切换镜头。近看其他工位时，电脑可能在画外，此时从被点击的简报条展开。
-    const screen = ui.mini.getBoundingClientRect(), view = scene.getBoundingClientRect();
+  function mediaOrigin(which, trigger) {
+    // 近看工位时，设备可能在画外；简报仍可从实际点到的入口展开。
+    const screen = (which === 'monitor' ? ui.mini : ui.tv).getBoundingClientRect();
+    const view = scene.getBoundingClientRect();
     const left = Math.max(screen.left, view.left), top = Math.max(screen.top, view.top);
     const width = Math.min(screen.right, view.right) - left, height = Math.min(screen.bottom, view.bottom) - top;
     return width > 0 && height > 0 ? { left, top, width, height } : trigger.getBoundingClientRect();
   }
-  function show(next, perform = true, trigger = ui.monitor) {
-    const screen = next === 'monitor' && device !== 'monitor' ? monitorOrigin(trigger) : null;
+  function cancelMotion() {
+    if (motion) { motion.onfinish = null; motion.cancel(); motion = null; }
+    folding = false;
+  }
+  function setTuner(open) {
+    ui.tune.setAttribute('aria-expanded', String(open));
+    ui.stations.hidden = !ui.tune.hidden && !open;
+  }
+  function show(next, perform = true, trigger = next === 'tv' ? ui.tv : ui.monitor) {
+    cancelMotion();
+    const screen = (next === 'monitor' || scene.dataset.roomView === 'nest') && device !== next
+      ? mediaOrigin(next, trigger) : null;
     scene.dispatchEvent(new CustomEvent('workshop:media-opening', { detail: { device: next } }));
-    monitorEntrance?.cancel();
+    setTuner(false);
     syncChannelScope();
     sources.reset();
     device = next;
@@ -211,24 +244,29 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
       if (perform && !busy) room.perform('news');
     }
     draw();
-    if (screen?.width && screen.height && ui.panel.animate &&
-        !document.body.classList.contains('reduced-motion') && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      const page = ui.panel.getBoundingClientRect();
-      if (page.width && page.height) {
-        const dx = screen.left - page.left, dy = screen.top - page.top;
-        monitorEntrance = ui.panel.animate([
-          { transform: `translate(${dx}px,${dy}px) scale(${screen.width / page.width},${screen.height / page.height})`, opacity: 0.65 },
-          { transform: 'none', opacity: 1 }
-        ], { duration: 380, easing: 'cubic-bezier(.22,.67,.25,1)' });
-      }
-    }
+    motion = animateWorkshopPanel(ui.panel, screen, true);
     ui.scroll.scrollTop = 0;
     ui.back.focus({ preventScroll: true });
   }
   function close(restoreFocus = true) {
     if (!device) return false;
     const trigger = device === 'tv' ? ui.tv : monitorTrigger;
-    monitorEntrance?.cancel();
+    if (restoreFocus && folding) return true;
+    cancelMotion();
+    if (restoreFocus && visible && scene.dataset.roomView === 'nest') {
+      motion = animateWorkshopPanel(ui.panel, mediaOrigin(device, trigger), false);
+      if (motion) {
+        folding = true;
+        motion.onfinish = () => finishClose(trigger, true);
+        return true;
+      }
+    }
+    finishClose(trigger, restoreFocus);
+    return true;
+  }
+  function finishClose(trigger, restoreFocus) {
+    cancelMotion();
+    setTuner(false);
     const wasReadingDuringWork = readDuringWork;
     readDuringWork = false;
     device = '';
@@ -240,15 +278,24 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
       const target = trigger.closest('.ws-room-menu[hidden]') ? scene.querySelector('[data-room-action="menu"]') : trigger;
       target?.focus({ preventScroll: true });
     }
-    return true;
   }
+  ui.tune.onclick = () => {
+    const open = ui.stations.hidden;
+    sources.escape();
+    setTuner(open);
+    if (open) ui.channelButtons.querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
+  };
+  ui.manageSources.addEventListener('click', () => setTuner(false));
   ui.tv.onclick = () => show('tv');
   ui.monitor.onclick = ui.ticker.onclick = event => show('monitor', true, event.currentTarget);
   ui.back.onclick = () => close();
   ui.power.onclick = () => { room.perform('tv-off'); close(); };
   ui.channelButtons.onclick = event => {
     const id = event.target.closest('button')?.dataset.channel;
-    if (id) selectWorkshopChannel(id);
+    if (id) {
+      selectWorkshopChannel(id);
+      if (!ui.tune.hidden) { setTuner(false); ui.tune.focus({ preventScroll: true }); }
+    }
   };
   scene.addEventListener('workshop:open-tv', () => show('tv', false));
   scene.addEventListener('workshop:close-media', () => close(false));
@@ -262,7 +309,11 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
-      if (!sources.escape()) close();
+      if (sources.escape()) return;
+      if (!ui.tune.hidden && !ui.stations.hidden) {
+        setTuner(false);
+        ui.tune.focus({ preventScroll: true });
+      } else close();
     }
   };
 
@@ -272,6 +323,10 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
       // 在小窝可点实物电脑；新闻标题只在主动打开互动菜单后显示。
       const host = on ? scene.querySelector('.ws-room-menu') : scene;
       host.append(ui.ticker);
+      scene.closest('.work-studio-view')?.toggleAttribute('data-wide-workshop', on || device === 'tv');
+      ui.watcher.hidden = on;
+      ui.tune.hidden = !on;
+      setTuner(false);
       for (const target of [ui.monitor, ui.tv]) {
         if (on) target.removeAttribute('title');
         else target.title = target.getAttribute('aria-label');
@@ -288,7 +343,8 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
         unsubscribeList = onWorkshopChannelListChanged(catalogChanged);
         if (device === 'tv') player.select(channel?.id);
       } else {
-        monitorEntrance?.cancel();
+        if (folding) close(false);
+        else cancelMotion();
         unsubscribe?.();
         unsubscribeList?.();
         sources.suspend();

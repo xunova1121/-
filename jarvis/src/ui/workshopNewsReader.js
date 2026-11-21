@@ -11,6 +11,29 @@ export function createWorkshopNewsReader(ui, feed, choose) {
   let expanded = false;
   let failed = false;
   let previousItems;
+  let photo;
+  let photoUrl;
+  let photoTitle;
+
+  function showPhoto(next) {
+    if (photoUrl === next?.image && photoTitle === next?.title) return;
+    photo?.remove();
+    photo = null;
+    photoUrl = next?.image;
+    photoTitle = next?.title;
+    if (!photoUrl) return;
+    const img = document.createElement('img');
+    img.className = 'ws-article-photo';
+    img.alt = next.title + ' · ' + next.source + '配图';
+    img.referrerPolicy = 'no-referrer';
+    img.decoding = 'async';
+    img.hidden = true;
+    img.onload = () => { img.hidden = false; };
+    img.onerror = () => { img.remove(); };
+    ui.news.insertBefore(img, ui.digest);
+    img.src = photoUrl;
+    photo = img;
+  }
 
   function showSummary() {
     ui.scroll.scrollTop = 0;
@@ -61,6 +84,7 @@ export function createWorkshopNewsReader(ui, feed, choose) {
     }
   };
   return function select(next, items) {
+    showPhoto(next);
     const summaryChanged = item?.summary !== next?.summary;
     if (items !== previousItems || item?.url !== next?.url || summaryChanged) {
       previousItems = items;

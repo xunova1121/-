@@ -34,6 +34,18 @@ describe('工作台公开新闻', () => {
     expect(globalThis.__badNews).toBeUndefined();
   });
 
+  it('配图随报道缓存，只有该媒体的图片可以进入阅读卡片', async () => {
+    const image = 'https://p3.img.cctvpic.com/photoworkspace/2026/11/21/cover.jpg';
+    const get = vi.fn().mockResolvedValue(cctvBody([{ ...row, image: image + '?from=index' }]));
+    const result = await readWorkshopHeadlines({ get, now: () => at });
+    expect(result.items[0].image).toBe(image);
+    expect(workshopHeadlines(result.items, at)[0].image).toBe(image);
+    for (const invalid of ['https://other.example/p.jpg', 'https://p3.img.cctvpic.com.evil.example/p.jpg',
+      'https://user@p3.img.cctvpic.com/p.jpg', 'http://p3.img.cctvpic.com/p.jpg', 'data:image/png,abc']) {
+      expect(workshopHeadlines([{ ...item, image: invalid }], at)[0]).toEqual(item);
+    }
+  });
+
   it('云端读新闻沿用登录，缓存不改刷新时间，离线再打开也能看到原来源', async () => {
     let time = at;
     const saved = storage();

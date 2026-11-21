@@ -75,3 +75,15 @@
   .ws-nest-idle-paint,.ws-nest-coffee::after { animation:none!important; }
 }
 .reduced-motion .ws-nest-idle-paint,.reduced-motion .ws-nest-coffee::after { animation:none!important; }
+/* 横幅睡姿使用与观影相同的前排坐垫；呼吸只作用在透明的被子和人物上。 */
+.ws-nest-living[data-sleep-seat="front"] { z-index:3; }
+.ws-nest-living[data-sleep-seat="front"] .ws-nest-idle-patch { display:none; }
+.ws-nest-living[data-sleep-seat="front"] .ws-nest-idle-detail {
+  left:5%; top:53%; width:23%; height:22%; mask-image:none; -webkit-mask-image:none;
+}
+.ws-nest-living[data-sleep-seat="front"] .ws-nest-idle-paint {
+  background-size:contain; background-position:center; transform-origin:64% 85%;
+}
+.ws-scene[data-nest-light="off"] .ws-nest-living[data-sleep-seat="front"] .ws-nest-idle-paint {
+  filter:brightness(.58) saturate(.78);
+}
