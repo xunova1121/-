@@ -502,7 +502,50 @@ describe('失败的步骤随回答存进对话（下一句问“为啥失败”�
 });
 
 describe('引导在原任务收尾时才送到（2026-11-17 用户：选了引导没有效果）', () => {
+ it('接续任务写盘失败时保留引导和失败检查点，向观察者返回失败并且不运行该任务', async () => {
+  const backend = createFileStore(dir);
+  let firstId, failOnce = true, calls = 0;
+  useBackend({ ...backend, async put(name, row) {
+    const checkpoint = row.taskCheckpoint;
+    if (name === 'sessions' && firstId && checkpoint?.status === 'queued' && checkpoint.taskId !== firstId && failOnce) {
+      failOnce = false;
+      throw new Error('模拟磁盘写入失败');
+    }
+    return backend.put(name, row);
+  } });
+  const runner = createTaskRunner({ getConfig: mockCfg, makeAdapter: () => ({ model: 'm', adapter: { async stream({ onText }) {
+    calls++; onText('已写原文'); return { text: '已写原文', toolCalls: [], stop: 'end_turn' };
+  } } }) });
+  const { id, sessionId } = await runner.start({ text: '写一段介绍' });
+  firstId = id;
+  let accepted;
+  runner.subscribe(id, e => {
+    if (e.phase === 'answer_committed' && !accepted) accepted = runner.start({ sessionId, targetTaskId: id, text: '保留第三行' });
+  });
+  await until(() => runner.get(id).status === 'error');
+  expect(await accepted).toMatchObject({ joined: true });
+  expect(runner.events(id).at(-1)).toMatchObject({ status: 'error', errorKind: 'storage' });
+  expect(runner.events(id).at(-1)).not.toHaveProperty('followupTaskId');
+  expect(runner.list()).toHaveLength(1);
+  expect(calls).toBe(1);
+  const session = await sessions.get(sessionId);
+  expect(session.taskCheckpoint).toMatchObject({ taskId: id, status: 'error' });
+  expect(session.messages.filter(m => m.content === '保留第三行')).toHaveLength(1);
+ });
+
  it('回答已写完时送到的引导不丢：原任务结束后接着开一轮处理，不重复记这句话，结束事件里带上新任务编号', async () => {
+  let predecessor, resumeWrite, reachedWrite;
+  const writing = new Promise(resolve => { reachedWrite = resolve; });
+  const paused = new Promise(resolve => { resumeWrite = resolve; });
+  const backend = createFileStore(dir);
+  useBackend({ ...backend, async put(name, row) {
+    const checkpoint = row.taskCheckpoint;
+    if (name === 'sessions' && predecessor && checkpoint?.status === 'queued' && checkpoint.taskId !== predecessor) {
+      reachedWrite();
+      await paused;
+    }
+    return backend.put(name, row);
+  } });
   const seen = [];
   const runner = createTaskRunner({ getConfig: mockCfg, makeAdapter: () => ({ adapter: { stream: async ({ messages, onText }) => {
     seen.push(messages.map(m => typeof m.content === 'string' ? m.content : '').join('\n'));
@@ -510,17 +553,36 @@ describe('引导在原任务收尾时才送到（2026-11-17 用户：选了引�
     onText?.(text); return { text, toolCalls: [], stop: 'end_turn' };
   } }, model: 'm' }) });
   const a = await runner.start({ sessionId: 'late-note', text: '写一段介绍' });
+  predecessor = a.id;
   // 回答提交后（模型循环已结束、还没收尾）立刻发来引导
   let sent = null;
   runner.subscribe(a.id, e => { if (e.type === 'diagnostic' && e.phase === 'answer_committed' && !sent) sent = runner.start({ sessionId: 'late-note', targetTaskId: a.id, text: '改成三句话' }); });
+  let duringWrite, observed;
+  try {
+    await writing;
+    expect(runner.get(a.id).status).toBe('running');
+    expect(runner.events(a.id).some(e => e.type === 'task_state' && e.status === 'done')).toBe(false);
+    const unsubscribe = runner.subscribe(a.id, e => { if (e.type === 'task_state' && e.status === 'done') observed = e; });
+    expect(typeof unsubscribe).toBe('function');
+    duringWrite = runner.start({ sessionId: 'late-note', targetTaskId: a.id, text: '第一句写给家长', requestId: 'at_handoff' });
+  } finally {
+    resumeWrite();
+  }
   await until(() => runner.get(a.id)?.status === 'done');
   expect((await sent).joined).toBe(true);
   const final = runner.events(a.id).find(e => e.type === 'task_state' && e.status === 'done');
   expect(final.followupTaskId).toBeTruthy();
+  expect(observed).toEqual(final);
+  expect(await duringWrite).toMatchObject({ id: final.followupTaskId, joined: true });
+  expect(await runner.start({ sessionId: 'late-note', targetTaskId: a.id, text: '第一句写给家长', requestId: 'at_handoff' })).toMatchObject({ id: final.followupTaskId, duplicate: true });
   await until(() => runner.get(final.followupTaskId)?.status === 'done');
   expect(seen.at(-1)).toContain('改成三句话');
+  expect(seen.at(-1)).toContain('原任务的回答');
+  expect(seen.at(-1)).toContain('第一句写给家长');
+  expect(runner.list()).toHaveLength(2);
   const messages = (await sessions.get('late-note')).messages;
   expect(messages.filter(m => m.content === '改成三句话')).toHaveLength(1);
+  expect(messages.filter(m => m.content === '第一句写给家长')).toHaveLength(1);
   expect(messages.at(-1)).toMatchObject({ role: 'assistant', content: '已按补充调整' });
  });
 });

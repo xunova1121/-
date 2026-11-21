@@ -190,9 +190,10 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   }
 
   /** 同一段对话的“读出来 → 改 → 存回去”排队做：几处同时改时，后存的不会冲掉先存的 */
-  function editSession(id, fn) {
+  function editSession(id, fn, onSettled) {
     const key = (userAccess?.current() || 'owner') + ':' + id;
-    const next = (locks.get(key) ?? Promise.resolve()).catch(() => {}).then(async () => fn(await sessions.get(id)));
+    const write = (locks.get(key) ?? Promise.resolve()).catch(() => {}).then(async () => fn(await sessions.get(id)));
+    const next = onSettled ? write.then(() => onSettled(null), onSettled) : write;
     locks.set(key, next);
     next.finally(() => { if (locks.get(key) === next) locks.delete(key); }).catch(() => {});
     return next;
@@ -311,7 +312,9 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     // 智能体对话：按本人注册表解析（找不到就报错，不悄悄当普通对话）
     // 评测任务只允许内置智能体（固定配置、不涉及个人数据），不读个人智能体
     const agent = await resolveAgentTurn({ agentId: session.agentId || null, form: session.agentForm || null }, task.evaluationId ? { lookup: async (id) => BUILTIN_AGENTS.find((p) => p.id === id) || null } : undefined);
-    const taskIntent = resolveTaskIntent(task.text, { history: session.messages.slice(0, -1), state: session.taskContext, images: task.images.length });
+    // 接续引导已经记在上一条回答之前；上一条回答也要交给模型才能修改它。
+    const history = task.followupOf ? session.messages : session.messages.slice(0, -1);
+    const taskIntent = resolveTaskIntent(task.text, { history, state: session.taskContext, images: task.images.length });
     // 记忆按意思找：用能力表“记忆向量”那一项（服务器没有跨域限制）；没有就只按关键字
     memory.configureMemory({ llm: helper(cfg, 'write', task, 'memory'), embedder: createEmbedder(cfg, { direct: true }) });
     const taskRepos = task.evaluationAuthorization ? null : codeProjects ? await codeProjects.reposFor(session.id) : codeRepos;
@@ -334,7 +337,6 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     // 告诉手机这句话交给了谁（回答底下显示）
     record(task, { type: 'route', model, task: kind, routed: route.routed, reason: taskIntent.reason, category: taskIntent.category });
     const fallbacks = fallbackRoutes(cfg, { provider: route.cfg.provider, model, task: kind }).map((f) => ({ ...createAdapter(f.cfg), label: `${providerLabel(f.cfg, f.provider)} · ${f.model}` })).filter((f) => !f.problem && f.adapter && f.model).map(f => ({ ...f, adapter: evaluationAdapter(f.adapter) }));
-    const history = session.messages.slice(0, -1); // 最后一条是这次的用户原话，单独作为 userText
     const taskLookup = task.evaluationId ? createLookupService({ storage: memoryLookupStorage(), get: publicFetch }) : lookupService;
     const tools = evaluationTools(makeTools({
       ...(!task.evaluationId && await lookupRuntime(task.userId || 'owner', cfg)),
@@ -472,6 +474,25 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     }
   }
 
+  function newTask(sessionId, text, { images = [], voice = false, evaluationId = null, evaluationAuthorization = null }, previous, evaluationScope = evaluationId) {
+    const id = uid('t'), createdAt = now();
+    const checkpoint = { taskId: id, text, notes: [], steps: [], inFlight: [], files: [], status: 'queued', createdAt };
+    if (codeFollowup(text) && (previous?.codeTaskId || codeTaskPolicy({ text: previous?.text || '', hasRepos: Boolean(codeRepos && !evaluationScope) }).enabled)) {
+      checkpoint.codeTaskId = previous?.codeTaskId || previous?.taskId;
+    }
+    return { id, userId: userAccess?.current() || 'owner', sessionId, evaluationId,
+      ...(evaluationAuthorization && { evaluationAuthorization: { id: evaluationAuthorization.id } }), text, status: 'queued',
+      seq: 0, events: [], listeners: new Set(), files: new Set(), inbox: [], notes: [], images, voice: Boolean(voice),
+      ctrl: new AbortController(), createdAt, checkpoint };
+  }
+
+  function enqueue(task) {
+    task.timing = createTaskTiming(task.createdAt, now);
+    tasks.set(task.id, task);
+    record(task, { type: 'task_state', status: 'queued', position: waiting.length + running });
+    waiting.push(task);
+  }
+
   async function finish(task, session, { text = '', error = '', errorType = '', stopped = false, shown = '', usedTools = [], toolCalls = 0 }) {
     clearTimeout(task.codeDeadline);
     const timing = task.timing.finish();
@@ -479,37 +500,61 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     clearTimeout(task.draftTimer);
     clearTimeout(task.checkpointTimer); task.checkpointTimer = null; // 下面一起写最终的检查点
     evidence.flush().catch(() => {});
+    let status = stopped ? 'stopped' : error ? 'error' : 'done';
+    const saveFailure = '服务器保存回答失败，请检查服务器存储。' + (task.inbox.length ? '补充尚未执行，可在原会话中重新发送。' : '');
+    let next = null;
+    // 会话锁释放前，一次公开可观察状态、后续编号和终结事件。
+    const publish = (saveError) => {
+      if (saveError) {
+        console.error(`[任务] ${task.id} 回答没存上：${saveError?.stack || saveError}`);
+        status = 'error';
+        error = saveFailure;
+        errorType = 'storage';
+        next = null;
+      }
+      if (next) {
+        enqueue(next);
+        task.followupTaskId = next.id;
+        task.inbox.length = 0;
+      }
+      task.status = status;
+      task.endedAt = now();
+      // 记一笔用时，方便查“为什么慢”：journalctl -u jarvis 能看到
+      const sec = (t) => (t && task.startedAt ? `${((t - task.startedAt) / 1000).toFixed(1)}s` : '—');
+      console.log(`[任务] ${task.id} ${task.status}：排队 ${task.startedAt ? ((task.startedAt - task.createdAt) / 1000).toFixed(1) : '—'}s，首字 ${sec(task.firstTextAt)}，共 ${sec(task.endedAt)}，工具 ${usedTools.length} 次${error ? `，出错：${error.slice(0, 120)}` : ''}`);
+      task.error = error;
+      task.errorType = errorType;
+      record(task, { type: 'task_state', status: task.status, timing, ...(next && { followupTaskId: next.id }), ...(task.review?.outcome && { outcome: task.review.outcome }), ...(error && { error, errorKind: errorType }), ...(task.status === 'done' && { text, toolCalls }), files: [...task.files] });
+      console.log(`[任务耗时] ${task.id} ${JSON.stringify(timing)}`);
+      task.listeners.clear();
+      task.images = [];
+    };
     // 重新读出来再改（期间用户可能又说了话、改了标题）：去掉半截回答，换成完整的
     await editSession(task.sessionId, async (fresh) => {
       fresh ??= session;
-      if (!fresh) return;
+      if (!fresh) throw new Error('会话不存在');
       if (!error && !stopped) applySuggestedTitle(fresh, task.suggestedTitle);
       fresh.messages = fresh.messages.filter((m) => m.draftOf !== task.id);
       if (!error && !stopped) fresh.messages.push({ role: 'assistant', content: text || '（完成）', ts: now(), ...extra });
       else if (shown.trim() || usedTools.length || task.markets?.length) fresh.messages.push({ role: 'assistant', content: `${shown.trim()}\n\n${stopped ? '（已打断）' : interruptionMark({ message: error, kind: errorType })}`, ts: now(), ...extra });
       fresh.updatedAt = now();
-      task.checkpoint=checkpointEvent(task.checkpoint,{type:'task_state',status:stopped?'stopped':error?'error':'done',error},now());
-      fresh.taskCheckpoint={...task.checkpoint,timing};
-      await sessions.save(fresh);
-    }).catch((e) => console.error(`[任务] ${task.id} 回答没存上：${e?.stack || e}`));
-    task.status = stopped ? 'stopped' : error ? 'error' : 'done';
-    task.endedAt = now();
-    // 回答已写完、收尾时才送到的引导/补充（模型没来得及读）：不丢，接着开一轮处理（2026-11-17 用户：选了引导没有效果）
-    const leftover = task.status === 'done' ? task.inbox.splice(0) : [];
-    let followupTaskId = null;
-    if (leftover.length) {
-      try { followupTaskId = (await inTask(task, () => api.start({ sessionId: task.sessionId, text: leftover.join('\n'), carried: true })))?.id || null; }
-      catch (e) { console.warn(`[任务] ${task.id} 收尾时的补充没能接着处理：${e?.message || e}`); }
-    }
-    // 记一笔用时，方便查“为什么慢”：journalctl -u jarvis 能看到
-    const sec = (t) => (t && task.startedAt ? `${((t - task.startedAt) / 1000).toFixed(1)}s` : '—');
-    console.log(`[任务] ${task.id} ${task.status}：排队 ${task.startedAt ? ((task.startedAt - task.createdAt) / 1000).toFixed(1) : '—'}s，首字 ${sec(task.firstTextAt)}，共 ${sec(task.endedAt)}，工具 ${usedTools.length} 次${error ? `，出错：${error.slice(0, 120)}` : ''}`);
-    task.error = error;
-    task.errorType = errorType;
-    record(task, { type: 'task_state', status: task.status, timing, ...(followupTaskId && { followupTaskId }), ...(task.review?.outcome && { outcome: task.review.outcome }), ...(error && { error, errorKind: errorType }), ...(task.status === 'done' && { text, toolCalls }), files: [...task.files] });
-    console.log(`[任务耗时] ${task.id} ${JSON.stringify(timing)}`);
-    task.listeners.clear();
-    task.images = [];
+      task.checkpoint = checkpointEvent(task.checkpoint, { type: 'task_state', status, error }, now());
+      // 已确认的补充与最终回答一次存入同一会话。写盘期间观察者仍能订阅原任务。
+      if (status === 'done' && task.inbox.length) {
+        next = newTask(task.sessionId, task.inbox.join('\n'), {
+          evaluationId: task.evaluationId, evaluationAuthorization: task.evaluationAuthorization
+        }, task.checkpoint);
+        next.followupOf = task.id;
+      }
+      fresh.taskCheckpoint = next?.checkpoint || { ...task.checkpoint, timing };
+      try { await sessions.save(fresh); }
+      catch (saveError) {
+        // 恢复写成功时保留已生成的答复、用户补充和失败检查点；持续故障时使用上次持久化的记录。
+        fresh.taskCheckpoint = { ...checkpointEvent(task.checkpoint, { type: 'task_state', status: 'error', error: saveFailure }, now()), timing };
+        await sessions.save(fresh).catch(() => {});
+        throw saveError;
+      }
+    }, publish);
     running--;
     lastActive = Date.now();
     pump();
@@ -571,7 +616,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
 
   const api = {
     /** @returns {Promise<{ id: string, sessionId: string }>} */
-    async start({ sessionId = null, text, images = [], voice = false, requestId = null, targetTaskId = null, evaluationId = null, evaluationAuthorization = null, agentId = null, agentForm = null, carried = false }) {
+    async start({ sessionId = null, text, images = [], voice = false, requestId = null, targetTaskId = null, evaluationId = null, evaluationAuthorization = null, agentId = null, agentForm = null }) {
       text = String(text ?? '').trim();
       if (!text) throw Object.assign(new Error('任务内容是空的'),{status:400});
       if (text.length>20000) throw Object.assign(new Error('任务内容太长'),{status:400});
@@ -581,6 +626,9 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       if (agentId!==null&&agentId!==''){profileId(agentId);}else agentId=null;
       agentForm=agentId?sanitizeAgentForm(agentForm):null;
       images=(Array.isArray(images)?images:[]).filter(i=>/^image\/(png|jpe?g|webp|gif)$/.test(i?.mime)&&typeof i.data==='string'&&i.data.length<=MAX_IMAGE_CHARS).slice(0,MAX_IMAGES).map(({mime,data})=>({mime,data}));
+      // 记下到达时正在处理的目标，等会话锁期间它可能刚好交接给下一轮。
+      const target = targetTaskId && tasks.get(targetTaskId);
+      const arrivedDuringTask = visible(target) && target.sessionId === sessionId && ['running', 'queued'].includes(target.status) && !target.ctrl.signal.aborted;
       await recover();
       if (userAccess && !userAccess.active(userAccess.current())) throw Object.assign(new Error('该用户已停用'), { status: 403 });
       const hash=createHash('sha256').update(JSON.stringify([text,images,Boolean(voice),targetTaskId,evaluationId,...(agentId?[agentId,agentForm]:[])])).digest('hex');
@@ -599,8 +647,9 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
           if(!tasks.has(prior.result.id))throw Object.assign(new Error('该请求已接收，服务器曾重启或记录已归档；请查看原会话，不要重复执行'),{status:409});
           return {...prior.result,duplicate:true};
         }
-        const busy=[...tasks.values()].find(t=>visible(t)&&t.sessionId===id&&['queued','running'].includes(t.status));
-        if(targetTaskId&&busy?.id!==targetTaskId)throw Object.assign(new Error('原任务已结束或中断，补充未执行；请作为新任务发送'),{status:409});
+        const busy=[...tasks.values()].find(t=>visible(t)&&t.sessionId===id&&['queued','running'].includes(t.status)&&!(t.status==='queued'&&t.ctrl.signal.aborted));
+        const handedOver = arrivedDuringTask && target.status === 'done' && (busy ? busy.id === target.followupTaskId : !target.followupTaskId);
+        if(targetTaskId&&busy?.id!==targetTaskId&&!handedOver)throw Object.assign(new Error('原任务已结束或中断，补充未执行；请作为新任务发送'),{status:409});
         const previous=session.taskCheckpoint;
         const incomplete=previous&&(['running','queued','interrupted','needs_review','error'].includes(previous.status) || previous.status==='stopped'&&previous.codeTaskId&&/^(继续|恢复|接着)/.test(text));
         if(!busy&&incomplete){
@@ -608,15 +657,10 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
           const archive=session.recoveryCheckpoints||[];const {evidence:_,...kept}=previous; // 旧版检查点里带着网页正文：归档时去掉，只留最近 5 次
           session.recoveryCheckpoints=[...archive.filter(x=>x.key!==key).map(({evidence,...record})=>record),{key,...kept}].slice(-5);
         }
-        // carried：原任务快结束时才送到的补充，原话已经记进对话，接着处理时不再重复记一条
-        if(!carried)session.messages.push({role:'user',content:text,ts:now()});session.updatedAt=now();
+        session.messages.push({role:'user',content:text,ts:now()});session.updatedAt=now();
         // 只有评测程序明确带了 evaluationId 的才按评测隔离；用户本人在评测会话里发的话照常读记忆（用户 2026-10-30：误进评测会话后“不知道我是谁”）
         if (!busy && userAccess && ([...tasks.values()].filter(t => visible(t) && ['queued','running'].includes(t.status)).length >= 20 || tasks.size >= 1000)) throw Object.assign(new Error('任务过多，请等待已有任务完成'), { status: 429 });
-        const task=busy||{id:uid('t'),userId:userAccess?.current() || 'owner',sessionId:id,evaluationId:evaluationId?evaluationScope:null,...(evaluationAuthorization && { evaluationAuthorization: { id: evaluationAuthorization.id } }),text,status:'queued',seq:0,events:[],listeners:new Set(),files:new Set(),inbox:[],notes:[],images,voice:Boolean(voice),ctrl:new AbortController(),createdAt:now(),checkpoint:{text,notes:[],steps:[],inFlight:[],files:[],status:'queued',createdAt:now()}};
-        if (!busy && codeFollowup(text) && (previous?.codeTaskId || codeTaskPolicy({ text: previous?.text || '', hasRepos: Boolean(codeRepos && !evaluationScope) }).enabled)) {
-          task.checkpoint.codeTaskId = previous.codeTaskId || previous.taskId;
-        }
-        task.checkpoint.taskId=task.id;
+        const task = busy || newTask(id, text, { images, voice, evaluationId: evaluationId ? evaluationScope : null, evaluationAuthorization }, previous, evaluationScope);
         if(!busy&&incomplete&&/^(继续|恢复|接着)/.test(text))task.resumeFrom=previous;
         const nextCheckpoint=busy?checkpointEvent(task.checkpoint,{type:'user_note',text},now()):task.checkpoint;
         session.taskCheckpoint=nextCheckpoint;
@@ -624,14 +668,17 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         session.taskReceipts=[...receipts,...(requestId?[{requestId,hash,result:answer,at:now()}]:[])];
         await sessions.save(session);task.checkpoint=nextCheckpoint;
         if(busy){busy.inbox.push(text);busy.notes.push(text);record(busy,{type:'user_note',text});}
-        else{task.timing=createTaskTiming(task.createdAt,now);tasks.set(task.id,task);record(task,{type:'task_state',status:'queued',position:waiting.length+running});waiting.push(task);}
+        else {
+          enqueue(task);
+          if (handedOver) target.followupTaskId = task.id;
+        }
         return answer;
       });
       pump();return result;
     },
     get(id) {
       const t = tasks.get(id);
-      return visible(t) && { id: t.id, sessionId: t.sessionId, evaluationId: t.evaluationId || null, text: t.text, status: t.status, seq: t.seq, files: [...t.files], error: t.error || '', errorKind: t.errorType || '', review: t.review ?? null, timing: t.timing.snapshot(), createdAt: t.createdAt, startedAt: t.startedAt ?? null, endedAt: t.endedAt ?? null };
+      return visible(t) && { id: t.id, sessionId: t.sessionId, evaluationId: t.evaluationId || null, text: t.text, status: t.status, seq: t.seq, ...(t.followupTaskId && { followupTaskId: t.followupTaskId }), files: [...t.files], error: t.error || '', errorKind: t.errorType || '', review: t.review ?? null, timing: t.timing.snapshot(), createdAt: t.createdAt, startedAt: t.startedAt ?? null, endedAt: t.endedAt ?? null };
     },
     list() { return [...tasks.keys()].map((id) => this.get(id)).filter(Boolean); },
     /** 全部用户正在做或排队的任务数（只给服务器自身用：自动更新据此等任务做完再重启，不返回任何内容） */
@@ -646,7 +693,14 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     stop(id) {
       const t = tasks.get(id);
       if (!visible(t)) return false;
-      if (t.status === 'queued') { t.status = 'stopped'; running++; waiting.splice(waiting.indexOf(t), 1); inTask(t, () => finish(t, null, { stopped: true })); return true; }
+      if (t.status === 'queued') {
+        if (t.ctrl.signal.aborted) return false;
+        t.ctrl.abort();
+        running++;
+        waiting.splice(waiting.indexOf(t), 1);
+        inTask(t, () => finish(t, null, { stopped: true }));
+        return true;
+      }
       if (t.status === 'running') { t.ctrl.abort(); return true; }
       return false;
     },
