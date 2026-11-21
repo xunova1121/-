@@ -83,6 +83,17 @@ it('有人在填写手账、阅读或退到后台时，不会突然吹开窗', (
   expect(world.dataset.windowState).toBe('ajar');
 });
 
+it('手机兼容显示中窗户不启动阵风，仍可手动开窗和落闩', () => {
+  document.documentElement = { classList: { contains: name => name === 'safe-render' } };
+  const controls = enter();
+  expect(vi.getTimerCount()).toBe(0);
+  controls.toggle.onclick();
+  expect(world.dataset.windowState).toBe('open');
+  expect(vi.getTimerCount()).toBe(0);
+  controls.latch.onclick();
+  expect(world.dataset.windowState).toBe('latched');
+});
+
 it('减少动态时可以手动推窗，远眺日夜随当地时间，不随室内开灯改变', () => {
   reduceMotion = true;
   const controls = enter();

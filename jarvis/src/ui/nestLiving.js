@@ -62,7 +62,7 @@ export function createNestLiving(floor) {
     if (!visible || previous !== 'coffee') return;
     const elapsed = performance.now() - started;
     const {phase,next} = coffeeMoment(elapsed);
-    const still = reduced.matches || document.body.classList.contains('reduced-motion') || document.documentElement.classList.contains('safe-render');
+    const still = reduced.matches || document.body.classList.contains('reduced-motion') || document.documentElement?.classList.contains('safe-render');
     layer.dataset.coffeePhase = still ? 'pour' : phase;
     if (!still) timer = setTimeout(coffeeStep, Math.max(1, Math.ceil(next - elapsed)));
   }
