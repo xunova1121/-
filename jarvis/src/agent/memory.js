@@ -512,6 +512,12 @@ async function embedOne(text) {
   try { return (await memoryState().embedder.embed([text]))[0] ?? null; } catch (e) { memoryState().lastEmbedError = { message: String(e?.message || e).slice(0, 160), at: Date.now() }; return null; }
 }
 
+function queryVector(query, memories, episodes) {
+  const model = memoryState().embedder?.model;
+  const compatible = item => item.embedding?.length && item.embModel === model;
+  return model && (memories.some(compatible) || episodes.some(compatible)) ? embedOne(query) : null;
+}
+
 /**
  * 给还没有当前向量的记忆补算（换了向量服务、刚填 Key 时）：一批 16 条，一次最多 limit 条
  * @returns {Promise<number>} 补了几条
@@ -612,10 +618,8 @@ export async function contextFor(query, { vector = true } = {}) {
   const selectedStyles = selectedCommunication.filter(item => active.includes(item));
   const cur = active.filter(m => !recordScope(m) || selectedStyles.includes(m));
   const usableEpisodes = eps.filter(safe(e => e.summary));
-  const model = memoryState().embedder?.model;
-  const hasVector = item => item.embedding?.length && item.embModel === model;
   // 空库、旧模型向量和仅关键词的闲聊都无需在回复前请求向量服务。
-  const vec = vector && model && (cur.some(hasVector) || usableEpisodes.some(hasVector)) ? await embedOne(query) : null;
+  const vec = vector ? await queryVector(query, cur, usableEpisodes) : null;
   const relevant = score(cur, query, (m) => m.content, { k: 6, vec });
   // 基本情况（年龄、称呼、住址、家人、工作……）：每轮都带上，不和偏好抢名额，也不靠和问题像不像
   const basics = basicFacts(cur);
@@ -666,13 +670,15 @@ export function basicFacts(list) {
 }
 
 export async function recall(query, { includeArchived = false } = {}) {
-  const all = (await memories.all()).map(upgrade).filter(safe((m) => m.content));
+  const [ms, eps, ls] = await Promise.all([memories.all(), episodes.all(), lessons.all()]);
+  const all = ms.map(upgrade).filter(safe((m) => m.content));
   const pool = includeArchived ? all : all.filter(current);
-  const vec = await embedOne(query);
+  const usableEpisodes = eps.filter(safe(e => e.summary));
+  const vec = await queryVector(query, pool, usableEpisodes);
   const hits = score(pool, query, (m) => m.content, { k: 8, vec });
-  const eps = score((await episodes.all()).filter(safe((e) => e.summary)), query, (e) => e.summary, { k: 3, vec, weights: false });
-  const ls = score((await lessons.all()).filter(safe((l) => l.content)), query, (l) => `${l.content} ${l.context ?? ''}`, { k: 3, weights: false });
-  return { memories: hits, episodes: eps.filter((e) => e.relevance >= 0.2), lessons: ls };
+  const relatedEpisodes = score(usableEpisodes, query, e => e.summary, { k: 3, vec, weights: false });
+  const relatedLessons = score(ls.filter(safe(l => l.content)), query, l => `${l.content} ${l.context ?? ''}`, { k: 3, weights: false });
+  return { memories: hits, episodes: relatedEpisodes.filter(e => e.relevance >= 0.2), lessons: relatedLessons };
 }
 
 /**

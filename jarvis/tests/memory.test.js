@@ -74,12 +74,14 @@ describe('检索与打分', () => {
     await memory.contextFor('周末的计划');
     await collection('memories').put({ id: 'old', content: '周末去爬山', embedding: [0, 1], embModel: 'previous' });
     expect((await memory.contextFor('爬山')).memories.map(m => m.id)).toContain('old');
+    expect((await memory.recall('爬山')).memories.map(m => m.id)).toContain('old');
     expect(calls).toBe(0);
     await collection('episodes').put({ id: 'ep', summary: '讨论过出游', embedding: [0, 1], embModel: 'current' });
     await memory.contextFor('周末的计划', { vector: false });
     expect(calls).toBe(0);
     expect((await memory.contextFor('登高')).episodes.map(e => e.id)).toContain('ep');
-    expect(calls).toBe(1);
+    expect((await memory.recall('登高')).episodes.map(e => e.id)).toContain('ep');
+    expect(calls).toBe(2);
   });
 
   it('相关度为主，重要度与新近度加权；钉住的即使不相关也会带上', async () => {
