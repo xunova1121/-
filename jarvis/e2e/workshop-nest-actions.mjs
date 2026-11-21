@@ -56,12 +56,14 @@ export async function checkLivingMotion(page, scene) {
   }
   assert.deepEqual(await movingCatParts(), [], '系统减少动态应覆盖全部猫姿势');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  const hadPreference = await page.evaluate(() => document.body.classList.contains('reduced-motion'));
+  // 使用设置页同一个选项和 change 处理器。系统偏好异步更新时也应尊重应用设置。
+  const preference = page.locator('#set-motion');
+  const previous = await preference.inputValue();
   try {
-    await page.evaluate(() => document.body.classList.add('reduced-motion'));
+    await preference.selectOption('on', { force: true });
     assert.deepEqual(await movingCatParts(), [], '应用减少动态应覆盖全部猫姿势');
   } finally {
-    if (!hadPreference) await page.evaluate(() => document.body.classList.remove('reduced-motion'));
+    await preference.selectOption(previous, { force: true });
   }
 }
 
