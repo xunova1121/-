@@ -1,0 +1,20 @@
+/* 这里使用从动作图中单独取出的人物。椅子、凳子都不随人物切换。 */
+.ws-nest-sofa-rest,.ws-nest-sofa-walk { display:none; pointer-events:none; position:absolute; z-index:2; }
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"]:is([data-nest-pose="rest"],[data-nest-pose="think"]) .ws-life-actor { display:none; }
+.ws-scene[data-room-view="nest"]:is([data-nest-pose="rest"],[data-nest-pose="think"]):not([data-sofa-walk]) .ws-nest-sofa-rest {
+  display:block; left:29.9%; top:37.2%; width:14%; aspect-ratio:1;
+  background:url('./assets/nestRoom/sofa-rest.webp') 0 0 / 200% 100% no-repeat;
+}
+.ws-scene[data-room-view="nest"][data-nest-pose="think"]:not([data-sofa-walk]) .ws-nest-sofa-rest { background-position:100% 0; }
+.ws-scene[data-room-view="nest"][data-sofa-walk] .ws-nest-sofa-walk {
+  display:block; left:31.7%; bottom:40.3%; width:11.2%; aspect-ratio:1;
+}
+.ws-nest-sofa-walk::after {
+  content:''; position:absolute; inset:0; background:url('./assets/workStudio/run.webp') 0 0 / 200% 200% no-repeat;
+  animation:ws-run-frames .38s steps(1,end) infinite;
+}
+.ws-nest-sofa-walk[data-facing="left"]::after { transform:scaleX(-1); }
+.ws-scene[data-nest-light="off"] :is(.ws-nest-sofa-rest,.ws-nest-sofa-walk) { filter:brightness(.49) saturate(.68); }
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] [data-furniture="sofa"]:hover:not(:focus-visible) {
+  background:transparent; box-shadow:none;
+}

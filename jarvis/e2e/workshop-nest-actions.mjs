@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
+import { checkViewerPixels } from './workshop-room-furniture.mjs';
 
 async function pixels(png) {
   const image = await loadImage(png);
@@ -69,6 +70,11 @@ export async function checkLivingMotion(page, scene) {
 
 export async function checkCoffee(page, room, scene, hit, shot) {
   const living = scene.locator('.ws-nest-living');
+  const table = scene.locator('.ws-nest-coffee-table');
+  await table.waitFor();
+  const service = () => table.evaluate(el => getComputedStyle(el, '::after').display);
+  assert.notEqual(await service(), 'none', '未开始冲泡时桌上也要有壶和杯');
+  const restingPlace = await table.evaluate(el => [el.offsetLeft, el.offsetTop, el.offsetWidth, el.offsetHeight]);
   const frames = await living.evaluateHandle(el => {
     const frames = [];
     const observer = new MutationObserver(() => {
@@ -82,19 +88,27 @@ export async function checkCoffee(page, room, scene, hit, shot) {
   await hit('cup').click();
   const phase = name => scene.locator(`[data-coffee-phase="${name}"] .ws-nest-coffee`).waitFor();
   await phase('pour');
+  assert.equal(await service(), 'none', '拿起壶时空出壶杯原来所在的台面');
   await checkUnobstructed(scene, '桌前倒咖啡');
   const geometry = await living.locator('.ws-nest-coffee').evaluate(el => {
-    const actor = el.getBoundingClientRect(), floor = el.closest('.ws-floorplan').getBoundingClientRect();
+    const actor = el.getBoundingClientRect(), stage = el.closest('.ws-floorplan'), floor = stage.getBoundingClientRect();
     const x = (actor.left + actor.width * .86 - floor.left) / floor.width;
     const y = (actor.top + actor.height * .82 - floor.top) / floor.height;
+    const table = stage.querySelector('.ws-nest-coffee-table').getBoundingClientRect();
+    const mugX = (actor.left + actor.width * .86 - table.left) / table.width;
+    const mugY = (actor.top + actor.height * .82 - table.top) / table.height;
     const style = getComputedStyle(el);
-    return { x, y, frame: style.backgroundPosition, art: style.backgroundImage };
+    return { x, y, mugX, mugY, frame: style.backgroundPosition, art: style.backgroundImage };
   });
   assert(geometry.x > .64 && geometry.x < .83 && geometry.y > .4 && geometry.y < .58 && geometry.art !== 'none',
     '水流落到桌面杯中 ' + JSON.stringify(geometry));
+  assert(geometry.mugX > .25 && geometry.mugX < .46 && geometry.mugY > .04 && geometry.mugY < .17,
+    '杯底应落在固定茶桌左侧的实际桌面内 ' + JSON.stringify(geometry));
   assert.equal(await scene.locator('.ws-life-actor').isVisible(), false, '倒咖啡时桌旁只有一位未央');
   await shot('桌边冲咖啡');
   await phase('hold');
+  assert.deepEqual(await table.evaluate(el => [el.offsetLeft, el.offsetTop, el.offsetWidth, el.offsetHeight]), restingPlace,
+    '倒水和喝完都应使用同一张固定的茶桌');
   const timeline = await frames.evaluate(log => { log.observer.disconnect(); return log.frames; });
   await frames.dispose();
   assert.deepEqual([...new Set(timeline.map(f => f.phase))], ['reach','pour','set-down','sip','hold'], '茶具和手应按冲泡顺序换姿势');
@@ -248,7 +262,7 @@ export async function checkViewingPlace(room, device) {
     const screen = rect(device === 'tv' ? '.ws-media-receiver' : '.ws-media-panel');
     const stage = el.getBoundingClientRect();
     // 取前景沙发实际帧中的眼睛及原地毯上的猫，而非页面的固定屏幕坐标。
-    const eye = [sofa.left + sofa.width * .636, sofa.top + sofa.height * .346];
+    const eye = [sofa.left + sofa.width * .845, sofa.top + sofa.height * .337];
     const catEye = [floor.left + floor.width * .414, floor.top + floor.height * .692];
     const catEar = [floor.left + floor.width * .405, floor.top + floor.height * .651];
     const inside = (point, box) => point[0] > box.left && point[0] < box.right && point[1] > box.top && point[1] < box.bottom;
@@ -259,5 +273,6 @@ export async function checkViewingPlace(room, device) {
   }, device);
   assert(shot.art && shot.frame === (device === 'tv' ? '50%' : '100%'), '第二张沙发应显示正在观看的人物美术帧 ' + device);
   assert(shot.viewer && shot.cat, '未央的眼睛、前景猫的眼睛和耳朵都应在节目与新闻正文之外可见 ' + JSON.stringify(shot));
+  await checkViewerPixels(scene, device);
   if (device === 'news') assert(shot.coverage >= .62 && shot.coverage <= .72, '新闻继续占房间约三分之二 ' + JSON.stringify(shot));
 }

@@ -1,11 +1,12 @@
 import './nestLiving.css';
 
 // 毫秒从拿壶算起。冲完这一杯后只会偶尔端杯，不会每隔几秒重新烧一壶水。
-export function coffeeMoment(elapsed) {
+export function coffeeMoment(elapsed, singleCup = false) {
   if (elapsed < 1200) return {phase: 'reach', next: 1200};
   if (elapsed < 4600) return {phase: 'pour', next: 4600};
   if (elapsed < 5700) return {phase: 'set-down', next: 5700};
   if (elapsed < 8200) return {phase: 'sip', next: 8200};
+  if (singleCup) return {phase: 'hold', next: null};
   const cycle = 23500;
   const since = (elapsed - 8200) % cycle;
   return since < 20500
@@ -42,6 +43,8 @@ function cropRegion(el, [x,y,w,h], source) {
 }
 
 export function createNestLiving(floor) {
+  // 茶桌是常驻家具，坐下或离开只换人手中的壶和杯，看电视也保留桌子。
+  part(floor, 'ws-nest-coffee-table');
   const layer = part(floor, 'ws-nest-living');
   layer.hidden = true;
   const body = part(layer, 'ws-nest-idle-patch');
@@ -61,10 +64,11 @@ export function createNestLiving(floor) {
     timer = null;
     if (!visible || previous !== 'coffee') return;
     const elapsed = performance.now() - started;
-    const {phase,next} = coffeeMoment(elapsed);
-    const still = reduced.matches || document.body.classList.contains('reduced-motion') || document.documentElement?.classList.contains('safe-render');
-    layer.dataset.coffeePhase = still ? 'pour' : phase;
-    if (!still) timer = setTimeout(coffeeStep, Math.max(1, Math.ceil(next - elapsed)));
+    const {phase,next} = coffeeMoment(elapsed, document.documentElement.classList.contains('safe-render'));
+    const still = reduced.matches || document.body.classList.contains('reduced-motion');
+    const visiblePhase = still ? 'pour' : phase;
+    if (layer.dataset.coffeePhase !== visiblePhase) layer.dataset.coffeePhase = visiblePhase;
+    if (!still && next !== null) timer = setTimeout(coffeeStep, Math.max(1, Math.ceil(next - elapsed)));
   }
 
   function setVisible(shown) {

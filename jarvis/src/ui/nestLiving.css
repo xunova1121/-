@@ -31,6 +31,20 @@
 }
 @keyframes nest-sleep-breath { 0%,100% { transform:none; } 43% { transform:scaleY(1.018) rotate(-.6deg); } }
 @keyframes nest-quilt-rise { 0%,100% { transform:none; } 43% { transform:scaleY(1.038) rotate(-.3deg); } }
+/* 茶桌在书桌前、椅子右手边。水壶和杯平时放在桌面，泡咖啡时由同位置的动作帧接手。 */
+.ws-nest-coffee-table { display:none; }
+.ws-scene[data-room-view="nest"] .ws-nest-coffee-table {
+  display:block; position:absolute; pointer-events:none; z-index:1;
+  left:64.323%; top:49.707%; width:18.164%; height:25.35%;
+  background:url('./assets/nestRoom/tea-table.webp') center / 100% 100% no-repeat;
+}
+.ws-nest-coffee-table::after {
+  content:''; position:absolute; left:5%; top:-18.1%; width:41.94%; height:31.2%;
+  background:url('./assets/nestRoom/tea-service.webp') center / 100% 100% no-repeat;
+}
+.ws-scene[data-nest-pose="coffee"] .ws-nest-coffee-table::after { display:none; }
+.ws-scene[data-nest-light="off"] .ws-nest-coffee-table { background-image:url('./assets/nestRoom/tea-table-off.webp'); }
+.ws-scene[data-nest-light="off"] .ws-nest-coffee-table::after { background-image:url('./assets/nestRoom/tea-service-off.webp'); }
 /* 四帧分别带有实绘的手、壶、杯和水线，臀部对齐椅垫，杯底对齐桌面。 */
 .ws-nest-coffee {
   display:none; position:absolute; left:56.966%; top:34.18%; width:16.21%; height:22.66%;
@@ -41,7 +55,7 @@
 .ws-nest-living:is([data-coffee-phase="set-down"],[data-coffee-phase="hold"]) .ws-nest-coffee { background-position:0 100%; }
 .ws-nest-living[data-coffee-phase="sip"] .ws-nest-coffee { background-position:100% 100%; }
 .work-studio-view[data-workshop] .ws-scene[data-room-view="nest"][data-nest-pose="coffee"] .ws-floorplan > .ws-life-actor { display:none; }
-.ws-scene[data-nest-light="off"] .ws-nest-coffee { filter:brightness(.67) saturate(.68) drop-shadow(0 1px 1px #19263d66); }
+.ws-scene[data-nest-light="off"] .ws-nest-coffee { background-image:url('./assets/nestRoom/desk-coffee-off.webp'); }
 .ws-nest-living[data-coffee-phase="pour"] .ws-nest-coffee::after {
   content:''; position:absolute; left:81%; top:58%; width:1.1%; height:2.2%;
   border-radius:50%; background:#f6f3dc; box-shadow:0 .5px 1px #f8e4b8;

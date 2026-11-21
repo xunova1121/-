@@ -1,5 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createWorkshopMotion, stationForStep } from '../src/ui/workshopMotion.js';
+import { createWorkshopMotion, stationForStep, walkAcrossRoom } from '../src/ui/workshopMotion.js';
+
+it('小窝开电视后人物的步态不会推走观影席；车间镜头仍可跟拍', () => {
+  vi.stubGlobal('CSS', {supports: () => true});
+  try {
+    const stage = {dataset: {roomView: 'nest'}};
+    const floor = {parentElement: stage, animate: vi.fn(() => ({cancel: vi.fn()}))};
+    const actor = {parentElement: floor, animate: vi.fn(() => ({addEventListener: vi.fn()}))};
+    walkAcrossRoom(actor, 40, 20, 300);
+    expect(actor.animate).toHaveBeenCalledOnce();
+    expect(floor.animate).not.toHaveBeenCalled();
+    stage.dataset.roomView = 'floor';
+    walkAcrossRoom(actor, 40, 20, 300);
+    expect(floor.animate).toHaveBeenCalledOnce();
+  } finally { vi.unstubAllGlobals(); }
+});
 
 describe('PC 工位上的动作', () => {
   let scene, motion, entries;

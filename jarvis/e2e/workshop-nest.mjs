@@ -4,6 +4,7 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { checkNestControls } from './workshop-test-view.mjs';
+import { checkLocalWallClock, checkRestingFurniture } from './workshop-room-furniture.mjs';
 import { checkProgramArea } from './workshop-tv-playback.mjs';
 import { checkCoffee, checkLivingMotion, checkRadio, checkUnobstructed, checkViewingPlace, listenForCat } from './workshop-nest-actions.mjs';
 import { chromium } from 'playwright';
@@ -174,6 +175,11 @@ async function checkMedia(page, room, button, shot) {
   await button(news, '返回房间').click();
   await room.locator('[data-media-device="tv"]').click();
   const tv = room.locator('.ws-media-panel[data-device=tv]');
+  // 老工作区的走路镜头会在开机前几百毫秒把整间小窝移到电视后面。
+  // 在等待频道解码之前先验房间位置，以免动作播放完才检查而漏掉这个回归。
+  const shift = await room.locator('.ws-scene[data-nest-viewing="tv"]').evaluate(scene =>
+    getComputedStyle(scene.querySelector('.ws-floorplan')).translate);
+  assert(shift === 'none' || /^0px(?: 0px)?$/.test(shift), '打开电视时房间不应被工作区走路镜头平移 ' + shift);
   await button(tv, 'CCTV-2 财经').click();
   await page.waitForFunction(() => {
     const video = document.querySelector('.work-studio[data-visible=true] .ws-tv-standby video');
@@ -187,11 +193,11 @@ async function checkMedia(page, room, button, shot) {
   await button(tv, '返回房间').click();
 }
 
-async function check(mobile, width) {
+async function check(mobile, width, clockOnly = false) {
   const home = mobile ? phones : pcs;
-  const platform = mobile ? 'mobile-' + width : 'desktop';
+  const platform = clockOnly ? 'mobile-local-clock' : mobile ? 'mobile-' + width : 'desktop';
   const context = await browser.newContext({ viewport: { width, height: mobile ? 844 : 950 },
-    isMobile: mobile, hasTouch: mobile, timezoneId: 'Asia/Shanghai' });
+    isMobile: mobile, hasTouch: mobile, timezoneId: clockOnly ? 'Asia/Kathmandu' : 'Asia/Shanghai' });
   const errors = [];
   await context.route('https://**/*', route => route.abort());
   await context.route('**/api/workshop/news', route => route.fulfill({ json: { items: [newsItem], updatedAt: +now('08:00'), stale: false } }));
@@ -233,6 +239,12 @@ async function check(mobile, width) {
     await page.goto(home, { waitUntil: 'domcontentloaded' });
     assert.equal(await page.locator('.work-studio:visible').count(), 0);
     await enter();
+    if (clockOnly) {
+      await checkLocalWallClock(page, scene);
+      assert.deepEqual(errors, []);
+      console.log(platform, '非整点时区的本机时间、分钟走时和前台校时通过');
+      return;
+    }
     await waitPose('work');
     const art = room.locator('.ws-nest-art');
     assert.deepEqual(await art.evaluate(img => [img.naturalWidth, img.naturalHeight]), mobile ? [1080, 720] : [1536, 1024]);
@@ -248,6 +260,8 @@ async function check(mobile, width) {
       await page.setViewportSize({ width, height: 844 });
     }
     await shot('小窝');
+    await checkLocalWallClock(page, scene);
+    await checkRestingFurniture(room, scene, hit, shot);
     await checkLivingMotion(page, scene);
     const { bright, dark } = await checkRoomLighting(page, scene, hit);
     await checkCoffee(page, room, scene, hit, shot);
@@ -302,7 +316,10 @@ async function check(mobile, width) {
 
 try {
   if (!process.argv.includes('--mobile')) await check(false, 1440);
-  if (!process.argv.includes('--desktop')) await check(true, 390);
+  if (!process.argv.includes('--desktop')) {
+    await check(true, 390);
+    await check(true, 390, true);
+  }
 } finally {
   await browser.close();
   for (const server of services) {

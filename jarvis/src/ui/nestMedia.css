@@ -12,24 +12,24 @@
 .ws-scene[data-room-view="nest"] .ws-monitor-ticker { max-width: min(65%,33em); }
 .ws-nest-loveseat { display: none; }
 .ws-scene[data-room-view="nest"] .ws-nest-loveseat {
-  display: block; position: absolute; z-index: 1; pointer-events: none;
-  left: 27.5%; top: 40.4%; width: 21.4%; aspect-ratio: 1;
+  display: block; position: absolute; z-index: 3; pointer-events: none;
+  left: 1.5%; top: 52.6%; width: 30.5%; aspect-ratio: 596 / 380;
   background: url('./assets/nestRoom/loveseat.webp') 0 0 / 300% 100% no-repeat;
   filter: drop-shadow(0 .45cqw .32cqw #45301865);
-  /* 地毯在沙发前面。顺着原画猫的肩、耳朵与下巴保留前景轮廓。 */
-  clip-path: polygon(0 0,100% 0,100% 100%,69.7% 100%,73.1% 95.5%,74.2% 90.9%,67% 84.6%,63.4% 82.7%,61.1% 76.8%,57.3% 84.2%,53.1% 81.6%,51.8% 81.8%,47.8% 96.2%,40.4% 92.6%,33.5% 91.1%,26.5% 91.7%,18.7% 94.1%,12.6% 100%,0 100%);
+  /* 沙发右扶手在猫尾后。沿地毯上橘猫的脊背、臀部和尾巴避让，兼容静态绘制。 */
+  clip-path:polygon(0 0,100% 0,100.0% 62.1%,99.5% 62.4%,96.3% 66.1%,93.9% 69.8%,92.2% 73.8%,90.9% 78.1%,90.1% 81.8%,90.3% 85.8%,91.6% 89.2%,94.3% 92.2%,99.2% 93.9%,100.0% 94.2%,100% 100%,0 100%);
 }
 .ws-scene[data-nest-light="off"] .ws-nest-loveseat {
   filter: brightness(.43) saturate(.62) drop-shadow(0 .4cqw .3cqw #120e0c88);
 }
 .ws-scene[data-nest-viewing="tv"] .ws-nest-loveseat { --viewer-frame: 50%; }
 .ws-scene[data-nest-viewing="news"] .ws-nest-loveseat { --viewer-frame: 100%; }
+.ws-scene[data-room-view="nest"][data-nest-viewing] .ws-nest-loveseat { background-position:var(--viewer-frame) 0; }
 .ws-scene[data-nest-viewing] .ws-nest-loveseat::after {
-  content: ''; position: absolute; inset: 0;
-  background: inherit; background-position: var(--viewer-frame) 0;
-  /* 呼吸只带动手臂与身体，木扶手和沙发脚留在原地。 */
-  clip-path: polygon(35% 39%,35% 31%,38% 26%,37% 14%,47% 11%,52% 14%,54% 15%,63% 14%,66% 24%,70% 26%,70% 42%,83% 40%,85% 46%,74% 50%,70% 52%,74% 61%,68% 65%,42% 65%,41% 58%,43% 50%,46% 43%);
-  transform-origin: 59% 61%;
+  content:''; position:absolute; inset:0;
+  background:inherit; background-position:var(--viewer-frame) 0;
+  clip-path:polygon(66.7% 34%,67.6% 12%,73% 7.5%,81% 9.8%,86% 17%,88.3% 31%,88% 40%,98% 38.5%,98% 44%,94% 53%,91% 60%,82% 63%,73% 60%,71% 56%,73% 40%);
+  transform-origin:81% 57%;
 }
 @media (prefers-reduced-motion:no-preference) {
   body:not(.reduced-motion) .work-studio-view[data-visible="true"] .ws-scene[data-nest-viewing] .ws-nest-loveseat::after {
@@ -51,18 +51,33 @@
 }
 .work-studio-view[data-media-open][data-workshop] .ws-scene[data-room-view="nest"][data-media-device] .ws-floorplan {
   width: max(100%,150cqh); height: auto; aspect-ratio: 3 / 2;
-  inset: 50% auto auto 50%; transform: translate(-50%,-50%); translate: none;
+  inset: 50% auto auto 50%; transform: translate(-50%,-50%); translate:none !important;
 }
 .ws-scene[data-room-view="nest"][data-media-device="tv"] .ws-media-panel .ws-media-receiver {
   inset-inline: auto var(--tv-inset); translate: none;
 }
-/* 镜头在小屋内平移，前景的绿沙发和猫留在屏幕左侧，播放区域沿用原版尺寸。 */
+/* 镜头框住前排沙发及猫脸，播放器和新闻阅读区域沿用原尺寸。 */
 .work-studio-view[data-media-open][data-workshop] .ws-scene[data-room-view="nest"][data-media-device]:not([data-media-work="true"]) .ws-floorplan {
-  width: max(155%,165cqh);
-  left: 7.4%; top: calc(61% - 15px); transform: translate(-39.6%,-60%);
+  width:calc((100cqw - var(--tv-width) - var(--tv-inset)) * 4.25);
+  left:.6%; top:calc(52% - 15px); transform:translate(-21.4%,-59%);
 }
 .work-studio-view[data-media-open][data-workshop] .ws-scene[data-room-view="nest"][data-media-device="monitor"]:not([data-media-work="true"]) .ws-floorplan {
-  left: 15.4%;
+  width:101%; left:1.8%;
+}
+/* 不同宽高比退镜时，用同幅原画的屋顶和地板连续铺到边缘，只绘静止纹理。 */
+.work-studio-view[data-workshop][data-visible="true"] .ws-scene[data-room-view="nest"][data-nest-viewing][data-media-device] {
+  background:var(--room-wall,#534737) var(--nest-view-art) center / cover;
+}
+.ws-scene[data-room-view="nest"][data-nest-viewing][data-media-device] .ws-floorplan::before,
+.ws-scene[data-room-view="nest"][data-nest-viewing][data-media-device] .ws-floorplan::after {
+  content:''; pointer-events:none; position:absolute; z-index:-1; left:0; width:100%; height:100%;
+  background-image:var(--nest-view-art); background-repeat:no-repeat; transform:scaleY(-1);
+}
+.ws-scene[data-room-view="nest"][data-nest-viewing][data-media-device] .ws-floorplan::before {
+  bottom:100%; background-position:center top; background-size:100% 1200%;
+}
+.ws-scene[data-room-view="nest"][data-nest-viewing][data-media-device] .ws-floorplan::after {
+  top:100%; background-position:center bottom; background-size:100% 660%;
 }
 .work-studio-view[data-workshop] .ws-scene[data-room-view="nest"][data-media-device="monitor"]:not([data-media-work="true"]) .ws-media-panel[data-device="monitor"] {
   inset: 4.5% 1% 4.5% 25.5%;

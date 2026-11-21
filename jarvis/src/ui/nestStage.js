@@ -1,8 +1,10 @@
 import { createNestCat } from './nestCat.js';
+import { createNestClock } from './nestClock.js';
 import { createNestDesk } from './nestDesk.js';
 import { createNestLiving } from './nestLiving.js';
 import { createNestWindow } from './nestWindow.js';
 import { createNestPhoto } from './nestPhoto.js';
+import { createNestSofa } from './nestSofa.js';
 import { nestArt, nestFigure, nestIsDark, nestNeedsSprite, nestFurniture, nestMobileSprites, nestSeatArt } from './nestArt.js';
 import { MOBILE } from '../config.js';
 import { createNestPanel } from './nestPanel.js';
@@ -31,6 +33,8 @@ export function createNestStage({scene, floor, room, caption, deskHost, onChange
   loveseat.className = 'ws-nest-loveseat';
   loveseat.setAttribute('aria-hidden', 'true');
   floor.prepend(art, seat, loveseat);
+  const sofa = createNestSofa(floor, scene);
+  const clock = createNestClock(floor, art);
   const panel = createNestPanel(scene, caption, () => {
     desk.close(false);
     cat.close();
@@ -82,12 +86,17 @@ export function createNestStage({scene, floor, room, caption, deskHost, onChange
   }
   function syncVisibility() {
     const shown = active && visible;
+    clock.setVisible(shown);
     living.setVisible(shown);
     cat.setVisible(shown);
     sash.setVisible(shown);
     photo.setVisible(shown);
     desk.setVisible(shown);
-    if (!shown) closePanels();
+    if (!shown) {
+      sofa.settle();
+      lastPose = '';
+      closePanels();
+    }
   }
   scene.addEventListener('workshop:media-opening', () => closePanels());
   scene.addEventListener('workshop:nest-open', e => open(e.detail.kind, e.detail.trigger));
@@ -125,11 +134,17 @@ export function createNestStage({scene, floor, room, caption, deskHost, onChange
           const emptySeat = MOBILE ? nestSeatArt(dark) : nestArt('sleep', dark);
           if (seat.getAttribute('src') !== emptySeat) seat.src = emptySeat;
         }
-        if (viewing) scene.dataset.nestViewing = viewing;
-        else delete scene.dataset.nestViewing;
+        if (viewing) {
+          scene.dataset.nestViewing = viewing;
+          scene.style.setProperty('--nest-view-art', 'url("' + url + '")');
+        } else {
+          delete scene.dataset.nestViewing;
+          scene.style.removeProperty('--nest-view-art');
+        }
         scene.dataset.nestPose = pose;
         scene.dataset.nestLight = dark ? 'off' : 'on';
-        scene.toggleAttribute('data-nest-sprite', sprite);
+        scene.toggleAttribute('data-nest-sprite', sprite && pose !== 'rest' && pose !== 'think');
+        if (pose !== lastPose) sofa.enter(pose, lastPose, Boolean(lastViewing));
         floor.classList.toggle('night', dark);
         lastPose = pose;
         lastDark = dark;

@@ -31,7 +31,7 @@ export function feetInRoom(actor, floor) {
 export function walkAcrossRoom(actor, dx, dy, duration) {
   const options = { duration, easing: 'ease-in-out' };
   const walk = actor.animate([{ translate: dx + 'px ' + dy + 'px' }, { translate: '0px 0px' }], options);
-  if (!CSS.supports('selector(:has(*))')) return walk;
+  if (actor.parentElement.parentElement?.dataset.roomView === 'nest' || !CSS.supports('selector(:has(*))')) return walk;
   // 两条轨迹共用同一时钟。只有电视镜头应用反向平移，全景依旧让人走过整间屋子。
   const pan = actor.parentElement.animate([{ translate: -dx + 'px ' + -dy + 'px' }, { translate: '0px 0px' }], options);
   walk.addEventListener('cancel', () => pan.cancel(), { once: true });

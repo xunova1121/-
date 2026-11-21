@@ -12,4 +12,8 @@ describe('小窝书桌冲咖啡', () => {
     expect(coffeeMoment(52750)).toEqual({phase:'sip',next:55200});
     expect(coffeeMoment(180000).phase).toBe('hold');
   });
+  it('兼容显示完整冲饮一次，到放下杯子便停止安排动作', () => {
+    expect([0,1200,4600,5700,8200].map(t => coffeeMoment(t, true).phase)).toEqual(['reach','pour','set-down','sip','hold']);
+    for (const t of [8200,28700,180000]) expect(coffeeMoment(t, true)).toEqual({phase:'hold',next:null});
+  });
 });

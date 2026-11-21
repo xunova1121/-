@@ -15,6 +15,8 @@
   width: min(100%,150cqh); aspect-ratio: 3 / 2; height: auto;
   top: 50%; bottom: auto; left: 50%; background: #3a3023;
   transform: translate(-50%,-50%) scale(var(--ws-scene-scale,1));
+  /* 从平面图切回时忽略未结束的旧跟拍，工作区的镜头只随用户打开的设备取景。 */
+  translate:none !important;
   transform-origin: var(--nest-aim-x,59%) var(--nest-aim-y,45%);
 }
 .ws-scene[data-room-view="nest"]:is([data-nest-pose="sleep"],[data-nest-pose="tv"]) { --nest-aim-x: 38%; --nest-aim-y: 46%; }
@@ -44,10 +46,11 @@
 }
 .ws-scene[data-room-view="nest"] .ws-furniture-controls button { touch-action:manipulation; }
 .ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="lamp"] { left:49.2%; top:21.8%; width:6%; height:12%; cursor:ns-resize; touch-action:none; }
-.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="cup"] { left:73.3%; top:41.6%; width:4%; height:6%; }
-.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="sofa"] { left:32%; top:52%; width:29%; height:18%; }
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="cup"] { left:71.5%; top:53.2%; width:14.4%; height:9.8%; z-index:1; }
+.work-studio-view .ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="cup"]:hover:not(:focus-visible) { background:transparent; box-shadow:none; }
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="sofa"] { left:34%; top:51.8%; width:32%; height:19%; }
 .ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="folder"] { left:54.6%; top:40%; width:6%; height:10%; }
-.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="draft"] { left:71%; top:48%; width:13%; height:8%; }
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="draft"] { left:70%; top:45.5%; width:10%; height:5%; }
 .ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="cat"] { left:38%; top:74%; width:16%; height:15%; }
 .ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="window"] { left:78.4%; top:18.3%; width:14%; height:14%; }
 .ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="photo"] { left:34.3%; top:27.6%; width:14%; height:15%; }
