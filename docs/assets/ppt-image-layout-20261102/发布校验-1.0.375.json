@@ -1,0 +1,62 @@
+{
+  "version": "1.0.375",
+  "publishedAt": "2026-11-02T03:56:57Z",
+  "assets": {
+    "Jarvis-1.0.375-android.apk": {
+      "bytes": 15624876,
+      "sha256": "59c947b0390c802dec9592f50cdef1dff91a0048c887481fb4ad159048accf46",
+      "matchesPublicRelease": true
+    },
+    "Jarvis-1.0.375-win-x64.zip": {
+      "bytes": 175889055,
+      "sha256": "c9f2e787d1c1b4a57308b320484e6bb79dec897363348d5a3032b815532e723f",
+      "matchesPublicRelease": true
+    },
+    "jarvis-server-1.0.375.tar.gz": {
+      "bytes": 23982797,
+      "sha256": "a1bc5bd8af0ebc28a6a79c1e3b0f62b0820cc1c0fbadca28948f763263df5d8c",
+      "matchesPublicRelease": true
+    },
+    "jarvis-server-latest.json": {
+      "bytes": 136,
+      "sha256": "8bb9bc272d5aabd238c0bd59571e88e87defabea87b0ac5852cfccf0d17d27fa",
+      "matchesPublicRelease": true
+    },
+    "Jarvis-Setup-1.0.375.exe": {
+      "bytes": 140347385,
+      "sha256": "a07fb067bb062c0643f13495e684e2aeaa06b24ec02bd430d0582bdda81476ae",
+      "matchesPublicRelease": true
+    },
+    "Jarvis-Setup-1.0.375.exe.blockmap": {
+      "bytes": 148636,
+      "sha256": "37387cf909a1ea631a4e204e582cee55f872e2b89461d8dc8412b9e8cd0c0fb1",
+      "matchesPublicRelease": true
+    },
+    "latest.yml": {
+      "bytes": 347,
+      "sha256": "4ed797df4fd60a306d7583be9346de4257e7f8aec9d761dbbfceb91b715fdfff",
+      "matchesPublicRelease": true
+    }
+  },
+  "homeHistoryStartupInBuiltAssets": true,
+  "androidThemeInBuiltAssets": true,
+  "android": {
+    "manifest": {
+      "versionCode": 375,
+      "versionName": "1.0.375",
+      "package": "com.xunova.jarvis"
+    },
+    "signerMatches374": true,
+    "zipCRC": true
+  },
+  "server": {
+    "revision": "6bd02e20e2d450c399d779a64a6a6974aaea0ba4",
+    "sourceFilesVerified": 657,
+    "manifestFiles": 658,
+    "generatedPackageVersion": "1.0.375"
+  },
+  "updateManifestsMatchPackages": true,
+  "windowsPortableZipCRC": true,
+  "userServerDeployed": false,
+  "realDeviceTested": false
+}

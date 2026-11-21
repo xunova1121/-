@@ -1,0 +1,106 @@
+import { documentStructureTool, structuredOperationSchema, runStructuredEdit } from './documentStructureTool.js';
+import * as ws from './workspace.js';
+import { editOffice } from './officeEdit.js';
+import { editSpreadsheet } from './spreadsheetEdit.js';
+import { deliverDocument } from './documentDelivery.js';
+import { documentError } from './documentPlan.js';
+import { S, str } from './documentSchema.js';
+
+/** 精确修改工具与新建流程分离，减少大改时误覆盖现有文件。 */
+export function createDocumentEditingTools(ctx) {
+  return [
+    {
+      name: 'edit_office_document',
+      description:
+        '编辑已有Word/PPT/Excel/PDF。排版用read_document_structure获取当前对象及sha256，再传operations、expected_sha256和另存路径；按用户要求组合格式/位置/表格/目录/打印或PDF页面操作，局部修改不套模板重写。Word标题下划线通常指装饰线，应同时对选中标题remove_lines:true、underline:false。目录用update_toc实际分页更新，缺渲染能力不能说页码正确。PDF目前仅页面旋转/排序/裁切，不支持扫描件正文改写或脱敏。旧replacements/append仅Word/PPT文字修改，和operations不能混用。',
+      input_schema: S(
+        {
+          path: str('已有文件路径（docx/pptx/xlsx/pdf）'),
+          operations: { type: 'array', minItems: 1, maxItems: 30, items: structuredOperationSchema },
+          expected_sha256: str('结构读取返回的sha256；operations必填'),
+          slides: {
+            type: 'array',
+            maxItems: 100,
+            items: { type: 'integer', minimum: 1 },
+            description: 'PPT指定实际页码（含封面，从1开始），只改这些页可见文字，不改备注；不填则沿用全文件替换'
+          },
+          expected_count: { type: 'integer', minimum: 0, description: '预期替换总次数，不符则整批不保存，防止误改同名文字' },
+          replacements: {
+            type: 'array',
+            description: '要替换的文字',
+            items: {
+              type: 'object',
+              properties: { find: str('原文（一字不差）'), replace: str('替换成') },
+              required: ['find', 'replace'],
+              additionalProperties: false
+            }
+          },
+          append: { type: 'array', items: { type: 'string' }, description: '追加到 Word 末尾的段落（每项一段，可选）' },
+          save_as: str('另存为（可选，不填就改原文件；原文件会自动备份）')
+        },
+        ['path']
+      ),
+      run: async ({ path, replacements = [], append = [], slides = [], expected_count: expectedCount, save_as: saveAs, operations, expected_sha256: expectedDigest }, options = {}) => {
+        if (typeof path !== 'string' || !path.trim()) throw documentError('修改已有文档必须先指定原文件path，例如 outputs/赛程.docx；请用find_files定位，不会新建文件代替原稿', 'DOCUMENT_SOURCE_PATH');
+        if (operations !== undefined) {
+          if (replacements.length || append.length || slides.length) throw documentError('结构编辑与文字替换请分批执行，避免对象编号漂移');
+          return runStructuredEdit(ctx, { path, operations, expected_sha256: expectedDigest, save_as: saveAs }, options);
+        }
+        const kind = ws.ext(path);
+        if (!['docx', 'pptx'].includes(kind)) throw new Error('只能修改 .docx 或 .pptx 文件；文本文件用 edit_file');
+        const r = await editOffice(await ws.readBlob(path), kind, {
+          replacements: Array.isArray(replacements) ? replacements : [],
+          append: Array.isArray(append) ? append : [],
+          slides,
+          expectedCount,
+          signal: options.signal
+        });
+        const hit = r.replaced.filter((x) => x.count);
+        const miss = r.replaced.filter((x) => !x.count);
+        if (!hit.length && !r.appended)
+          throw new Error(`文件里没有找到要替换的文字：${miss.map((x) => `“${x.find}”`).join('、') || '（没有给出修改）'}。先用 read_file 看准原文`);
+        const target = saveAs ? saveAs.replace(/\.[a-z0-9]+$/i, '') + `.${kind}` : path;
+        const w = await deliverDocument(ctx, { blob: r.blob, ext: kind }, target, { ...options, requirements: options.requestText || options.rawRequestText || options.requirements || '' });
+        const parts = hit.map((x) => `“${x.find}”替换了 ${x.count} 处`);
+        if (r.appended) parts.push(`追加了 ${r.appended} 段`);
+        if (miss.length) parts.push(`没找到：${miss.map((x) => `“${x.find}”`).join('、')}`);
+        return `已保存 ${w.path}（格式保留）：${parts.join('；')}；${w.notes.join('；')}${w.backup === 'saved' ? '。原文件已自动备份，可在“工作区 → 改动记录”里恢复' : ''}`;
+      }
+    },
+    {
+      name: 'edit_spreadsheet',
+      description:
+        '精确修改已有Excel的指定格，保留其他部件；可带expected核对旧值，任何冲突整批不保存。修改公式缓存会失效，打开Office时重算，不伪造结果。不能插入或删除行：新内容比原来行数少时，把多出来的行设为value:null清空，改完不能留下重复行。新增行列或大改结构用create_document。',
+      input_schema: S(
+        {
+          path: str('工作区xlsx路径'),
+          save_as: str('另存路径，可选'),
+          edits: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 100,
+            items: S(
+              {
+                sheet: str('实际工作表名'),
+                cell: str('A1式地址'),
+                value: { type: ['string', 'number', 'boolean', 'null'] },
+                formula: str('公式，与value二选一'),
+                expected: { type: ['string', 'number', 'boolean', 'null'] }
+              },
+              ['sheet', 'cell']
+            )
+          }
+        },
+        ['path', 'edits']
+      ),
+      run: async ({ path, edits, save_as: saveAs }, options = {}) => {
+        if (ws.ext(path) !== 'xlsx') throw documentError('只支持xlsx工作簿');
+        const edited = await editSpreadsheet(await ws.readBlob(path), edits, { signal: options.signal });
+        const target = saveAs ? saveAs.replace(/\.[a-z0-9]+$/i, '') + '.xlsx' : path;
+        const saved = await deliverDocument(ctx, { blob: edited.blob, ext: 'xlsx' }, target, options);
+        return `已修改${edited.changed}个单元格，保存${saved.path}；${saved.notes.join('；')}`;
+      }
+    },
+    documentStructureTool
+  ];
+}

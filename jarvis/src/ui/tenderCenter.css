@@ -1,0 +1,38 @@
+.wy-tender-center { margin: 20px 0 28px; color: inherit; text-align: left; min-width: 0; }
+.wy-tender-connected .wy-studio-subhero { display: none; }
+.wy-tender-connected .wy-tender-center { margin: 0 0 12px; }
+.wy-tender-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.wy-tender-heading h2 { font-size: 22px; margin: 0 0 6px; }
+.wy-tender-heading p, .wy-tender-message { font-size: 13px; line-height: 1.6; opacity: .75; margin: 0; }
+.wy-tender-center button, .wy-tender-center input, .wy-tender-center select, .wy-tender-center summary, .wy-tender-center a { font: inherit; font-size: 13px; min-height: 44px; box-sizing: border-box; }
+.wy-tender-center button { padding: 9px 12px; color: inherit; background: rgba(120,140,170,.07); border: 1px solid rgba(120,140,170,.22); border-radius: 10px; cursor: pointer; }
+.wy-tender-center button:disabled { opacity: .5; cursor: wait; }
+.wy-tender-center :focus-visible { outline: 2px solid #477ee5; outline-offset: 2px; }
+.wy-tender-tabs { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 4px; margin-bottom: 12px; border-bottom: 1px solid rgba(120,140,170,.2); }
+.wy-tender-tabs button { border: 0; border-radius: 10px 10px 0 0; padding: 8px 2px; background: transparent; }
+.wy-tender-tabs button[aria-selected="true"] { color: #3771de; background: rgba(70,120,220,.09); border-bottom: 2px solid #477ee5; font-weight: 600; }
+.wy-tender-filters { display: grid; grid-template-columns: 1.5fr 1fr 1fr auto; gap: 10px; margin: 14px 0; }
+.wy-tender-filters[hidden] { display: none; }
+.wy-tender-filters label { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 12px; }
+.wy-tender-filters > label > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.wy-tender-center input, .wy-tender-center select { width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid rgba(120,140,170,.25); border-radius: 10px; background: rgba(120,140,170,.025); color: inherit; }
+.wy-tender-filter-more, .wy-tender-subscribe { grid-column: 1 / -1; }
+.wy-tender-filter-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; }
+.wy-tender-center summary { cursor: pointer; display: flex; align-items: center; color: #477ee5; }
+.wy-tender-center summary::before { content: '›'; margin-right: 6px; }
+.wy-tender-center details[open] > summary::before { content: '⌄'; }
+.wy-tender-subscribe[open] { display: grid; gap: 10px; padding: 8px 12px 12px; border: 1px solid rgba(120,140,170,.2); border-radius: 12px; }
+.wy-tender-center small { display: block; font-size: 12px; opacity: .7; line-height: 1.6; }
+.wy-tender-center button.wy-tender-primary { color: white; background: #3776de; border-color: transparent; }
+.wy-tender-body { display: grid; gap: 12px; }
+.wy-tender-card { border: 1px solid rgba(120,140,170,.2); border-radius: 16px; padding: 17px; background: rgba(120,140,170,.025); overflow-wrap: anywhere; min-width: 0; }
+.wy-tender-card h3 { font-size: 16px; line-height: 1.6; margin: 10px 0; }
+.wy-tender-card p { font-size: 13px; line-height: 1.7; margin: 8px 0; white-space: pre-line; }
+.wy-tender-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12px; opacity: .85; }
+.wy-tender-tag { color: #3378a7; background: rgba(45,150,180,.1); padding: 4px 8px; border-radius: 6px; }
+.wy-tender-card-actions, .wy-tender-admin, .wy-tender-pager { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.wy-tender-card-actions a { display: inline-flex; align-items: center; color: #477ee5; text-decoration: none; padding: 8px; }
+.wy-tender-empty { padding: 28px 16px; font-size: 14px; line-height: 1.8; border: 1px dashed rgba(120,140,170,.3); border-radius: 16px; }
+.wy-tender-sources { font-size: 12px; line-height: 1.8; margin-top: 18px; opacity: .8; }
+.wy-tender-pager { justify-content: center; font-size: 12px; }
+@media (max-width: 650px) { .wy-tender-filters { grid-template-columns: repeat(2,minmax(0,1fr)); } .wy-tender-filter-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .wy-tender-card { padding: 14px; } }

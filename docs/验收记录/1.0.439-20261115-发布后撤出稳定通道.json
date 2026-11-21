@@ -1,0 +1,191 @@
+{
+  "status": "published_then_quarantined",
+  "packageAuditAtPublication": {
+    "version": "1.0.439",
+    "runId": 43665104927,
+    "buildRevision": "04c030e4c75a5cc806abc9e512338c86bc484e1a",
+    "runtimeRevision": "55c483113390e9d4f7d3b94df40620d2c571b212",
+    "status": "passed",
+    "checks": [
+      {
+        "label": "source/public正式版本一致且均已公开",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "源码Release绑定冻结构建提交",
+        "passed": true,
+        "detail": "04c030e4c75a5cc806abc9e512338c86bc484e1a"
+      },
+      {
+        "label": "两仓七份资产齐全",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "七份原件大小和GitHub SHA256一致",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "实际下载五份原件，摘要与正式资产一致",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "服务器更新索引版本/文件/SHA256一致",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "Windows安装器是真实PE文件",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "Windows更新索引版本和原EXE SHA512一致",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "服务器全运行文件与冻结清单逐字节一致",
+        "passed": true,
+        "detail": {
+          "manifestFiles": 963,
+          "checked": 962,
+          "revision": "55c483113390e9d4f7d3b94df40620d2c571b212"
+        }
+      },
+      {
+        "label": "服务器归档全项可读/目录可进入、root属主且无链接",
+        "passed": true,
+        "detail": {
+          "entries": 1139,
+          "bad": []
+        }
+      },
+      {
+        "label": "服务器版本及包内清单相符",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "APK沿用原始签名证书",
+        "passed": true,
+        "detail": "56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6"
+      },
+      {
+        "label": "APK包名/版本名/版本号保持更新链",
+        "passed": true,
+        "detail": {
+          "package": "com.xunova.jarvis",
+          "versionName": "1.0.439",
+          "versionCode": 439
+        }
+      },
+      {
+        "label": "APK实际前端包含新分层功能和原消息菜单/编辑链",
+        "passed": true,
+        "detail": {
+          "layered-1": true,
+          "design-current-state": true,
+          "改为引导": true,
+          "取消消息": true,
+          "/images/edits": true
+        }
+      },
+      {
+        "label": "公开latest固定入口指向本版原件：latest.yml",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "公开latest固定入口指向本版原件：jarvis-server-latest.json",
+        "passed": true,
+        "detail": null
+      }
+    ],
+    "downloaded": [
+      {
+        "name": "Jarvis-1.0.439-android.apk",
+        "bytes": 18700925,
+        "sha256": "d5b34fdfafea5ebcef243d872728decf440dac8379163fd59871af5f7e5ceb6e"
+      },
+      {
+        "name": "Jarvis-Setup-1.0.439.exe",
+        "bytes": 142153900,
+        "sha256": "26792cde33f9a3b0e9361ff192d4fd1e496e13d0bfa5f4ef880de3d3b0a42d96"
+      },
+      {
+        "name": "jarvis-server-1.0.439.tar.gz",
+        "bytes": 28523569,
+        "sha256": "eb9ec44330181887c3a1648b4d1d2dc6794b7f83bf2b4d1a3aad09e20026eb27"
+      },
+      {
+        "name": "latest.yml",
+        "bytes": 347,
+        "sha256": "319dd392c4c391a339fb79150d33b3c1ffa4ba2b128d628f9143bfeff1239d9c"
+      },
+      {
+        "name": "jarvis-server-latest.json",
+        "bytes": 136,
+        "sha256": "d2dde5140be74ad5b17658489689d47b9435ac8218a9ea2f5869c9cf3621c9df"
+      }
+    ],
+    "assetMetadata": {
+      "Jarvis-1.0.439-android.apk": {
+        "size": 18700925,
+        "digest": "sha256:d5b34fdfafea5ebcef243d872728decf440dac8379163fd59871af5f7e5ceb6e",
+        "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.439/Jarvis-1.0.439-android.apk"
+      },
+      "Jarvis-1.0.439-win-x64.zip": {
+        "size": 177922512,
+        "digest": "sha256:c4e693846ac1f19b1ecc5e2ebd5570cdf6c4e9992eee762163fc405c874a2f19",
+        "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.439/Jarvis-1.0.439-win-x64.zip"
+      },
+      "Jarvis-Setup-1.0.439.exe": {
+        "size": 142153900,
+        "digest": "sha256:26792cde33f9a3b0e9361ff192d4fd1e496e13d0bfa5f4ef880de3d3b0a42d96",
+        "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.439/Jarvis-Setup-1.0.439.exe"
+      },
+      "Jarvis-Setup-1.0.439.exe.blockmap": {
+        "size": 150514,
+        "digest": "sha256:d630e056fb1444d76e418ca9bbb2845c5aec11001b8908e82b62ce340ddef851",
+        "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.439/Jarvis-Setup-1.0.439.exe.blockmap"
+      },
+      "jarvis-server-1.0.439.tar.gz": {
+        "size": 28523569,
+        "digest": "sha256:eb9ec44330181887c3a1648b4d1d2dc6794b7f83bf2b4d1a3aad09e20026eb27",
+        "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.439/jarvis-server-1.0.439.tar.gz"
+      },
+      "jarvis-server-latest.json": {
+        "size": 136,
+        "digest": "sha256:d2dde5140be74ad5b17658489689d47b9435ac8218a9ea2f5869c9cf3621c9df",
+        "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.439/jarvis-server-latest.json"
+      },
+      "latest.yml": {
+        "size": 347,
+        "digest": "sha256:319dd392c4c391a339fb79150d33b3c1ffa4ba2b128d628f9143bfeff1239d9c",
+        "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.439/latest.yml"
+      }
+    },
+    "latest": {
+      "latest.yml": {
+        "bytes": 347,
+        "sha256": "319dd392c4c391a339fb79150d33b3c1ffa4ba2b128d628f9143bfeff1239d9c"
+      },
+      "jarvis-server-latest.json": {
+        "bytes": 136,
+        "sha256": "d2dde5140be74ad5b17658489689d47b9435ac8218a9ea2f5869c9cf3621c9df"
+      }
+    },
+    "apkCertificateSha256": "56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6",
+    "limitations": [
+      "实际下载五件；Windows ZIP与blockmap只对照两仓七件元数据摘要",
+      "APK核对签名证书和编译包元数据/实际JS，不是用户真机安装或独立apksigner全签名验证",
+      "未部署用户服务器；未测试实际付费模型或Claude独立复审"
+    ]
+  },
+  "supersededBy": "1.0.440",
+  "reason": "高精度图表原值误用绘图坐标舍入；已标预发布，保留原资产"
+}

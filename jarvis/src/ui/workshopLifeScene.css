@@ -1,0 +1,142 @@
+/* 前景休息区和后排工位在同一张透视底图上。空家具与有人使用的道具共用落脚线。 */
+.ws-life-furniture, .ws-room-light {
+  position: absolute; inset: 0; pointer-events: none;
+}
+.ws-life-furniture { z-index: 1; }
+.ws-room-item, .ws-life-actor {
+  position: absolute; aspect-ratio: 1; transform: translateX(-50%); pointer-events: none;
+}
+.ws-room-item {
+  background-size: 200% 200%; background-repeat: no-repeat;
+  filter: drop-shadow(1px 2px 1px #4d3d353e);
+}
+.work-studio-view[data-visible="true"] .ws-room-item { background-image: url('./assets/workStudio/workshop-furniture.webp'); }
+.ws-room-item[data-place="kitchen"] { width: 11%; left: 32.6%; bottom: 18.7%; background-position: 0 0; }
+.ws-room-item[data-place="television"] { width: 15.5%; left: 81.4%; bottom: 17.3%; background-position: 100% 0; }
+.ws-room-item[data-place="lounge"] { width: 13%; left: 49%; bottom: 13.9%; background-position: 0 100%; }
+.ws-room-item[data-place="shredder"] { width: 8.5%; left: 13.3%; bottom: 20.2%; background-position: 100% 100%; }
+
+.ws-scene[data-life-place="kitchen"][data-life-phase="settled"] .ws-room-item[data-place="kitchen"],
+.ws-scene[data-life-place="television"][data-life-phase="settled"] .ws-room-item[data-place="television"],
+.ws-scene[data-life-place="lounge"][data-life-phase="settled"] .ws-room-item[data-place="lounge"],
+.ws-scene[data-life-place="shredder"][data-life-phase="settled"] .ws-room-item[data-place="shredder"] { visibility: hidden; }
+
+.ws-life-actor {
+  display: none; z-index: 3; left: var(--life-x); bottom: calc(100% - var(--life-ground));
+  width: var(--life-width); --life-tempo: 2s;
+}
+.ws-scene[data-life-place] .ws-life-actor { display: block; }
+.ws-scene[data-life-place] .ws-floorplan > .ws-actor { visibility: hidden; }
+.work-studio-view[data-workshop] .ws-scene[data-life-place] {
+  --ws-aim-x: var(--life-x); --ws-aim-y: 84%;
+}
+.work-studio-view[data-workshop] .ws-scene[data-life-place] .ws-floorplan { --ws-floor-shift: 0%; }
+.ws-life-pose, .ws-life-walker {
+  position: absolute; inset: 0; background-repeat: no-repeat; transform-origin: 50% 94%;
+}
+.ws-life-pose {
+  background-size: 600% 300%;
+  background-position: var(--life-frame-a) var(--life-frame-y);
+}
+.work-studio-view[data-visible="true"] .ws-scene[data-life-place] .ws-life-pose {
+  background-image: url('./assets/workStudio/workshop-life.webp');
+}
+.work-studio-view[data-visible="true"] .ws-scene[data-life-pose="sleep"][data-winter-quilt] .ws-life-pose {
+  background-image: url('./assets/workStudio/workshop-winter-sleep.webp');
+  background-size: 200% 100%;
+  --life-frame-a: 0%; --life-frame-b: 100%; --life-frame-y: 0%;
+}
+.ws-life-shadow {
+  position: absolute; left: 14%; right: 12%; bottom: 3%; height: 8%;
+  border-radius: 50%; background: radial-gradient(ellipse closest-side, #594a385e, transparent);
+}
+.ws-life-walker { display: none; inset: auto 15% 0; aspect-ratio: 1; background-size: 200% 200%; }
+.ws-scene[data-life-phase="walking"] .ws-life-pose { visibility: hidden; }
+.work-studio-view[data-visible="true"] .ws-scene[data-life-phase="walking"] .ws-life-walker {
+  display: block; background-image: url('./assets/workStudio/run.webp');
+  animation: ws-run-frames .38s steps(1,end) infinite;
+}
+.ws-life-actor[data-facing="left"] .ws-life-walker { transform: scaleX(-1); }
+
+.ws-life-notes, .ws-life-steam { display: none; position: absolute; pointer-events: none; }
+.ws-life-notes {
+  left: 72%; top: 13%; font: 700 clamp(11px,4cqw,29px)/1 Georgia,serif;
+  color: #654924; text-shadow: 0 1px #ffefbf,1px 0 #ffefbf;
+}
+.ws-scene[data-life-pose="sing"][data-life-phase="settled"] .ws-life-notes { display: block; }
+.ws-life-steam {
+  left: 77%; top: 45%; width: 8%; height: 10%; border-left: 1px solid #fffcf0;
+  border-radius: 55%; transform: rotate(12deg); filter: drop-shadow(0 0 1px #927353);
+}
+.ws-scene[data-life-pose="coffee"][data-life-phase="settled"] .ws-life-steam { display: block; }
+.ws-scene[data-life-pose="sleep"] .ws-life-actor { --life-tempo: 5.4s; }
+.ws-scene[data-life-pose="think"] .ws-life-actor, .ws-scene[data-life-pose="rest"] .ws-life-actor { --life-tempo: 4.4s; }
+.ws-scene[data-life-pose="tv"] .ws-life-actor { --life-tempo: 4s; }
+.ws-scene[data-life-pose="sing"] .ws-life-actor { --life-tempo: 1.25s; }
+.ws-scene[data-life-pose="shred"] .ws-life-actor { --life-tempo: 1.5s; }
+
+/* 天色从上排窗户过渡到室内，桌面和人物保留原画的明暗层次。 */
+.ws-room-light { z-index: 4; }
+.ws-room-light::before, .ws-room-light::after { content: ''; position: absolute; inset: 0; }
+.ws-room-light::before {
+  background: var(--room-daylight), var(--room-interior-shadow, none);
+  opacity: var(--room-daylight-strength);
+}
+.ws-scene[data-life-period="dawn"] {
+  --room-daylight: linear-gradient(156deg, #ffc98b 0%, #ffe0ad70 16%, transparent 42%);
+  --room-daylight-strength: .38;
+}
+.ws-scene[data-life-period="day"] {
+  --room-daylight: linear-gradient(170deg, #ffe9b8 0%, transparent 28%);
+  --room-daylight-strength: .18;
+}
+.ws-scene[data-life-period="dusk"] {
+  --room-daylight: linear-gradient(190deg, #dd9163 1%, #d89a6d80 15%, transparent 42%);
+  --room-daylight-strength: .50;
+}
+/* 关灯时，白天的窗光仍照进房间，靠里的桌子和地板先暗下来。 */
+.ws-scene[data-lamp-lit="off"]:not([data-life-period="night"]) {
+  --room-interior-shadow: linear-gradient(175deg, transparent 14%, #19283c66 65%);
+}
+.ws-scene[data-life-period="night"] {
+  --room-wall-shade: #162640b5;
+  --room-floor-shade: #122039ad;
+  --room-daylight: linear-gradient(180deg, #152942 3%, #1e3551db 13%, var(--room-wall-shade) 35%, var(--room-floor-shade) 68%);
+  --room-daylight-strength: .78;
+}
+.ws-scene[data-life-period="night"][data-lamp-lit="on"] {
+  --room-wall-shade: #21365022;
+  --room-floor-shade: transparent;
+}
+.ws-scene[data-life-pose="tv"][data-life-phase="settled"] .ws-room-light::before {
+  mask-image: radial-gradient(ellipse 7% 6% at 85% 70%,transparent 20%,black);
+}
+.ws-room-light::after {
+  opacity: 0;
+  background:
+    radial-gradient(ellipse 12% 20% at 18% 23%,#ffd88252,transparent),
+    radial-gradient(ellipse 15% 25% at 50% 24%,#ffe0a95c,transparent),
+    radial-gradient(ellipse 13% 21% at 83% 23%,#ffe0a952,transparent),
+    radial-gradient(ellipse 9% 12% at 80.5% 45%,#ffcf776e,transparent);
+  mix-blend-mode: screen;
+}
+.ws-scene[data-lamp-lit="on"] .ws-room-light::after { opacity: 1; }
+
+@keyframes ws-life-contact {
+  0%,100% { background-position-x: var(--life-frame-a); }
+  42% { background-position-x: var(--life-frame-b); }
+}
+@keyframes ws-life-breath { 50% { transform: scale(1.008,1.021); } }
+@keyframes ws-life-vapour { 0% { opacity: 0; } 34% { opacity: .82; } 100% { opacity: 0; transform: translate(20%,-100%) rotate(-15deg); } }
+@keyframes ws-life-note { 0% { opacity: 0; } 28% { opacity: 1; } 100% { opacity: 0; transform: translate(40%,-65%) rotate(9deg); } }
+@media (prefers-reduced-motion: no-preference) {
+  body:not(.reduced-motion) .work-studio-view[data-visible="true"] .ws-scene[data-life-phase="settled"] .ws-life-pose {
+    animation: ws-life-contact var(--life-tempo) steps(1,end) infinite;
+  }
+  body:not(.reduced-motion) .work-studio-view[data-visible="true"] .ws-scene:is([data-life-pose="sleep"],[data-life-pose="rest"])[data-life-phase="settled"] .ws-life-pose {
+    animation: ws-life-contact var(--life-tempo) steps(1,end) infinite, ws-life-breath var(--life-tempo) ease-in-out infinite;
+  }
+  body:not(.reduced-motion) .ws-life-steam { animation: ws-life-vapour 1.6s ease-out infinite; }
+  body:not(.reduced-motion) .ws-life-notes { animation: ws-life-note 1.25s ease-out infinite; }
+  body:not(.reduced-motion) .ws-room-light::before, body:not(.reduced-motion) .ws-room-light::after { transition: opacity .32s ease; }
+}

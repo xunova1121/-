@@ -1,0 +1,664 @@
+{
+  "version": "1.0.450",
+  "publishedBeijing": "2026-11-16 10:37:44",
+  "release": "https://github.com/xunova1121/weiyang-release/releases/tag/desktop-v1.0.450",
+  "build": "bec91580a0c41341391c4fdaaeb5a501580651f7",
+  "frozen": "e18cd3ad0ecdeae24627216f9c685509aac8c1ce",
+  "runtimeManifestFiles": 988,
+  "workflow": {
+    "id": 43790977456,
+    "url": "https://github.com/xunova1121/-/actions/runs/43790977456",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "name": "清理旧的构建产物",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "删除以前运行留下的构建产物",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "同步现有安装包到公开仓库",
+        "conclusion": "skipped"
+      },
+      {
+        "name": "建草稿发布",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "建草稿发布（只在正式分支/版本标签）",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "打包 (windows-latest)",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/setup-node@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "安装网页依赖",
+            "conclusion": "success"
+          },
+          {
+            "name": "安装桌面版依赖",
+            "conclusion": "success"
+          },
+          {
+            "name": "版本号",
+            "conclusion": "success"
+          },
+          {
+            "name": "打包",
+            "conclusion": "success"
+          },
+          {
+            "name": "上传安装包（正式发版：直接传到草稿发布）",
+            "conclusion": "success"
+          },
+          {
+            "name": "上传安装包（验证分支：构建产物）",
+            "conclusion": "skipped"
+          },
+          {
+            "name": "Post Run actions/setup-node@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "发布前完整验证",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/setup-node@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "使用Ubuntu官方软件源（仅临时构建机）",
+            "conclusion": "success"
+          },
+          {
+            "name": "安装依赖和测试浏览器",
+            "conclusion": "success"
+          },
+          {
+            "name": "安装 ffmpeg 和海报中文字体（单元测试需真实栅格化与字体检查）",
+            "conclusion": "success"
+          },
+          {
+            "name": "完整单元测试",
+            "conclusion": "success"
+          },
+          {
+            "name": "代码检查（没定义的变量、浏览器同名全局、格式）",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证评测入口与耗时统计",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证架构实测固定版本、隔离与实际文件验收",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证多文件项目隔离执行与取消",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证项目菜单确认与隔离预览",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证Claude协议完成与断流取消",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证代码隔离与取消",
+            "conclusion": "success"
+          },
+          {
+            "name": "安装Office真实渲染环境",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证四格式结构编辑与目录连续分页",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证Word、PPT、Excel真实转PDF",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证PPT和Excel字号及Word97转换",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证Word字体字号与有界真实分页",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证四种PPT风格、可编辑元素与真实PDF",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证政企汇报风格、原生渐变与真实PDF",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证六份PPT图片美学版式、真实PDF与逐页截图",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证中文图片程序排字、三格式交付与真实浏览器及Office渲染",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证4K大屏同设计PNG与离线交互Demo",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证分层海报、同稿Demo、中文可读性与Office真实导出",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证海报手机整图字号、三种结构、素材用途与真实Office导出",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证Canvas原图卡槽填字、零遮挡、可编辑PPTX及压缩编辑器",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证沉浸海报连续渐变、中文与可编辑PPTX",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证分享返回状态、原字节和同账号会话恢复（原生事件模拟）",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证四种Excel样式、公式筛选与真实PDF",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证文档场景模板、精确修改及真实PDF逐页检查",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证只排版正文保留与真实Word、PDF读回",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证上传Word结构、图片和原件保留",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证手机与桌面失败步骤显示实际错误",
+            "conclusion": "success"
+          },
+          {
+            "name": "构建网页版",
+            "conclusion": "success"
+          },
+          {
+            "name": "服务器模式端到端测试，打包服务器版",
+            "conclusion": "success"
+          },
+          {
+            "name": "上传服务器版（正式发版：直接传到草稿发布）",
+            "conclusion": "success"
+          },
+          {
+            "name": "上传服务器版（验证分支：构建产物）",
+            "conclusion": "skipped"
+          },
+          {
+            "name": "构建并验证手机版界面",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证海报单份交付、图文证据、分类图表与真实Office及文件空间",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证 Electron 全息桌面互动",
+            "conclusion": "success"
+          },
+          {
+            "name": "网页版和单文件版端到端测试",
+            "conclusion": "success"
+          },
+          {
+            "name": "保存验证截图和日志",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/setup-node@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "打包安卓 App",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/setup-node@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/setup-java@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "安装依赖",
+            "conclusion": "success"
+          },
+          {
+            "name": "使用Ubuntu官方软件源（仅临时构建机）",
+            "conclusion": "success"
+          },
+          {
+            "name": "安装 ffmpeg 和海报中文字体（单元测试需真实栅格化与字体检查）",
+            "conclusion": "success"
+          },
+          {
+            "name": "单元测试",
+            "conclusion": "success"
+          },
+          {
+            "name": "构建手机版网页并同步到安卓工程",
+            "conclusion": "success"
+          },
+          {
+            "name": "签名密钥",
+            "conclusion": "success"
+          },
+          {
+            "name": "打包 APK",
+            "conclusion": "success"
+          },
+          {
+            "name": "验证正式APK完整性与原签名证书",
+            "conclusion": "success"
+          },
+          {
+            "name": "上传 APK（正式发版：直接传到草稿发布）",
+            "conclusion": "success"
+          },
+          {
+            "name": "上传 APK（验证分支：构建产物）",
+            "conclusion": "skipped"
+          },
+          {
+            "name": "Post Run actions/setup-java@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/setup-node@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "发布到 Releases",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "取回草稿发布里的安装包",
+            "conclusion": "success"
+          },
+          {
+            "name": "写发布说明",
+            "conclusion": "success"
+          },
+          {
+            "name": "发布",
+            "conclusion": "success"
+          },
+          {
+            "name": "检查安装包仓库令牌",
+            "conclusion": "success"
+          },
+          {
+            "name": "同步发布到安装包仓库",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      }
+    ]
+  },
+  "unit": {
+    "files": 472,
+    "tests": 4078,
+    "allPassed": true
+  },
+  "regression": {
+    "relatedUnit": 100,
+    "contextAndReceiptUnit": 26,
+    "newArtifactBrowser": 19,
+    "originalLayered": 105,
+    "originalReading": 62,
+    "originalCanvas": 45,
+    "originalShareSimulation": 22,
+    "originalForegroundSimulation": 9,
+    "isolatedCloudFileChecks": 5
+  },
+  "assets": [
+    {
+      "name": "Jarvis-1.0.450-android.apk",
+      "bytes": 18732521,
+      "digest": "sha256:77dc6e4f419f353299a554985244ca77bef29ab5b13847b76b24a140748e3ee9"
+    },
+    {
+      "name": "Jarvis-1.0.450-win-x64.zip",
+      "bytes": 191795482,
+      "digest": "sha256:8bb69a658c1653ec0d2ddd9e195cf93a5ed3c4a0809d5b21b5ec7e743352d5c2"
+    },
+    {
+      "name": "jarvis-server-1.0.450.tar.gz",
+      "bytes": 28591354,
+      "digest": "sha256:7f7d089b23c21b2b8f1ea6cd3696cf655c37545c258398b9ee929ea9d272619a"
+    },
+    {
+      "name": "jarvis-server-latest.json",
+      "bytes": 136,
+      "digest": "sha256:b3436d6596d4cb1cae811bd3902ff3a968c95851ec32c66682538ca4446f2e41"
+    },
+    {
+      "name": "Jarvis-Setup-1.0.450.exe",
+      "bytes": 151383903,
+      "digest": "sha256:5475cb8d86f7dd9e54dc12a109b8b8909f1347a43b7a30cb2982d6a2f7dc7a79"
+    },
+    {
+      "name": "Jarvis-Setup-1.0.450.exe.blockmap",
+      "bytes": 160916,
+      "digest": "sha256:4b0e347cba8d8fa09cbfb252fbcb7663911c3f900f147f4c72dac0452a0aca8f"
+    },
+    {
+      "name": "latest.yml",
+      "bytes": 347,
+      "digest": "sha256:a1632eb52e0f5c80047d8c5ab19a3b3300399a9414223ae11c2a0d14d1158f58"
+    }
+  ],
+  "packageAudit": {
+    "version": "1.0.450",
+    "build": "bec91580a0c41341391c4fdaaeb5a501580651f7",
+    "frozen": "e18cd3ad0ecdeae24627216f9c685509aac8c1ce",
+    "checks": [
+      {
+        "label": "两仓正式发布版本及来源仓库构建提交",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "两仓七资产名称/大小/摘要一致",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "实际下载字节及SHA256：Jarvis-1.0.450-android.apk",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "实际下载字节及SHA256：Jarvis-1.0.450-win-x64.zip",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "实际下载字节及SHA256：Jarvis-Setup-1.0.450.exe",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "实际下载字节及SHA256：jarvis-server-1.0.450.tar.gz",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "实际下载字节及SHA256：jarvis-server-latest.json",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "实际下载字节及SHA256：latest.yml",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "服务器索引版本/文件名/实际SHA256",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "服务器归档root属主、无链接且服务账号可读",
+        "passed": true,
+        "detail": 1164
+      },
+      {
+        "label": "服务器VERSION及打包版本",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "服务器冻结清单一致",
+        "passed": true,
+        "detail": 988
+      },
+      {
+        "label": "所有服务器运行文件逐字节核对",
+        "passed": true,
+        "detail": {
+          "files": 987,
+          "failures": [],
+          "missing": []
+        }
+      },
+      {
+        "label": "服务器依赖与仓库锁定声明保持一致",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "新海报模块及原分享/前台恢复均在服务器包",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "实际公开APK沿用原证书",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "APK实际包名/versionCode/versionName",
+        "passed": true,
+        "detail": {
+          "versionCode": 450,
+          "versionName": "1.0.450",
+          "compileSdkVersion": 36,
+          "compileSdkVersionCodename": "16",
+          "package": "com.xunova.jarvis",
+          "platformBuildVersionCode": 36,
+          "platformBuildVersionName": 16
+        }
+      },
+      {
+        "label": "APK实际前端包含交付与源文件/历史UI",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "Windows实际ZIP包含原生PE主程序",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "Windows包含原生Canvas依赖",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "Windows实际ASAR前后端含新能力和原恢复、版本一致",
+        "passed": true,
+        "detail": {
+          "version": "1.0.450",
+          "serverFiles": 43,
+          "webFiles": 19,
+          "markers": {
+            "POSTER_TASK_LIMIT": {
+              "server": true,
+              "web": true
+            },
+            "POSTER_SOURCE_ALIAS_FAILED": {
+              "server": true,
+              "web": true
+            },
+            "DESIGN_ILLUSTRATION_MISSING": {
+              "server": true,
+              "web": true
+            },
+            "DESIGN_CHART_LABEL": {
+              "server": true,
+              "web": true
+            },
+            "availableFormats": {
+              "server": true,
+              "web": true
+            },
+            "receiptId": {
+              "server": true,
+              "web": true
+            },
+            "sourceAliases": {
+              "server": true,
+              "web": true
+            },
+            "visualsPresent": {
+              "server": true,
+              "web": true
+            }
+          },
+          "resume": true
+        }
+      },
+      {
+        "label": "Windows安装器PE和实际SHA512更新索引",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "固定latest下载地址：jarvis-server-latest.json",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "固定latest下载地址：latest.yml",
+        "passed": true,
+        "detail": null
+      }
+    ],
+    "actualDevicesTested": false
+  },
+  "localFullGate": {
+    "passed": 28,
+    "failed": 3,
+    "skipped": 7,
+    "notFullGreen": true,
+    "rechecks": [
+      "原serverMode15单测按原5秒断言独立通过",
+      "原Canvas45项修复后通过；不提高2000字预算",
+      "原document-quality文档场景/PDF/定点编辑独立复核通过"
+    ],
+    "note": "本机脚本运行期间包含开发中间状态，最终全量依据为上述固定版本CI；未删除或放宽原门禁。"
+  },
+  "actualPaidModelTested": false,
+  "actualWindowsAndroidWeChatDevicesTested": false,
+  "userServerDeployed": false,
+  "claudeIndependentReview": "pending",
+  "previousCandidates": {
+    "1.0.447": "公开前取消，补指定源稿路径兼容",
+    "1.0.448": "新界面回归放在手机版构建前，被门禁拦下未公开",
+    "1.0.449": "原Canvas回归发现长回执被裁成非JSON，未公开；450已在2000字内保留JSON并通过"
+  }
+}

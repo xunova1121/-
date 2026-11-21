@@ -1,0 +1,202 @@
+import { todayNewsIntent } from '../newsIntent.js';
+import { createQueryLedger } from '../retrievalQuality.js';
+import { RESEARCH_BUDGETS } from '../researchBudget.js';
+import { RETRIEVAL_FINISHED } from '../../../shared/retrievalStop.js';
+import { isPortraitRetouch } from '../../core/portraitIntent.js';
+/** 普通问题快查；报告、多项核验和明确的深度研究保留较长预算。预算从首次联网开始。 */
+export const QUICK_RETRIEVAL_MS = 45_000;
+export const DEEP_RETRIEVAL_MS = 8 * 60_000;
+export const VERIFICATION_MS = 3 * 60_000;
+export const strictVerification = text => /逐[项一条].{0,12}(?:核[实验对]|查证|查原文)|(?:核[实验对]|查证).{0,12}逐[项一条]|查原文|核实原文|核对原文|原文核实|打开.{0,8}原文.{0,8}(?:核实|核对)/.test(String(text));
+export function extensiveRetrieval(text = '') {
+  return isPortraitRetouch(text) || strictVerification(text) || /深度|深入|全面|调研|研究报告|逐项|逐一|多来源|交叉核[验对]|报告|方案|文档|论文|PPT|Word|Excel|代码|编程|开发|文件|保存|对比|比较|这几|这些|每场|多场|清单|架构图|流程图|示意图|拓扑图|画图|海报|research|report|document|code|diagram/i.test(String(text));
+}
+/** 预算类别的中文名（报错给用户看） */
+const KIND_LABEL = { search: '搜索', read: '读网页', model: '模型调用' };
+export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs, clock = null } = {}) {
+  if (clock?.retrieval) return clock.retrieval;
+  const resources = { search: 0, read: 0, model: 0 };
+  const news = todayNewsIntent(text);
+  // 次数只是防失控兜底；检索仍从首次联网起共用45秒，不按工具种类另开时钟。
+  const limits = { search: 12, read: news ? 8 : 10, model: 3 };
+  const totalLimit = limits.search + limits.read;
+  let strict = strictVerification(text);
+  let extensive = extensiveRetrieval(text), started = null, calls = 0, failed = 0, reason = '', override = null;
+  let researchLimits = null;
+  const duration = () => override ?? timeBudgetMs ?? (strict ? VERIFICATION_MS : extensive ? DEEP_RETRIEVAL_MS : QUICK_RETRIEVAL_MS);
+  const limitFor = kind => {
+    const base = (strict ? { search: 20, read: 16 } : !extensive ? limits : {})[kind];
+    return researchLimits ? Math.min(researchLimits[kind] ?? Infinity, strict ? base ?? Infinity : Infinity) : base ?? Infinity;
+  };
+  const check = () => {
+    if (!reason && started !== null) {
+      if ((clock && clock.retrievalRemaining() <= 0 || duration() > 0 && now() - started >= duration())) reason = '本轮联网检索已达到时间预算';
+      else if (!extensive && calls >= totalLimit) reason = `普通查询已达到 ${totalLimit} 次联网检索兜底预算`;
+      else if (!extensive && failed >= 3) reason = '连续 3 次联网检索没有取得有效资料';
+    }
+    return reason;
+  };
+  const budget = {
+    registerQuery: createQueryLedger(),
+    begin() { if (check()) return false; if (started === null) { started = now(); clock?.beginRetrieval?.(); } calls++; return true; },
+    consume(kind) {
+      // 整轮已收尾时，写清是哪一类先用完、这次哪一步没执行（用户 2026-10-29：读网页却报“search 调用已达到预算”，看不懂）
+      if (reason || started !== null && (clock && clock.retrievalRemaining() <= 0 || duration()>0 && now()-started>=duration())) throw Object.assign(new Error(`${reason || '本轮联网检索已达到时间预算'}，这次${KIND_LABEL[kind] || kind}没有执行`), {code:'RETRIEVAL_BUDGET'});
+      const limit = limitFor(kind);
+      // 某一类用完：整轮检索就此收尾（主循环下一步会让模型直接用已有资料回答，而不是换个工具接着查）
+      if (limit && resources[kind] >= limit) { reason ||= `${researchLimits ? '本轮调研' : strict ? '逐项核验' : '普通查询'}的${KIND_LABEL[kind] || kind}（${kind}）预算已用完（${limit}次）`; throw Object.assign(new Error(reason), { code:'RETRIEVAL_BUDGET' }); }
+      if (kind in resources) resources[kind]++;
+    },
+    /** 先原子预留整个批次才准许并发。额度不够返回null，调用方沿用逐页路径。 */
+    reserve(kind, count) {
+      if (!(kind in resources) || !Number.isInteger(count) || count < 1 || count > 3) return null;
+      if (check() || resources[kind] + count > limitFor(kind)) return null;
+      resources[kind] += count;
+      let unused = count;
+      return {
+        take() {
+          if (check()) throw Object.assign(new Error(reason), { code: 'RETRIEVAL_BUDGET' });
+          if (!unused) throw new Error('读取预留额度已用完');
+          unused--;
+        },
+        release() { resources[kind] -= unused; unused = 0; }
+      };
+    },
+    get active() { return started !== null; },
+    get resources() { return {...resources}; },
+    beginResearch(depth = 'standard') {
+      // 只在真正执行调研工具前调整一次；重试、换问题或升档都不能重置计数或续时。
+      if (researchLimits) return;
+      if (check()) throw Object.assign(new Error(reason), { code: 'RETRIEVAL_BUDGET' });
+      const profile = RESEARCH_BUDGETS[depth] ?? RESEARCH_BUDGETS.standard;
+      const elapsed = started === null ? 0 : now() - started;
+      researchLimits = Object.fromEntries(['search', 'read', 'model'].map(kind => [kind, resources[kind] + profile[kind]]));
+      // 显式指定的检索期限仍优先，不能借工具升级绕开调用方约束。
+      override = Math.min(timeBudgetMs ?? Infinity, elapsed + profile.durationMs);
+      if (clock?.extend && Number.isFinite(clock.remaining?.())) {
+        clock.extend(Math.max(0, override - elapsed + SUMMARY_RESERVE_MS - clock.remaining()));
+      }
+      extensive = true;
+    },
+    end(ok) { failed = ok ? 0 : failed + 1; },
+    upgrade(text) { if (extensiveRetrieval(text)) extensive = true; if (strictVerification(text)) strict = true; },
+    close(why) { reason ||= why; },
+    /** 自主编排：快查失败后交给模型接着查——从现在起再给 ms，去掉普通查询的次数/连续失败/8秒单项门槛 */
+    extend(ms) { extensive = true; failed = 0; reason = ''; override = (started === null ? 0 : now() - started) + ms; },
+    get extensive() { return extensive; },
+    get reason() { return check(); },
+    /** 还能联网几次（发请求前用：模型自带的联网搜索按这个限次数，不等搜完再扣） */
+    get left() { return check() ? 0 : extensive ? Infinity : Math.max(0, Math.min(limits.search - resources.search, totalLimit - calls)); },
+    get remaining() {
+      const remaining = started === null || duration() <= 0 ? Infinity : Math.max(0, duration() - (now() - started));
+      return Math.min(remaining, clock?.retrievalRemaining() ?? Infinity);
+    },
+    get note() {
+      // 真正连续取源失败仍给模型诊断依据；正常到时/次数上限不再混成用户可见的错误原因。
+      const failure = check() === '连续 3 次联网检索没有取得有效资料' ? `${reason}。` : '';
+      return `（系统提示：${failure}${RETRIEVAL_FINISHED}${extensive ? '可以继续读写文件、生成文档和运行验证。' : '直接回答，不要再调用工具。'}没有确切结果就如实说明哪些信息尚未核实，还没有确切结果就直说；不编造，也不把它说成问题没有答案。用户再次要求查询时可以继续。）`;
+    }
+  };
+  if (clock) clock.retrieval = budget;
+  return budget;
+}
+
+
+// 正式发布：普通查询预留收尾，预算不足时不再发起新请求。
+/** 总时限不变，提前结束检索，给最后整理保留15秒；所有阶段共用同一时钟。 */
+export const SUMMARY_RESERVE_MS = 15_000;
+export const QUICK_MODEL_ATTEMPTS = 3;
+
+/** 到点时正在写答案：只要还在连续出字（两段之间不超过 WRITING_GAP_MS），最多再宽限 WRITING_GRACE_MS，把话写完 */
+export const WRITING_GRACE_MS = 30_000;
+export const WRITING_GAP_MS = 6_000;
+const RECHECK_MS = 1_000;
+
+export function createLookupClock({ totalMs: initialMs, now = Date.now, disabled = () => false, phased = false }) {
+  const started = now();
+  let totalMs = initialMs, bonusMs = 0;
+  let lastText = -Infinity;
+  let retrievalStarted = null;
+  const reserve = phased ? SUMMARY_RESERVE_MS : Math.min(SUMMARY_RESERVE_MS, Math.max(1, totalMs / 4));
+  const remaining = () => (disabled() ? Infinity : Math.max(0, totalMs - (now() - started)));
+  return {
+    startedAt: started, phased,
+    get totalMs() { return totalMs; },
+    /** 程序换了来源才取到资料：多给模型一些时间写答案，别把原始回执直接甩给用户（用户 2026-11-01） */
+    extend: (ms) => { totalMs += Math.max(0, ms); bonusMs += Math.max(0, ms); },
+    get bonusMs() { return bonusMs; },
+    remaining,
+    beginRetrieval: () => { retrievalStarted ??= now(); },
+    retrievalRemaining: () => {
+      const left = remaining();
+      if (!phased || !Number.isFinite(left)) return Math.max(0, left - reserve);
+      // 模型先决定地点/工具的等待不吃掉来源额度；整轮硬截止仍不延长。
+      const used = retrievalStarted === null ? 0 : now() - retrievalStarted;
+      return Math.max(0, Math.min(left - 1000, totalMs - reserve - used));
+    },
+    /** 收到一段答案文字 */
+    wrote: () => { lastText = now(); },
+    /** 还在写、且没超出宽限（slack：外层总时限比内层多等一会儿，让内层先体面收尾） */
+    writing: (slack = 0) => now() - lastText < WRITING_GAP_MS && now() - started < totalMs + WRITING_GRACE_MS + slack
+  };
+}
+
+/** 即使上游忽略取消也按阶段返回；取消只作用于当前模型请求。 */
+export function modelWindow(control, closing, controller) {
+  let timer;
+  let onAbort;
+  let output = false;
+  const expired = new Promise((resolve, reject) => {
+    onAbort = () => reject(controller.signal.reason || Object.assign(new Error('已停止'), { name: 'AbortError' }));
+    controller.signal.addEventListener('abort', onAbort, { once: true });
+    if (controller.signal.aborted) onAbort();
+    // 普通查询：取数收住后仍给模型独立首字窗口，不能拿取数期限截断正常回答。
+    const delay = control?.phased ? Math.min(FIRST_OUTPUT_MS + (control.bonusMs || 0), control.remaining() - 1000) : closing ? control?.remaining() - 1000 : control?.retrievalRemaining();
+    if (!Number.isFinite(delay)) return;
+    const expire = () => {
+      if (!Number.isFinite(control.remaining())) return;
+      if (control.phased && output && control.remaining() > 1000) {
+        timer = setTimeout(expire, control.remaining() - 1000); return;
+      }
+      // 正在写答案：先不掐，过一秒再看
+      if (control.writing?.()) { timer = setTimeout(expire, RECHECK_MS); return; }
+      const error = Object.assign(new Error(closing ? '答案整理时间已用完' : '已预留时间整理现有资料'), {
+        name: 'LookupPhaseError',
+        kind: 'timeout',
+        code: control.phased ? 'LOOKUP_ANSWER_TIMEOUT' : closing ? 'LOOKUP_SUMMARY_TIMEOUT' : 'LOOKUP_RETRIEVAL_END'
+      });
+      controller.abort(error);
+      reject(error);
+    };
+    if (delay <= 0) expire();
+    else timer = setTimeout(expire, delay);
+  });
+  // 允许请求前已过期；即使调用方尚未进入race也不产生未处理拒绝。
+  expired.catch(() => {});
+  return {
+    // 受内容约束而暂缓展示的正文也算在写；仍须通过原审查才显示。
+    output: () => { output = true; control?.wrote?.(); },
+    race: (work) =>
+      controller.signal.aborted
+        ? Promise.reject(controller.signal.reason)
+        : Promise.race([
+            typeof work === 'function'
+              ? Promise.resolve().then(() => {
+                  if (controller.signal.aborted) throw controller.signal.reason;
+                  return work();
+                })
+              : work,
+            expired
+          ]),
+    dispose: () => {
+      clearTimeout(timer);
+      controller.signal.removeEventListener('abort', onAbort);
+    }
+  };
+}
+
+/** 速度目标只作统计，绝不能用于中止请求。 */
+export const LOOKUP_TARGETS = Object.freeze({ weather: 5000, sports_live: 10000, news: 20000, sports_news: 20000, market: 15000, general: 45000 });
+export const FIRST_OUTPUT_MS = 15_000;
+/** 天气含API及两级免费备用共14秒+15秒首字；行情8秒取数+15秒首字。 */
+export const LOOKUP_TOTALS = Object.freeze({ weather: 40000, sports_live: 40000, news: 45000, sports_news: 45000, market: 35000, general: 60000 });

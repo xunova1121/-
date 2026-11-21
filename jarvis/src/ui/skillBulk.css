@@ -1,0 +1,10 @@
+/* 已安装技能：搜索框、多选删除（见 skillBulk.js） */
+.skill-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 10px; }
+.skill-bulk .skill-search { flex: 1 1 200px; min-width: 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--text); font: inherit; }
+.skill-bulk .skill-filter-count { font-variant-numeric: tabular-nums; }
+.skill-bulk .skill-bulk-delete:disabled { opacity: 0.5; }
+#skill-list > .skill[hidden], .skill-no-match[hidden], .skill-bulk [hidden] { display: none !important; }
+#skill-list .skill-pick { display: none; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
+#skill-list.picking .skill-pick { display: inline-flex; }
+#skill-list .skill-pick input { width: 18px; height: 18px; accent-color: var(--accent); }
+#skill-list.picking > .skill.picked { border-color: var(--accent); background: var(--accent-soft); }

@@ -1,0 +1,9 @@
+.nest-wall-photo {
+  position: absolute; z-index: 2; pointer-events: none;
+  left: 27.9%; top: 21.4%; width: 12.8%; height: 12.4%; object-fit: cover;
+  clip-path: polygon(0 0,100% 1.6%,100% 100%,0 100%);
+  filter: sepia(.09) saturate(.89) brightness(.96);
+}
+.nest-wall-photo.nest-photo-dark { filter: brightness(.43) saturate(.64); }
+.nest-wall-photo[hidden] { display: none !important; }
+.nest-photo-controls p[role="status"]:empty { display: none; }

@@ -1,5 +1,7 @@
 # 渔政执法 AI Agent 演示页
 
+> 本仓库另含 **贾维斯智能体（J.A.R.V.I.S.）**：桌面版安装包见 Releases 页面（说明见 [`jarvis/desktop/`](jarvis/desktop/README.md)）；双击根目录的 [`jarvis-standalone.html`](jarvis-standalone.html) 也能直接使用；源码与完整版见 [`jarvis/`](jarvis/README.md)。
+
 `agent-demo-offline.html` —— 单文件，双击浏览器打开即可演示。
 
 - **图标、图表、实景图全部内嵌**，页面对外零静态资源请求，断网可跑完整演示

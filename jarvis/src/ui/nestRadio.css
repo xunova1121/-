@@ -1,0 +1,8 @@
+/* 收音机位于电视上方。侧面的调谐灯只在音频已经发声后点亮。 */
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="radio"] {
+  left: 92.8%; top: 38.8%; width: 12%; height: 9%;
+}
+.ws-scene[data-room-view="nest"] [data-furniture="radio"][data-playback="playing"]::after {
+  content: ''; position: absolute; top: 67%; right: 18%; width: clamp(3px,.6cqw,7px); aspect-ratio: 1;
+  border-radius: 50%; background: #ffd888; box-shadow: 0 0 5px 2px #f9b745b3; pointer-events: none;
+}

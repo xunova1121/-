@@ -1,0 +1,12 @@
+未央小窝 · 小猫咪呀
+
+中文台词“小猫咪呀”由未央项目使用 Kokoro-82M v1.0 的普通话女声离线合成，并调整语速与音调。
+模型 https://huggingface.co/hexgrad/Kokoro-82M （Apache 2.0）
+运行工具 https://github.com/k2-fsa/sherpa-onnx （Apache 2.0）
+
+猫叫来自 Dan Crosby 对家猫 Silas 的录音 Meow.ogg。
+原始录音 https://commons.wikimedia.org/wiki/File:Meow.ogg
+本项目调整了猫叫音量，加入合成中文语音、短暂停顿，并转码为 MP3。
+原录音及合成后的此段配乐均按 CC BY-SA 3.0 提供。
+https://creativecommons.org/licenses/by-sa/3.0/
+署名及许可证也保存在音频文件的 ID3 标签内。

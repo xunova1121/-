@@ -1,0 +1,110 @@
+/**
+ * 30 题联合复测的自动评审员：按 joint-rubric.mjs 的同一把尺子给每次运行打分、写依据、标“说做到没做到”和失败主因。
+ * 在未央服务器上运行（读服务器的模型配置，Key 不打印、不写报告）。
+ *
+ *   node evals/joint-judge.mjs 报告.json [--judge=服务商::型号]
+ *
+ * 不指定时用能力表里“推理”那一项（一般是最强的）；和答题模型相同时报告里会标出来——自己评自己可能偏高。
+ */
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { createAdapter } from '../src/llm/config.js';
+import { routeFor } from '../src/llm/router.js';
+import { createHelperLlm } from '../src/llm/helper.js';
+import { judgePrompt, parseJudgement, rubricVersion } from './joint-rubric.mjs';
+import { stability, jointSummary, compareRounds } from './joint-report.mjs';
+
+const lineCfg = (cfg, provider, model) => ({ ...cfg, provider, models: { ...cfg.models, [provider]: model }, routing: { enabled: false }, abilities: {}, pinModel: true });
+/** 不能拿来评文字的模型：语音、画图、视频、向量、识字等（第二轮实测：选中了语音识别 fun-asr，每题 400） */
+const NOT_CHAT = /asr|tts|whisper|paraformer|sensevoice|cosyvoice|sambert|speech|audio|realtime|voice|embed|rerank|bge|image|wanx|wan2|flux|cogview|dall|sora|video|kling|ocr|vision|-vl\b|vl-/i;
+/** 配置里能聊天的模型（能力表里除看图 / 识字 / 画图 / 向量以外的项、模型分工、备用线路、主模型），去重 */
+export function availableModels(cfg) {
+  const lines = [];
+  const add = (provider, model) => {
+    if (!provider || !model || typeof model !== 'string' || NOT_CHAT.test(model)) return;
+    if (provider !== cfg.provider && !cfg.keys?.[provider] && !cfg.baseURLs?.[provider]) return;
+    if (!lines.some((l) => l.provider === provider && l.model === model)) lines.push({ provider, model });
+  };
+  for (const [ability, line] of Object.entries(cfg.abilities || {})) if (!['vision', 'ocr', 'image', 'embed'].includes(ability)) for (const slot of ['main', 'backup']) add(line?.[slot]?.provider, line?.[slot]?.model);
+  for (const route of Object.values(cfg.routing?.routes || {})) {
+    const [p, ...m] = String(route || '').split('::');
+    m.length ? add(p, m.join('::')) : add(cfg.routing?.provider || cfg.provider, p);
+  }
+  for (const f of cfg.fallbackModels || []) add(f?.provider, f?.model);
+  add(cfg.provider, cfg.models?.[cfg.provider]);
+  return lines;
+}
+/** 名字看着像强模型的排前面（sol / opus / pro / max / 推理型），同类按版本号（只认 0～99，日期不算） */
+const version = (model) => {
+  const n = Number(String(model).match(/(\d+(?:\.\d+)?)/)?.[1]);
+  return Number.isFinite(n) && n < 100 ? n : 0;
+};
+const strength = (model) => (/sol|opus|ultra|\bpro\b|-pro|max|thinking|reason|r1\b/i.test(model) ? 100 : 0) + version(model);
+/**
+ * 选评审模型：显式指定 > 配置里和答题模型不同、看着最强的 > 能力表“推理”那一项。
+ * 自己评自己分数偏高（第一轮实测：答题和评审都是 gpt-6-luna），所以默认尽量换一个。
+ */
+export function judgeConfig(cfg, wanted = '', answerModel = '') {
+  const [provider, ...rest] = String(wanted).split('::');
+  if (provider && rest.length) return lineCfg(cfg, provider, rest.join('::'));
+  const others = availableModels(cfg).filter((l) => l.model !== answerModel).sort((a, b) => strength(b.model) - strength(a.model));
+  if (others.length) return lineCfg(cfg, others[0].provider, others[0].model);
+  return routeFor(cfg, 'reason').cfg;
+}
+
+/** 给一次运行评分；输出格式不对重试一次，还不对就记 error，不猜分 */
+export async function judgeRun(llm, item, run, { signal } = {}) {
+  const { system, prompt } = judgePrompt(item, run);
+  for (let i = 0; i < 2; i++) {
+    const text = await llm({ system, prompt: i ? prompt + '\n\n（上次输出格式不对：只输出一个 JSON 对象。）' : prompt, signal, allowWebSearch: false, maxTransientRetries: 1 });
+    const parsed = parseJudgement(text, item);
+    if (!parsed.error) return parsed;
+    if (i === 1) return parsed;
+  }
+}
+
+export async function main(args = process.argv.slice(2), env = process.env) {
+  const file = args.find((a) => !a.startsWith('--'));
+  if (!file) throw Object.assign(new Error('用法：node evals/joint-judge.mjs 报告.json [--judge=服务商::型号]'), { code: 'EVAL_CONFIG' });
+  const dataDir = env.JARVIS_DATA || '/opt/jarvis/data';
+  const cfg = JSON.parse(await fs.readFile(path.join(dataDir, 'config.json'), 'utf8'));
+  const report = JSON.parse(await fs.readFile(file, 'utf8'));
+  const chosen = judgeConfig(cfg, args.find((a) => a.startsWith('--judge='))?.slice(8), report.conditions?.model || '');
+  const { adapter, model, problem } = createAdapter(chosen);
+  if (problem || !adapter) throw Object.assign(new Error('评审模型不可用：' + (problem || '没有配置')), { code: 'EVAL_CONFIG' });
+  const llm = createHelperLlm(adapter, model);
+  report.judge = { provider: chosen.provider, model, rubricVersion, sameAsAnswerModel: model === report.conditions?.model, judgedAt: new Date().toISOString() };
+  for (const entry of report.results) {
+    for (const run of entry.runs) {
+      if (run.environment === 'not_ready' || !run.turns?.length) continue;
+      try {
+        run.judgement = await judgeRun(llm, entry, run);
+      } catch (error) {
+        run.judgement = { error: '评审调用失败：' + String(error.message || error).slice(0, 120) };
+      }
+      console.log(`${entry.id} 第${run.attempt}次：${run.judgement.error ? run.judgement.error : `${run.judgement.pass ? '通过' : '不通过'}，${run.judgement.total}/20${run.judgement.overclaim ? '，说做到没做到' : ''}`}`);
+    }
+    entry.stability = stability(entry.runs);
+    await fs.writeFile(file, JSON.stringify(report, null, 2), { mode: 0o600 });
+  }
+  report.summary = jointSummary(report.results);
+  // 逐题对比要用评审后的结果重算；上一轮报告的路径在跑题时记下了，也可以 --previous= 指定
+  const readJson = async (p) => { try { return p ? JSON.parse(await fs.readFile(p, 'utf8')) : null; } catch { return null; } };
+  const previous = await readJson(args.find((a) => a.startsWith('--previous='))?.slice(11) || report.compareWith?.previous);
+  const baseline = await readJson(args.find((a) => a.startsWith('--baseline='))?.slice(11) || report.compareWith?.baseline);
+  if (previous || baseline) {
+    report.comparison = compareRounds(report.results, previous, baseline);
+    // 两轮评审员不同：分数变化有一部分是换了评审员，不全是未央变了
+    report.comparisonJudge = { before: previous?.judge?.model ?? null, after: model, changed: Boolean(previous?.judge?.model && previous.judge.model !== model) };
+  }
+  await fs.writeFile(file, JSON.stringify(report, null, 2), { mode: 0o600 });
+  console.log(`评审完成（${model}${report.judge.sameAsAnswerModel ? '，和答题模型相同，分数可能偏高' : ''}）。下一步：node evals/joint-calibrate.mjs sample ${file}`);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error.code === 'EVAL_CONFIG' ? error.message : '评审没跑完；已评的部分保存在报告里。');
+    process.exitCode = 1;
+  });
+}

@@ -1,0 +1,111 @@
+{
+  "version": "1.0.433",
+  "source": "24f4470b7e5e8e8a6a6588953e54f8a4baaf65f1",
+  "runtimeRevision": "8d0042fc922cd7ae19ab01fdfa8828b267c8fc1c",
+  "publicAssets": 7,
+  "sourcePublicDigestsMatch": true,
+  "downloadedAssets": {
+    "Jarvis-1.0.433-android.apk": "39a7a3f9749956a2a823754e7e15c9d24950b536774459db38e986bb79f4c4b2",
+    "jarvis-server-1.0.433.tar.gz": "b16989917c97b83630bd815e4f8d668f035c36670584e650cf9b0945c9b446e8",
+    "jarvis-server-latest.json": "06dd969154a00bddb09489597bb572a38924acfccab379c64d520603ec63d46b",
+    "Jarvis-Setup-1.0.433.exe": "285abc5b378819308768a58dc53fb43ff77f80f536b6cc710cc624ab94a68b53",
+    "latest.yml": "8040bbaffde608a66c7b68195a438d682a250f33fe530b12b46917d63b5a3993"
+  },
+  "server": {
+    "archiveEntries": 1124,
+    "manifestFiles": 948,
+    "runtimeFilesChecked": 947,
+    "sha256": "b16989917c97b83630bd815e4f8d668f035c36670584e650cf9b0945c9b446e8",
+    "permissions": "root-owned/readable-by-service-account"
+  },
+  "windows": {
+    "file": "Jarvis-Setup-1.0.433.exe",
+    "bytes": 142098254,
+    "sha256": "285abc5b378819308768a58dc53fb43ff77f80f536b6cc710cc624ab94a68b53",
+    "sha512MatchesLatestYml": true
+  },
+  "apk": {
+    "versionCode": 433,
+    "versionName": "1.0.433",
+    "package": "com.xunova.jarvis",
+    "certificateSHA256": "56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6",
+    "sha256": "39a7a3f9749956a2a823754e7e15c9d24950b536774459db38e986bb79f4c4b2"
+  },
+  "limits": [
+    "user-server-not-deployed",
+    "no-real-device",
+    "no-paid-model-or-real-portrait-test",
+    "api-get-search-contract-unconfirmed"
+  ],
+  "tag": "desktop-v1.0.433",
+  "releaseUrl": "https://github.com/xunova1121/weiyang-release/releases/tag/desktop-v1.0.433",
+  "publishedAt": "2026-11-13T07:26:04Z",
+  "workflow": {
+    "id": 43382927370,
+    "url": "https://github.com/xunova1121/-/actions/runs/43382927370",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "name": "清理旧的构建产物",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "同步现有安装包到公开仓库",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "name": "建草稿发布",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "打包安卓 App",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "打包 (windows-latest)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "发布前完整验证",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "发布到 Releases",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "validation": {
+    "ci": {
+      "testFiles": 460,
+      "unitTests": 3937,
+      "fullOriginalGate": "passed",
+      "smoke": "174/174",
+      "standalone": "14/14",
+      "allAgentMargins": "360/360",
+      "businessFirstFold": 83,
+      "posterComposition": "84/84",
+      "visualDemo": "88/88",
+      "posterGradient": "48/48",
+      "portraitMultipart": "mobile 390 and PC 1280, each one edit and one dual-image review; fixture"
+    },
+    "local": {
+      "targeted": "50/50",
+      "portraitBrowser": "passed",
+      "businessFirstFold": "83/83",
+      "fullGate": "started; 3936/3937 unit tests first run, original Excel timeout; unchanged file 26/26 recheck passed. Old Office rendering timeout and visualDemo weather-material partial observed. Stopped duplicate local process after frozen-source full CI gate passed; not a full local green result."
+    },
+    "publicIndices": "downloaded independently and byte-identical"
+  },
+  "metadataOnlyAssets": [
+    "Jarvis-1.0.433-win-x64.zip",
+    "Jarvis-Setup-1.0.433.exe.blockmap"
+  ]
+}
