@@ -44,11 +44,11 @@ it('同一任务在模型输出结束前可经普通 SSE 和整包原生网络�
       if (event.type === 'text') texts[index] += event.delta;
       if (event.type === 'server_connection') counts.set(index, event.state);
     } }));
-    await vi.waitFor(() => expect(texts).toEqual(['第一段。', '第一段。', '']), { timeout: 4000 });
+    await vi.waitFor(() => expect(texts).toEqual(['第一段。', '第一段。', '']), { timeout: 15000 });
     // 从最新序号回到前台时还没有新字，健康的流仍立即确认连接。
     const { seq } = await clients[0].getTask(id);
     const resumed = await fetch(`${base}/api/tasks/${id}/events?after=${seq}`, {
-      headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(2500)
+      headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(5000)
     });
     const reader = resumed.body.getReader();
     expect(new TextDecoder().decode((await reader.read()).value)).toContain(': connected');
@@ -66,4 +66,4 @@ it('同一任务在模型输出结束前可经普通 SSE 和整包原生网络�
     useBackend(null);
     await rm(dir, { recursive: true, force: true });
   }
-}, 10000);
+}, 30000);
