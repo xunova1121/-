@@ -35,6 +35,21 @@ public class CrashLogPlugin extends Plugin {
             activity.runOnUiThread(() -> { activity.restoreDefaultDrawing(); call.resolve(); });
         } else call.resolve();
     }
+    /** 与聊天的兼容偏好独立，只为当前页面的前台小屋申请系统合成。 */
+    @PluginMethod public void setWorkshopDrawing(PluginCall call) {
+        Boolean active = call.getBoolean("active");
+        Object value = call.getData().opt("revision");
+        if (active == null || !(value instanceof Number number) || number.longValue() < 0
+                || number.longValue() > 9007199254740991L || number.doubleValue() != number.longValue()) {
+            call.reject("小屋绘制请求需要有效的状态和顺序号");
+            return;
+        }
+        if (!(getActivity() instanceof MainActivity activity)) {
+            call.reject("当前界面无法调整小屋绘制");
+            return;
+        }
+        activity.runOnUiThread(() -> call.resolve(activity.setWorkshopDrawing(active, number.longValue())));
+    }
     /** 网页每隔几秒报一次当前界面（只是界面名和规模），渲染进程崩溃时写进异常记录 */
     @PluginMethod public void note(PluginCall call){
         String screen=call.getString("screen","");
@@ -47,6 +62,7 @@ public class CrashLogPlugin extends Plugin {
         result.put("device",android.os.Build.MANUFACTURER+" "+android.os.Build.MODEL);
         result.put("safeDisplay",MainActivity.safeDisplay(getContext()));
         result.put("softwareLayer",getActivity() instanceof MainActivity activity && activity.usesSoftwareDrawing());
+        result.put("workshopDrawing",getActivity() instanceof MainActivity activity && activity.usesWorkshopDrawing());
         result.put("exitDetails",ExitReasons.since(getContext(),0));
         result.put("lastRenderer",getContext().getSharedPreferences("render-health",android.content.Context.MODE_PRIVATE).getString("lastRenderer",""));
         android.content.SharedPreferences share=getContext().getSharedPreferences("share-return",android.content.Context.MODE_PRIVATE);

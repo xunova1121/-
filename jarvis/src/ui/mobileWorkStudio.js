@@ -1,9 +1,10 @@
 import { createWorkStudioView } from './workStudioView.js';
 import { createConversationMount } from './conversationMount.js';
+import { createWorkshopDrawing } from '../mobile/workshopDrawing.js';
 import './mobileWorkStudio.css';
 
 // 从菜单可随时看房间；当前回复旁的快捷入口只回看这一轮。
-export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsChat, newsFeed, getPlayers, nestDeskOptions }) {
+export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsChat, newsFeed, getPlayers, nestDeskOptions, toast }) {
   const transcript = document.getElementById('transcript');
   const entry = document.createElement('button');
   entry.type = 'button';
@@ -42,7 +43,7 @@ export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsCh
   empty.textContent = '交给未央一个任务。';
   heading.append(label, title);
   chat.append(heading, empty);
-  sheet.append(chat);
+  sheet.append(back, chat);
   const conversation = createConversationMount(transcript, document.getElementById('inputbar'));
   const appElement = document.querySelector('.app');
   document.body.append(sheet);
@@ -51,6 +52,34 @@ export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsCh
   let fromReply = false;
   let scheduled = false;
   let disposed = false;
+  let restoreEntryScroll;
+  let foregroundActive = globalThis.__jarvisForeground !== false;
+  const setRoomActive = createWorkshopDrawing({
+    show() {
+      if (!sheet.open || disposed || document.hidden || !foregroundActive) return;
+      if (!view) {
+        view = createWorkStudioView({ workshop: true, newsChat, newsFeed, getPlayers, nestDeskOptions });
+        sheet.prepend(view.element);
+      }
+      const keepFocus = document.activeElement === back;
+      view.element.querySelector('.ws-header').prepend(back);
+      refresh();
+      if (!sheet.open) return;
+      view.setVisible(true);
+      if (keepFocus) back.focus({ preventScroll: true });
+      restoreEntryScroll?.();
+      restoreEntryScroll = null;
+    },
+    hide() {
+      sheet.prepend(back);
+      view?.setVisible(false, { preserveMedia: true });
+    },
+    failed(reason) {
+      exitStudio();
+      toast?.(reason === 'cooldown' ? '小窝刚出现显示异常，请稍后再打开。' : '暂时无法打开小窝显示，请再试一次。');
+    }
+  });
+  const syncDrawing = () => setRoomActive(sheet.open && !disposed && !document.hidden && foregroundActive);
 
   function latestReply() {
     if (transcript.lastElementChild?.classList.contains('wy-history-pages')) return null;
@@ -80,7 +109,7 @@ export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsCh
       const name = session?.title || '';
       title.textContent = name === '新对话' ? '' : name;
       empty.hidden = Boolean(transcript.querySelector('.msg, .wy-history-pages, .wy-agent-start, .wy-studio-start'));
-      view.render(snapshot);
+      view?.render(snapshot);
     }
   }
 
@@ -95,20 +124,13 @@ export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsCh
     if (sheet.open || (viaReply && (!latestReply()?.contains(entry) || !snapshot.entries.length))) return;
     fromReply = viaReply;
     if (!fromReply) closeDrawer();
-    if (!view) {
-      view = createWorkStudioView({ workshop: true, newsChat, newsFeed, getPlayers, nestDeskOptions });
-      sheet.prepend(view.element);
-      view.element.querySelector('.ws-header').prepend(back);
-    }
     sessionId = snapshot.sessionId;
     // 这是完整的工作页面。模型选择与队列菜单使用原有的 body 弹层，继续盖在工作台上。
     sheet.show();
-    const restoreScroll = conversation.moveTo(chat);
+    restoreEntryScroll = conversation.moveTo(chat);
     appElement.inert = true;
-    refresh();
-    view.setVisible(true);
+    syncDrawing();
     back.focus({ preventScroll: true });
-    restoreScroll?.();
   }
   entry.addEventListener('click', () => open(true));
   roomEntry.addEventListener('click', () => open(false));
@@ -148,9 +170,11 @@ export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsCh
   const closeForPanel = () => { if (sheet.open && document.body.classList.contains('side-open')) exitStudio(); };
   window.addEventListener('jarvis:panel', closeForPanel);
   function leave() {
+    restoreEntryScroll = null;
+    setRoomActive(false);
+    view?.setVisible(false, { preserveMedia: false });
     appElement.inert = false;
     const restoreScroll = conversation.restore();
-    view?.setVisible(false);
     restoreScroll?.();
   }
   function exitStudio() {
@@ -166,11 +190,11 @@ export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsCh
   });
   // 真机切后台时停止回放；返回前台后拉取已在内存中的最新步骤。
   const foreground = (e) => {
-    if (!sheet.open) return;
-    view.setVisible(e.detail?.active !== false);
-    if (e.detail?.active !== false) schedule();
+    foregroundActive = e.detail?.active !== false;
+    syncDrawing();
   };
   window.addEventListener('jarvis:foreground', foreground);
+  document.addEventListener('visibilitychange', syncDrawing);
   const observer = new MutationObserver(schedule);
   observer.observe(transcript, { childList: true });
   const unsubscribe = activity.subscribe(schedule);
@@ -180,6 +204,7 @@ export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsCh
     observer.disconnect();
     unsubscribe();
     window.removeEventListener('jarvis:foreground', foreground);
+    document.removeEventListener('visibilitychange', syncDrawing);
     window.removeEventListener('jarvis:panel', closeForPanel);
     document.removeEventListener('keydown', overlayEscape, true);
     if (sheet.open) sheet.close();

@@ -59,7 +59,7 @@ export function createNestWindow({ world, panel, art }) {
   let gust = false;
   let nextTimer, stopTimer, opener;
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
-  const still = () => reduced.matches || document.body.classList.contains('reduced-motion');
+  const still = () => reduced.matches || document.body.classList.contains('reduced-motion') || document.documentElement.classList.contains('safe-render');
 
   function draw() {
     const open = mode === 'open' || gust;

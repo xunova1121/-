@@ -421,6 +421,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/jarvis-e2e"
           node e2e/mobile-ui.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/mobile-chat-stream.mjs
+          node e2e/mobile-workshop-tv-recovery.mjs
           node scripts/make-icons.mjs --check
           node e2e/client-recovery.mjs "$RUNNER_TEMP/jarvis-e2e/client-recovery"
           node e2e/phone-control.mjs "$RUNNER_TEMP/jarvis-e2e/phone-control"

@@ -10,14 +10,37 @@ import catLit from './assets/nestRoom/cat-lit.webp';
 import catDark from './assets/nestRoom/cat-off.webp';
 import sleepLit from './assets/nestRoom/sleep-lit.webp';
 import sleepDark from './assets/nestRoom/sleep-off.webp';
+import seatLit from './assets/nestRoom/mobile/seat-lit.webp';
+import seatDark from './assets/nestRoom/mobile/seat-off.webp';
+import phoneMascot from './assets/nestRoom/mobile/mascot.webp';
+import phoneLoveseat from './assets/nestRoom/mobile/loveseat.webp';
+import phoneLife from './assets/nestRoom/mobile/workshop-life.webp';
+import { MOBILE } from '../config.js';
 
 const art = {
   work: [workLit, workDark], news: [newsLit, newsDark], trip: [travelLit, travelDark],
   tv: [tvLit, tvDark], cat: [catLit, catDark], sleep: [sleepLit, sleepDark]
 };
 
-export function nestArt(pose, dark) {
-  return (art[pose] || art.work)[dark ? 1 : 0];
+const phoneArt = MOBILE || import.meta.env.DEV
+  ? import.meta.glob('./assets/nestRoom/mobile/{work,news,trip,tv,cat,sleep}-{lit,off}.webp', { eager: true, import: 'default' })
+  : {};
+
+export const nestMobileSprites = MOBILE || import.meta.env.DEV
+  ? { mascot: phoneMascot, loveseat: phoneLoveseat, life: phoneLife }
+  : null;
+
+export function nestArt(pose, dark, mobile = false) {
+  const scene = Object.hasOwn(art, pose) ? pose : 'work';
+  if (mobile && (MOBILE || import.meta.env.DEV)) {
+    return phoneArt[`./assets/nestRoom/mobile/${scene}-${dark ? 'off' : 'lit'}.webp`];
+  }
+  return art[scene][dark ? 1 : 0];
+}
+
+// 原画中的空椅（x 752、y 255、宽 416、高 454）已保留原渐变边缘。
+export function nestSeatArt(dark) {
+  return dark ? seatDark : seatLit;
 }
 
 // 白天的自然光仍能照亮书桌，手动拉灯则切换到可以辨认的熄灯画面。

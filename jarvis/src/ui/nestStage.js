@@ -3,15 +3,24 @@ import { createNestDesk } from './nestDesk.js';
 import { createNestLiving } from './nestLiving.js';
 import { createNestWindow } from './nestWindow.js';
 import { createNestPhoto } from './nestPhoto.js';
-import { nestArt, nestFigure, nestIsDark, nestNeedsSprite, nestFurniture } from './nestArt.js';
+import { nestArt, nestFigure, nestIsDark, nestNeedsSprite, nestFurniture, nestMobileSprites, nestSeatArt } from './nestArt.js';
+import { MOBILE } from '../config.js';
 import { createNestPanel } from './nestPanel.js';
 import './nestStage.css';
+import './nestMobile.css';
 
 export function createNestStage({scene, floor, room, caption, deskHost, onChange, nestDeskOptions}) {
   const art = document.createElement('img');
   art.className = 'ws-nest-art';
   art.alt = '';
   art.draggable = false;
+  art.decoding = 'async';
+  if (MOBILE) {
+    art.fetchPriority = 'high';
+    for (const [name, url] of Object.entries(nestMobileSprites)) {
+      document.documentElement.style.setProperty('--nest-mobile-' + name, 'url("' + url + '")');
+    }
+  }
   // 透出同一机位的空座位，让正在吃饭、唱歌、取档的旧动作也能在小窝中演出。
   const seat = document.createElement('img');
   seat.className = 'ws-nest-seat';
@@ -109,11 +118,11 @@ export function createNestStage({scene, floor, room, caption, deskHost, onChange
       const viewing = !busy && (pose === 'tv' || pose === 'news' && state.activity === 'news') ? pose : '';
       if (pose !== lastPose || dark !== lastDark || viewing !== lastViewing) {
         const sprite = nestNeedsSprite(pose);
-        const url = nestArt(viewing ? 'work' : pose, dark);
+        const url = nestArt(viewing ? 'work' : pose, dark, MOBILE);
         if (art.getAttribute('src') !== url) art.src = url;
         seat.hidden = !sprite && !viewing;
         if (!seat.hidden) {
-          const emptySeat = nestArt('sleep', dark);
+          const emptySeat = MOBILE ? nestSeatArt(dark) : nestArt('sleep', dark);
           if (seat.getAttribute('src') !== emptySeat) seat.src = emptySeat;
         }
         if (viewing) scene.dataset.nestViewing = viewing;

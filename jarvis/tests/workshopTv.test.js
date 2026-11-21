@@ -9,13 +9,14 @@ const sources = {
   cctv1: { type: 'embed', url: 'https://player.cctv.com/embed/fixture' },
   cctv2: { type: 'media', url: 'https://media.cntv.cn/fixture.webm' }
 };
-afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 function mockPlayerDocument(canPlayType = () => '') {
   const nodes = [];
   vi.stubGlobal('document', { createElement(tag) {
     const el = { tag, children: [], canPlayType, setAttribute: vi.fn(), removeAttribute: vi.fn(),
       querySelector: name => el.children.find(c => c.tag === name), replaceChildren: (...children) => { el.children = children; },
+      append: (...children) => el.children.push(...children),
       pause: vi.fn(), load: vi.fn() };
     nodes.push(el);
     return el;
@@ -76,6 +77,7 @@ describe('工作台央视播放器', () => {
     await player.select('cctv9');
     expect(player.element.hidden).toBe(true);
     expect(player.element.children).toHaveLength(0);
+    player.close();
   });
 
   it('无授权源时在机内播放有标记的本地短片，换台或关闭后释放旧短片', async () => {
@@ -129,6 +131,7 @@ describe('工作台央视播放器', () => {
     expect(player.standby.children[0].children[1].textContent).toContain('未能播放风景短片');
     await player.standby.children[0].children[2].onclick();
     expect(player.element.children[0].src).toBe(sources.cctv2.url);
+    player.close();
   });
 
   it.each([
@@ -207,5 +210,97 @@ describe('工作台自定义视频源与 HLS 解码', () => {
     expect(engine.attachMedia).not.toHaveBeenCalled();
     expect(player.element.children[0].src).toBe(sources.cctv2.url);
     expect(() => player.preview({ label: '测试', source: { url: 'javascript:0' } })).toThrow();
+    player.close();
+  });
+
+  it('清单一直不返回时提示正在连接，超时可选短片并重新尝试原频道', async () => {
+    vi.useFakeTimers();
+    mockPlayerDocument();
+    const { engine, Hls } = setupHls();
+    const player = createWorkshopTvPlayer({ loadHls: async () => ({ default: Hls }) });
+    await player.preview(channel);
+    const [video, feedback] = player.element.children;
+    expect(feedback.children[0].children[1].textContent).toBe('正在连接频道…');
+    await vi.advanceTimersByTimeAsync(12000);
+    expect(video.pause).toHaveBeenCalledOnce();
+    expect(engine.destroy).toHaveBeenCalledOnce();
+    const [,, retry, film] = player.standby.children[0].children;
+    expect(retry.textContent).toBe('重新连接');
+    film.onclick();
+    const [clip, label] = player.standby.children;
+    expect(label.children[0].textContent).toContain('非频道直播');
+    await label.children[2].onclick();
+    expect(clip.pause).toHaveBeenCalledOnce();
+    expect(engine.loadSource).toHaveBeenCalledTimes(2);
+    player.close();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('央视无后缀签名媒体先直放，原生无法识别时挑选 HLS，仅切换一次', async () => {
+    mockPlayerDocument();
+    const { engine, Hls } = setupHls();
+    const source = {type:'media', url:'https://media.cntv.cn/live?id=1'};
+    const player = createWorkshopTvPlayer({getPlayers: async () => ({cctv2:source}), loadHls: async () => ({default:Hls})});
+    await player.select('cctv2');
+    const video = player.element.children[0];
+    expect(video.src).toBe(source.url);
+    video.onerror();
+    await vi.waitFor(() => expect(engine.loadSource).toHaveBeenCalledWith(source.url));
+    video.onerror();
+    expect(engine.loadSource).toHaveBeenCalledTimes(1);
+    expect(player.element.hidden).toBe(true);
+    player.close();
+  });
+
+  it('首次自动播放受限时等用户点击，首帧后让出画面，暂停观看不会报超时', async () => {
+    vi.useFakeTimers();
+    mockPlayerDocument();
+    const player = createWorkshopTvPlayer({ getPlayers: async () => sources });
+    await player.select('cctv2');
+    const [video, feedback] = player.element.children;
+    Object.assign(video, { paused: true, readyState: 3, videoWidth: 640, currentTime: 0,
+      play: vi.fn().mockRejectedValueOnce(new DOMException('需手势', 'NotAllowedError')).mockResolvedValue() });
+    video.oncanplay();
+    await vi.advanceTimersByTimeAsync(15000);
+    const play = feedback.children[0].children[2];
+    expect(play.textContent).toBe('点击播放');
+    play.onclick();
+    expect(video.play).toHaveBeenCalledTimes(2);
+    video.paused = false;
+    video.onplaying();
+    expect(feedback.hidden).toBe(true);
+    video.paused = true;
+    video.onpause();
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(player.element.hidden).toBe(false);
+    video.paused = false;
+    video.onplaying();
+    video.onwaiting();
+    expect(feedback.children[0].children[1].textContent).toContain('缓冲');
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(player.standby.children[0].children[1].textContent).toContain('已停止更新');
+    player.close();
+  });
+
+  it('切台/后台清理定时和手势回调，延迟的频道配置及 play 拒绝无法干扰新画面', async () => {
+    vi.useFakeTimers();
+    mockPlayerDocument();
+    let resolveConfig, rejectPlay;
+    const getPlayers = vi.fn().mockResolvedValueOnce(sources)
+      .mockImplementationOnce(() => new Promise(resolve => { resolveConfig = resolve; }));
+    const player = createWorkshopTvPlayer({ getPlayers });
+    await player.select('cctv2');
+    const video = player.element.children[0];
+    Object.assign(video, {paused:true, play: () => new Promise((_resolve, reject) => { rejectPlay = reject; })});
+    video.oncanplay();
+    const changing = player.select('cctv1');
+    rejectPlay(new DOMException('手势', 'NotAllowedError'));
+    await vi.advanceTimersByTimeAsync(12000);
+    resolveConfig(sources);
+    await changing;
+    expect(player.standby.children[0].children[1].textContent).toContain('配置超时');
+    expect(player.element.hidden).toBe(true);
+    player.close();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

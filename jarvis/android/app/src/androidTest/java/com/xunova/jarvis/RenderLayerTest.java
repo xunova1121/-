@@ -19,13 +19,25 @@ public class RenderLayerTest {
         SharedPreferences prefs = context.getSharedPreferences("render-health", Context.MODE_PRIVATE);
         boolean hadSafe = prefs.contains("safeDisplay"), wasSafe = prefs.getBoolean("safeDisplay", false);
         boolean hadSoftware = prefs.contains("softwareLayer"), wasSoftware = prefs.getBoolean("softwareLayer", false);
-        prefs.edit().putBoolean("safeDisplay", true).putBoolean("softwareLayer", true).commit();
+        boolean hadRoomCrash = prefs.contains("workshopCrashAt");
+        long previousRoomCrash = prefs.getLong("workshopCrashAt", 0);
+        prefs.edit().putBoolean("safeDisplay", true).putBoolean("softwareLayer", true).remove("workshopCrashAt").commit();
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
             scenario.onActivity(activity -> {
                 WebView web = activity.getBridge().getWebView();
                 assertEquals(View.LAYER_TYPE_SOFTWARE, web.getLayerType());
                 assertTrue(activity.usesSoftwareDrawing());
+                long revision = System.currentTimeMillis();
+                assertTrue(activity.setWorkshopDrawing(true, revision).optBoolean("active"));
+                assertEquals(View.LAYER_TYPE_NONE, web.getLayerType());
+                assertFalse(activity.usesSoftwareDrawing());
+                assertFalse(activity.setWorkshopDrawing(false, revision + 2).optBoolean("active"));
+                assertEquals(View.LAYER_TYPE_SOFTWARE, web.getLayerType());
+                assertEquals("stale", activity.setWorkshopDrawing(true, revision + 1).optString("status"));
+                assertEquals(View.LAYER_TYPE_SOFTWARE, web.getLayerType());
+                activity.setWorkshopDrawing(true, revision + 3);
                 activity.restoreDefaultDrawing();
+                activity.setWorkshopDrawing(false, revision + 4);
                 assertEquals(View.LAYER_TYPE_NONE, web.getLayerType());
                 assertFalse(activity.usesSoftwareDrawing());
             });
@@ -33,6 +45,7 @@ public class RenderLayerTest {
             SharedPreferences.Editor restore = prefs.edit();
             if (hadSafe) restore.putBoolean("safeDisplay", wasSafe); else restore.remove("safeDisplay");
             if (hadSoftware) restore.putBoolean("softwareLayer", wasSoftware); else restore.remove("softwareLayer");
+            if (hadRoomCrash) restore.putLong("workshopCrashAt", previousRoomCrash); else restore.remove("workshopCrashAt");
             restore.commit();
         }
     }

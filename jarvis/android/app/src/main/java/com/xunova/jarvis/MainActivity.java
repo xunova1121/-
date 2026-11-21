@@ -21,13 +21,17 @@ import android.widget.TextView;
 
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.Bridge;
+import com.getcapacitor.JSObject;
 import com.getcapacitor.WebViewListener;
 
 public class MainActivity extends BridgeActivity {
     private boolean rendererGone = false;
     private volatile boolean softwareDrawing;
+    private final WorkshopDrawing workshopDrawing = new WorkshopDrawing();
+    private boolean foreground;
     public boolean isRendererGone(){return rendererGone;}
     boolean usesSoftwareDrawing(){return softwareDrawing;}
+    boolean usesWorkshopDrawing(){return workshopDrawing.active();}
     @Override public void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);}
     private SharedPreferences health() { return getSharedPreferences("render-health",MODE_PRIVATE); }
     static boolean safeDisplay(Context context) {
@@ -61,13 +65,52 @@ public class MainActivity extends BridgeActivity {
     }
 
     void restoreDefaultDrawing() {
+        workshopDrawing.userChoseDefault();
         if (!rendererGone && getBridge() != null && softwareDrawing) {
             WebView web = getBridge().getWebView();
             web.setLayerType(View.LAYER_TYPE_NONE, null);
             softwareDrawing = web.getLayerType() == View.LAYER_TYPE_SOFTWARE;
         }
     }
+
+    JSObject setWorkshopDrawing(boolean visible, long revision) {
+        String status = workshopDrawing.request(visible, revision) ? applyWorkshopDrawing() : "stale";
+        JSObject result = new JSObject();
+        result.put("status", status);
+        result.put("active", !rendererGone && workshopDrawing.active());
+        result.put("softwareLayer", softwareDrawing);
+        return result;
+    }
+
+    private String applyWorkshopDrawing() {
+        if (rendererGone || getBridge() == null || isFinishing() || isDestroyed()) return "unavailable";
+        WebView web = getBridge().getWebView();
+        boolean entering = workshopDrawing.requested() && foreground;
+        boolean cooldown = false;
+        if (entering) {
+            SharedPreferences prefs = health();
+            long crash = prefs.getLong("workshopCrashAt", 0);
+            cooldown = crash > 0 && WorkshopDrawing.coolingDown(crash, System.currentTimeMillis(),
+                    prefs.getString("workshopCrashVersion", ""), webViewVersion());
+        }
+        boolean supportsVideo = !web.isAttachedToWindow() || web.isHardwareAccelerated();
+        boolean previous = web.getLayerType() == View.LAYER_TYPE_SOFTWARE;
+        boolean software = workshopDrawing.softwareFor(foreground && !cooldown && supportsVideo, previous);
+        if (previous != software) web.setLayerType(software ? View.LAYER_TYPE_SOFTWARE : View.LAYER_TYPE_NONE, null);
+        softwareDrawing = web.getLayerType() == View.LAYER_TYPE_SOFTWARE;
+        if (workshopDrawing.requested() && !foreground) return "background";
+        if (cooldown) return "cooldown";
+        return entering && !supportsVideo ? "unavailable" : "applied";
+    }
+
+    @Override public void onResume() {
+        super.onResume();
+        foreground = true;
+        if (workshopDrawing.requested()) applyWorkshopDrawing();
+    }
     @Override public void onPause() {
+        foreground = false;
+        if (workshopDrawing.active()) applyWorkshopDrawing();
         super.onPause();
         if(TaskService.running && !rendererGone && getBridge()!=null)getBridge().getWebView().onResume();
     }
@@ -89,6 +132,10 @@ public class MainActivity extends BridgeActivity {
             web.evaluateJavascript(script,null);
         }catch(Exception e){CrashLog.write(this,"轻量界面预置："+e.getMessage());}
         getBridge().addWebViewListener(new WebViewListener(){
+            @Override public void onPageStarted(WebView view) {
+                workshopDrawing.documentStarted(System.currentTimeMillis());
+                if (workshopDrawing.active()) applyWorkshopDrawing();
+            }
             @Override public boolean onRenderProcessGone(WebView view,RenderProcessGoneDetail detail){
                 if(rendererGone)return true; rendererGone=true;
                 long now=System.currentTimeMillis();SharedPreferences prefs=health();
@@ -101,8 +148,12 @@ public class MainActivity extends BridgeActivity {
                 boolean fallback = !softwareDrawing && RenderRecovery.useSoftwareOnRecovery(
                         Build.MANUFACTURER, version, wasSafe, crashed, memory.lowMemory);
                 SharedPreferences.Editor record = prefs.edit().putLong("lastCrash",now).putInt("consecutive",count).putBoolean("safeDisplay",true);
+                if (crashed && !memory.lowMemory && workshopDrawing.active()) {
+                    record.putLong("workshopCrashAt", now).putString("workshopCrashVersion", version);
+                }
                 if (fallback) record.putString("softwareRecoveryVersion", version);
                 String report="WebView="+version+"，didCrash="+crashed+"，priority="+(detail==null?-1:detail.rendererPriorityAtExit())+"，可用内存="+memory.availMem/1048576+"MB，lowMemory="+memory.lowMemory+"，JavaHeap="+(runtime.totalMemory()-runtime.freeMemory())/1048576+"/"+runtime.maxMemory()/1048576+"MB，连续="+count+"，软件绘制="+softwareDrawing+"，"+Build.MANUFACTURER+" "+Build.MODEL+"，崩溃前界面="+prefs.getString("lastScreen","未知");
+                if (workshopDrawing.active()) report += "，小屋前台绘制";
                 record.putString("lastRenderer",new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",java.util.Locale.CHINA).format(new java.util.Date(now))+" App="+CrashLog.appVersion(MainActivity.this)+"，"+report).commit();
                 CrashLog.write(MainActivity.this,report);
                 String restartMode = fallback || softwareDrawing ? "软件绘制" : "兼容显示";

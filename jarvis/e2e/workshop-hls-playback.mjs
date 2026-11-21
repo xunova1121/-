@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 // 系统 Chromium 可解码 AVC/TS；Playwright 的自由编解码器构建用 VP9/fMP4 验证同一 HLS 播放链路。
-async function makePlaylist(avc) {
+export async function makePlaylist(avc) {
   const dir = await mkdtemp(path.join(tmpdir(), 'wy-hls-'));
   try {
     const codec = avc ? ['-c:v', 'libx264', '-profile:v', 'baseline', '-level', '3.0', '-preset', 'ultrafast', '-sc_threshold', '0'] :

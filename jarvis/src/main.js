@@ -239,7 +239,7 @@ const studioOptions = {
 };
 // prettier-ignore
 if (!COMPACT) initWorkbench({ showPanel: app.showPanel, newSession: app.newSession, openSession: app.openSession, ...studioOptions, getRunning: () => (app.active && !app.active.streamDone ? app.session.id : null), openFile: app.openInWorkspace });
-else initMobileWorkStudio({ ...studioOptions, closeDrawer: () => app.drawer?.close() });
+else initMobileWorkStudio({ ...studioOptions, toast, closeDrawer: () => app.drawer?.close() });
 mascots = initMascots();
 companion = initCompanion({
   send: app.send,

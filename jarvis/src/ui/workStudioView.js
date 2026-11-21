@@ -366,11 +366,11 @@ export function createWorkStudioView({ workshop = false, newsFeed, newsChat, get
       }
       update();
     },
-    setVisible(on) {
+    setVisible(on, { preserveMedia = document.hidden } = {}) {
       const show = Boolean(on);
+      if (!show && !preserveMedia) media?.close(false);
       if (visible === show) return;
       visible = show;
-      if (!show && !document.hidden) media?.close(false);
       element.hidden = !show;
       if (show) document.addEventListener('visibilitychange', visibilityChanged);
       else document.removeEventListener('visibilitychange', visibilityChanged);

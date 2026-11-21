@@ -1,6 +1,7 @@
 import { workshopTvPlayers } from '../../shared/workshopTv.js';
 import { listWorkshopChannels } from './workshopMediaChannels.js';
 import { parseWorkshopVideoSource } from '../../shared/workshopVideoSource.js';
+import { watchWorkshopVideo } from './workshopVideoHealth.js';
 import meadowMp4 from './assets/workStudio/meadow-preview.mp4';
 import meadowWebm from './assets/workStudio/meadow-preview.webm';
 import filmCredit from '../../licenses/workshop-film.txt?raw';
@@ -29,11 +30,14 @@ export function createWorkshopTvPlayer({ getPlayers, openSources, loadHls = () =
   const element = playerPart('div', 'ws-tv-player');
   const standby = playerPart('div', 'ws-tv-standby');
   element.hidden = standby.hidden = true;
-  let request, current, viewer, hls;
+  let request, current, viewer, hls, health, connectionTimer;
 
   function clearScreen() {
+    clearTimeout(connectionTimer);
+    health?.dispose();
+    health = null;
     if (viewer) {
-      viewer.onerror = null;
+      viewer.onerror = viewer.onload = null;
       hls?.destroy();
       hls = null;
       if (viewer === element.querySelector('video') || viewer === standby.querySelector('video')) {
@@ -71,6 +75,7 @@ export function createWorkshopTvPlayer({ getPlayers, openSources, loadHls = () =
   }
 
   function problem(channel, detail, offerClip) {
+    request?.abort();
     clearScreen();
     const retry = action('重新连接', () => tune(channel, true));
     const buttons = [retry];
@@ -79,7 +84,28 @@ export function createWorkshopTvPlayer({ getPlayers, openSources, loadHls = () =
     standby.hidden = false;
   }
 
+  function monitor(video, host, channel, clip, onTimeout) {
+    const feedback = playerPart('div', 'ws-tv-feedback');
+    host.append(feedback);
+    let previous = '', lastPlay;
+    return watchWorkshopVideo(video, {
+      loadingText: clip ? '正在打开风景短片…' : '正在连接频道…',
+      show(detail, play) {
+        if (!feedback.hidden && previous === detail && lastPlay === play) return;
+        previous = detail;
+        lastPlay = play;
+        const buttons = play ? [action('点击播放', play)] : [];
+        if (!clip) buttons.push(action('看未央风景短片', () => playClip(channel, '已切换到短片')));
+        feedback.replaceChildren(signalCard(clip ? '未央风景短片' : channel.label, detail, buttons));
+        feedback.hidden = false;
+      },
+      hide() { if (!feedback.hidden) feedback.hidden = true; },
+      timeout: onTimeout
+    });
+  }
+
   function playClip(channel, reason) {
+    request?.abort();
     clearScreen();
     const title = '未央风景短片 · 非频道直播';
     const clip = inlineVideo(title);
@@ -90,19 +116,25 @@ export function createWorkshopTvPlayer({ getPlayers, openSources, loadHls = () =
     const supportsAvc = clip.canPlayType('video/mp4; codecs="avc1.42E01F"');
     const webmFirst = !supportsAvc && clip.canPlayType('video/webm; codecs="vp8"');
     let alternate = webmFirst ? meadowMp4 : meadowWebm;
-    clip.onerror = () => {
+    const clipFailed = () => {
       if (viewer !== clip) return;
       if (alternate) {
         clip.src = alternate;
         alternate = null;
+        health.loading();
+        health.tryPlay();
       } else {
         problem(channel, '本机未能播放风景短片', false);
       }
     };
     viewer = clip;
-    clip.src = webmFirst ? meadowWebm : meadowMp4;
-    standby.replaceChildren(clip, signalCard(title, channel.label + ' ' + reason));
+    const recover = reason === '直播未接入' ? [] : [action('重试直播', () => tune(channel, true))];
+    standby.replaceChildren(clip, signalCard(title, channel.label + ' ' + reason, recover));
     standby.hidden = false;
+    health = monitor(clip, standby, channel, true, clipFailed);
+    clip.onerror = clipFailed;
+    clip.src = webmFirst ? meadowWebm : meadowMp4;
+    health.tryPlay();
   }
 
   async function attachHls(video, url, channel, signal) {
@@ -125,6 +157,7 @@ export function createWorkshopTvPlayer({ getPlayers, openSources, loadHls = () =
       });
       session.loadSource(url);
       session.attachMedia(video);
+      health.tryPlay();
     } catch {
       if (active()) problem(channel, '直播播放器加载失败，请重新连接', true);
     }
@@ -144,6 +177,9 @@ export function createWorkshopTvPlayer({ getPlayers, openSources, loadHls = () =
     standby.hidden = false;
     let source = channel.source;
     if (channel.kind === 'cctv') {
+      connectionTimer = setTimeout(() => {
+        if (!loading.signal.aborted) problem(channel, '读取频道配置超时', true);
+      }, 12000);
       try { source = workshopTvPlayers(await getPlayers?.(loading.signal))[channel.id]; } catch {
         if (!loading.signal.aborted) problem(channel, '暂时无法读取频道配置', true);
         return;
@@ -172,22 +208,52 @@ export function createWorkshopTvPlayer({ getPlayers, openSources, loadHls = () =
     media.onerror = failed;
     element.replaceChildren(media);
     element.hidden = false;
-    const isHls = source.type === 'media' && (source.format === 'hls' || /\.m3u8$/i.test(new URL(source.url).pathname));
-    if (isHls) {
-      if (!media.canPlayType('application/vnd.apple.mpegurl')) {
-        await attachHls(media, source.url, channel, loading.signal);
-        return;
-      }
-      // 部分 WebView 声明支持 HLS，打开真实清单后才报告失败。
-      media.onerror = () => {
-        if (loading.signal.aborted || viewer !== media) return;
-        media.onerror = failed;
-        media.removeAttribute('src');
-        media.load();
-        void attachHls(media, source.url, channel, loading.signal);
+    if (source.type === 'embed') {
+      const card = signalCard(channel.label, '正在打开频道播放器…');
+      card.className += ' ws-tv-feedback';
+      element.append(card);
+      // 跨域 iframe 的 load 只能证明导航结束，无法读取或判断其中的视频帧。
+      media.onload = () => {
+        if (viewer !== media || loading.signal.aborted) return;
+        clearTimeout(connectionTimer);
+        card.hidden = true;
       };
+      connectionTimer = setTimeout(() => {
+        if (viewer === media) problem(channel, '打开频道播放器超时', true);
+      }, 12000);
+      media.src = source.url;
+      return;
     }
+    const path = new URL(source.url).pathname;
+    const isHls = source.format === 'hls' || /\.m3u8$/i.test(path);
+    // 部署方给央视配置的签名直链可能只有路径和查询参数，先直放，失败时试一次 HLS。
+    const unknown = !source.format && !/\.[a-z0-9]{2,5}$/i.test(path);
+    let tryingHls = false;
+    function useHls() {
+      tryingHls = true;
+      media.onerror = failed;
+      media.removeAttribute('src');
+      media.load();
+      health.loading();
+      return attachHls(media, source.url, channel, loading.signal);
+    }
+    const couldFallback = () => !tryingHls && (isHls || unknown);
+    health = monitor(media, element, channel, false, stalled => {
+      if (!stalled && couldFallback()) { void useHls(); return; }
+      problem(channel, stalled ? '频道画面已停止更新，请重试或更换视频源' : '等待频道画面超时，请重试或更换视频源', true);
+    });
+    if (isHls && !media.canPlayType('application/vnd.apple.mpegurl')) {
+      tryingHls = true;
+      await attachHls(media, source.url, channel, loading.signal);
+      return;
+    }
+    media.onerror = () => {
+      if (loading.signal.aborted || viewer !== media) return;
+      if (couldFallback()) void useHls();
+      else failed();
+    };
     media.src = source.url;
+    health.tryPlay();
   }
 
   function select(id, retry = false) {

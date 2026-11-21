@@ -235,7 +235,7 @@ async function check(mobile, width) {
     await enter();
     await waitPose('work');
     const art = room.locator('.ws-nest-art');
-    assert.deepEqual(await art.evaluate(img => [img.naturalWidth, img.naturalHeight]), [1536, 1024]);
+    assert.deepEqual(await art.evaluate(img => [img.naturalWidth, img.naturalHeight]), mobile ? [1080, 720] : [1536, 1024]);
     assert(await scene.evaluate(el => el.getBoundingClientRect().width >= 280));
     assert.equal(await page.locator('#inputbar').count(), 1);
     if (mobile) {
