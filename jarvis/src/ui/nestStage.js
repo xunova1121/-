@@ -129,6 +129,10 @@ export function createNestStage({scene, floor, room, caption, deskHost, onChange
     if (active === value) return;
     active = value;
     scene.dataset.roomView = value ? 'nest' : 'floor';
+    if (!value) {
+      delete scene.dataset.nestLayout;
+      portrait.hide();
+    }
     syncVisibility();
   }
   setActive(true);

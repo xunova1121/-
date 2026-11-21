@@ -36,3 +36,18 @@
     flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin;
   }
 }
+
+/* 竖屏小窝里把来源配图排为随文缩略图，导语和正文可绕图，再自然铺满阅读区。 */
+.ws-scene[data-room-view="nest"][data-nest-layout="portrait"] .ws-media-news:has(.ws-article-photo:not([hidden])) {
+  display: flow-root;
+}
+.ws-scene[data-room-view="nest"][data-nest-layout="portrait"] .ws-media-news > .ws-article-photo:not([hidden]) {
+  float: right;
+  width: clamp(64px, 25%, 88px);
+  max-height: 76px;
+  object-position: right top;
+  margin: 4px 0 4px 10px;
+}
+.ws-scene[data-room-view="nest"][data-nest-layout="portrait"] .ws-media-news:has(.ws-article-photo:not([hidden])) > :is(.ws-media-credit,.ws-media-updated,.ws-article-content) {
+  margin-top: 4px;
+}

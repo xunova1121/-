@@ -1,6 +1,8 @@
 /* 小窝以整幅 3:2 原画为坐标系。热区和照片随同一镜头缩放，媒体留在镜头外。 */
 .work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] {
   background: var(--ws-panel);
+  /* 小窝只裁画面，从不作为滚动区。近看时画外电视/工位即使获取焦点也不能挪动沙发。 */
+  overflow:clip;
   aspect-ratio: 3 / 2;
   --ws-aim-x: 61%; --ws-aim-y: 48%;
 }

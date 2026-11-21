@@ -18,6 +18,7 @@ const browser = await chromium.launch({ executablePath: process.env.WORKSHOP_CHR
 const services = [];
 const now = (clock, date = '20') => new Date('2026-11-' + date + 'T' + clock + ':00+08:00');
 const newsItem = { title: '城市图书馆开放晚间阅读', url: 'https://news.cctv.com/2026/11/20/ARTIworkshoptest.shtml',
+  summary: '为了方便上班族和学生夜间阅读，图书馆从本周起延长开放时间。晚间增设借阅和自习座席，周末的社区阅读活动也会继续开放。',
   source: '央视网', image: 'https://p1.img.cctvpic.com/workshop/library.png', publishedAt: now('07:00').toISOString() };
 const folderFile = '资料/小窝验收旅行笔记.md';
 
@@ -187,7 +188,16 @@ async function checkMedia(page, room, button, shot) {
     await img.decode();
     return [img.currentSrc, img.naturalWidth, img.naturalHeight];
   }), [newsItem.image, 120, 80], '显示并解码本篇报道的原媒体配图');
-  if (portrait) assert.equal(await page.locator('#prompt').getAttribute('placeholder'), '追问这条新闻…');
+  if (portrait) {
+    assert.equal(await page.locator('#prompt').getAttribute('placeholder'), '追问这条新闻…');
+    const visibleLines = await news.locator('.ws-article-content').evaluate(content => {
+      const scroll = content.closest('.ws-media-scroll').getBoundingClientRect();
+      const text = document.createRange();
+      text.selectNodeContents(content);
+      return [...text.getClientRects()].filter(line => line.top >= scroll.top && line.bottom <= scroll.bottom).length;
+    });
+    assert(visibleLines >= 2, '新闻首屏的配图和至少两行导语应同时可见');
+  }
   assert.equal(await news.getByRole('link', { name: '阅读原文', exact: true }).getAttribute('href'), newsItem.url);
   await news.evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished)));
   await checkViewingPlace(room, 'news');
@@ -232,7 +242,7 @@ async function check(mobile, width, clockOnly = false) {
   await context.route('**/api/workshop/news', route => route.fulfill({ json: { items: [newsItem], updatedAt: +now('08:00'), stale: false } }));
   await context.route('**/cmsdatainterface/page/news_1.jsonp', route => route.fulfill({
     contentType: 'text/plain', headers: { 'Access-Control-Allow-Origin': '*' },
-    body: 'news(' + JSON.stringify({ data: { list: [{ ...newsItem, focus_date: '2026-11-20 07:00:00' }] } }) + ')'
+    body: 'news(' + JSON.stringify({ data: { list: [{ ...newsItem, brief: newsItem.summary, focus_date: '2026-11-20 07:00:00' }] } }) + ')'
   }));
   await context.addInitScript(() => {
     localStorage.setItem('jarvis.llm.v1', JSON.stringify({ provider: 'mock' }));

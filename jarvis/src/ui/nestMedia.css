@@ -136,7 +136,7 @@
     --tv-width:min(83.8cqw,158cqh); inset:1% .6% auto auto;
   }
   .wb-desk .work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="monitor"] {
-    inset:1% 1% 35.5% 1%;
+    inset:1% 1% 33% 1%;
   }
   .wb-desk .ws-scene[data-room-view="nest"] .ws-media-remote {
     position:absolute; inset:4px auto auto 4px; margin:0; border-radius:6px; background:#30251bd9;
