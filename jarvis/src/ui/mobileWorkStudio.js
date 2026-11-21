@@ -3,7 +3,7 @@ import { createConversationMount } from './conversationMount.js';
 import './mobileWorkStudio.css';
 
 // 从菜单可随时看房间；当前回复旁的快捷入口只回看这一轮。
-export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsChat, newsFeed, getPlayers }) {
+export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsChat, newsFeed, getPlayers, nestDeskOptions }) {
   const transcript = document.getElementById('transcript');
   const entry = document.createElement('button');
   entry.type = 'button';
@@ -96,7 +96,7 @@ export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsCh
     fromReply = viaReply;
     if (!fromReply) closeDrawer();
     if (!view) {
-      view = createWorkStudioView({ workshop: true, newsChat, newsFeed, getPlayers });
+      view = createWorkStudioView({ workshop: true, newsChat, newsFeed, getPlayers, nestDeskOptions });
       sheet.prepend(view.element);
       view.element.querySelector('.ws-header').prepend(back);
     }

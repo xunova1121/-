@@ -37,6 +37,7 @@ import * as habits from './agent/habits.js';
 import * as sessionsApi from './agent/sessions.js';
 import { createStudioActivity } from './app/studioActivity.js';
 import { createWorkshopNewsFeed } from './core/workshopNews.js';
+import { createNestDeskOptions } from './app/nestDeskWorkspace.js';
 import { getWorkshopTvPlayers } from './app/workshopTv.js';
 import { initMobileWorkStudio } from './ui/mobileWorkStudio.js';
 import { initWorkbench } from './ui/workbench.js';
@@ -232,6 +233,7 @@ const studioOptions = {
   activity: app.studioActivity,
   newsFeed: createWorkshopNewsFeed(app),
   newsChat: app.workshopNewsChat,
+  nestDeskOptions: createNestDeskOptions(app),
   getPlayers: (signal) => getWorkshopTvPlayers(app, signal)
 };
 // prettier-ignore

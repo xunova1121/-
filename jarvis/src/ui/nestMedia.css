@@ -1,0 +1,31 @@
+/* 家具热区随整幅小窝取景。原来的播放器、视频源和简报继续使用。 */
+.ws-scene[data-room-view="nest"] [data-media-device="monitor"] {
+  left: 78.8%; top: 35.7%; width: 9%; height: 13%;
+}
+.ws-scene[data-room-view="nest"] [data-media-device="tv"] {
+  left: 89%; top: 53%; width: 11%; height: 15%;
+}
+.ws-scene[data-room-view="nest"] .ws-mini-screen {
+  inset: 1% 5% 8%; width: auto; height: auto; transform: none;
+  background: none; opacity: 0; pointer-events: none;
+}
+.ws-scene[data-room-view="nest"] .ws-monitor-ticker { max-width: min(65%,33em); }
+.work-studio-view[data-workshop][data-visible="true"] .ws-scene[data-room-view="nest"][data-media-device="tv"] {
+  --tv-width: min(52cqw,calc((100cqh - 44px) * 1.7778));
+  background: var(--room-wall,#534737);
+}
+.work-studio-view[data-media-open][data-workshop] .ws-scene[data-room-view="nest"][data-media-device] .ws-floorplan {
+  width: max(100%,150cqh); height: auto; aspect-ratio: 3 / 2;
+  inset: 50% auto auto 50%; transform: translate(-50%,-50%); translate: none;
+}
+.ws-scene[data-room-view="nest"][data-media-device="tv"] .ws-media-panel .ws-media-receiver {
+  inset-inline: auto max(1%,8px); top: calc(50% - 15px); translate: none; padding: .5% 1.5% .65% .5%;
+}
+/* 工作中人物在窗边，屏幕移到另一侧，仍能看见手上的事情。 */
+.ws-scene[data-room-view="nest"][data-media-device="tv"][data-media-work="true"] .ws-media-receiver {
+  inset-inline: max(1%,8px) auto;
+}
+.work-studio-view .ws-scene[data-room-view="nest"][data-media-device="tv"] .ws-media-panel[data-device="tv"] .ws-tv-watcher,
+.work-studio-view .ws-scene[data-room-view="nest"][data-media-device="tv"] .ws-media-panel[data-device="tv"] .ws-media-receiver::after {
+  display: none;
+}

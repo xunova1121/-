@@ -4,6 +4,8 @@ export const WORKSHOP_HUM_MINUTES = 3;
 const MINUTE = 60000;
 const STORAGE_KEY = 'jarvis.workshopLife.v1';
 const activities = {
+  draft: { label: '正在书桌前写草稿', minutes: 30 },
+  trip: { label: '正在书桌前摊开地图，计划旅行', minutes: 30 },
   coffee: { label: '正在泡咖啡', minutes: 5 },
   eat: { label: '正在吃饭', minutes: 20 },
   rest: { label: '坐下来歇一会儿', minutes: 10 },
@@ -53,7 +55,7 @@ const routine = [
   ['17:44', 'news'],
   ['17:50', 'study', '正在电脑前收好今天的笔记'],
   ['18:00', 'eat', '正在吃晚饭'],
-  ['18:30', 'rest'],
+  ['18:30', 'cat-visit', '在沙发上歇一会儿，看看橘猫'],
   ['19:00', 'tv'],
   ['19:35', 'sing'],
   ['19:38', 'quiet'],
@@ -66,10 +68,28 @@ const routine = [
   return [hour * 60 + minute, activity, label];
 });
 
+// 周末自选的旅行时间仍为吃饭、听歌等原有日常活动留出位置。
+function withTravelSlots(morning, evening) {
+  const slots = routine.filter(([minute]) => !(morning && minute >= 540 && minute < 635) && !(evening && minute >= 1260 && minute < 1310));
+  if (morning) slots.push([540, 'trip']);
+  if (evening) slots.push([1260, 'trip']);
+  return slots.sort((a, b) => a[0] - b[0]);
+}
+
+const weekendRoutine = withTravelSlots(true, true);
+const fridayRoutine = withTravelSlots(false, true);
+
+function todaysRoutine(date) {
+  const day = date.getDay();
+  if (day === 0 || day === 6) return weekendRoutine;
+  return day === 5 ? fridayRoutine : routine;
+}
+
 function routineAt(date) {
   const minute = date.getHours() * 60 + date.getMinutes();
-  let period = routine[0];
-  for (const entry of routine) {
+  const today = todaysRoutine(date);
+  let period = today[0];
+  for (const entry of today) {
     if (entry[0] > minute) break;
     period = entry;
   }
@@ -120,9 +140,11 @@ function manualEnd(prefs) {
 
 function nextRoutineChange(date) {
   const minute = date.getHours() * 60 + date.getMinutes();
-  const next = routine.find(([start]) => start > minute);
+  const next = todaysRoutine(date).find(([start]) => start > minute);
   const boundary = new Date(date);
-  boundary.setHours(0, next?.[0] ?? 24 * 60, 0, 0);
+  if (!next) boundary.setDate(date.getDate() + 1);
+  // 夜睡跨午夜延续，预告下一次真正起身的时刻。
+  boundary.setHours(0, next?.[0] ?? todaysRoutine(boundary)[1][0], 0, 0);
   return boundary.getTime();
 }
 
@@ -157,7 +179,9 @@ function stateAt(now, busy, prefs) {
   const lampOn = prefs.lightMode === 'auto' ? needsLamp : prefs.lightMode === 'on';
   const { activity, label } = state;
   const winterQuilt = activity === 'sleep' && needsWinterQuilt(now, manual ? prefs.startedAt : state.bedtime);
-  return { activity, label, manual, period, night: period === 'night', lightMode: prefs.lightMode, lampOn, televisionOff, winterQuilt };
+  const nextAt = manual ? manualEnd(prefs) : nextRoutineChange(date);
+  const nextLabel = routineAt(new Date(nextAt)).label;
+  return { activity, label, manual, nextAt, nextLabel, period, night: period === 'night', lightMode: prefs.lightMode, lampOn, televisionOff, winterQuilt };
 }
 
 export function getWorkshopLife({ busy = false } = {}) {

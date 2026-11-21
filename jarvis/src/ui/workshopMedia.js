@@ -5,6 +5,7 @@ import { createWorkshopTvPlayer } from './workshopTvPlayer.js';
 import { createWorkshopNewsReader } from './workshopNewsReader.js';
 import { createWorkshopSourceManager } from './workshopSourceManager.js';
 import './workshopMedia.css';
+import './nestMedia.css';
 
 const REFRESH = 15 * 60_000;
 const localTime = new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -86,6 +87,8 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
   function draw() {
     const reading = device === 'monitor' && !workOnMonitor();
     ui.panel.hidden = !device;
+    scene.dataset.mediaDevice = device;
+    scene.dataset.mediaWork = String(busy);
     scene.closest('.work-studio-view')?.toggleAttribute('data-media-open', Boolean(device));
     ui.panel.dataset.device = device;
     ui.panel.setAttribute('aria-label', device === 'tv' ? '电视' : reading ? '新闻简报' : '工作显示器');
@@ -193,6 +196,7 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     return width > 0 && height > 0 ? { left, top, width, height } : trigger.getBoundingClientRect();
   }
   function show(next, perform = true, trigger = ui.monitor) {
+    scene.dispatchEvent(new Event('workshop:media-opening'));
     const screen = next === 'monitor' && device !== 'monitor' ? monitorOrigin(trigger) : null;
     monitorEntrance?.cancel();
     syncChannelScope();
@@ -244,6 +248,7 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     if (id) selectWorkshopChannel(id);
   };
   scene.addEventListener('workshop:open-tv', () => show('tv', false));
+  scene.addEventListener('workshop:close-media', () => close(false));
   ui.switchScreen.onclick = () => { readDuringWork = !readDuringWork; syncTimers(); draw(); };
   ui.prev.onclick = () => setArticle(-1);
   ui.next.onclick = () => setArticle(1);

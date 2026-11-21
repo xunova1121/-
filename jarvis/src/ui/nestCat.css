@@ -1,0 +1,34 @@
+.ws-nest-cat-patch {
+  position: absolute; z-index: 2; pointer-events: none; left: 20.83333%; top: 54.19922%;
+  width: 40.49479%; height: 30.27344%; max-width: none; object-fit: fill;
+  -webkit-mask-image: radial-gradient(ellipse 28% 44% at 38% 61%, #000 82%, transparent);
+  mask-image: radial-gradient(ellipse 28% 44% at 38% 61%, #000 82%, transparent);
+}
+.ws-nest-cat-patch[data-pose="sniff"] {
+  -webkit-mask-image: radial-gradient(ellipse 30% 48% at 48% 57%, #000 78%, transparent);
+  mask-image: radial-gradient(ellipse 30% 48% at 48% 57%, #000 78%, transparent);
+}
+.ws-nest-cat-panel {
+  position:absolute; z-index:16; inset:8px 8px auto auto; width:min(285px,78%); max-height:calc(100% - 16px);
+  overflow:auto; overscroll-behavior:contain; padding:12px 15px; box-sizing:border-box;
+  color:#34392e; background:#fbf7ec; border:1px solid #c6baa1; border-radius:13px; box-shadow:0 5px 17px #201b1540;
+  font:normal 14px/1.45 system-ui,sans-serif; text-align:left;
+}
+.ws-nest-cat-panel header, .ws-nest-cat-actions { display:flex; gap:7px; align-items:center; }
+.ws-nest-cat-panel header { justify-content:space-between; margin:0 0 5px; }
+.ws-nest-cat-panel h3, .ws-nest-cat-panel strong, .ws-nest-cat-panel p { color:inherit; margin:0; }
+.ws-nest-cat-panel h3 { font-size:16px; }
+.ws-nest-cat-panel p { margin:5px 0 9px; font-size:13px; }
+.ws-nest-cat-panel button {
+  font:inherit; color:inherit; cursor:pointer; border:1px solid #c6baa1; background:#fffcf4;
+  border-radius:9px; min-height:34px; padding:4px 10px;
+}
+.ws-nest-cat-panel button[data-cat-choice="main"] { background:#344a36; color:#fff; border-color:#344a36; }
+.ws-nest-cat-panel button[data-cat-choice="close"] { font-size:22px; padding:1px; width:35px; }
+.ws-nest-cat-panel button:focus-visible { outline:2px solid #895910; outline-offset:1px; }
+.ws-nest-cat-patch[hidden], .ws-nest-cat-panel[hidden], .ws-nest-cat-panel button[hidden] { display:none!important; }
+@media(max-width:720px) {
+  .ws-nest-cat-panel { inset:4px 4px auto auto; max-height:calc(100% - 8px); padding:8px 10px; font-size:13px; }
+  .ws-nest-cat-panel h3 { font-size:14px; }
+  .ws-nest-cat-panel p { font-size:12px; margin:3px 0 6px; }
+}

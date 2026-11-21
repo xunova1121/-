@@ -2,7 +2,7 @@ import { createWorkStudioView } from './workStudioView.js';
 import { createConversationMount } from './conversationMount.js';
 import './workbenchDesk.css';
 
-export function createWorkbenchStudio({ getSession, activity, newsChat, newsFeed, getPlayers }) {
+export function createWorkbenchStudio({ getSession, activity, newsChat, newsFeed, getPlayers, nestDeskOptions }) {
   const transcript = document.getElementById('transcript');
   const form = document.getElementById('inputbar');
   const main = transcript.parentElement;
@@ -63,7 +63,7 @@ export function createWorkbenchStudio({ getSession, activity, newsChat, newsFeed
     open = on;
     if (open) {
       if (!view) {
-        view = createWorkStudioView({ workshop: true, newsChat, newsFeed, getPlayers });
+        view = createWorkStudioView({ workshop: true, newsChat, newsFeed, getPlayers, nestDeskOptions });
         desk.prepend(view.element);
       }
       desk.hidden = false;

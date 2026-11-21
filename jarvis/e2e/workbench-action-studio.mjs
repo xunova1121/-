@@ -11,6 +11,7 @@ import { currentUser, runAsUser } from '../server/userScope.mjs';
 import { createTools } from '../src/agent/tools.js';
 import { createServerClient } from '../src/core/serverClient.js';
 import { useBackend } from '../src/agent/store.js';
+import { openTaskFloor } from './workshop-test-view.mjs';
 import { checkWorkshopRoom } from './workshop-room-check.mjs';
 
 const output = path.resolve(process.argv[2] || '/tmp/weiyang-workbench-action-studio');
@@ -76,9 +77,10 @@ async function open(server, options = {}, serverConfig = null, intercept) {
   return page;
 }
 const stage = page => page.locator('.work-studio:visible');
-async function enter(page) {
+async function enter(page, taskFloor = true) {
   await page.locator('.wb-tabs').getByRole('button', { name: '工作台', exact: true }).click();
   await stage(page).waitFor();
+  if (taskFloor) await openTaskFloor(stage(page));
   assert.equal(await page.locator('#stage-wrap').isVisible(), false, '工作台隐藏星系');
   assert.equal(await page.getByRole('button', { name: /经典舞台/ }).count(), 0, '工作台不保留旧舞台按钮');
   for (const selector of ['.work-studio', '#transcript', '#inputbar']) {
@@ -338,7 +340,7 @@ try {
   const member = await owner.createUser('工作台验收');
   const login = await owner.loginAccount(member.accessCode);
   const remote = await open(desktop, { viewport: { width: 1280, height: 860 } }, { enabled: true, url: url(cloud), userId: member.id, token: login.token, role: 'member' });
-  await enter(remote);
+  await enter(remote, false);
   const roomSession = await remote.evaluate(() => window.__jarvis.sessionId);
   const memberClient = createServerClient({ base: url(cloud), token: login.token });
   const savedRoom = remote.waitForResponse(res => res.request().method() === 'POST' && res.url().endsWith('/' + roomSession + '/append'));
@@ -348,6 +350,8 @@ try {
   assert.equal(await owner.getSession(roomSession), null, '房间对话存入成员自己的空间');
   assert.equal(requests.filter(req => req.method === 'POST' && req.path === '/api/tasks').length, 0, '房间灯控没有提交云任务');
   await send(remote, '请列出已有文件，再写一份简报保存到' + cloudFile + '，最后核对成果记录并核验交付文件。');
+  await stage(remote).locator('.ws-scene[data-room-view="nest"][data-nest-pose="archive"] .ws-actor').waitFor();
+  await openTaskFloor(stage(remote));
   await stage(remote).locator('.ws-scene[data-station="archive"]').waitFor();
   await checkWorkingHands(remote, 'archive');
   await send(remote, '未央，你在干嘛？');

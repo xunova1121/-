@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { openTaskFloor } from './workshop-test-view.mjs';
 import { chromium } from 'playwright';
 
 const root = fileURLToPath(new URL('../dist-mobile', import.meta.url));
@@ -83,6 +84,7 @@ try {
     await menu.click();
     await page.getByRole('button', { name: '未央工作台', exact: true }).click();
     await sheet.waitFor();
+    await openTaskFloor(sheet);
   }
   async function roomAction(command) {
     await sheet.locator('[data-room-action="menu"]').click();
@@ -153,6 +155,7 @@ try {
   await send('列出工作区文件');
   await entry.click();
   await sheet.waitFor();
+  await openTaskFloor(sheet);
   await sheet.locator('.ws-row').filter({ hasText: '列出文件' }).waitFor();
   await sheet.locator('.ws-row').filter({ hasText: '已完成本轮回复' }).waitFor();
   const bounds = await sheet.boundingBox();

@@ -1,7 +1,11 @@
 import { createWorkshopLife } from '../app/workshopLife.js';
+import { nestFurniture, nestIsDark } from './nestArt.js';
 import { createWorkshopLifeScene } from './workshopLifeScene.js';
 import { playWorkshopHum, stopWorkshopHum, suggestWorkshopTune, workshopHumTitle } from './workshopHum.js';
 import './workshopRoom.css';
+
+const nextClock = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+const availableDuringWork = new Set(['light', 'lamp-auto', 'photo', 'window', 'folder', 'draft', 'trip', 'tv']);
 
 const choices = [
   ['coffee', '泡咖啡'], ['eat', '吃饭'], ['rest', '歇一会儿'],
@@ -36,10 +40,31 @@ export function createWorkshopRoom(scene, floor, onChange) {
     targets.append(el);
     return el;
   }
-  const toggleLight = () => life.perform(life.snapshot().lampOn ? 'lamp-off' : 'lamp-on');
+  let nest = true;
+  const isLit = state => nest ? !nestIsDark(state) : state.lampOn;
+  const toggleLight = () => {
+    life.perform(isLit(life.snapshot()) ? 'lamp-off' : 'lamp-on');
+    dismiss(true);
+  };
   const lampTarget = furniture('lamp', '控制桌上的台灯', toggleLight);
   const cupTarget = furniture('cup', '去茶水桌泡咖啡', () => life.perform('coffee'));
   const seatTarget = furniture('sofa', '坐到沙发上休息', () => life.perform('rest'));
+  let pullStart = null;
+  let pulledAt = -Infinity;
+  lampTarget.onpointerdown = event => {
+    if (!nest || event.button !== 0) return;
+    pullStart = event.clientY;
+    lampTarget.setPointerCapture(event.pointerId);
+  };
+  lampTarget.onpointercancel = () => { pullStart = null; };
+  lampTarget.onpointerup = event => {
+    if (pullStart !== null && event.clientY - pullStart > 12) {
+      pulledAt = performance.now();
+      toggleLight();
+    }
+    pullStart = null;
+  };
+  lampTarget.onclick = () => { if (performance.now() - pulledAt > 350) toggleLight(); };
   floor.append(targets);
   const tools = document.createElement('div');
   tools.className = 'ws-room-tools';
@@ -51,6 +76,12 @@ export function createWorkshopRoom(scene, floor, onChange) {
   const menu = document.createElement('div');
   menu.className = 'ws-room-menu';
   menu.hidden = true;
+  const schedule = document.createElement('small');
+  schedule.className = 'ws-nest-next';
+  menu.append(schedule);
+  const nestActions = new Map(nestFurniture);
+  const extraActions = [...nestActions].map(([key, label]) => button(key, label));
+  menu.append(...extraActions);
   for (const [key, label] of choices) menu.append(button(key, label));
   const listen = button('listen', '听听');
   listen.hidden = true;
@@ -78,8 +109,14 @@ export function createWorkshopRoom(scene, floor, onChange) {
       dismiss(true);
     }
   }
+  // 手机上输入区在失焦时会收起模型行和软键盘。只看一下互动菜单不应结束正在写的消息。
+  const preserveDraftFocus = () => nest && Boolean(scene.closest('.mobile-studio-sheet')) &&
+    document.activeElement === document.getElementById('prompt');
+  open.onpointerdown = event => {
+    if (event.button === 0 && preserveDraftFocus()) event.preventDefault();
+  };
   open.onclick = () => {
-    if (!menu.hidden) return dismiss(true);
+    if (!menu.hidden) return dismiss(!preserveDraftFocus());
     menu.hidden = false;
     open.setAttribute('aria-expanded', 'true');
     document.addEventListener('pointerdown', outside);
@@ -89,11 +126,19 @@ export function createWorkshopRoom(scene, floor, onChange) {
   listen.onclick = () => {
     const title = suggested;
     if (life.perform('sing')) playWorkshopHum(title);
+    dismiss(true);
   };
   menu.onclick = (event) => {
     const cmd = event.target.closest('button')?.dataset.roomAction;
     const title = suggested;
-    if (!cmd || !life.perform(cmd)) return;
+    if (!cmd || cmd === 'listen' || cmd === 'light') return;
+    if (nest && nestActions.has(cmd)) {
+      dismiss(true);
+      scene.dispatchEvent(new CustomEvent('workshop:nest-open', { detail: { kind: cmd, trigger: open } }));
+      return;
+    }
+    scene.dispatchEvent(new Event('workshop:nest-interrupt'));
+    if (!life.perform(cmd)) return;
     if (cmd === 'sing') playWorkshopHum(title);
     dismiss(true);
     if (cmd === 'tv') scene.dispatchEvent(new Event('workshop:open-tv'));
@@ -101,6 +146,12 @@ export function createWorkshopRoom(scene, floor, onChange) {
 
   return {
     perform: life.perform,
+    setNest(value) {
+      nest = value;
+      dismiss(false);
+      for (const action of extraActions) action.hidden = !value;
+      schedule.hidden = !value;
+    },
     render(presentingWork, confirmedShred) {
       life.setBusy(presentingWork);
       const state = life.snapshot();
@@ -108,14 +159,27 @@ export function createWorkshopRoom(scene, floor, onChange) {
       lastActivity = state.activity;
       if (leftSong) stopWorkshopHum();
       const workOrigin = display.render(presentingWork && confirmedShred ? { ...state, activity: 'shred' } : state);
-      if (lamp.getAttribute('aria-pressed') !== String(state.lampOn)) {
-        lamp.setAttribute('aria-pressed', String(state.lampOn));
-        lampTarget.setAttribute('aria-pressed', String(state.lampOn));
-        lamp.textContent = state.lampOn ? '关灯' : '开灯';
-        lamp.title = state.lampOn ? '关闭工作台台灯' : '打开工作台台灯';
+      const compact = nest && Boolean(scene.closest('.mobile-studio-sheet'));
+      if (compact && lamp.parentElement !== menu) menu.prepend(lamp, listen);
+      else if (!compact && lamp.parentElement === menu) tools.prepend(listen, lamp);
+      const menuLabel = compact ? '互动' : '房间互动';
+      if (open.textContent !== menuLabel) open.textContent = menuLabel;
+      if (nest && state.nextAt) {
+        const nextTime = nextClock.format(state.nextAt);
+        const next = (state.manual ? '恢复作息 ' : '接下来 ') + nextTime + ' · ' + state.nextLabel;
+        if (schedule.textContent !== next) schedule.textContent = next;
+      }
+      const lit = isLit(state);
+      if (lamp.getAttribute('aria-pressed') !== String(lit)) {
+        lamp.setAttribute('aria-pressed', String(lit));
+        lampTarget.setAttribute('aria-pressed', String(lit));
+        lamp.textContent = lit ? '关灯' : '开灯';
+        lamp.title = lit ? '关闭工作台台灯' : '打开工作台台灯';
       }
       cupTarget.disabled = seatTarget.disabled = Boolean(presentingWork);
-      for (const el of menu.children) el.disabled = presentingWork && el.dataset.roomAction !== 'lamp-auto';
+      for (const el of menu.querySelectorAll('button')) {
+        el.disabled = Boolean(presentingWork) && !availableDuringWork.has(el.dataset.roomAction);
+      }
       let label = state.label;
       const playing = workshopHumTitle();
       const automaticSong = state.activity === 'sing' && !state.manual;

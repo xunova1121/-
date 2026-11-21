@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { checkNestControls, openTaskFloor } from './workshop-test-view.mjs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -72,6 +73,11 @@ export async function checkWorkshopChat({ page, base, requests, finishReply, sho
   await queue.locator('li').filter({ hasText: followUp }).waitFor();
   assert.equal(requests().length, 2, '第一轮结束前追问仍在队列');
   assert.equal(await chat.locator('.msg.user').count(), 1);
+  await prompt.fill('保留草稿');
+  await checkNestControls(page, sheet);
+  await queue.locator('li').filter({ hasText: followUp }).waitFor();
+  await prompt.fill('');
+  await openTaskFloor(sheet);
   await checkVisibleLayout();
   await shot('mobile-room-chat.png');
   await prompt.focus();

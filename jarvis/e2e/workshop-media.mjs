@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
+import { openTaskFloor } from './workshop-test-view.mjs';
 import { checkNewsEntrance } from './workshop-news-zoom.mjs';
 import JSZip from 'jszip';
 import { createServer } from '../server/server.mjs';
@@ -31,6 +32,7 @@ async function openRoom(page, mobile) {
   }
   const room = page.locator('.work-studio:visible');
   await room.waitFor();
+  await openTaskFloor(room);
   return room;
 }
 

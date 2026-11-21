@@ -1,0 +1,85 @@
+/* 小窝以整幅 3:2 原画为坐标系。热区和照片随同一镜头缩放，媒体留在镜头外。 */
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] {
+  background: var(--ws-panel);
+  aspect-ratio: 3 / 2;
+  --ws-aim-x: 61%; --ws-aim-y: 48%;
+}
+.wb-desk .work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] {
+  flex: 0 1 auto; width: min(100%,calc(133vh - 182px)); align-self: center;
+  min-height: 0; aspect-ratio: 3 / 2;
+}
+.mobile-studio-sheet .work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] {
+  flex: none; width: min(100%,70cqh); aspect-ratio: 3 / 2;
+}
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] > .ws-floorplan {
+  width: min(100%,150cqh); aspect-ratio: 3 / 2; height: auto;
+  top: 50%; bottom: auto; left: 50%; background: #3a3023;
+  transform: translate(-50%,-50%) scale(var(--ws-scene-scale,1));
+  transform-origin: var(--nest-aim-x,59%) var(--nest-aim-y,45%);
+}
+.ws-scene[data-room-view="nest"]:is([data-nest-pose="sleep"],[data-nest-pose="tv"]) { --nest-aim-x: 38%; --nest-aim-y: 46%; }
+.ws-scene[data-room-view="nest"][data-nest-pose="cat"] { --nest-aim-x: 43%; --nest-aim-y: 72%; }
+.ws-scene[data-room-view="nest"][data-nest-sprite] { --nest-aim-x: 61%; --nest-aim-y: 67%; }
+.ws-nest-art,.ws-nest-seat { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; user-select:none; }
+.ws-nest-seat {
+  mask-image: radial-gradient(ellipse 13.5% 22% at 62.5% 47%,black 71%,transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 13.5% 22% at 62.5% 47%,black 71%,transparent 100%);
+}
+.ws-scene[data-room-view="floor"] :is(.ws-nest-art,.ws-nest-seat,.ws-nest-hit,.nest-window-glass,.nest-wall-photo,.ws-nest-cat-patch),
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] > .ws-floorplan > :is(.ws-life-furniture,.ws-fixtures,.ws-room-light,.ws-actor,.ws-life-actor) { display:none; }
+/* 额外的日常活动沿用原先真正泡咖啡、吃饭、唱歌、碎纸的成套姿势和道具。 */
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"][data-nest-sprite] .ws-life-actor {
+  display:block; left:65%; width:18%; bottom:20%; z-index:3;
+}
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"][data-nest-sprite] .ws-life-actor[data-facing] { animation:none; }
+.ws-scene[data-room-view="nest"][data-nest-light="off"] :is(.ws-life-actor,.ws-actor) {
+  filter: brightness(.54) saturate(.76) drop-shadow(1px 3px 2px #0a0f184d);
+}
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"][data-nest-pose="archive"] .ws-life-actor { display:none; }
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"][data-nest-pose="archive"] .ws-floorplan > .ws-actor {
+  display:block; visibility:visible; left:50%; bottom:44%; width:17%; z-index:2;
+}
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"]:is([data-nest-pose="cheer"],[data-nest-pose="stomp"],[data-nest-pose="stop"]) .ws-floorplan > .ws-actor {
+  display:block;visibility:visible;left:59%;bottom:22%;width:17%;z-index:2;
+}
+.ws-scene[data-room-view="nest"] .ws-furniture-controls button { touch-action:manipulation; }
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="lamp"] { left:49.2%; top:21.8%; width:6%; height:12%; cursor:ns-resize; touch-action:none; }
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="cup"] { left:73.3%; top:41.6%; width:4%; height:6%; }
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="sofa"] { left:32%; top:52%; width:29%; height:18%; }
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="folder"] { left:54.6%; top:40%; width:6%; height:10%; }
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="draft"] { left:71%; top:48%; width:13%; height:8%; }
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="cat"] { left:38%; top:74%; width:16%; height:15%; }
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="window"] { left:78.4%; top:18.3%; width:14%; height:14%; }
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="photo"] { left:34.3%; top:27.6%; width:14%; height:15%; }
+.ws-nest-next { grid-column:1 / -1; padding:3px 7px 5px; color:#e4ddc5; line-height:1.4; font-size:11px; max-width:min(70cqw,260px); }
+.ws-scene[data-room-view="nest"] .ws-room-tools { z-index:6; }
+.ws-scene[data-room-view="nest"] .ws-room-menu {
+  grid-template-columns:repeat(3,max-content); max-width:calc(100cqw - 16px);
+  max-height:min(76cqh,260px); gap:2px; overscroll-behavior:contain;
+}
+.work-studio-view .ws-floor-toggle {
+  flex:none; border:1px solid var(--ws-line); border-radius:7px; color:var(--ws-on-tint);
+  background:var(--ws-panel); font:550 12px/1.4 var(--font-ui,sans-serif); padding:4px 8px; margin-left:auto;
+}
+.wb-desk .work-studio-view .ws-floor-toggle + .ws-zoom-toggle,
+.mobile-studio-sheet .work-studio-view .ws-floor-toggle + .ws-zoom-toggle { margin-left:0; margin-inline-start:0; }
+.ws-nest-panel {
+  position:absolute; z-index:8; inset:7% 7% auto; max-height:86%; display:flex; flex-direction:column;
+  padding:clamp(9px,2cqw,17px); gap:9px; border:1px solid var(--ws-line); border-radius:13px;
+  background:var(--ws-panel); color:var(--ws-ink); box-shadow:0 6px 18px #28231538;
+}
+.ws-nest-panel header { flex:none; display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.ws-nest-panel h3 { font:650 clamp(14px,2.2cqw,19px)/1.4 var(--font-ui,sans-serif); }
+.ws-nest-panel-body { min-height:0; overflow:auto; overscroll-behavior:contain; }
+.work-studio-view .ws-nest-panel button { color:var(--ws-ink); background:var(--ws-tint); border:1px solid var(--ws-line); padding:5px 10px; border-radius:8px; font-size:13px; min-height:30px; }
+.ws-nest-panel[data-nest-panel="view"] { inset:0; padding:0; gap:0; max-height:none; border:0; border-radius:inherit; }
+.ws-nest-panel[data-nest-panel="view"] .ws-nest-panel-body { height:100%; }
+.ws-nest-panel[data-nest-panel="view"] header {
+  position:absolute; z-index:2; top:7px; right:7px; left:7px;
+  align-items:flex-start; pointer-events:none;
+}
+.ws-nest-panel[data-nest-panel="view"] header button {pointer-events:auto;box-shadow:0 2px 7px #241b102e;}
+.ws-nest-panel[data-nest-panel="view"] header h3 {background:#243527cc;color:white;border-radius:6px;padding:3px 8px;}
+@container mobile-workroom (min-width:600px) and (min-aspect-ratio:1.25) {
+  .mobile-studio-sheet .work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] {width:min(100%,calc(140cqh - 152px));}
+}

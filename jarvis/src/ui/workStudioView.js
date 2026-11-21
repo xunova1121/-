@@ -1,5 +1,6 @@
 import './workStudioView.css';
 import './workbenchWorkshopMotion.css';
+import { createNestStage } from './nestStage.js';
 import { createWorkshopMedia } from './workshopMedia.js';
 import { addWorkshopFixtures } from './workshopFixtures.js';
 import { createWorkshopMotion, routineStations, stationForStep, stationNames } from './workshopMotion.js';
@@ -38,7 +39,7 @@ function text(el, content = '') {
   if (el.textContent !== content) el.textContent = content;
 }
 
-export function createWorkStudioView({ workshop = false, newsFeed, newsChat, getPlayers } = {}) {
+export function createWorkStudioView({ workshop = false, newsFeed, newsChat, getPlayers, nestDeskOptions } = {}) {
   const element = node('section', 'work-studio work-studio-view');
   const viewTitle = workshop ? '未央工作台' : '看未央工作';
   element.setAttribute('aria-label', viewTitle);
@@ -70,7 +71,7 @@ export function createWorkStudioView({ workshop = false, newsFeed, newsChat, get
   // 文件对象也作为可选中文本呈现在下方；场景里只画一次。
   prop.setAttribute('aria-hidden', 'true');
   const chip = node('span', 'ws-pose-label');
-  let motion, room, media;
+  let motion, room, media, nest;
   if (workshop) {
     const floor = node('div', 'ws-floorplan');
     addWorkshopFixtures(floor);
@@ -79,6 +80,7 @@ export function createWorkStudioView({ workshop = false, newsFeed, newsChat, get
     motion = createWorkshopMotion(scene, actor);
     room = createWorkshopRoom(scene, floor, update);
     media = createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, getPlayers });
+    nest = createNestStage({scene, floor, room, onChange: update, nestDeskOptions});
   } else scene.append(chip, prop, actor);
   const caption = node('div', 'ws-caption');
   const action = node('strong', 'ws-action');
@@ -101,7 +103,23 @@ export function createWorkStudioView({ workshop = false, newsFeed, newsChat, get
     zoom.className = 'ws-zoom-toggle';
     setZoom(false);
     zoom.onclick = () => setZoom(element.dataset.zoom !== 'detail');
-    caption.append(zoom);
+    const floorToggle = control('work-floor', '任务工位');
+    floorToggle.className = 'ws-floor-toggle';
+    floorToggle.setAttribute('aria-pressed', 'false');
+    heading.textContent = '未央小窝';
+    floorToggle.onclick = () => {
+      const useNest = scene.dataset.roomView !== 'nest';
+      media.close(false);
+      room.setNest(useNest);
+      nest.setActive(useNest);
+      heading.textContent = useNest ? '未央小窝' : viewTitle;
+      floorToggle.textContent = useNest ? '任务工位' : '回小窝';
+      floorToggle.setAttribute('aria-label', floorToggle.textContent);
+      floorToggle.setAttribute('aria-pressed', String(!useNest));
+      setZoom(false);
+      update();
+    };
+    caption.append(floorToggle, zoom);
   }
   performance.append(scene, caption);
 
@@ -178,7 +196,8 @@ export function createWorkStudioView({ workshop = false, newsFeed, newsChat, get
     if (motion) {
       const backgroundWork = !isReview && snapshot.otherWork && !snapshot.active;
       const showTask = Boolean(isReview || snapshot.active || backgroundWork || justFinished !== null);
-      const state = room.render(showTask, !backgroundWork && entry?.roomOperation === 'shred' && entry.status === 'done');
+      const confirmedShred = !backgroundWork && entry?.roomOperation === 'shred' && entry.status === 'done';
+      const state = room.render(showTask, confirmedShred);
       if (state.televisionOff) media.powerOff();
       media.setTask(snapshot.sessionId, showTask,
         backgroundWork ? '正在处理另一段对话的任务' : title,
@@ -195,10 +214,11 @@ export function createWorkStudioView({ workshop = false, newsFeed, newsChat, get
         working: !!routine || (movingStep && ((live && entry.status === 'running') || playing)),
         gesture: showTask && !isReview && (pose === 'stomp' || pose === 'cheer')
       }, state.workOrigin);
+      const nestLabel = nest.render(state, {busy: showTask, station, operation: confirmedShred ? 'shred' : backgroundWork ? '' : pose});
       if (state.activity !== 'work') {
         text(mode, '生活中');
         text(stationLabel, routine ? stationNames[station] : '工作台');
-        text(action, state.label);
+        text(action, nestLabel || state.label);
         detail.hidden = file.hidden = prop.hidden = true;
       } else if (backgroundWork) {
         text(mode, '工作中');
@@ -310,6 +330,7 @@ export function createWorkStudioView({ workshop = false, newsFeed, newsChat, get
   function visibilityChanged() {
     const shown = visible && !document.hidden;
     element.dataset.visible = String(shown);
+    nest?.setVisible(shown);
     room?.setVisible(shown);
     media?.setVisible(shown);
     if (!shown) { stopPlaying(); motion?.reset(); clearTimeout(justFinished); justFinished = null; }
@@ -318,7 +339,7 @@ export function createWorkStudioView({ workshop = false, newsFeed, newsChat, get
 
   return {
     element,
-    closeMedia: () => media?.close(),
+    closeMedia: () => nest?.close(true) || media?.close(),
     render(nextSnapshot) {
       if (nextSnapshot.sessionId !== snapshot.sessionId) {
         clearTimeout(justFinished);
