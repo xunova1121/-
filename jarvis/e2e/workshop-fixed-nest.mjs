@@ -4,7 +4,8 @@ import { createCanvas, loadImage } from '@napi-rs/canvas';
 export const isPortraitNest = scene => scene.evaluate(el => el.matches('[data-room-view=nest][data-nest-layout=portrait]'));
 
 async function pixels(locator) {
-  const image = await loadImage(await locator.screenshot({ scale: 'css', animations: 'disabled' }));
+  // 取家具和角色的实际画面。Playwright 强停、重播整页动画会触发 Chromium 114 的动画事件崩溃。
+  const image = await loadImage(await locator.screenshot({ scale: 'css' }));
   const ctx = createCanvas(image.width, image.height).getContext('2d');
   ctx.drawImage(image, 0, 0);
   return ctx.getImageData(0, 0, image.width, image.height);
