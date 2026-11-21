@@ -39,11 +39,26 @@ export async function checkLivingMotion(page, scene) {
     }
     return count;
   };
-  const regions = portrait ? await parts.evaluateAll(els => els.map(el => {
-    const b = el.getBoundingClientRect(), scene = el.closest('.ws-scene').getBoundingClientRect();
-    return [(b.left-scene.left)/scene.width,(b.top-scene.top)/scene.height,(b.right-scene.left)/scene.width,(b.bottom-scene.top)/scene.height].map(n => Math.max(0,Math.min(1,n)));
-  })) : [[.55,.32,.70,.56],[.29,.65,.44,.82]];
-  const motion = { person: changed(regions[0]), cat: changed(regions[1]), wall: changed([.07,.13,.16,.25]) };
+  const regions = await scene.evaluate((el, portrait) => {
+    const stage = el.getBoundingClientRect();
+    const floor = el.querySelector('.ws-floorplan').getBoundingClientRect();
+    const points = (left, top, right, bottom) => [
+      (left - stage.left) / stage.width, (top - stage.top) / stage.height,
+      (right - stage.left) / stage.width, (bottom - stage.top) / stage.height,
+    ].map(n => Math.max(0, Math.min(1, n)));
+    const floorRegion = ([x0, y0, x1, y1]) => points(floor.left + x0 * floor.width,
+      floor.top + y0 * floor.height, floor.left + x1 * floor.width, floor.top + y1 * floor.height);
+    const spriteRegion = selector => {
+      const b = el.querySelector(selector).getBoundingClientRect();
+      return points(b.left, b.top, b.right, b.bottom);
+    };
+    return {
+      person: portrait ? spriteRegion('.ws-nest-portrait-actor') : floorRegion([.55,.32,.70,.56]),
+      cat: portrait ? spriteRegion('.ws-nest-portrait-cat') : floorRegion([.29,.65,.44,.82]),
+      wall: floorRegion([.07,.13,.16,.25]),
+    };
+  }, portrait);
+  const motion = { person: changed(regions.person), cat: changed(regions.cat), wall: changed(regions.wall) };
   assert(motion.person >= 8 && motion.cat >= 8 && motion.wall <= 2, '人物、橘猫各自有动作，背景书架应保持静止 ' + JSON.stringify(motion));
   await parts.evaluateAll(els => els.forEach(el => el.getAnimations().forEach(animation => animation.play())));
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -269,7 +284,9 @@ export async function checkRadio(page, room, scene, hit) {
   assert.notEqual(first, second, '换台后应播放另一份实际乐曲');
   await room.locator('[data-media-device="tv"]').click();
   assert(await audio.evaluate(el => el.paused), '打开电视时收音机应停止播放');
-  await room.locator('.ws-media-panel[data-device="tv"]').getByRole('button', { name: '返回房间', exact: true }).click();
+  const television = room.locator('.ws-media-panel[data-device="tv"]');
+  await television.getByRole('button', { name: '返回房间', exact: true }).click();
+  await television.waitFor({state:'hidden'});
 }
 
 export async function checkViewingPlace(room, device) {

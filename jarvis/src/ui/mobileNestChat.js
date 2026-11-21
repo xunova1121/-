@@ -35,6 +35,12 @@ export function createMobileNestChat(sheet, chat, transcript) {
     toggle.setAttribute('aria-label', mode === 'hidden' ? '展开对话' : '隐藏对话');
     toggle.setAttribute('aria-expanded', String(mode !== 'hidden'));
   }
+  function fitMenu() {
+    const bottom = (mode === 'hidden' ? sheet : chat).getBoundingClientRect();
+    const room = (mode === 'hidden' ? bottom.bottom : bottom.top) - roomMenu.getBoundingClientRect().top - 6;
+    roomMenu.style.setProperty('--nest-menu-space', Math.max(44, Math.floor(room)) + 'px');
+  }
+  const menuSize = new ResizeObserver(fitMenu);
   function sync() {
     const immersive = sheet.open && scene?.dataset.nestLayout === 'portrait' && scene.dataset.roomView === 'nest';
     const previous = sheet.hasAttribute('data-nest-immersive');
@@ -42,6 +48,11 @@ export function createMobileNestChat(sheet, chat, transcript) {
     sheet.toggleAttribute('data-nest-immersive', Boolean(immersive));
     const controlHost = immersive ? roomMenu : caption;
     if (viewControls[0].parentElement !== controlHost) controlHost.append(...viewControls);
+    if (immersive && !roomMenu.hidden) {
+      fitMenu();
+      menuSize.observe(chat);
+      menuSize.observe(sheet);
+    } else menuSize.disconnect();
     if (!immersive) {
       if (previous && mode !== 'history') readingPosition?.();
       if (previousPlaceholder !== undefined) prompt.placeholder = previousPlaceholder;
@@ -63,6 +74,7 @@ export function createMobileNestChat(sheet, chat, transcript) {
     viewControls = [view.querySelector('.ws-floor-toggle'), view.querySelector('.ws-zoom-toggle')];
     view.querySelector('.ws-header').append(toggle);
     sceneObserver.observe(scene, { attributes: true, attributeFilter: ['data-room-view', 'data-nest-layout'] });
+    sceneObserver.observe(roomMenu, { attributes: true, attributeFilter: ['hidden'] });
     // 只监听设备开关和新闻项目是否可读，避开场景动画、正文流式和逐帧样式变更。
     for (const node of scene.querySelectorAll('.ws-media-panel, .ws-media-news, .ws-media-actions')) {
       sceneObserver.observe(node, { attributes: true, attributeFilter: ['hidden', 'data-device'] });
@@ -114,6 +126,7 @@ export function createMobileNestChat(sheet, chat, transcript) {
   chat.prepend(historyButton);
   function close() {
     sceneObserver.disconnect();
+    menuSize.disconnect();
     const floating = sheet.hasAttribute('data-nest-immersive');
     if (floating && mode === 'history') rememberPosition();
     const restoreReading = floating ? readingPosition : null;

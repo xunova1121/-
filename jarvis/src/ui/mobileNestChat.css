@@ -38,6 +38,7 @@
 }
 #mobile-work-studio[data-nest-immersive] :is(.ws-mode,.ws-playback-controls,.ws-timeline,.ws-pose-label,.mobile-studio-empty) { display:none; }
 #mobile-work-studio[data-nest-immersive] .ws-room-tools { top: calc(env(safe-area-inset-top) + 5px); right: calc(env(safe-area-inset-right) + 52px); }
+#mobile-work-studio[data-nest-immersive] .ws-room-menu { max-height: min(260px, var(--nest-menu-space,260px)); }
 #mobile-work-studio[data-nest-immersive] .ws-caption {
   position: absolute; top: calc(env(safe-area-inset-top) + 45px); left: max(8px, env(safe-area-inset-left));
   z-index: 5; width: auto; max-width: calc(100% - 16px); min-height: 0; padding: 0;

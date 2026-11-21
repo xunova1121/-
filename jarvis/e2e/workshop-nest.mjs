@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { checkNestControls } from './workshop-test-view.mjs';
 import { checkLocalWallClock, checkRestingFurniture } from './workshop-room-furniture.mjs';
-import { captureFurniture, capturePortraitFurniture, checkFloatingChat, checkFurniturePixels, checkFurnitureStayed, isPortraitNest } from './workshop-fixed-nest.mjs';
+import { captureFurniture, capturePortraitFurniture, checkFloatingChat, checkRoomEdges, checkFurniturePixels, checkFurnitureStayed, isPortraitNest } from './workshop-fixed-nest.mjs';
 import { checkNearNestCamera } from './workshop-nest-camera.mjs';
 import { checkProgramArea } from './workshop-tv-playback.mjs';
 import { checkCoffee, checkLivingMotion, checkRadio, checkUnobstructed, checkViewingPlace, listenForCat } from './workshop-nest-actions.mjs';
@@ -56,9 +56,12 @@ async function checkRoomLighting(page, scene, hit) {
   if ((await lamp.getAttribute('aria-pressed')) !== 'true') await lamp.click();
   await page.waitForTimeout(400);
   const bright = await lightLevel(scene);
+  const portrait = await isPortraitNest(scene);
+  if (portrait) await checkRoomEdges(scene);
   await lamp.click();
   await page.waitForTimeout(450);
   const dark = await lightLevel(scene);
+  if (portrait) await checkRoomEdges(scene);
   assert(dark < bright * .74, '拉灯后实际室内亮度应明显降低 ' + JSON.stringify({ bright, dark }));
   await lamp.click();
   return { bright, dark };
@@ -239,6 +242,7 @@ async function check(mobile, width, clockOnly = false) {
   page.setDefaultTimeout(18000);
   page.setDefaultNavigationTimeout(60000);
   page.on('pageerror', error => errors.push(error.message));
+  page.on('crash', () => errors.push('renderer crash'));
   await page.clock.install({ time: now('08:30') });
   const room = page.locator('.work-studio:visible');
   const scene = room.locator('.ws-scene');
@@ -338,7 +342,7 @@ async function check(mobile, width, clockOnly = false) {
     await page.clock.fastForward(4000);
     await room.locator('[data-cat-state="rest"]').waitFor({ state: 'attached' });
     assert.notEqual(await scene.getAttribute('data-nest-pose'), 'cat', '猫闻手后拒绝，未央留出距离');
-    if (mobile) await checkFloatingChat(page, room, scene, shot);
+    if (mobile) await checkFloatingChat(page, scene, shot);
     assert.deepEqual(errors, []);
     console.log(platform, '室内亮度', bright.toFixed(1), '→', dark.toFixed(1), '窗景、相框、草稿、旅行、猫、新闻、电视和当地作息通过');
   } catch (err) {

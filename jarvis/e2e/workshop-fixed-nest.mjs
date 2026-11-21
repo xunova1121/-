@@ -1,13 +1,29 @@
 import assert from 'node:assert/strict';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 
-export const isPortraitNest = scene => scene.getAttribute('data-nest-layout').then(value => value === 'portrait');
+export const isPortraitNest = scene => scene.evaluate(el => el.matches('[data-room-view=nest][data-nest-layout=portrait]'));
 
 async function pixels(locator) {
   const image = await loadImage(await locator.screenshot({ scale: 'css', animations: 'disabled' }));
   const ctx = createCanvas(image.width, image.height).getContext('2d');
   ctx.drawImage(image, 0, 0);
   return ctx.getImageData(0, 0, image.width, image.height);
+}
+
+// 超过 9:16 的空间必须有能解码的天花和地面，不允许留下浏览器默认底色。
+export async function checkRoomEdges(scene) {
+  const sizes = await scene.locator('.ws-floorplan').evaluate(floor => Promise.all(['::before', '::after'].map(async part => {
+    const rule = getComputedStyle(floor, part);
+    const url = rule.backgroundImage.match(/^url\(["']?([^"')]+)["']?\)$/)?.[1];
+    if (!url) return null;
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    return [image.naturalWidth, image.naturalHeight, rule.backgroundRepeat, rule.transform];
+  })));
+  for (const size of sizes) {
+    assert(size && size[0] >= 640 && size[1] >= 80 && size[3] === 'none', '上下延展应使用真实同机位纹理 ' + JSON.stringify(size));
+  }
 }
 
 // 对照的是屏幕坐标，不是家具在可能一起平移或缩小的父容器内的相对坐标。
@@ -97,7 +113,7 @@ export async function checkPortraitViewer(scene, device) {
 }
 
 // 用正常输入和发送按钮产生消息，两条气泡、历史层和键盘都只覆盖同一张房间。
-export async function checkFloatingChat(page, room, scene, shot) {
+export async function checkFloatingChat(page, scene, shot) {
   const sheet = page.locator('#mobile-work-studio');
   const before = await captureFurniture(scene);
   const viewport = await scene.boundingBox();
