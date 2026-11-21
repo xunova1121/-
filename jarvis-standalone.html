@@ -16,7 +16,9 @@
     try {
       if (document.documentElement.dataset.mode === 'mobile') {
         var savedDisplay = localStorage.getItem('jarvis.renderSafe');
-        if (window.__jarvisRenderSafe === true || savedDisplay === 'true' || (savedDisplay === null && /渲染进程/.test(localStorage.getItem('jarvis.lastCrash') || ''))) document.documentElement.classList.add('safe-render');
+        // 安卓原生已给出当前是否需要兼容显示时只认它（原生按崩溃/内存提醒限时判断）；旧版存下的 true 不能让它一直开着
+        var nativeSafe = window.__jarvisRenderSafe;
+        if (typeof nativeSafe === 'boolean' ? nativeSafe : (savedDisplay === 'true' || (savedDisplay === null && /渲染进程/.test(localStorage.getItem('jarvis.lastCrash') || '')))) document.documentElement.classList.add('safe-render');
       }
     } catch (e) {}
     // 首帧前就决定明暗，避免先黑后白的闪烁（逻辑与 src/core/theme.js 一致）
