@@ -36,7 +36,9 @@ public class MainActivity extends BridgeActivity {
     private SharedPreferences health() { return getSharedPreferences("render-health",MODE_PRIVATE); }
     static boolean safeDisplay(Context context) {
         SharedPreferences prefs=context.getSharedPreferences("render-health",MODE_PRIVATE);
-        return prefs.getBoolean("safeDisplay",false) || RenderRecovery.recent(prefs.getLong("lastCrash",0),System.currentTimeMillis(),24*60*60*1000L);
+        // 旧版把崩溃、内存提醒都写成永久的 safeDisplay=true，分不清是不是手动开的：升级后清掉一次，只认新的手动开关
+        if (!prefs.getBoolean("safeDisplayLimited", false)) prefs.edit().remove("safeDisplay").putBoolean("safeDisplayLimited", true).commit();
+        return RenderRecovery.safeDisplayActive(prefs.getBoolean("safeDisplayManual",false),prefs.getLong("lastCrash",0),prefs.getLong("lastTrim",0),System.currentTimeMillis());
     }
     private static String webViewVersion() {
         if (Build.VERSION.SDK_INT < 26) return "";
@@ -56,7 +58,7 @@ public class MainActivity extends BridgeActivity {
                 previous = version;
                 prefs.edit().putString("softwareRecoveryVersion", version).apply();
             }
-            if (RenderRecovery.useSavedSoftwareLayer(prefs.getBoolean("softwareLayer", false), Build.MANUFACTURER, version, previous)) {
+            if (RenderRecovery.softwareLayerNow(prefs.getBoolean("softwareLayer", false), Build.MANUFACTURER, version, previous, prefs.getLong("lastCrash", 0), System.currentTimeMillis())) {
                 web.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
             }
         }
@@ -147,7 +149,7 @@ public class MainActivity extends BridgeActivity {
                 boolean wasSafe = safeDisplay(MainActivity.this);
                 boolean fallback = !softwareDrawing && RenderRecovery.useSoftwareOnRecovery(
                         Build.MANUFACTURER, version, wasSafe, crashed, memory.lowMemory);
-                SharedPreferences.Editor record = prefs.edit().putLong("lastCrash",now).putInt("consecutive",count).putBoolean("safeDisplay",true);
+                SharedPreferences.Editor record = prefs.edit().putLong("lastCrash",now).putInt("consecutive",count);
                 if (crashed && !memory.lowMemory && workshopDrawing.active()) {
                     record.putLong("workshopCrashAt", now).putString("workshopCrashVersion", version);
                 }
@@ -174,7 +176,7 @@ public class MainActivity extends BridgeActivity {
         super.onTrimMemory(level);
         if(!RenderRecovery.shouldReduceDisplay(level))return;
         // 只是系统提醒内存紧张（多半在后台），不是闪退：不写进异常记录，记下时间供诊断
-        health().edit().putBoolean("safeDisplay",true).putLong("lastTrim",System.currentTimeMillis()).putInt("lastTrimLevel",level).apply();
+        health().edit().putLong("lastTrim",System.currentTimeMillis()).putInt("lastTrimLevel",level).apply();
         if(!rendererGone && !isFinishing() && !isDestroyed() && getBridge()!=null){
             getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('jarvis:memory-pressure'));",null);
         }
@@ -183,9 +185,9 @@ public class MainActivity extends BridgeActivity {
         LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);layout.setGravity(Gravity.CENTER_VERTICAL);layout.setPadding(dp(26),dp(30),dp(26),dp(30));layout.setBackgroundColor(Color.rgb(252,251,255));
         TextView title=new TextView(this);title.setText("先稳住，再继续");title.setTextSize(24);title.setTypeface(null,Typeface.BOLD);title.setTextColor(Color.rgb(45,42,66));layout.addView(title);
         TextView message=new TextView(this);message.setText("界面连续异常，已停止自动重启。\n\n可以用兼容显示重新打开；还是不行就试试软件绘制。已保存的对话、文件和设置仍在本机；正在执行但尚未保存的内容需要检查后继续。");message.setTextSize(16);message.setTextColor(Color.rgb(93,87,113));message.setLineSpacing(dp(5),1);message.setPadding(0,dp(20),0,dp(24));layout.addView(message);
-        Button retry=new Button(this);retry.setText("用兼容显示重新打开");retry.setOnClickListener(v->{health().edit().putInt("consecutive",0).putLong("lastCrash",0).putBoolean("safeDisplay",true).remove("softwareRecoveryVersion").putBoolean("softwareLayer",false).commit();recreate();});layout.addView(retry);
+        Button retry=new Button(this);retry.setText("用兼容显示重新打开");retry.setOnClickListener(v->{health().edit().putInt("consecutive",0).putLong("lastCrash",0).putBoolean("safeDisplayManual",true).remove("softwareRecoveryVersion").putBoolean("softwareLayer",false).commit();recreate();});layout.addView(retry);
         // 兼容显示还是会崩时试这个：整个界面改用软件绘制，绕开手机图形驱动；以后在设置里关掉兼容显示就恢复正常绘制
-        Button software=new Button(this);software.setText("用软件绘制重新打开（更稳，会慢一些）");software.setOnClickListener(v->{health().edit().putInt("consecutive",0).putLong("lastCrash",0).putBoolean("safeDisplay",true).putBoolean("softwareLayer",true).commit();CrashLog.write(this,"用户选择软件绘制重新打开");recreate();});layout.addView(software);
+        Button software=new Button(this);software.setText("用软件绘制重新打开（更稳，会慢一些）");software.setOnClickListener(v->{health().edit().putInt("consecutive",0).putLong("lastCrash",0).putBoolean("safeDisplayManual",true).putBoolean("softwareLayer",true).commit();CrashLog.write(this,"用户选择软件绘制重新打开");recreate();});layout.addView(software);
         Button copy=new Button(this);copy.setText("复制诊断信息");copy.setOnClickListener(v->{((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("未央异常诊断",CrashLog.peek(this)));copy.setText("诊断已复制");});layout.addView(copy);
         Button later=new Button(this);later.setText("稍后再试");later.setOnClickListener(v->moveTaskToBack(true));layout.addView(later);
         android.widget.ScrollView scroll=new android.widget.ScrollView(this);scroll.setFillViewport(true);scroll.addView(layout);setContentView(scroll);

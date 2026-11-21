@@ -28,8 +28,8 @@ public class CrashLogPlugin extends Plugin {
     }
     @PluginMethod public void setDisplayMode(PluginCall call) {
         boolean safe=call.getBoolean("safe",true);
-        android.content.SharedPreferences.Editor edit=getContext().getSharedPreferences("render-health",android.content.Context.MODE_PRIVATE).edit().putBoolean("safeDisplay",safe);
-        if(!safe)edit.putLong("lastCrash",0).putInt("consecutive",0).putBoolean("softwareLayer",false).remove("softwareRecoveryVersion");
+        android.content.SharedPreferences.Editor edit=getContext().getSharedPreferences("render-health",android.content.Context.MODE_PRIVATE).edit().putBoolean("safeDisplayManual",safe);
+        if(!safe)edit.putLong("lastCrash",0).putLong("lastTrim",0).putInt("consecutive",0).putBoolean("softwareLayer",false).remove("softwareRecoveryVersion");
         edit.apply();
         if (!safe && getActivity() instanceof MainActivity activity) {
             activity.runOnUiThread(() -> { activity.restoreDefaultDrawing(); call.resolve(); });

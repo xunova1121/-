@@ -9,6 +9,18 @@ public final class RenderRecovery {
     }
     public static boolean shouldReduceDisplay(int level){return level==15 || level>=60;}
     public static boolean autoRestart(int count) { return count == 1; }
+    // 2026-11-21 用户：手机特别卡。原来崩过一次或系统提醒一次内存紧张，兼容显示就永久打开；
+    // 华为 114 内核崩过还会一直用软件绘制（整个界面由处理器画），要等系统组件更新才解除。改成限时：
+    // 崩溃后的兼容显示与自动软件绘制最多保持 3 天，内存紧张只临时开 6 小时；手动选择的不受限。
+    public static final long CRASH_PROTECT_MS = 3 * 24 * 60 * 60 * 1000L;
+    public static final long TRIM_PROTECT_MS = 6 * 60 * 60 * 1000L;
+    public static boolean safeDisplayActive(boolean manual, long lastCrash, long lastTrim, long now) {
+        return manual || recent(lastCrash, now, CRASH_PROTECT_MS) || recent(lastTrim, now, TRIM_PROTECT_MS);
+    }
+    /** 本次启动是否用软件绘制：手动选择一直有效；自动的只在最近一次崩溃后 3 天内有效。 */
+    static boolean softwareLayerNow(boolean manual, String manufacturer, String version, String recoveryVersion, long lastCrash, long now) {
+        return manual || (useSavedSoftwareLayer(false, manufacturer, version, recoveryVersion) && recent(lastCrash, now, CRASH_PROTECT_MS));
+    }
     public static boolean recent(long previousTime, long now, long window) {
         return previousTime > 0 && now >= previousTime && now - previousTime < window;
     }

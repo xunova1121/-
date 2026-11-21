@@ -41,4 +41,26 @@ public class RenderRecoveryTest {
         assertFalse(RenderRecovery.useSavedSoftwareLayer(false, "other", VERSION, VERSION));
         assertTrue(RenderRecovery.useSavedSoftwareLayer(true, "other", null, ""));
     }
+
+    // 2026-11-21 用户：手机特别卡。崩溃和内存提醒不能把兼容显示、软件绘制永久打开。
+    private static final long DAY = 24 * 60 * 60 * 1000L;
+    @Test public void crashAndMemoryProtectionExpire() {
+        long now = 100 * DAY;
+        assertTrue(RenderRecovery.safeDisplayActive(true, 0, 0, now));
+        assertFalse(RenderRecovery.safeDisplayActive(false, 0, 0, now));
+        assertTrue(RenderRecovery.safeDisplayActive(false, now - 2 * DAY, 0, now));
+        assertFalse(RenderRecovery.safeDisplayActive(false, now - 3 * DAY, 0, now));
+        assertTrue(RenderRecovery.safeDisplayActive(false, 0, now - 5 * 60 * 60 * 1000L, now));
+        assertFalse(RenderRecovery.safeDisplayActive(false, 0, now - 7 * 60 * 60 * 1000L, now));
+    }
+
+    @Test public void automaticSoftwareDrawingLastsThreeDaysAfterCrashManualStays() {
+        long now = 100 * DAY;
+        assertTrue(RenderRecovery.softwareLayerNow(false, "HUAWEI", VERSION, VERSION, now - DAY, now));
+        assertFalse(RenderRecovery.softwareLayerNow(false, "HUAWEI", VERSION, VERSION, now - 3 * DAY, now));
+        assertFalse(RenderRecovery.softwareLayerNow(false, "HUAWEI", VERSION, VERSION, 0, now));
+        assertFalse(RenderRecovery.softwareLayerNow(false, "HUAWEI", VERSION, "", now - DAY, now));
+        assertFalse(RenderRecovery.softwareLayerNow(false, "other", VERSION, VERSION, now - DAY, now));
+        assertTrue(RenderRecovery.softwareLayerNow(true, "other", null, "", 0, now));
+    }
 }
