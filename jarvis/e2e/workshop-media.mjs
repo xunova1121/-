@@ -269,6 +269,8 @@ async function check(mobile) {
       await page.evaluate(() => {
         Object.defineProperty(visualViewport, 'height', { configurable: true, value: 480 });
         visualViewport.dispatchEvent(new Event('resize'));
+        // Android 的方向通知可能晚于聚焦和键盘 resize，不应把 480 当成竖屏的完整高度。
+        window.dispatchEvent(new Event('orientationchange'));
       });
       await page.waitForFunction(() => document.body.classList.contains('wy-keyboard-open'));
       await checkLayout(room);

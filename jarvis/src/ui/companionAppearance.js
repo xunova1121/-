@@ -13,25 +13,35 @@ export function initCompanionAppearance(navigation = {}) {
   body.classList.add('companion-edition');
   initMobileStartup();
   dispatchEvent(new Event('jarvis:chrome-ready'));
-  let fullHeight = viewport?.height || innerHeight;
+  // Android 旋转、输入框聚焦、键盘缩短视口的通知可能乱序。按布局宽度记住
+  // 最近两种方向的完整高度，避免拿横屏的高度判断竖屏键盘。
+  let layout = { width: innerWidth, height: innerHeight };
+  let previousLayout;
   let keyboardOpen = false;
   const editing = () => /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || '');
   const resize = () => {
     const height = viewport?.height || innerHeight;
+    const focused = editing();
+    if (layout.width !== innerWidth) {
+      const next = previousLayout?.width === innerWidth ? previousLayout : { width: innerWidth, height: 0 };
+      previousLayout = layout;
+      layout = next;
+    }
     // 点击发送会先让输入框失焦，键盘却尚未收回；此时不能提前展开角色，
     // 否则按钮会在 pointerdown 与 pointerup 之间移位，导致点击丢失。
-    if (!keyboardOpen && !editing()) fullHeight = height;
-    keyboardOpen = fullHeight - height > 120 && (editing() || keyboardOpen);
+    // 键盘可能只缩短 visualViewport，也可能连 innerHeight 一起缩短。
+    // 编辑中可采纳恢复后的较大布局高度，但不能用键盘已经占用的高度覆盖基线。
+    layout.height = focused || keyboardOpen ? Math.max(layout.height, innerHeight) : innerHeight;
+    // 双指放大同样会缩小可视高度。按缩放比例换回布局像素，只用来判断键盘。
+    const unzoomedHeight = height * (viewport?.scale || 1);
+    keyboardOpen = layout.height - unzoomedHeight > 120 && (focused || keyboardOpen);
     body.classList.toggle('wy-keyboard-open', keyboardOpen);
     body.style.setProperty('--wy-viewport-height', `${Math.round(height)}px`);
     body.style.setProperty('--wy-viewport-top', `${Math.round(viewport?.offsetTop || 0)}px`);
   };
   viewport?.addEventListener('resize', resize);
   addEventListener('resize', resize);
-  addEventListener('orientationchange', () => {
-    fullHeight = viewport?.height || innerHeight;
-    resize();
-  });
+  addEventListener('orientationchange', resize);
   document.addEventListener('focusin', resize);
   document.addEventListener('focusout', () => requestAnimationFrame(resize));
   resize();
