@@ -4,7 +4,7 @@
   padding: clamp(10px,2.3cqw,22px); gap: clamp(6px,1.4cqw,12px);
 }
 /* 近看的画布宽于屏幕，焦点移动时避免浏览器横滚整个房间；正文仍在读报区内滚动。 */
-.work-studio-view .ws-scene[data-media-device="monitor"] { overflow: clip; }
+.work-studio-view[data-workshop] .ws-scene[data-media-device="monitor"] { overflow: clip; }
 .ws-media-panel[data-device="monitor"] .ws-media-scroll {
   flex: 1 1 auto; overflow-anchor: none; scrollbar-width: thin; scrollbar-gutter: stable; padding-inline-end: 2px;
 }

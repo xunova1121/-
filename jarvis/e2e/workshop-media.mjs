@@ -237,12 +237,14 @@ async function check(mobile) {
     assert.ok(!externals.some(u => new URL(u).hostname === 'tv.cctv.com'), '用户选择官方入口前不播放');
 
     await checkNewsEntrance({ page, room, platform, output });
-    if (mobile) {
-      // 近看家具的焦点和键盘会尝试横向滚动祖先；实际阅读时只允许正文区滚动。
-      await room.locator('.ws-scene').evaluate(scene => { scene.scrollLeft = scene.scrollWidth; });
-      assert.equal(await room.locator('.ws-scene').evaluate(scene => scene.scrollLeft), 0);
-      await checkLayout(room);
-    }
+    // 近看家具的焦点和键盘会尝试滚动祖先；实际阅读时只允许正文区滚动。
+    const stage = room.locator('.ws-scene');
+    const offsets = await stage.evaluate(scene => {
+      scene.scrollTo(scene.scrollWidth, scene.scrollHeight);
+      return [scene.scrollLeft, scene.scrollTop, getComputedStyle(scene).overflow];
+    });
+    assert.deepEqual(offsets, [0, 0, 'clip'], '桌面与手机的共同阅读视口不会被家具焦点推离原位');
+    await checkLayout(room);
     await monitor.getByText(items[0].title, { exact: true }).waitFor();
     const digest = monitor.getByRole('navigation', { name: '本期其他报道' });
     await button(digest, items[1].title).click();
