@@ -178,7 +178,8 @@ export function createNestStage({scene, floor, room, caption, deskHost, onChange
         else delete scene.dataset.nestViewing;
         scene.dataset.nestPose = pose;
         scene.dataset.nestLight = dark ? 'off' : 'on';
-        scene.toggleAttribute('data-nest-sprite', sprite && pose !== 'rest' && pose !== 'think');
+        // 只有这三种姿势交给通用生活人物；书桌、沙发、取文件和任务表情各自绘制自己的未央。
+        scene.toggleAttribute('data-nest-sprite', ['eat', 'sing', 'shred'].includes(pose));
         if (pose !== lastPose || viewing !== lastViewing) {
           sofa.enter(pose, lastPose, Boolean(lastViewing), {upright, viewing});
         }

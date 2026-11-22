@@ -77,7 +77,8 @@ export function createWorkshopLifeScene(scene, floor, onChange = () => {}) {
     actor.style.setProperty('--life-frame-a', (target.col * 40) + '%');
     actor.style.setProperty('--life-frame-b', (target.col * 40 + 20) + '%');
     actor.style.setProperty('--life-frame-y', (target.row * 50) + '%');
-    if (!previous || still() || !actor.animate || !CSS.supports('translate', '1px')) return;
+    // 小窝的行走由固定家具的脚下坐标接管，车间的走路人物只用于车间。
+    if (scene.dataset.roomView === 'nest' || !previous || still() || !actor.animate || !CSS.supports('translate', '1px')) return;
 
     // 按世界坐标行走。远近镜头共用同一脚底锚点，快速换动作从眼前位置转向。
     const dx = (previous.x - target.x / 100) * floor.offsetWidth;

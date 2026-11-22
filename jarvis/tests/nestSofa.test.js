@@ -45,6 +45,12 @@ describe('小窝固定沙发', () => {
     for (const previous of ['', 'sleep', 'rest', 'think']) sofa.enter('rest', previous, false);
     expect(walker.animate).not.toHaveBeenCalled();
   });
+  it.each([false, true])('书桌到前景饭桌交给一条走路轨迹，原地哼歌不重新走（竖屏 %s）', upright => {
+    const {sofa, walker} = mount();
+    sofa.enter('eat', 'work', false, {upright});
+    sofa.enter('sing', 'eat', false, {upright});
+    expect(walker.animate).toHaveBeenCalledOnce();
+  });
   it.each([{safe: true}, {reduced: true}, {paced: true}])('需要静态显示时直接坐下 %j', options => {
     const { sofa, walker } = mount(options);
     sofa.enter('rest', 'coffee', false);

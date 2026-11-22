@@ -5,16 +5,18 @@ const backCushion = { x: .373, y: .597 };
 const carpet = { x: .428, y: .774 };
 const frontCushion = { x: .306, y: .766 };
 const desk = { x: .62, y: .631 };
+const foreground = { x: .65, y: .80 };
 
 // 以脚底而不是头像中心定位。竖幅家具与猫、角色都在同一个固定画布内。
 const portraitFeet = {
-  desk: {x: .748, y: .549}, front: {x: .631, y: .725}, cat: {x: .316, y: .707}
+  desk: {x: .748, y: .549}, front: {x: .631, y: .725}, cat: {x: .316, y: .707}, foreground: {x: .53, y: .63}
 };
 
 export function nestFootPosition(pose, viewing, upright) {
   if (pose === 'cat') return upright ? portraitFeet.cat : carpet;
   if (viewing || pose === 'tv' || pose === 'sleep') return upright ? portraitFeet.front : frontCushion;
   if (pose === 'rest' || pose === 'think') return upright ? portraitFeet.front : backCushion;
+  if (['eat','sing','shred'].includes(pose)) return upright ? portraitFeet.foreground : foreground;
   return upright ? portraitFeet.desk : desk;
 }
 

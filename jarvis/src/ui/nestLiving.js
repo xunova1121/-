@@ -55,7 +55,7 @@ export function createNestLiving(floor) {
   let timer = null;
   let activityKey = '';
   let started = 0;
-  let previous = '';
+  let previous = null;
   let source = '';
   let visible = false;
 
@@ -80,7 +80,12 @@ export function createNestLiving(floor) {
       reduced.removeEventListener('change',coffeeStep);
       clearTimeout(timer);
       timer = null;
-      previous = '';
+      // 竖屏吃饭、撸猫等使用独立人物，传入的局部绘画姿势就是空串。
+      // 退到后台时要废弃上一帧；否则醒来吃饭会把仍在桌前端杯的那一层当成已清理。
+      previous = null;
+      delete layer.dataset.coffeePhase;
+      delete layer.dataset.sleepSeat;
+      delete layer.dataset.idlePose;
     }
   }
 

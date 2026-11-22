@@ -9,6 +9,7 @@ import { captureFurniture, capturePortraitFurniture, checkFloatingChat, checkRoo
 import { checkNearNestCamera } from './workshop-nest-camera.mjs';
 import { checkProgramArea } from './workshop-tv-playback.mjs';
 import { checkCoffee, checkLivingMotion, checkRadio, checkUnobstructed, checkViewingPlace, listenForCat } from './workshop-nest-actions.mjs';
+import { checkDinnerAfterAway } from './workshop-nest-resident.mjs';
 import { chromium } from 'playwright';
 import { createServer } from '../server/server.mjs';
 
@@ -242,8 +243,19 @@ async function checkMedia(page, room, button, shot) {
   assert.equal(await tv.locator('.ws-tv-watcher').isVisible(), false, '小窝只显示沙发上的一位未央');
   await checkViewingPlace(room, 'tv');
   await shot('看电视');
-  await button(tv, '返回房间').click();
+  const closeTv = button(tv, '返回房间');
+  assert(await closeTv.evaluate(el => {
+    const icon = getComputedStyle(el, '::before');
+    const hit = el.getBoundingClientRect();
+    return icon.content.includes('×') && icon.borderTopStyle === 'solid' && icon.borderRadius === '50%' &&
+      parseFloat(icon.width) >= 20 && icon.width === icon.height && hit.width >= 32 && hit.height >= 32;
+  }), '电视右下是带圆圈的关闭叉，保留原点击区域和操作名称');
+  const playing = await tv.locator('.ws-tv-standby video').elementHandle();
+  await closeTv.click();
   await tv.waitFor({ state:'hidden' });
+  assert(await playing.evaluate(video => !video.isConnected && video.paused && !video.hasAttribute('src')),
+    '点击圆叉会退出观看、停止声音并释放旧节目信号');
+  await playing.dispose();
   await fixed('收起电视');
 }
 
@@ -383,6 +395,8 @@ async function check(mobile, width, clockOnly = false) {
     await page.clock.fastForward(4000);
     await room.locator('[data-cat-state="rest"]').waitFor({ state: 'attached' });
     assert.notEqual(await scene.getAttribute('data-nest-pose'), 'cat', '猫闻手后拒绝，未央留出距离');
+    await reloadAt('17:50');
+    await checkDinnerAfterAway({page, room, scene, mobile, enter, dinnerTime: now('18:09'), shot});
     if (mobile) await checkFloatingChat(page, scene, shot);
     assert.deepEqual(errors, []);
     console.log(platform, '室内亮度', bright.toFixed(1), '→', dark.toFixed(1), '窗景、相框、草稿、旅行、猫、新闻、电视和当地作息通过');

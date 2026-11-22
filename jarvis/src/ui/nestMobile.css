@@ -9,11 +9,13 @@
 }
 
 /* 原画自带人与猫；静态时去掉完全重叠的图层。睡猫、理毛等另绘姿势仍保留一张小裁片。 */
-:root.safe-render .mobile-studio-sheet :is(.ws-nest-idle-patch,.ws-nest-idle-detail,.ws-nest-cat-motion[data-source="room"]),
+:root.safe-render .mobile-studio-sheet .ws-nest-living:not([data-sleep-seat="front"]) :is(.ws-nest-idle-patch,.ws-nest-idle-detail),
+:root.safe-render .mobile-studio-sheet .ws-nest-cat-motion[data-source="room"],
 :root.safe-render .mobile-studio-sheet .ws-nest-cat-motion[data-source="patch"] :is(.ws-nest-cat-face,.ws-nest-cat-hand),
 .mobile-studio-sheet .ws-scene[data-room-view="nest"][data-media-device="tv"] :is(.ws-nest-living,.ws-nest-cat-motion[data-source="room"],.ws-nest-cat-face,.ws-nest-cat-hand,.nest-window-drape) {
   display: none !important;
 }
+:root.safe-render .mobile-studio-sheet .ws-nest-living[data-sleep-seat="front"] .ws-nest-idle-paint { animation:none; }
 .mobile-studio-sheet .ws-scene[data-room-view="nest"][data-media-device="tv"] :is(.ws-nest-cat-body,.ws-life-pose,.ws-life-steam,.ws-life-notes),
 .mobile-studio-sheet .work-studio-view[data-visible="true"] .ws-scene[data-room-view="nest"][data-media-device="tv"] .ws-nest-loveseat::after {
   animation: none !important;

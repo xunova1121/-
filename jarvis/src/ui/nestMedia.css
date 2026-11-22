@@ -73,9 +73,13 @@
   font-size: 0; min-width: 32px; min-height: 32px;
 }
 .ws-scene[data-room-view="nest"] .ws-media-panel .ws-media-back::before { content: '×'; font: 22px/1 sans-serif; }
+.work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] .ws-media-back {
+  width: 32px; padding-inline: 0;
+}
 .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] .ws-media-back::before {
-  content: ''; width: 8px; height: 8px; border: solid currentColor; border-width: 0 2px 2px 0;
-  transform: translateY(-2px) rotate(45deg);
+  content: '×'; display: grid; place-items: center; box-sizing: border-box;
+  width: 21px; height: 21px; border: 1.5px solid currentColor; border-radius: 50%;
+  font: 600 17px/1 Arial, sans-serif;
 }
 .ws-scene[data-room-view="nest"] .ws-tv-controls .ws-tv-stations {
   position: absolute; z-index: 2; inset: auto 0 100%; flex-wrap: wrap;

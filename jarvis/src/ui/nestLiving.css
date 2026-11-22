@@ -50,7 +50,7 @@
   display:none; position:absolute; left:56.966%; top:34.18%; width:16.21%; height:22.66%;
   background:url('./assets/nestRoom/desk-coffee.webp') 0 0 / 200% 200% no-repeat;
 }
-.ws-nest-living[data-coffee-phase] .ws-nest-coffee { display:block; }
+.ws-scene[data-nest-pose="coffee"] .ws-nest-living[data-coffee-phase] .ws-nest-coffee { display:block; }
 .ws-nest-living[data-coffee-phase="pour"] .ws-nest-coffee { background-position:100% 0; }
 .ws-nest-living:is([data-coffee-phase="set-down"],[data-coffee-phase="hold"]) .ws-nest-coffee { background-position:0 100%; }
 .ws-nest-living[data-coffee-phase="sip"] .ws-nest-coffee { background-position:100% 100%; }
