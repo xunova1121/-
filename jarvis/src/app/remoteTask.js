@@ -83,15 +83,24 @@ export function createRemoteTask(app) {
           }
         }
       });
-      turn.completedAt = result.completedAt ?? Date.now();
-      elapsedMs = result.timing?.totalMs;
-      bubble.setTimestamp?.(turn.completedAt);
-      app.studioActivity?.finish(turn, 'done');
+      if (!turn.streamDone) {
+        if (ctrl.signal.aborted) {
+          app.studioActivity?.finish(turn, 'stopped');
+        } else {
+          turn.completedAt = result?.completedAt ?? Date.now();
+          elapsedMs = result?.timing?.totalMs;
+          bubble.setTimestamp?.(turn.completedAt);
+          app.studioActivity?.finish(turn, 'done');
+        }
+      }
     } catch (e) {
-      turn.completedAt = e.completedAt ?? Date.now();
-      bubble.setTimestamp?.(turn.completedAt);
-      app.studioActivity?.finish(turn, e.name === 'AbortError' ? 'stopped' : serverTaskMayBeRunning(e) ? 'waiting' : 'error');
-      if (e.name !== 'AbortError') {
+      const stopped = ctrl.signal.aborted || e.name === 'AbortError';
+      if (!turn.streamDone && !stopped) {
+        turn.completedAt = e.completedAt ?? Date.now();
+        bubble.setTimestamp?.(turn.completedAt);
+      }
+      if (!turn.streamDone) app.studioActivity?.finish(turn, stopped ? 'stopped' : serverTaskMayBeRunning(e) ? 'waiting' : 'error');
+      if (!stopped && !turn.streamDone) {
         failed = true;
         const message = app.friendlyError(e);
         bubble.append(`\n（${message}）`);

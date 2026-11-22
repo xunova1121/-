@@ -18,13 +18,16 @@ describe('行情客户端生命周期', () => {
     expect(JSON.stringify(next.llmHistory)).not.toContain('quote-only-metadata');
     expect(app.history[0].markets).toEqual([snapshot]);
   });
-  for (const reason of ['abort', 'streamDone']) it(`接回服务器任务后${reason}，迟到行情事件不能继续写原气泡或新会话`, async () => {
+  it.each([
+    ['abort', '结束'], ['streamDone', '结束'], ['abort', '断线'], ['streamDone', '断线']
+  ])('接回服务器任务后%s，迟到的行情与%s事件不能改写原气泡或新会话', async (reason, end) => {
     let emit, finish;
     transport.runRemote.mockImplementationOnce(async (_server, opts) => {
       emit = opts.emit;
       await new Promise(resolve => { finish = resolve; });
+      if (end === '断线') throw new Error('原任务的观察连接已结束');
     });
-    const bubble = { el: { classList: { add: vi.fn() } }, marketCards: vi.fn(), done: vi.fn() };
+    const bubble = { el: { classList: { add: vi.fn() } }, marketCards: vi.fn(), done: vi.fn(), setTimestamp: vi.fn() };
     const session = { id: 'original', taskId: 'task' };
     const app = { server: {}, session, transcript: { add: () => bubble }, setTask: vi.fn(), replayTranscript: vi.fn() };
     const followed = createRemoteTask(app).followServerTask(session);
@@ -38,6 +41,7 @@ describe('行情客户端生命周期', () => {
     expect(bubble.marketCards).toHaveBeenCalledTimes(1);
     expect(original.markets).toEqual(saved); expect(app.active.markets).toBeUndefined();
     finish(); await followed;
+    expect(bubble.setTimestamp).not.toHaveBeenCalled();
     expect(app.replayTranscript).not.toHaveBeenCalled();
   });
 });
