@@ -69,6 +69,7 @@ export function initCallouts({ root, getAnchor, onPick, onHover, reducedMotion =
     return slot;
   });
 
+  let visible = false;
   let shown = false;
   let busy = false;
   let raf = 0;
@@ -126,13 +127,14 @@ export function initCallouts({ root, getAnchor, onPick, onHover, reducedMotion =
     root.classList.remove('cl-retract');
     // 重新触发“长出来”的动画
     root.classList.remove('cl-in');
-    void root.offsetWidth;
+    if (visible) void root.offsetWidth;
     root.classList.add('cl-in');
-    loop();
+    syncAnimation();
   }
 
   function retract() {
     shown = false;
+    syncAnimation();
     root.classList.add('cl-retract');
     root.classList.remove('cl-in');
     for (const s of slots) hover(s, false);
@@ -184,21 +186,25 @@ export function initCallouts({ root, getAnchor, onPick, onHover, reducedMotion =
     }
   }
 
-  function loop() {
-    cancelAnimationFrame(raf);
-    const tick = () => {
-      if (!document.hidden) layout();
-      raf = requestAnimationFrame(tick);
-    };
-    tick();
+  function tick() {
+    layout();
+    raf = requestAnimationFrame(tick);
   }
 
-  new ResizeObserver(() => layout()).observe(root);
+  function syncAnimation() {
+    if (shown && visible) {
+      if (!raf) raf = requestAnimationFrame(tick);
+    } else if (raf) {
+      cancelAnimationFrame(raf);
+      raf = 0;
+    }
+  }
 
   return {
     set,
     retract,
     show,
+    setVisible(next) { visible = next; syncAnimation(); },
     get items() { return slots.map((s) => s.item); },
     get visible() { return shown && !root.classList.contains('cl-hidden'); },
     /** 测试用：点第 i 条 */

@@ -45,6 +45,26 @@
   -webkit-mask-image: var(--hand); mask-image: var(--hand); transform-origin: 44.5% 73%;
   animation: nest-cat-stroke 1.5s ease-in-out infinite;
 }
+/* 猫的胸背、脸和手始终落在原图 x=25–50%、y=60–84% 内。
+   只让这块纹理参与渐变和旋转，下面的坐标是原来的遮罩和支点在裁片内的位置。 */
+@supports (object-view-box: inset(0)) {
+  .ws-nest-cat-motion[data-source="room"] img {
+    inset: 60% auto auto 25%; width: 25%; height: 24%;
+    object-view-box: inset(60% 50% 16% 25%);
+    --fur: radial-gradient(ellipse 39.2% 35.833% at 46% 54.167%, #000 86%, transparent);
+    --face: radial-gradient(ellipse 14% 23.75% at 61.2% 38.75%, #000 74%, transparent);
+    --chest-origin: 48% 79.167%; --face-origin: 57.2% 54.167%;
+  }
+  .ws-nest-cat-motion[data-source="room"]:is([data-pose="pet"],[data-pose="welcome"]) img {
+    --face: radial-gradient(ellipse 12.8% 19.167% at 54% 37.083%, #000 68%, transparent);
+    --face-origin: 52.4% 54.583%;
+  }
+  .ws-nest-cat-motion[data-source="room"][data-pose="pet"] .ws-nest-cat-hand {
+    --hand: radial-gradient(ellipse 9.8% 11.042% at 68.4% 48.333%, #000 68%, transparent);
+    transform-origin: 78% 54.167%;
+  }
+}
+
 @keyframes nest-cat-breathe { 0%,100% {transform: none} 44% {transform: scale(1.006,1.038)} }
 @keyframes nest-cat-look { 0%,13%,37%,74%,100% {transform: none} 24% {transform: rotate(3.8deg)} 82% {transform: rotate(-2.7deg)} }
 @keyframes nest-cat-sniff { 0%,100% {transform:none} 50% {transform: translate(.48%,-.28%) rotate(2deg)} }

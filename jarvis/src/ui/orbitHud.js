@@ -154,10 +154,15 @@ export function initOrbitHud({ root, getAnchor, reducedMotion = () => false }) {
     last = t;
     layout();
   }
-  const start = () => { if (!raf && !document.hidden) raf = requestAnimationFrame(loop); };
-  const stop = () => { cancelAnimationFrame(raf); raf = 0; };
-  document.addEventListener('visibilitychange', () => (document.hidden ? stop() : start()));
-  start();
+  let visible = false;
+  function setVisible(next) {
+    visible = next;
+    if (visible && !raf) raf = requestAnimationFrame(loop);
+    if (!visible && raf) {
+      cancelAnimationFrame(raf);
+      raf = 0;
+    }
+  }
 
   /** 往思考流里加一行（逐字打出） */
   function think(text, kind = '') {
@@ -168,14 +173,18 @@ export function initOrbitHud({ root, getAnchor, reducedMotion = () => false }) {
     logList.append(li);
     while (logList.children.length > 6) logList.firstElementChild.remove();
     const full = String(text).slice(0, 80);
-    if (reducedMotion()) { li.textContent = full; return; }
     let i = 0;
-    const type = () => { li.textContent = full.slice(0, (i += 2)); if (i < full.length) setTimeout(type, 16); };
+    const type = () => {
+      if (!visible || reducedMotion()) { li.textContent = full; return; }
+      li.textContent = full.slice(0, (i += 2));
+      if (i < full.length) setTimeout(type, 16);
+    };
     type();
   }
 
   return {
     think,
+    setVisible,
     setStatus(text) { statusText = text; },
     setMetrics({ cpu, mem }) {
       if (Number.isFinite(cpu)) metrics.cpu = Math.max(0, Math.min(1, cpu));
@@ -199,6 +208,6 @@ export function initOrbitHud({ root, getAnchor, reducedMotion = () => false }) {
       satellites = satellites.filter(s => s.id !== id);
     },
     get satellites() { return satellites; },
-    dispose() { stop(); svg.remove(); log.remove(); }
+    dispose() { setVisible(false); svg.remove(); log.remove(); }
   };
 }

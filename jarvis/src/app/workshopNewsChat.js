@@ -7,7 +7,7 @@ export function createWorkshopNewsChat(app) {
   const scope = () => app.messageQueue?.scope();
   const inRoom = () => !document.hidden && Boolean(app.prompt?.closest('.wb-desk:not([hidden]), #mobile-work-studio[open]'));
   const current = (item) => item && item.session === app.session && item.scope === scope() && inRoom();
-  // 手机上阅读页的输入栏明确标为「追问这条新闻」，可以直接写问题。
+  // 小窝阅读页的输入栏明确标为「追问这条新闻」，可以直接写问题。
   const readingHere = () => app.prompt?.hasAttribute?.('data-nest-news') === true;
   function clear() {
     selected = null;

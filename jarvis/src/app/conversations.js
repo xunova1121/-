@@ -83,7 +83,13 @@ export function createConversations(app) {
   /** 把当前会话的消息重新画到对话区 */
   let historyViewEnd = null;
   function visibleHistory(end = app.history.length) {
-    return transcriptWindow(app.history.length, { mobile: MOBILE, safe: document.documentElement.classList.contains('safe-render'), end });
+    return transcriptWindow(app.history.length, { mobile: MOBILE, desktop: !MOBILE, safe: document.documentElement.classList.contains('safe-render'), end });
+  }
+  function prepareTranscriptForTurn() {
+    const { limit } = visibleHistory();
+    // 电脑持续对话时留出一批新气泡的位置，避免每次发送都重画前面的几十条。
+    const refreshAt = MOBILE ? limit : limit + 24;
+    if (historyViewEnd !== null || (app.history.length >= refreshAt && $('#transcript').querySelectorAll('.msg').length >= refreshAt)) replayTranscript();
   }
   function replayTranscript(end = app.history.length, { fromTop = false } = {}) {
     app.studioActivity?.changed();
@@ -410,6 +416,7 @@ export function createConversations(app) {
     exportSession,
     openInWorkspace,
     rewindAndResend,
+    prepareTranscriptForTurn,
     get historyViewEnd() {
       return historyViewEnd;
     }

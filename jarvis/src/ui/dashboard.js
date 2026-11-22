@@ -271,7 +271,7 @@ export class Dashboard {
   // ---------- 视差 / 倾斜 / 光晕 ----------
   #bindPointer() {
     window.addEventListener('pointermove', (e) => {
-      if (!this.motion || e.pointerType === 'touch') return;
+      if (!this.chartsVisible || !this.motion || e.pointerType === 'touch') return;
       if (!this.root.querySelector('#emotion-picker').hidden) return;
       const rect = this.root.getBoundingClientRect();
       const near = e.clientX > rect.left - NEAR_PX && e.clientX < rect.right + NEAR_PX

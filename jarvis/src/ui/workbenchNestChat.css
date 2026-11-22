@@ -1,0 +1,59 @@
+/* 房里的短消息和输入框沿用同一条底栏。展开阅读时只抬高会话纸页，设备和沙发保持原位。 */
+.wb-nest-chat-controls { display:none; }
+body.workbench .wb-desk[data-desk-chat] .wb-nest-chat-controls {
+  display:flex; flex:none; align-items:center; margin-left:auto; gap:4px;
+}
+.wb-nest-chat-controls button {
+  padding:3px 7px; min-height:26px; border-radius:6px; border:1px solid var(--desk-line);
+  color:var(--desk-accent); background:var(--desk-paper); font:550 12px/1.4 var(--font-ui,sans-serif);
+  cursor:pointer; white-space:nowrap;
+}
+.wb-nest-chat-controls button:hover { background:var(--desk-soft); }
+body.workbench .wb-desk[data-desk-chat] .wb-desk-chat-head {
+  min-height:30px; padding:2px 9px; gap:6px; align-items:center;
+}
+body.workbench .wb-desk[data-desk-chat] .wb-desk-chat-head h2 { font-size:14px; }
+body.workbench .wb-desk[data-desk-chat="preview"] .wb-desk-chat > #transcript {
+  padding:3px 12px; gap:4px;
+}
+body.workbench .wb-desk[data-desk-chat="preview"] .wb-desk-chat > .wb-desk-empty { display:none; }
+body.workbench .wb-desk[data-desk-chat="preview"] #transcript > :is(.msg:nth-last-child(n+3 of .msg),.wy-history-pages) { display:none; }
+body.workbench .wb-desk[data-desk-chat="preview"] #transcript > .msg {
+  display:block; padding:0; margin:0; border:0; background:transparent; border-radius:0; max-width:100%;
+}
+body.workbench .wb-desk[data-desk-chat="preview"] #transcript > .msg > :is(.meta,.who,.msg-actions) { display:none !important; }
+body.workbench .wb-desk[data-desk-chat="preview"] #transcript > .msg > .body:not(:empty) {
+  display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2;
+  overflow:hidden; font-size:14px; line-height:1.45; min-height:0;
+}
+body.workbench .wb-desk[data-desk-chat="preview"] #transcript > .msg > .body > :first-child { margin-block-start:0; }
+body.workbench .wb-desk[data-desk-chat="preview"] #transcript > .msg > .body > :last-child { margin-block-end:0; }
+body.workbench .wb-desk[data-desk-chat="preview"] #transcript > .msg.user { align-self:flex-end; color:var(--desk-accent); }
+body.workbench .wb-desk[data-desk-chat="quiet"] .wb-desk-chat > :is(#transcript,.wb-desk-empty,.wy-jump-latest,.wb-jump-latest) { display:none !important; }
+body.workbench .wb-desk[data-desk-chat="history"] > .wb-desk-chat {
+  position:absolute; z-index:9; inset:auto 8px 6px auto; width:min(650px,calc(100% - 16px));
+  height:min(66%,620px); min-height:min(280px,90%); box-sizing:border-box;
+  display:flex; flex-direction:column; border-color:var(--desk-line); background:var(--desk-paper);
+}
+body.workbench .wb-desk[data-desk-chat="history"] #transcript { flex:1 1 0; }
+body.workbench .wb-desk[data-desk-chat="history"] .wb-desk-chat > .wb-desk-empty { inset-inline:10px; }
+body.workbench .wb-desk[data-desk-chat="history"] .wb-desk-chat > .composer-message-queue { max-height:min(125px,20%); }
+@container workbench-area (min-width:731px) {
+  body.workbench .wb-desk[data-desk-chat]:has(.ws-scene[data-room-view="nest"]) > .wb-desk-chat { grid-area:2 / 1; }
+  body.workbench .wb-desk[data-desk-chat="history"]:has(.ws-scene[data-room-view="nest"]) > .wb-desk-chat { grid-area:auto; }
+  body.workbench .wb-desk[data-desk-chat] .wb-desk-chat > #inputbar { margin:3px 7px; padding:5px; width:calc(100% - 14px); }
+  body.workbench .wb-desk[data-desk-chat] .wb-desk-chat > #inputbar #prompt { min-height:30px; max-height:min(9vh,70px); }
+  body.workbench .wb-desk[data-desk-chat]:not([data-desk-chat="history"]) .wb-desk-chat { overflow:visible; z-index:7; }
+  body.workbench .wb-desk[data-desk-chat]:not([data-desk-chat="history"]) .wb-desk-chat > #inputbar {
+    align-self:end; grid-row:1 / span 3;
+  }
+  body.workbench .wb-desk[data-desk-chat]:not([data-desk-chat="history"]) .wb-desk-chat > .chip-bar { grid-column:1; }
+  body.workbench .wb-desk[data-desk-chat="quiet"] .chip-bar,
+  body.workbench .wb-desk[data-desk-chat="preview"]:has(#transcript > .msg) .chip-bar { display:none; }
+
+  body.workbench .wb-desk[data-desk-chat]:not([data-desk-chat="history"]) .wb-desk-chat > .composer-message-queue:not([hidden]) {
+    position:absolute; grid-area:auto; z-index:3; bottom:max(100%,var(--wb-desk-input-height,0px)); right:0; width:min(440px,97%); margin:0;
+    max-height:min(160px,23vh); overflow-y:auto; background:var(--desk-paper);
+  }
+  body.workbench .wb-desk[data-desk-chat]:not([data-desk-chat="history"]) .composer-message-queue:not([hidden]) ~ #inputbar { grid-row:1 / span 3; }
+}

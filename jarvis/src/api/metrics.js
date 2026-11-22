@@ -33,21 +33,25 @@ export class MetricsPoller {
     this.inflight = ctrl;
     try {
       // 单文件版没有网关：直接用浏览器能拿到的近似指标；网关连不上时同样回退
+      let data;
       if (STANDALONE || this.fallback) {
-        this.onData?.(await browserMetrics());
+        data = await browserMetrics(ctrl.signal);
       } else {
         const res = await fetch(this.url, { signal: ctrl.signal, cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        this.onData?.({ source: 'server', ...(await res.json()) });
+        data = { source: 'server', ...(await res.json()) };
       }
+      if (!ctrl.signal.aborted) this.onData?.(data);
     } catch (err) {
-      if (err.name !== 'AbortError') {
+      if (!ctrl.signal.aborted && err.name !== 'AbortError') {
         this.fallback = true;
         this.onError?.(err);
       }
     } finally {
-      if (this.inflight === ctrl) this.inflight = null;
+      if (this.inflight === ctrl) {
+        this.inflight = null;
+        if (this.running) this.timer = setTimeout(() => this.#poll(), this.interval);
+      }
     }
-    if (this.running) this.timer = setTimeout(() => this.#poll(), this.interval);
   }
 }

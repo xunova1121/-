@@ -42,13 +42,13 @@ export function initConversationComposer({ cancelDictation } = {}) {
   row.append(plus, model, stop, mic, call, send); // DOM 顺序与键盘阅读顺序相同
   form.classList.add('conversation-composer');
   function refresh() {
-    recording.hidden = !document.body.classList.contains('dictating');
+    recording.toggleAttribute('hidden', !document.body.classList.contains('dictating'));
     const state = composerState({text:prompt.value,attachments:form.querySelector('#attach-list')?.children.length,generating:document.body.classList.contains('generating')});
     form.classList.toggle('has-draft',state.hasDraft); form.classList.toggle('is-working',state.stop);
-    send.hidden = !state.send; send.disabled = !state.send;
+    send.toggleAttribute('hidden', !state.send); send.toggleAttribute('disabled', !state.send);
     // 无识别能力时原有 hidden 标志仍然生效，不伪造可用的麦克风。
-    mic.style.display = state.voice ? 'grid' : 'none'; call.hidden = !state.voice;
-    stop.hidden = !state.stop;
+    mic.style.display = state.voice ? 'grid' : 'none'; call.toggleAttribute('hidden', !state.voice);
+    stop.toggleAttribute('hidden', !state.stop);
   }
   prompt.addEventListener('input',refresh); form.addEventListener('submit',()=>queueMicrotask(refresh));
   new MutationObserver(refresh).observe(document.body,{attributes:true,attributeFilter:['class']});

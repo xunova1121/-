@@ -1,5 +1,4 @@
 /** 一轮输入整理及模型线路选择；图片缓存仍只保留最近两条消息，不落盘。 */
-import { MOBILE } from '../config.js';
 import { followsImage } from '../core/imageFollowup.js';
 import { createAdapter } from '../llm/config.js';
 import { routeFor, TASKS, effortFor, computerTaskKind } from '../llm/router.js';
@@ -17,7 +16,7 @@ export function createTurnInputs(app) {
   function takeInput(text, echo, queuedFiles) {
     app.cancelCompression?.();
     // 持续聊天也保持有界；先重画已完成的历史，再追加本轮，避免重复消息。
-    if (MOBILE && (app.historyViewEnd !== null || $('#transcript').querySelectorAll('.msg').length >= app.visibleHistory().limit)) app.replayTranscript();
+    app.prepareTranscriptForTurn?.();
     const files = queuedFiles ?? app.attachments.splice(0);
     if (!queuedFiles) app.renderAttachments();
     // 压缩包标一句怎么打开，模型不会把它当普通文件去读

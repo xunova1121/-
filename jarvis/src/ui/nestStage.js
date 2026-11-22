@@ -164,7 +164,7 @@ export function createNestStage({scene, floor, room, caption, deskHost, onChange
         }
         seat.hidden = upright || (!sprite && !viewing && !sleepInFront);
         if (!seat.hidden) {
-          const emptySeat = MOBILE ? nestSeatArt(dark) : nestArt('sleep', dark);
+          const emptySeat = nestSeatArt(dark);
           if (seat.getAttribute('src') !== emptySeat) seat.src = emptySeat;
         }
         if (viewing) scene.dataset.nestViewing = viewing;

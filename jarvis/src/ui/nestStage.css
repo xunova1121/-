@@ -22,9 +22,10 @@
   transform-origin:50% 50%;
 }
 .ws-nest-art,.ws-nest-seat { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; user-select:none; }
+/* 小屋仍用原画坐标。座位图已经按原渐变烘出透明边缘，只上传这块家具的纹理。 */
 .ws-nest-seat {
-  mask-image: radial-gradient(ellipse 13.5% 22% at 62.5% 47%,black 71%,transparent 100%);
-  -webkit-mask-image: radial-gradient(ellipse 13.5% 22% at 62.5% 47%,black 71%,transparent 100%);
+  inset: 24.90234375% auto auto 48.95833333%;
+  width: 27.08333333%; height: 44.3359375%;
 }
 .ws-scene[data-room-view="floor"] :is(.ws-nest-art,.ws-nest-seat,.ws-nest-hit,.nest-window-glass,.nest-wall-photo,.ws-nest-cat-patch),
 .work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] > .ws-floorplan > :is(.ws-life-furniture,.ws-fixtures,.ws-room-light,.ws-actor,.ws-life-actor) { display:none; }

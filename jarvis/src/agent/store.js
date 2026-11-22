@@ -1,4 +1,5 @@
 import { userStorageSuffix } from '../core/userStorage.js';
+import { readRecentSessionRows, writeSessionsAndList } from './localSessionList.js';
 /**
  * 本地持久化：IndexedDB（浏览器）/ 内存 Map（Node 测试或存储被禁用时）。
  * 所有数据只在这台电脑的浏览器里，不上传。
@@ -68,6 +69,18 @@ const fileUpdates = new WeakMap();
  * backend 提供 all / get / put / delete / clear(集合名, …)
  */
 export function useBackend(b) { backend = b; }
+
+/** 浏览器的侧栏查询只返回标题。非浏览器存储保持同一套筛选和顺序。 */
+export async function localRecentSessionRows(limit) {
+  if (!backend) {
+    const db = await openDb();
+    if (db) return readRecentSessionRows(db, limit);
+  }
+  const rows = backend ? await backend.all('sessions') : [...memoryDb.get('sessions').values()];
+  return rows.filter(row => !row.evaluationId)
+    .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || (b.updatedAt || 0) - (a.updatedAt || 0))
+    .slice(0, limit).map(({id, title, updatedAt}) => ({id, title, updatedAt}));
+}
 
 /** 文件清单只投影小段元数据。本机按游标处理，服务器直接读取索引里的大小和时间。 */
 export async function mapFileMetadata(project) {
@@ -179,20 +192,23 @@ export function collection(name) {
       if (backend) { await backend.put(name, obj); return obj; }
       const db = await openDb();
       if (!db) { memoryDb.get(name).set(obj.id, obj); return obj; }
-      await tx(db, name, 'readwrite', (s) => s.put(obj));
+      if (name === 'sessions') await writeSessionsAndList(db, 'put', obj);
+      else await tx(db, name, 'readwrite', (s) => s.put(obj));
       return obj;
     },
     async delete(id) {
       if (backend) return backend.delete(name, id);
       const db = await openDb();
       if (!db) { memoryDb.get(name).delete(id); return; }
-      await tx(db, name, 'readwrite', (s) => s.delete(id));
+      if (name === 'sessions') await writeSessionsAndList(db, 'delete', id);
+      else await tx(db, name, 'readwrite', (s) => s.delete(id));
     },
     async clear() {
       if (backend) return backend.clear(name);
       const db = await openDb();
       if (!db) { memoryDb.get(name).clear(); return; }
-      await tx(db, name, 'readwrite', (s) => s.clear());
+      if (name === 'sessions') await writeSessionsAndList(db, 'clear');
+      else await tx(db, name, 'readwrite', (s) => s.clear());
     }
   };
 }

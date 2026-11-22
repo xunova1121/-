@@ -3,7 +3,7 @@ import { dropSessionWork } from './workLedger.js';
  * 多会话：每段对话单独保存（本机 IndexedDB），可以新建、切换、搜索、重命名、导出、删除。
  * 消息只存文本（用户原话与未央的回答），工具调用记录只存名字，用于回看时显示“用了哪些工具”。
  */
-import { collection, uid } from './store.js';
+import { collection, localRecentSessionRows, uid } from './store.js';
 import { buildIndex } from './search.js';
 import { archiveRequirements } from './taskRequirements.js';
 import { evidence } from './evidenceStore.js';
@@ -16,6 +16,9 @@ let remote = null;
 export function useRemote(r) { remote = r; }
 /** 现在是不是从服务器读对话（电脑左栏据此决定刷新频率） */
 export const usingRemote = () => Boolean(remote);
+// 四条最近对话之外只需知道是否还有更多，用第五条决定“查看更多”的显示。
+const localSidebar = { list: () => localRecentSessionRows(5) };
+export const sidebarSource = () => remote || localSidebar;
 
 /** 用第一句话做标题 */
 export function autoTitle(text) {

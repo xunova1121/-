@@ -13,6 +13,13 @@ export const cases = [
     while(end>0){const r=transcriptWindow(history.length,{mobile:true,safe:true,end});assert.ok(r.end-r.start<=12);seen.unshift(...history.slice(r.start,r.end));end=r.start;}
     assert.deepEqual(seen,history);assert.equal(JSON.stringify(history),snapshot);
   }],
+  ['电脑分批绘制长对话，翻回最前页仍能找到相邻消息', () => {
+    const latest=transcriptWindow(115,{desktop:true});
+    const middle=transcriptWindow(115,{desktop:true,end:latest.start});
+    const first=transcriptWindow(115,{desktop:true,end:middle.start});
+    assert.deepEqual([first.start,first.end,middle.start,middle.end,latest.start,latest.end],[0,19,19,67,67,115]);
+    assert.equal(latest.limit,48);
+  }],
   ['空历史和越界翻页仍有界', () => {
     assert.deepEqual(transcriptWindow(0,{mobile:true}),{start:0,end:0,limit:24,older:0,newer:0});
     assert.equal(transcriptWindow(5,{mobile:true,end:999}).end,5);

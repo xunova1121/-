@@ -1,6 +1,7 @@
 import { createWorkStudioView } from './workStudioView.js';
 import { createConversationMount } from './conversationMount.js';
 import './workbenchDesk.css';
+import { createWorkbenchNestChat } from './workbenchNestChat.js';
 
 export function createWorkbenchStudio({ getSession, activity, newsChat, newsFeed, getPlayers, nestDeskOptions }) {
   const transcript = document.getElementById('transcript');
@@ -27,6 +28,7 @@ export function createWorkbenchStudio({ getSession, activity, newsChat, newsFeed
   empty.textContent = '把要做的事告诉未央。';
   chat.append(header, empty);
   desk.append(chat);
+  const nestChat = createWorkbenchNestChat(desk, chat, transcript, form);
 
   let view;
   let open = false;
@@ -70,11 +72,13 @@ export function createWorkbenchStudio({ getSession, activity, newsChat, newsFeed
       restoreScroll = conversation.moveTo(chat);
       updateEmpty();
     } else {
+      nestChat.close();
       restoreScroll = conversation.restore();
       desk.hidden = true;
     }
     visibility();
     restoreScroll?.();
+    if (open) nestChat.open(view.element);
   }
   return { show, refresh };
 }

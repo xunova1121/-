@@ -13,6 +13,7 @@ import { createServerClient } from '../src/core/serverClient.js';
 import { useBackend } from '../src/agent/store.js';
 import { openTaskFloor } from './workshop-test-view.mjs';
 import { checkWorkshopRoom } from './workshop-room-check.mjs';
+import { checkNestHistory } from './workbench-nest-history.mjs';
 
 const output = path.resolve(process.argv[2] || '/tmp/weiyang-workbench-action-studio');
 await mkdir(output, { recursive: true });
@@ -400,6 +401,7 @@ try {
   await stage(remote).locator('[data-entry-id][data-pose="cheer"]').waitFor();
   assert.equal(await remoteEdit.count(), 1, '断线续接后没有重复工具步骤');
   assert.equal(requests.filter(req => req.method === 'POST' && req.path === '/api/tasks').length, 1, '回放和重连都未重复提交云端任务');
+  await checkNestHistory(remote, memberClient);
 
   const phone = await open(mobile, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   assert.equal(await phone.locator('.wb-tabs:visible').count(), 0);

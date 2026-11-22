@@ -224,17 +224,19 @@ export function createStage(app) {
 
   // 后台 / 视口外暂停（需求 9.2）
   let canvasVisible = false;
-  new IntersectionObserver(([e]) => {
-    canvasVisible = e.isIntersecting;
-    if (canvasVisible && body.classList.contains('wb-classic-stage') && !wantsReducedMotion(app.settings, reducedMql)) ensureStage();
-    stage?.setPaused('offscreen', !canvasVisible);
-  }).observe($('#stage-wrap'));
+  let dashboardVisible = false;
+  function syncStageVisibility() {
+    const showHud = canvasVisible && !document.hidden;
+    orbit?.setVisible(showHud);
+    callouts?.setStageVisible?.(showHud);
+    if (!COMPACT && !document.hidden && (canvasVisible || dashboardVisible)) poller.start();
+    else poller.stop();
+  }
 
   document.addEventListener('visibilitychange', () => {
     const hidden = document.hidden;
     stage?.setPaused('hidden', hidden);
-    if (hidden) poller.stop();
-    else if (!COMPACT) poller.start();
+    syncStageVisibility();
     app.face?.setPaused(hidden);
   });
 
@@ -250,7 +252,20 @@ export function createStage(app) {
     },
     onError: () => dashboard.setDisconnected()
   });
-  if (!document.hidden && !COMPACT) poller.start(); // 手机上没有仪表盘
+  const stageWrap = $('#stage-wrap');
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      const visible = entry.isIntersecting && entry.intersectionRect.width > 0 && entry.intersectionRect.height > 0;
+      if (entry.target === stageWrap) {
+        canvasVisible = visible;
+        if (visible && body.classList.contains('wb-classic-stage') && !wantsReducedMotion(app.settings, reducedMql)) ensureStage();
+        stage?.setPaused('offscreen', !visible);
+      } else dashboardVisible = visible;
+    }
+    syncStageVisibility();
+  });
+  observer.observe(stageWrap);
+  if (!COMPACT) observer.observe($('#dashboard'));
 
   subscribeAgentEvents({ onEmotion: (state, ttl) => machine.inject(state, ttl ?? 5000) });
 
@@ -367,6 +382,7 @@ export function createStage(app) {
           cur().set(items);
         },
         show: () => cur().show(),
+        setStageVisible: (visible) => full.setVisible(visible),
         retract() {
           full.retract();
           chips.retract();
@@ -417,6 +433,7 @@ export function createStage(app) {
       }
     };
     callouts = COMPACT ? initChips(suggestionOpts) : dualSuggestions(initCallouts(suggestionOpts), initChips(suggestionOpts), useSuggestionChips);
+    syncStageVisibility();
   }
 
   return {

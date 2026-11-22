@@ -109,7 +109,7 @@
   .wb-desk .work-studio-view[data-wide-workshop] .ws-timeline:not(:has(.ws-list:empty)) {
     flex:none; max-height:68px; overflow:auto;
   }
-  body.workbench .wb-desk:has(.ws-scene[data-room-view="nest"]) {
+  body.workbench .wb-desk:has(.work-studio-view[data-wide-workshop] .ws-scene[data-room-view="nest"]) {
     padding-block: 6px; grid-template-rows:minmax(0,1fr) minmax(112px,14%); gap:6px;
   }
   .wb-desk .work-studio-view[data-wide-workshop]:has(.ws-scene[data-room-view="nest"]) .ws-header {
@@ -152,9 +152,12 @@
 
 @media (max-height:720px) {
   @container workbench-area (min-width:731px) {
-    /* 矮窗口可以下滚到对话，避免全景仅剩天花和电视上沿。 */
-    body.workbench .wb-desk:has(.ws-scene[data-room-view="nest"]) {
-      grid-template-rows:minmax(63cqw,1fr) minmax(112px,16vh); overflow:auto;
+    /* 矮屏优先取景到地毯上的猫，给对话留在视口里。开设备时保持同一取景。 */
+    .wb-desk .work-studio-view[data-wide-workshop] .ws-scene[data-room-view="nest"] > .ws-floorplan {
+      top:min(11cqw,16cqh,calc(100cqh - 59.5cqw));
+    }
+    .wb-desk .work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="monitor"] {
+      inset:1% 1% 9% 26%;
     }
   }
 }

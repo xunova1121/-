@@ -23,9 +23,14 @@ export function createComposer(app) {
   // —— 输入框：Enter 发送，Shift+Enter 换行；随内容自动增高
   const prompt = $('#prompt');
   const messageQueue = createComposerQueue(app, $('#inputbar'));
+  // 新版桌面浏览器能按文字和换行自行调整高度，逐个按键都测量 scrollHeight 会强制整页布局。
+  const nativeSizing = !MOBILE && globalThis.CSS?.supports('field-sizing', 'content');
+  if (nativeSizing) prompt.style.fieldSizing = 'content';
   function autosize() {
-    prompt.style.height = 'auto';
-    prompt.style.height = `${Math.min(prompt.scrollHeight, 160)}px`;
+    if (!nativeSizing) {
+      prompt.style.height = 'auto';
+      prompt.style.height = `${Math.min(prompt.scrollHeight, 160)}px`;
+    }
     app.composer?.refresh();
   }
   $('#inputbar').addEventListener('submit', (e) => {

@@ -1354,6 +1354,38 @@ function userStorageSuffix(storage) {
   return "";
 }
 
+// src/agent/localSessionList.js
+var prefix = "session-list-row:";
+var rowKeys = () => IDBKeyRange.bound(prefix, "session-list-row;", false, true);
+function listRow(session) {
+  return {
+    id: prefix + session.id,
+    sessionId: session.id,
+    title: session.title,
+    pinned: !!session.pinned,
+    updatedAt: session.updatedAt,
+    excluded: !!session.evaluationId
+  };
+}
+function writeSessionsAndList(db, method, value) {
+  return new Promise((resolve, reject) => {
+    const tx2 = db.transaction(["sessions", "kv"], "readwrite");
+    const sessions = tx2.objectStore("sessions"), index = tx2.objectStore("kv");
+    if (method === "put") {
+      sessions.put(value);
+      index.put(listRow(value));
+    } else if (method === "delete") {
+      sessions.delete(value);
+      index.delete(prefix + value);
+    } else {
+      index.delete(rowKeys());
+      sessions.clear();
+    }
+    tx2.oncomplete = resolve;
+    tx2.onabort = tx2.onerror = () => reject(tx2.error);
+  });
+}
+
 // src/agent/store.js
 var DB_NAME = "jarvis" + userStorageSuffix();
 var DB_VERSION = 5;
@@ -1442,7 +1474,8 @@ function collection(name) {
         memoryDb.get(name).set(obj.id, obj);
         return obj;
       }
-      await tx(db, name, "readwrite", (s) => s.put(obj));
+      if (name === "sessions") await writeSessionsAndList(db, "put", obj);
+      else await tx(db, name, "readwrite", (s) => s.put(obj));
       return obj;
     },
     async delete(id) {
@@ -1452,7 +1485,8 @@ function collection(name) {
         memoryDb.get(name).delete(id);
         return;
       }
-      await tx(db, name, "readwrite", (s) => s.delete(id));
+      if (name === "sessions") await writeSessionsAndList(db, "delete", id);
+      else await tx(db, name, "readwrite", (s) => s.delete(id));
     },
     async clear() {
       if (backend) return backend.clear(name);
@@ -1461,7 +1495,8 @@ function collection(name) {
         memoryDb.get(name).clear();
         return;
       }
-      await tx(db, name, "readwrite", (s) => s.clear());
+      if (name === "sessions") await writeSessionsAndList(db, "clear");
+      else await tx(db, name, "readwrite", (s) => s.clear());
     }
   };
 }

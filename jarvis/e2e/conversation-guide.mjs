@@ -30,7 +30,7 @@ const mode = createServerMode({ dataDir: dir, password: 'guide-fixture-password'
 await mode.ready;
 const server = createServer({ serverMode: mode, ollama: null });
 const mobile = createServer({ staticDir: path.resolve('dist-mobile'), ollama: null });
-const desktop = createServer({ staticDir: path.resolve('dist'), ollama: null });
+const desktop = createServer({ staticDir: path.resolve(process.env.WORKSHOP_PC_DIST || 'dist'), ollama: null });
 const servers = [server, mobile, desktop];
 for (const app of servers) await new Promise(resolve => app.listen(0, '127.0.0.1', resolve));
 const base = 'http://127.0.0.1:' + server.address().port;
@@ -41,10 +41,10 @@ let browser;
 const check = (name, ok) => { results.push({ name, ok }); console.log(`${ok ? '✓' : '✗'} ${name}`); assert.ok(ok, name); };
 try {
   browser = await chromium.launch();
-  for (const [width, app] of [[390, mobile], [1280, desktop], [320, mobile]]) {
+  for (const [width, app, inRoom] of [[390, mobile], [1280, desktop], [320, mobile], [1366, desktop, true]]) {
     const user = await owner.createUser('引导验收' + width), login = await owner.loginAccount(user.accessCode);
     const client = createServerClient({ base, token: login.token });
-    const context = await browser.newContext({ viewport: { width, height: 844 }, isMobile: width < 800, hasTouch: width < 800 });
+    const context = await browser.newContext({ viewport: { width, height: inRoom ? 720 : 844 }, isMobile: width < 800, hasTouch: width < 800 });
     await context.addInitScript(({ base, token, userId, width }) => {
       localStorage.setItem('jarvis.server.v1', JSON.stringify({ url: base, token, userId, role: 'member', enabled: true }));
       localStorage.setItem('jarvis.settings.v1', JSON.stringify({ theme: width === 320 ? 'night' : 'day', speechOutput: false, autoMemory: false, teamMode: 'off' }));
@@ -55,11 +55,53 @@ try {
     await page.goto('http://127.0.0.1:' + app.address().port);
     await page.waitForFunction(() => window.__jarvisServerClient && window.__jarvis?.send);
     await page.evaluate(() => document.querySelector('#app-splash')?.remove());
+    if (inRoom) {
+      await page.locator('.wb-tabs').getByRole('button', { name:'工作台', exact:true }).click();
+      await page.locator('.wb-desk[data-desk-chat=preview]').waitFor();
+      const visible = await page.locator('#prompt').evaluate(input => {
+        const box = input.getBoundingClientRect();
+        return box.bottom <= innerHeight && document.elementFromPoint(box.x + 10, box.y + 10) === input;
+      });
+      check('720px 高的电脑窗口在工作台首屏可以直接点击输入框', visible);
+      const field = page.locator('#prompt');
+      await field.fill('第一行');
+      const single = await field.boundingBox();
+      await field.fill('第一行\n第二行\n第三行');
+      const multi = await field.boundingBox();
+      await field.fill('');
+      const reset = await field.boundingBox();
+      check('输入多行时自动增高，清空后恢复初始高度', multi.height > single.height && Math.abs(reset.height - single.height) < 1);
+      const cat = page.locator('.wb-desk [data-furniture="cat"]');
+      check('矮窗口保留地毯上的猫和交互位置', await cat.evaluate(el => {
+        const b = el.getBoundingClientRect();
+        return document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)?.closest('[data-furniture="cat"]') === el;
+      }));
+    }
     const submit = async text => { await page.fill('#prompt', text); await page.click('#btn-send'); };
     holdNext = true;
     const start = httpCalls.length, callsStart = modelCalls.length;
     await submit('请介绍甲方案的优缺点');
     await page.waitForFunction(() => document.querySelector('.msg.agent.streaming .body')?.textContent.includes('正在整理原计划'));
+    if (inRoom) {
+      const bothLines = await page.locator('#transcript').evaluate(el => {
+        const area = el.getBoundingClientRect();
+        return ['user', 'agent'].every(role => {
+          const msg = el.querySelector('.msg.' + role + ' > .body')?.getBoundingClientRect();
+          return msg && msg.top >= area.top - 1 && msg.bottom <= area.bottom + 1;
+        });
+      });
+      check('短提问和流式回复可同时读到', bothLines);
+      const original = await page.locator('.wb-desk .ws-floorplan').boundingBox();
+      await page.getByRole('button', { name:'隐藏消息' }).click();
+      check('收起房间消息时仍可输入', !await page.locator('#transcript').isVisible() && await page.locator('#prompt').isVisible());
+      await page.getByRole('button', { name:'显示消息' }).click();
+      await page.locator('#transcript .msg.agent .body').filter({hasText:'正在整理原计划'}).click();
+      const rect = await page.locator('#transcript').boundingBox();
+      check('小窝回复可展开阅读（实测 ' + Math.round(rect.height) + 'px）', rect.height >= 200);
+      const final = await page.locator('.wb-desk .ws-floorplan').boundingBox();
+      check('阅读时房间与沙发位置保持一致 ' + JSON.stringify([original, final]), Object.keys(original).every(key => Math.abs(original[key] - final[key]) < 1));
+      await page.getByRole('button', { name:'收起全文' }).click();
+    }
     const queue = page.getByRole('region', { name: '待发送问题' });
     check(`${width} 发送前没有模式按钮`, await page.locator('.composer-send-modes').count() === 0);
     await submit('原计划补充：保留三个重点');
@@ -69,7 +111,7 @@ try {
     await queue.locator('li').last().getByRole('button', { name: '待发消息操作', exact: true }).click();
     check(`${width} 菜单提供编辑/引导/取消`, (await menu.getByRole('menuitem').allTextContents()).join('|') === '编辑消息|改为引导|取消消息');
     const menuRect = await menu.boundingBox(), formRect = await page.locator('#inputbar').boundingBox(), queueRect = await queue.boundingBox();
-    check(`${width} 待发列表在输入框上方，菜单完整可见`, queueRect.y + queueRect.height <= formRect.y + 1 && menuRect.x >= 0 && menuRect.y >= 0 && menuRect.x + menuRect.width <= width && menuRect.y + menuRect.height <= 844);
+    check(`${width} 待发列表在输入框上方，菜单完整可见`, queueRect.y + queueRect.height <= formRect.y + 1 && menuRect.x >= 0 && menuRect.y >= 0 && menuRect.x + menuRect.width <= width && menuRect.y + menuRect.height <= page.viewportSize().height);
     check(`${width} 菜单触控至少44px`, await menu.getByRole('menuitem').evaluateAll(items => items.every(item => item.getBoundingClientRect().height >= 44)));
     await page.screenshot({ path: `${out}/menu-${width}.png` });
     await page.keyboard.press('Escape');

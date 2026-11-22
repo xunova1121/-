@@ -38,22 +38,39 @@ export function initWorkbench({showPanel,newSession,openSession,getSession,getRu
  const suggestions=[['整理工作，轻松开始','拆解目标，安排今天的计划','plan','请帮我梳理今天的工作计划，先问我当前的目标和时间安排。','✓'],['你的专属专家','办公、编程、研究，按需协作','expert','请列出已经安装的技能，并说明哪些适合我现在的工作。','✦'],['文件处理','读文档、写方案、制作演示稿','document','我需要整理一份文档，请先让我提供文件和具体要求。','▤'],['数据分析','读懂表格，发现数据里的线索','data','我想分析一份表格，请先确认文件、分析目标和数据口径。','▥']];
  for(const [title,sub,cls,prompt,art]of suggestions){const b=node('button',null,'wb-card '+cls),copy=node('span');copy.append(node('b',title),node('small',sub));b.append(copy,node('i',art,'wb-card-art'));b.onclick=()=>{const input=document.querySelector('#prompt');input.value=prompt;input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();};cards.append(b);}landing.append(intro,cards);main.prepend(landing);
  const transcript=document.querySelector('#transcript');function update(){landing.hidden=!!transcript.querySelector('.msg, .wy-agent-start');}
- new MutationObserver(update).observe(transcript,{childList:true,subtree:true});update();
+ new MutationObserver(update).observe(transcript,{childList:true});update();
  document.querySelector('#prompt').placeholder='可以描述任务，或提出任何问题';
  const info=node('aside',null,'wb-info');info.id='wb-conversation-info';info.setAttribute('aria-label','当前对话信息');
  const infoHead=node('div',null,'wb-info-head'),infoTabs=node('div',null,'wb-info-tabs'),conversationTab=node('button','对话信息'),expertTab=node('button','能力信息'),hideInfo=node('button','×','wb-info-close');
  hideInfo.setAttribute('aria-label','收起右侧信息栏');infoTabs.append(conversationTab,expertTab);infoHead.append(infoTabs,hideInfo);
  const infoContent=node('div',null,'wb-info-content');info.append(infoHead,infoContent);document.querySelector('.app').append(info);
  const toggleInfo=node('button','◧','wb-info-toggle');toggleInfo.type='button';toggleInfo.setAttribute('aria-controls',info.id);top.append(toggleInfo);
- let infoOpen=false,infoTab='conversation',infoSignature='';
- function setInfoOpen(open){infoOpen=open;document.body.classList.toggle('wb-info-open',open);info.hidden=!open;toggleInfo.setAttribute('aria-expanded',String(open));toggleInfo.setAttribute('aria-label',open?'收起右侧信息栏':'展开右侧信息栏');toggleInfo.title=open?'收起对话信息':'展开对话信息';try{localStorage.setItem('jarvis.workbench.infoOpen',String(open));}catch{}if(!open&&info.contains(document.activeElement))toggleInfo.focus();window.dispatchEvent(new Event('resize'));}
+ let infoOpen=false,infoTab='conversation',infoSignature='',infoTimer;
+ function syncInfo(){
+  clearInterval(infoTimer);
+  if (!infoOpen || document.hidden) return;
+  refreshInfo();
+  infoTimer=setInterval(refreshInfo,700);
+ }
+ function setInfoOpen(open){infoOpen=open;document.body.classList.toggle('wb-info-open',open);info.hidden=!open;toggleInfo.setAttribute('aria-expanded',String(open));toggleInfo.setAttribute('aria-label',open?'收起右侧信息栏':'展开右侧信息栏');toggleInfo.title=open?'收起对话信息':'展开对话信息';try{localStorage.setItem('jarvis.workbench.infoOpen',String(open));}catch{}if(!open&&info.contains(document.activeElement))toggleInfo.focus();syncInfo();window.dispatchEvent(new Event('resize'));}
  toggleInfo.onclick=()=>setInfoOpen(!infoOpen);hideInfo.onclick=()=>setInfoOpen(false);
  function selectInfoTab(tab){infoTab=tab;conversationTab.classList.toggle('selected',tab==='conversation');expertTab.classList.toggle('selected',tab==='expert');conversationTab.setAttribute('aria-pressed',String(tab==='conversation'));expertTab.setAttribute('aria-pressed',String(tab==='expert'));infoSignature='';refreshInfo();}
  conversationTab.onclick=()=>selectInfoTab('conversation');expertTab.onclick=()=>selectInfoTab('expert');
  function section(title){const s=node('section',null,'wb-info-section');s.append(node('h3',title));infoContent.append(s);return s;}
- function refreshInfo(){const current=getSession?.()||{},messages=current.messages||[],files=[...new Set(messages.flatMap(m=>m.files||[]))],usedTools=[...new Set(messages.flatMap(m=>m.tools||[]))],reply=[...messages].reverse().find(m=>m.role==='assistant'&&typeof m.content==='string'),model=document.querySelector('#model-chip')?.textContent?.trim()||'尚未配置';const signature=JSON.stringify([current.id,reply?.content,files,usedTools,model,infoTab]);if(signature===infoSignature)return;infoSignature=signature;const scroll=infoContent.scrollTop;infoContent.replaceChildren();
+ function refreshInfo(){
+  if (!infoOpen || document.hidden) return;
+  const current=getSession?.()||{}, messages=current.messages||[];
+  const conversation=infoTab==='conversation';
+  const files=conversation ? [...new Set(messages.flatMap(m=>m.files||[]))] : [];
+  const usedTools=conversation ? [] : [...new Set(messages.flatMap(m=>m.tools||[]))];
+  const reply=conversation && messages.findLast(m=>m.role==='assistant' && typeof m.content==='string');
+  const summaryText=reply ? reply.content.slice(0,320)+(reply.content.length>320?'…':'') : '开始对话后，在这里查看最近回复。';
+  const model=conversation ? '' : document.querySelector('#model-chip')?.textContent?.trim()||'尚未配置';
+  const signature=JSON.stringify([current.id,Boolean(reply),summaryText,files,usedTools,model,infoTab]);
+  if(signature===infoSignature)return;
+  infoSignature=signature;const scroll=infoContent.scrollTop;infoContent.replaceChildren();
   if(infoTab==='conversation'){
-   const summary=section('最近回复摘要');summary.append(node('p',reply?reply.content.slice(0,320)+(reply.content.length>320?'…':''):'开始对话后，在这里查看最近回复。','wb-info-note'));if(reply)summary.append(node('small','摘自当前会话最近一次回复'));
+   const summary=section('最近回复摘要');summary.append(node('p',summaryText,'wb-info-note'));if(reply)summary.append(node('small','摘自当前会话最近一次回复'));
    const list=section('相关文件'+(files.length?'（'+files.length+'）':''));if(!files.length)list.append(node('p','本次对话还没有生成文件。','wb-info-note'));for(const path of files){if(typeof path!=='string')continue;const b=node('button',null,'wb-info-file');b.type='button';b.title=path;const ext=path.split('.').pop().toLowerCase(),types={docx:['文档','#4376c4'],xlsx:['表格','#408a6f'],csv:['表格','#408a6f'],pptx:['演示','#cb8058'],pdf:['PDF','#c76070'],md:['文本','#9276b5'],py:['代码','#6a7a93'],js:['代码','#6a7a93']},[label,color]=types[ext]||['文件','#9276b5'],badge=node('span',label,'weiyang-file-badge');badge.style.background=color;b.append(badge,node('span',path.split(/[\\/]/).pop()));b.onclick=()=>openFile?.(path);list.append(b);}
   }else{
    section('当前模型').append(node('p',model,'wb-info-note'));
@@ -63,7 +80,8 @@ export function initWorkbench({showPanel,newSession,openSession,getSession,getRu
   }infoContent.scrollTop=scroll;
  }
  selectInfoTab('conversation');let savedOpen=false;try{savedOpen=localStorage.getItem('jarvis.workbench.infoOpen')==='true';}catch{}setInfoOpen(savedOpen);
- const infoTimer=setInterval(()=>{if(!document.hidden)refreshInfo();},700);window.addEventListener('pagehide',()=>clearInterval(infoTimer));
+ document.addEventListener('visibilitychange',syncInfo);
+ window.addEventListener('pagehide',()=>clearInterval(infoTimer));
  const panel=document.querySelector('#panel'),panelClose=node('button','×','wb-panel-close');panelClose.title='返回对话';panelClose.setAttribute('aria-label','关闭功能面板');panelClose.onclick=closePanel;panel.prepend(panelClose);
  document.addEventListener('keydown',e=>{if(e.key==='Escape')closePanel();});
  initWorkspaceNavigation({showPanel,closePanel});
@@ -71,9 +89,54 @@ export function initWorkbench({showPanel,newSession,openSession,getSession,getRu
  initWorkbenchAgents({rail,top,agents,closePanel});
  // 正在回答的对话在“最近对话”里转圈
  let running='';function paint(){const cur=getSession?.()?.id;for(const b of history.querySelectorAll('.wb-chat')){b.classList.toggle('current',b.dataset.id===cur);const on=!!running&&b.dataset.id===running;b.classList.toggle('running',on);if(on)b.setAttribute('aria-busy','true');else b.removeAttribute('aria-busy');}}
- let shown='';function markRunning(){const id=getRunning?.()||'',cur=getSession?.()?.id||'';if(cur!==shown){shown=cur;studioSurface.refresh();paint();}if(id===running)return;const finished=running&&!id;running=id;paint();if(finished){last='';refresh().catch(()=>{});}if(id&&![...history.querySelectorAll('.wb-chat')].some(b=>b.dataset.id===id)){last='';refresh().catch(()=>{});}}// 新对话还没出现在列表里：重新读一次列表
+ let shown='';function markRunning(){if(historySource!==sessions.sidebarSource())refresh().catch(()=>{});const id=getRunning?.()||'',cur=getSession?.()?.id||'';if(cur!==shown){shown=cur;studioSurface.refresh();paint();}if(id===running)return;const finished=running&&!id;running=id;paint();if(finished){last='';refresh().catch(()=>{});}if(id&&![...history.querySelectorAll('.wb-chat')].some(b=>b.dataset.id===id)){last='';refresh().catch(()=>{});}}// 新对话还没出现在列表里：重新读一次列表
  // 读不到列表时保留上次的（historyList.js）：原来一次超时就把整栏清空成“暂不可用”，看着像对话全没了
- let last='',shownRows=null;async function refresh(){if(document.hidden)return;const got=await loadHistory({list:()=>sessions.list(),cached:()=>sessions.cachedList(),shown:()=>shownRows});if(!got.rows){history.replaceChildren(node('p',got.hint));last='';shownRows=null;more.hidden=true;return;}const rows=got.rows;const signature=JSON.stringify([got.stale,...rows.map(s=>[s.id,s.title,s.updatedAt])]);if(signature===last)return;last=signature;shownRows=rows;history.replaceChildren();if(got.stale)history.append(node('p',got.hint,'wb-history-stale'));for(const s of rows.slice(0,4)){const b=node('button',null,'wb-chat');b.dataset.id=s.id;b.append(node('i',null,'wb-run'),node('span',s.title||'未命名对话'));b.title=s.title;b.onclick=()=>{openSession(s.id);closePanel();setView(document.body.classList.contains('wb-studio'));};history.append(b);}if(!rows.length)history.append(node('p','开始对话后，记录会保存在这里。'));more.hidden=rows.length<=4;paint();}refresh();let timer=0;const tick=()=>{timer=setTimeout(()=>refresh().catch(()=>{}).finally(tick),refreshInterval(sessions.usingRemote()));};tick();window.addEventListener('pagehide',()=>clearTimeout(timer));
+ let last = '', shownRows = null, historySource = null, activeRead = null;
+ async function refresh() {
+   if (document.hidden) return;
+   const source = sessions.sidebarSource();
+   if (source !== historySource) {
+     historySource = source;
+     activeRead = null;
+     shownRows = null;
+     last = '';
+     history.replaceChildren();
+     more.hidden = true;
+   }
+   if (activeRead) return activeRead;
+   const read = loadHistory({ list: () => source.list(), cached: () => source.cachedList?.(), shown: () => shownRows });
+   activeRead = read;
+   try {
+     const got = await read;
+     if (read !== activeRead || source !== sessions.sidebarSource()) return;
+     if (!got.rows) {
+       history.replaceChildren(node('p', got.hint));
+       shownRows = null;
+       last = '';
+       more.hidden = true;
+       return;
+     }
+     const rows = got.rows.slice(0, 5).map(({id, title, updatedAt}) => ({id, title, updatedAt}));
+     const signature = JSON.stringify([got.stale, rows]);
+     if (signature === last) return;
+     last = signature;
+     shownRows = rows;
+     history.replaceChildren();
+     if (got.stale) history.append(node('p', got.hint, 'wb-history-stale'));
+     for (const s of rows.slice(0, 4)) {
+       const b = node('button', null, 'wb-chat');
+       b.dataset.id = s.id;
+       b.append(node('i', null, 'wb-run'), node('span', s.title || '未命名对话'));
+       b.title = s.title;
+       b.onclick = () => { openSession(s.id); closePanel(); setView(document.body.classList.contains('wb-studio')); };
+       history.append(b);
+     }
+     if (!rows.length) history.append(node('p', '开始对话后，记录会保存在这里。'));
+     more.hidden = rows.length <= 4;
+     paint();
+   } finally { if (read === activeRead) activeRead = null; }
+ }
+ refresh();let timer=0;const tick=()=>{timer=setTimeout(()=>refresh().catch(()=>{}).finally(tick),refreshInterval(sessions.usingRemote()));};tick();window.addEventListener('pagehide',()=>clearTimeout(timer));
  // 切回窗口时马上刷新一次（不再靠 3 秒一次的轮询）
  document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh().catch(()=>{});});window.addEventListener('focus',()=>refresh().catch(()=>{}));
  const runTimer=setInterval(markRunning,400);window.addEventListener('pagehide',()=>clearInterval(runTimer));
