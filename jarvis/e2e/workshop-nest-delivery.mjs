@@ -20,6 +20,8 @@ export async function checkNewsDeliveryInNest(page, room, filename, headline) {
   await group.waitFor();
   await group.getByRole('button', { name: '继续修改 ' + filename, exact: true }).click();
   const prompt = page.locator('#prompt');
+  // 先等工作区读回并校验同一版本；手机存储与云端都可能在按钮点击结束后才返回。
+  await group.waitFor({ state: 'hidden' });
   assert((await prompt.inputValue()).includes(filename), '生成简报后可从原房间继续修改文件');
   assert(await prompt.evaluate(el => el === document.activeElement), '继续修改后焦点回到当前输入框');
   assert(await scene.isVisible(), '继续修改后房间仍可见');

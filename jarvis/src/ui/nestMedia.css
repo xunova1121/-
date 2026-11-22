@@ -85,7 +85,9 @@
 .ws-scene[data-room-view="nest"] .ws-tv-stations .ws-media-channels {
   display: contents;
 }
-.ws-scene[data-room-view="nest"] .ws-source-manager { inset: auto auto 35px 3px; width: calc(100% - 6px); max-height: min(68cqh,420px); }
+.ws-scene[data-room-view="nest"] .ws-source-manager {
+  inset: 3px 3px 35px; width: auto; max-height: none;
+}
 .work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="monitor"] {
   inset: 1% 1% 35%; border-color: #c8ac89; border-radius: 14px;
   --ws-panel:#fff7e7; --ws-ink:#38291e; --ws-dim:#675440; --ws-line:#d5c3a9; --ws-on-tint:#73502d;
@@ -154,7 +156,9 @@
   .wb-desk .ws-scene[data-room-view="nest"] .ws-tv-controls .ws-tv-stations {
     inset:auto 0 100% auto; width:min(64cqw,25rem);
   }
-  .wb-desk .ws-scene[data-room-view="nest"] .ws-source-manager { inset:auto 4px 4px auto; width:min(90%,25rem); }
+  .wb-desk .ws-scene[data-room-view="nest"] .ws-source-manager {
+    inset:4px 4px auto auto; width:min(90%,25rem); max-height:calc(100% - 8px);
+  }
 }
 
 @media (max-height:720px) {
