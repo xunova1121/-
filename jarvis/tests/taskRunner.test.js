@@ -136,14 +136,18 @@ describe('服务器任务执行器', () => {
 
   it('发任务 → 服务器做完 → 回答存进对话；进度事件按序号可补发', async () => {
     const runner = createTaskRunner({ getConfig: mockCfg });
-    const { id, sessionId } = await runner.start({ text: '你好，介绍一下你自己' });
+    const submittedAt = Date.now() - 3600000;
+    const { id, sessionId } = await runner.start({ text: '你好，介绍一下你自己', submittedAt });
     await until(() => runner.get(id).status === 'done');
     const s = await sessions.get(sessionId);
     expect(s.messages.map((m) => m.role)).toEqual(['user', 'assistant']);
     expect(s.messages[1].content.length).toBeGreaterThan(0);
+    expect(s.messages[0].ts).toBe(submittedAt);
+    expect(runner.get(id).createdAt).toBeGreaterThan(submittedAt);
+    expect(s.messages[1].ts).toBe(runner.get(id).endedAt);
     const all = runner.events(id, 0);
     expect(all.map((e) => e.seq)).toEqual(all.map((_, i) => i + 1));
-    expect(all.at(-1)).toMatchObject({ type: 'task_state', status: 'done' });
+    expect(all.at(-1)).toMatchObject({ type: 'task_state', status: 'done', completedAt: s.messages[1].ts });
     expect(runner.events(id, all.at(-2).seq)).toHaveLength(1); // 断线重连：只补发漏掉的
   });
 

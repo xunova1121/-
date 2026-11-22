@@ -15,9 +15,10 @@ export function createWorkspaceFiles(app, { files = workspace, identity = userSt
       }
     }
     let mode = files.mode(),
-      folder = files.folderName();
+      folder = files.folderName(),
+      root = files.fileRoot?.();
     const check = () => {
-      if (server !== app.server || owner !== identity() || mode !== files.mode() || folder !== files.folderName())
+      if (server !== app.server || owner !== identity() || mode !== files.mode() || folder !== files.folderName() || root !== files.fileRoot?.())
         throw Object.assign(new Error('账号、服务器或工作区已切换，请重新打开文件'), { code: 'WORKSPACE_CHANGED', kind: 'input' });
     };
     const call = async (run) => {
@@ -56,6 +57,7 @@ export function createWorkspaceFiles(app, { files = workspace, identity = userSt
         // 恢复本机授权文件夹本身会改变模式；后续读操作绑定恢复后的目录。
         mode = files.mode();
         folder = files.folderName();
+        root = files.fileRoot?.();
         check();
         return result;
       },

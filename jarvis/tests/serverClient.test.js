@@ -46,6 +46,12 @@ describe('服务器模式客户端', () => {
     expect(c.calls.filter((x) => x[0] === 'events').map((x) => x[1])).toEqual([0, 2]);
     expect(end.status).toBe('done');
   });
+  it.each([{completedAt: 120, at: 130}, {at: 120}])('接上已完成的任务时取实际结束时间，兼容旧服务端 %o', async (stamp) => {
+    const c = fakeClient([{seq: 1, type: 'task_state', status: 'done', ...stamp}]);
+    const answer = await runRemote(c, {sessionId: 'c1', submittedAt: 100, userText: '排队的消息', emit() {}});
+    expect(c.calls[0][1].submittedAt).toBe(100);
+    expect(answer.completedAt).toBe(120);
+  });
   it('runRemote 和 runAgent 一样用：进度交给 emit，文件交给 onFile，返回回答', async () => {
     const c = fakeClient(EVENTS);
     const emitted = [];

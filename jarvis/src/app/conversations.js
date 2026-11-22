@@ -98,12 +98,15 @@ export function createConversations(app) {
     const root = $('#transcript'),
       range = visibleHistory(end);
     historyViewEnd = range.newer ? range.end : null;
+    root.dataset.historySession = app.session?.id || '';
+    const notifyHistory = () => root.dispatchEvent(new CustomEvent('wy:history-rendered', { detail: root.dataset.historySession }));
     app.agents?.dismissStart?.();
     root.replaceChildren();
     transcript.follow = true;
     document.body.classList.remove('wy-reading-history');
     if (!app.history.length) {
       app.renderWelcome();
+      notifyHistory();
       return;
     }
     const pageNav = (buttons) => {
@@ -111,6 +114,7 @@ export function createConversations(app) {
       nav.setAttribute('aria-label', '对话翻页');
       for (const [label, target, top] of buttons) {
         const button = Object.assign(document.createElement('button'), { type: 'button', textContent: label });
+        if (target === app.history.length && !top) button.dataset.historyLatest = '';
         button.onclick = () => {
           if (app.active) {
             toast('当前回复完成后，可以翻看更早的对话');
@@ -134,9 +138,9 @@ export function createConversations(app) {
       const shown = app.history.slice(range.start, range.end);
       const lastAgent = shown.findLastIndex((m) => m.role !== 'user');
       shown.forEach((m, i) => {
-        if (m.role === 'user') transcript.add('user', m.content, m.ts, { thumbs: m.thumbs });
+        if (m.role === 'user') transcript.add('user', m.content, m.ts ?? null, { thumbs: m.thumbs });
         else {
-          const b = transcript.add('agent', '', m.ts);
+          const b = transcript.add('agent', '', m.ts ?? null);
           b.append(m.content);
           if (m.sports) b.sports(m.sports);
           if (m.markets) b.marketCards?.(m.markets);
@@ -149,6 +153,7 @@ export function createConversations(app) {
     });
     // 往后翻：从这一页开头接着读
     if (fromTop) root.scrollTop = 0;
+    notifyHistory();
   }
   /** 新对话的开场建议：之前没做完的事 > 上一段对话 */
   async function resumeSuggestion() {

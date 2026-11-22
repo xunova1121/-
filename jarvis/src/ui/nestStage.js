@@ -166,7 +166,10 @@ export function createNestStage({scene, floor, room, caption, deskHost, onChange
             floor.style.setProperty('--nest-floor', 'url("' + portraitArt('floor-' + light) + '")');
           }
         }
-        seat.hidden = upright || (!sprite && !viewing && !sleepInFront);
+        // 横幅的桌边人物已画在背景里。回桌途中先盖上原画空椅，抵达再露出手和纸张。
+        const deskArrival = !upright && !viewing && ['work','news','trip'].includes(pose) && Boolean(lastPose);
+        seat.toggleAttribute('data-walk-only', deskArrival);
+        seat.hidden = upright || (!sprite && !viewing && !sleepInFront && !deskArrival);
         if (!seat.hidden) {
           const emptySeat = nestSeatArt(dark);
           if (seat.getAttribute('src') !== emptySeat) seat.src = emptySeat;

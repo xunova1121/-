@@ -1,3 +1,5 @@
+import { noteTaskFile, taskFileDelivery } from '../agent/taskFileReceipts.js';
+import { nestFileScope } from './nestFileScope.js';
 import { localLookup } from './lookup.js';
 import { createLookupModel, createLookupAnswerModel } from '../agent/lookupModels.js';
 import { createAdapter as lookupAdapter } from '../llm/config.js';
@@ -58,11 +60,16 @@ export function createTurn(app) {
     if (app.active) app.callouts?.show();
     if (app.active) {
       const turn = app.active;
+      if (!turn.streamDone) {
+        turn.completedAt = Date.now();
+        turn.bubble?.setTimestamp?.(turn.completedAt);
+      }
       if (!turn.streamDone && (turn.shown?.trim() || turn.files?.size || turn.markets?.length))
         app.rememberTurn(
           'assistant',
           (turn.shown || '').trim() + '\n\n（已打断，还没完成；以上内容已保留）',
           {
+            ts: turn.completedAt,
             ...(turn.usedTools?.length && { tools: [...new Set(turn.usedTools)] }),
             ...(turn.files?.size && { files: [...turn.files] }),
             ...(turn.sports && { sports: turn.sports }),
@@ -138,13 +145,13 @@ export function createTurn(app) {
   // —— 干活时插话、切换对话后台继续
   const backgroundTurns = new Set();
   /** 干活时又发来一句：问进度直接答；说停就停；其他的交给正在干的未央（下一步开始前看到），不打断 */
-  async function interject(text, { thumbs = [], mode = 'auto', expectedTurn } = {}) {
+  async function interject(text, { thumbs = [], mode = 'auto', expectedTurn, submittedAt = Date.now() } = {}) {
     const turn = app.active;
     if (expectedTurn && (turn !== expectedTurn || turn.streamDone || app.session.id !== turn.session.id || turn.queueScope !== app.messageQueue?.scope()))
       return false;
-    if (!turn || turn.streamDone) return send(text);
-    if (mode === 'auto' && separateRequest(text)) return app.messageQueue.enqueue(text);
-    app.transcript.add('user', text, Date.now(), { thumbs });
+    if (!turn || turn.streamDone) return send(text, { submittedAt });
+    if (mode === 'auto' && separateRequest(text)) return app.messageQueue.enqueue(text, { submittedAt });
+    app.transcript.add('user', text, submittedAt, { thumbs });
     const reply = (words) => {
       if (app.session.id !== turn.session.id || turn.queueScope !== app.messageQueue?.scope()) return;
       const b = app.transcript.add('agent', words);
@@ -159,7 +166,7 @@ export function createTurn(app) {
       reply(`${turnStatus(turn, now())}。做完会直接给你结果；想停的话点右下角的方块，或者说“停”。`);
       return true;
     }
-    if (!expectedTurn) app.rememberTurn('user', text, thumbs.length ? { thumbs } : {}, turn.session);
+    if (!expectedTurn) app.rememberTurn('user', text, { ts: submittedAt, ...(thumbs.length && { thumbs }) }, turn.session);
     if (!turn.remote) {
       turn.inbox.push(text);
       if (MOBILE) {
@@ -168,12 +175,13 @@ export function createTurn(app) {
       }
     } else if (!turn.remoteId) {
       turn.inbox.push(text);
-      if (expectedTurn) app.rememberTurn('user', text, thumbs.length ? { thumbs } : {}, turn.session);
+      (turn.pendingNoteTimes ??= []).push(submittedAt);
+      if (expectedTurn) app.rememberTurn('user', text, { ts: submittedAt, ...(thumbs.length && { thumbs }) }, turn.session);
       reply('收到补充，连接到原任务后会送达。');
       return true;
     } else {
       try {
-        await app.server.appendTaskNote(turn.remoteId, text);
+        await app.server.appendTaskNote(turn.remoteId, text, submittedAt);
       } catch (e) {
         if (app.session.id !== turn.session.id || turn.queueScope !== app.messageQueue?.scope()) return false;
         if (!expectedTurn && !app.prompt.value.trim()) {
@@ -188,7 +196,7 @@ export function createTurn(app) {
         return false;
       }
     }
-    if (expectedTurn) app.rememberTurn('user', text, thumbs.length ? { thumbs } : {}, turn.session);
+    if (expectedTurn) app.rememberTurn('user', text, { ts: submittedAt, ...(thumbs.length && { thumbs }) }, turn.session);
     // 点“引导”送达的也给回执（以前只显示自己那句话，看起来像没反应）
     reply(`收到，做完手上这一步就按这句调整（${turnStatus(turn, now())}）。`);
     return true;
@@ -206,10 +214,12 @@ export function createTurn(app) {
   function finishBackground(turn, { text = '', error = '', shown = '', usedTools = [], files = new Set() }) {
     backgroundTurns.delete(turn);
     const extra = {
+      ts: turn.completedAt,
       ...(turn.sports && { sports: turn.sports }),
       ...(turn.markets?.length && { markets: turn.markets }),
       ...(usedTools.length && { tools: [...new Set(usedTools)] }),
       ...(files.size && { files: [...files].slice(-12) }),
+      ...((files.size || turn.fileVersions?.size) && taskFileDelivery(turn)),
       ...(turn.failedSteps?.length && { failures: turn.failedSteps })
     };
     const title = turn.session.title || '另一个对话';
@@ -226,11 +236,11 @@ export function createTurn(app) {
   }
 
   /** 正在干活时又发来一句（可能带附件）：附件先传到服务器，再按插话处理 */
-  async function addToRunningTurn(text, { echo, byVoice, mode, queuedFiles, expectedTurn }) {
+  async function addToRunningTurn(text, { echo, byVoice, mode, queuedFiles, expectedTurn, submittedAt }) {
     const turn = app.active;
     const inputFiles = queuedFiles ?? app.attachments;
-    if (STOP_ASK.test(text) && !inputFiles.length) return interject(text, { mode: 'steer' });
-    if (mode === 'queue' || (mode !== 'steer' && separateRequest(text))) return app.messageQueue.enqueue(text, { files: inputFiles });
+    if (STOP_ASK.test(text) && !inputFiles.length) return interject(text, { mode: 'steer', submittedAt });
+    if (mode === 'queue' || (mode !== 'steer' && separateRequest(text))) return app.messageQueue.enqueue(text, { files: inputFiles, submittedAt });
     const client = app.server;
     const extra = queuedFiles ? [...queuedFiles] : app.attachments.splice(0);
     if (!queuedFiles) app.renderAttachments();
@@ -246,7 +256,7 @@ export function createTurn(app) {
           return false;
         }
         if (app.server !== client || app.session.id !== turn.session.id) {
-          app.messageQueue.enqueue(text, { files: extra, target: turn.session, client: turn.queueScope });
+          app.messageQueue.enqueue(text, { files: extra, submittedAt, target: turn.session, client: turn.queueScope });
           app.messageQueue.finished(turn, false);
           return;
         }
@@ -261,21 +271,26 @@ export function createTurn(app) {
       }
       if (expectedTurn && (app.active !== turn || turn.streamDone || app.server !== client || app.session.id !== turn.session.id)) return false;
       if (app.server !== client || app.session.id !== turn.session.id || (app.active && app.active !== turn)) {
-        app.messageQueue.enqueue(text, { files: extra, target: turn.session, client: turn.queueScope });
+        app.messageQueue.enqueue(text, { files: extra, submittedAt, target: turn.session, client: turn.queueScope });
         app.messageQueue.finished(turn, false);
         return;
       }
       if (!app.active || app.active.streamDone) {
         app.attachments.unshift(...extra);
         app.renderAttachments();
-        return send(text, { echo, byVoice });
+        return send(text, { echo, byVoice, submittedAt });
       }
     }
     const content = extra.length ? text + '\n\n[已上传到工作区：' + extra.map((f) => f.path).join('、') + ']' : text;
-    return interject(content, { mode: 'steer', expectedTurn, thumbs: extra.filter((f) => f.image).map((f) => ({ src: f.image.thumb, path: f.path })) });
+    return interject(content, {
+      mode: 'steer',
+      expectedTurn,
+      submittedAt,
+      thumbs: extra.filter((f) => f.image).map((f) => ({ src: f.image.thumb, path: f.path }))
+    });
   }
 
-  async function send(text, { echo = true, byVoice = false, mode = 'auto', queuedFiles, expectedTurn, instantStatus = false } = {}) {
+  async function send(text, { echo = true, byVoice = false, mode = 'auto', queuedFiles, expectedTurn, instantStatus = false, submittedAt = Date.now() } = {}) {
     if (
       expectedTurn &&
       (app.active !== expectedTurn ||
@@ -296,15 +311,16 @@ export function createTurn(app) {
         const snapshot = app.studioActivity?.snapshot(app.session);
         const busy = Boolean((app.active && !app.active.streamDone) || snapshot?.active || (app.server && app.session.taskId));
         if (mediaReply || shouldAnswerWorkshopCommand(command, { busy, mode, instantStatus }))
-          return roomChat.reply(command, text, { echo, busy, byVoice, snapshot, mediaReply });
-        return app.messageQueue.enqueue(text, { files: inputFiles });
+          return roomChat.reply(command, text, { echo, busy, byVoice, snapshot, mediaReply, submittedAt });
+        return app.messageQueue.enqueue(text, { files: inputFiles, submittedAt });
       } else if (!expectedTurn && app.companion?.perform(text)) return;
     }
     if (!expectedTurn && (instantStatus || byVoice)) text = workshopNewsChat.bind(text, byVoice);
     app.askNotifyOnce();
     if (!text && inputFiles.some((a) => a.image)) text = '请看看这张图片。';
     // 正在干活时又发了一句：不打断，问进度就直接答，别的话交给正在干的未央；说“停”才停
-    if ((echo || expectedTurn) && app.active && !app.active.streamDone) return addToRunningTurn(text, { echo, byVoice, mode, queuedFiles, expectedTurn });
+    if ((echo || expectedTurn) && app.active && !app.active.streamDone)
+      return addToRunningTurn(text, { echo, byVoice, mode, queuedFiles, expectedTurn, submittedAt });
     if (app.active) {
       app.active.ctrl.abort();
       app.active = null;
@@ -312,7 +328,7 @@ export function createTurn(app) {
     app.speaker.cancel();
     app.speaker.unlock(); // 发送多由点击 / 回车触发：顺便启动音频上下文，云端语音才能播放
 
-    const { files, userText, imgs, withImages, llmHistory } = app.takeTurnInput(text, echo, queuedFiles);
+    const { files, userText, imgs, withImages, llmHistory } = app.takeTurnInput(text, echo, queuedFiles, submittedAt);
 
     if (app.machine.task !== 'listening') app.machine.beginUserTurn();
     const ctrl = new AbortController();
@@ -371,6 +387,7 @@ export function createTurn(app) {
         withImages
       }
     );
+    turn.fileScope = app.server && !here ? 'server' : nestFileScope(null);
     if (problem && (!app.server || here)) {
       // 服务器模式：用服务器上的模型设置
       bubble.append(problem);
@@ -420,18 +437,19 @@ export function createTurn(app) {
         return runRemote(client, {
           sessionId: o.sessionId,
           userText: o.userText,
+          submittedAt,
           images: remoteTurnImages(o.images, llmHistory),
           voice: o.voice,
           agentId,
           agentForm: turn.session.agentForm || null,
           emit: o.emit,
           signal: o.signal,
-          onFile: (p) => app.pullServerFile(p, turn),
+          onFile: (p, version) => app.pullServerFile(p, turn, version),
           onStarted: async (remoteTask) => {
             turn.remoteId = remoteTask.id;
             for (const note of turn.inbox.splice(0)) {
               try {
-                await client.appendTaskNote(remoteTask.id, note);
+                await client.appendTaskNote(remoteTask.id, note, turn.pendingNoteTimes?.shift());
               } catch (e) {
                 app.prompt.value += (app.prompt.value.trim() ? '\n' : '') + note;
                 app.autosize();
@@ -508,6 +526,10 @@ export function createTurn(app) {
         },
         emit: app.turnEvents(turn, st, { bubble, speech, cards, doneSteps, model })
       });
+      if (turn.fileScope === 'server' && !result.fileDelivery && !turn.fileVersions?.size) turn.fileScope = null;
+      for (const version of result.fileDelivery?.files || []) noteTaskFile(turn, version);
+      turn.completedAt = result.completedAt ?? Date.now();
+      bubble.setTimestamp?.(turn.completedAt);
       if (turn.background) {
         finishBackground(turn, { text: result.text, shown: st.shown, usedTools, files: madeFiles });
         app.studioActivity?.finish(turn, 'done');
@@ -515,7 +537,8 @@ export function createTurn(app) {
       }
       if (app.active !== turn) return;
       speech.flush();
-      const total = now() - t0;
+      const total = result.timing?.totalMs ?? now() - t0;
+      const firstTokenMs = result.timing?.firstTextMs ?? (st.firstToken ? st.firstToken - t0 : null);
       // 回答底下写明用了谁：看图模型（主模型看不了图时）→ 回答的模型（按能力表换了的写上是哪一项）
       const seen = st.seenBy ? `看图 ${st.seenBy} → ` : '';
       // 服务档位：生效了写“快速档”，没生效写清原因（服务商不认这个参数，或回报按别的档位处理）
@@ -540,8 +563,9 @@ export function createTurn(app) {
                 ? `${seen}${st.usedModel}（${st.capabilityUpgraded ? '按任务切换能力模型' : `${model} ${st.fellSlow ? '没反应' : '出错'}后换用`}） · `
                 : `${seen}${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
       bubble.done(
-        `${modelTag}${tierTag}${team ? `团队 ${result.steps} 步 · ` : ''}${st.ctxMs !== null && st.ctxMs >= 300 ? `准备 ${(st.ctxMs / 1000).toFixed(1)}s · ` : ''}${st.firstToken ? `首字 ${((st.firstToken - t0) / 1000).toFixed(1)}s · ` : ''}${serverSlowTag(result.timing)}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}${MOBILE && st.textChunks ? ` · 分 ${st.textChunks} 次收到${globalThis.__jarvisNetVia?.(app.llmConfig.baseURLs?.[app.llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`,
+        `${modelTag}${tierTag}${team ? `团队 ${result.steps} 步 · ` : ''}${st.ctxMs !== null && st.ctxMs >= 300 ? `准备 ${(st.ctxMs / 1000).toFixed(1)}s · ` : ''}${firstTokenMs !== null ? `首字 ${(firstTokenMs / 1000).toFixed(1)}s · ` : ''}${serverSlowTag(result.timing)}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}${MOBILE && st.textChunks ? ` · 分 ${st.textChunks} 次收到${globalThis.__jarvisNetVia?.(app.llmConfig.baseURLs?.[app.llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`,
         {
+          elapsedMs: total,
           onFeedback: async (kind, comment) => {
             if (kind === 'up') await agentMemory.noteTask(`获得好评：${text.slice(0, 30)}`);
             else {
@@ -552,9 +576,9 @@ export function createTurn(app) {
           }
         }
       );
-      app.dashboard.setLatency(st.firstToken ? st.firstToken - t0 : null, total);
+      app.dashboard.setLatency(firstTokenMs, total);
       app.hud.think(`✓ 完成 · ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · ${result.toolCalls} 个工具` : ''}`, 'ok');
-      $('#hud-latency').textContent = st.firstToken ? `${Math.round(st.firstToken - t0)} ms` : '—';
+      $('#hud-latency').textContent = firstTokenMs !== null ? `${Math.round(firstTokenMs)} ms` : '—';
       if (result.text)
         wp({
           say: result.text
@@ -568,10 +592,12 @@ export function createTurn(app) {
         'assistant',
         result.text || '（完成）',
         {
+          ts: turn.completedAt,
           ...(turn.sports && { sports: turn.sports }),
           ...(turn.markets?.length && { markets: turn.markets }),
           ...(usedTools.length && { tools: [...new Set(usedTools)] }),
           ...(madeFiles.size && { files: [...madeFiles].slice(-12) }),
+          ...((madeFiles.size || turn.fileVersions?.size) && taskFileDelivery(turn)),
           ...(turn.failedSteps?.length && { failures: turn.failedSteps })
         },
         turn.session
@@ -601,6 +627,8 @@ export function createTurn(app) {
       if (!app.speaker.speaking) finishTurn();
     } catch (err) {
       turn.queueFailed = true;
+      turn.completedAt = err.completedAt ?? Date.now();
+      bubble.setTimestamp?.(turn.completedAt);
       if (err.name === 'AbortError') {
         app.studioActivity?.finish(turn, 'stopped');
         return;
@@ -631,8 +659,10 @@ export function createTurn(app) {
           'assistant',
           `${st.shown.trim()}\n\n${interruptionMark(err)}`,
           {
+            ts: turn.completedAt,
             ...(usedTools.length && { tools: [...new Set(usedTools)] }),
             ...(madeFiles.size && { files: [...madeFiles].slice(-12) }),
+            ...((madeFiles.size || turn.fileVersions?.size) && taskFileDelivery(turn)),
             ...(turn.sports && { sports: turn.sports }),
             ...(turn.markets?.length && { markets: turn.markets }),
             ...(turn.failedSteps?.length && { failures: turn.failedSteps })

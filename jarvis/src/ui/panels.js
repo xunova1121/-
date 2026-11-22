@@ -128,13 +128,25 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
 
   let docxFit = null;
   let previewGeneration = 0;
+  let previewSource;
+  const viewerWorkspace = () => previewSource || getWorkspace();
+  function releasePreview() {
+    previewGeneration++;
+    current = null;
+    previewSource = null;
+    docxFit = null;
+    for (const url of objectUrls) URL.revokeObjectURL(url);
+    objectUrls = [];
+    $('#viewer-body').replaceChildren();
+  }
   addEventListener('resize', () => docxFit?.());
-  async function openFile(path) {
+  async function openFile(path, boundSource, isCurrent = () => true) {
     const generation = ++previewGeneration;
-    const source = getWorkspace();
+    previewSource = boundSource;
+    const source = viewerWorkspace();
     const scope = getWorkspaceScope();
     const visible = () => {
-      if (generation !== previewGeneration || scope !== getWorkspaceScope()) return false;
+      if (!isCurrent() || generation !== previewGeneration || scope !== getWorkspaceScope()) return false;
       try { source.check?.(); return true; } catch { return false; }
     };
     current = path;
@@ -203,7 +215,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   }
 
   async function download(path) {
-    const msg = await saveFile(await getWorkspace().readBlob(path), path.split('/').pop());
+    const msg = await saveFile(await viewerWorkspace().readBlob(path), path.split('/').pop());
     if (MOBILE) toast(msg);
   }
 
@@ -213,12 +225,12 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     $('#btn-v-share').hidden = false;
     $('#btn-v-share').addEventListener('click', () => {
       const path = current;
-      if (path) getWorkspace().readBlob(path).then(blob => shareFile(blob, path.split('/').pop())).then(toast, e => toast(e.message));
+      if (path) viewerWorkspace().readBlob(path).then(blob => shareFile(blob, path.split('/').pop())).then(toast, e => toast(e.message));
     });
   }
   $('#btn-v-open').addEventListener('click', async () => {
     if (!current) return;
-    const path = current, source = getWorkspace();
+    const path = current, source = viewerWorkspace();
     let blob = await source.readBlob(path);
     if (/\.html?$/i.test(path)) blob = new Blob([await inlineAssets(path, await blob.text(), source)], { type: 'text/html' });
     window.open(URL.createObjectURL(blob), '_blank', 'noopener');
@@ -227,7 +239,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   $('#btn-v-pdf').addEventListener('click', async () => {
     if (!current) return;
     const path = current;
-    const source = getWorkspace();
+    const source = viewerWorkspace();
     let html = await source.readText(path);
     if (/\.md$/i.test(path)) html = htmlDocument(path.replace(/^.*\/|\.md$/g, ''), html, { printable: true });
     html = html.replace(/<script[\s\S]*?<\/script>/gi, '');
@@ -251,7 +263,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   $('#btn-v-kb').addEventListener('click', async () => {
     if (!current) return;
     try {
-      const blob = await getWorkspace().readBlob(current);
+      const blob = await viewerWorkspace().readBlob(current);
       const text = ws.isText(current) && !/\.html?$/i.test(current) ? await blob.text() : (await parseFile(blob, current)).text;
       const d = await kb.addDocument({ name: current.split('/').pop(), text, source: 'workspace' });
       toast(`已加入知识库：${d.name}（${d.chunks} 段）`);
@@ -584,6 +596,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     },
     workspaceMode: () => getWorkspace().mode(),
     openFile,
+    releasePreview,
     markFresh(path) { fresh.add(path); },
     refreshKb,
     refreshMind,

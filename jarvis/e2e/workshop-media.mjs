@@ -9,6 +9,7 @@ import JSZip from 'jszip';
 import { createServer } from '../server/server.mjs';
 import { checkWorkshopTvPlayback, checkTvActor, openMobileCloudRoom } from './workshop-tv-playback.mjs';
 import { checkWorkshopLighting } from './workshop-lighting.mjs';
+import { checkNewsDeliveryInNest } from './workshop-nest-delivery.mjs';
 import { checkWorkshopSourceManagement } from './workshop-source-management.mjs';
 
 const output = path.resolve(process.argv[2] || '/tmp/weiyang-workshop-media');
@@ -263,8 +264,26 @@ async function check(mobile) {
       await page.screenshot({ path: path.join(output, 'mobile-compact-article.png') });
       await page.setViewportSize({ width: 390, height: 844 });
     }
+    const readingPort = monitor.locator('.ws-media-scroll');
+    const savedTop = await readingPort.evaluate(port => (port.scrollTop = 90, port.scrollTop));
+    assert(savedTop > 0, '长文有可保存的阅读位置');
+    await button(monitor, '返回房间').click();
+    await monitor.waitFor({ state: 'hidden' });
+    await device('monitor').click();
+    await monitor.locator('.ws-article-content').getByText(articleText, { exact: true }).waitFor();
+    await page.waitForFunction(top => [...document.querySelectorAll('.ws-media-scroll')]
+      .some(port => port.clientHeight && Math.abs(port.scrollTop - top) <= 1), savedTop);
+    assert.equal(await link(monitor, '收起原文').getAttribute('href'), items[0].url);
+    const readCount = articleRequests;
     await button(monitor, '下一条').click();
     await monitor.getByText(items[1].title, { exact: true }).waitFor();
+    await button(monitor, '上一条').click();
+    await monitor.locator('.ws-article-content').getByText(articleText, { exact: true }).waitFor();
+    await page.waitForFunction(top => [...document.querySelectorAll('.ws-media-scroll')]
+      .some(port => port.clientHeight && Math.abs(port.scrollTop - top) <= 1), savedTop);
+    assert.equal(articleRequests, readCount, '返回读过的报道无需重新抓取');
+    await link(monitor, '收起原文').click();
+    await button(monitor, '下一条').click();
     assert.equal(await link(monitor, '阅读原文').getAttribute('href'), items[1].url);
     assert(!await monitor.getByText(articleText, { exact: true }).isVisible(), '翻到另一条新闻后不残留上一篇正文');
     await link(monitor, '阅读原文').click();
@@ -337,6 +356,7 @@ async function check(mobile) {
     assert(actualWord.includes(items[0].title) && !actualWord.includes(items[1].title), '切换新闻不改写队列中那份简报的原文');
     await page.waitForFunction(() => !document.body.classList.contains('generating'));
     await checkWorkshopLighting(page, room, platform, output);
+    await checkNewsDeliveryInNest(page, room, briefFile, items[0].title);
     await page.reload();
     await page.waitForFunction(() => window.__jarvis?.send);
     const reopened = await openRoom(page, mobile);

@@ -13,7 +13,7 @@ import { $, DESKTOP, COMPACT } from './env.js';
 export function createTurnInputs(app) {
   const recentImages = new Map(); // 消息时间 → 最近两条带图消息，仅内存。
   /** 整理这一轮的输入：取走附件、显示并记下这句话、挑出要带给模型的历史和图片 */
-  function takeInput(text, echo, queuedFiles) {
+  function takeInput(text, echo, queuedFiles, submittedAt = Date.now()) {
     app.cancelCompression?.();
     // 持续聊天也保持有界；先重画已完成的历史，再追加本轮，避免重复消息。
     app.prepareTranscriptForTurn?.();
@@ -25,7 +25,7 @@ export function createTurnInputs(app) {
       : text;
     const imgs = files.filter((f) => f.image).map((f) => f.image);
     const thumbs = files.filter((f) => f.image).map((f) => ({ src: f.image.thumb, path: f.path }));
-    if (echo) app.transcript.add('user', userText, Date.now(), { thumbs }); // echo=false：这句话之前已经显示并记下了
+    if (echo) app.transcript.add('user', userText, submittedAt, { thumbs }); // echo=false：这句话之前已经显示并记下了
     app.director.onUserText(text);
     app.hud.newTurn();
     app.hud.think(`◂ 收到：${text.slice(0, 30)}`);
@@ -43,7 +43,7 @@ export function createTurnInputs(app) {
         : []
     );
     const llmHistory = recent.map(({ role, content, ts }) => ({ role, content, ...(withImages.has(ts) && { images: recentImages.get(ts) }) }));
-    if (echo) app.rememberTurn('user', userText, thumbs.length ? { thumbs } : {});
+    if (echo) app.rememberTurn('user', userText, { ts: submittedAt, ...(thumbs.length && { thumbs }) });
     if (imgs.length) {
       recentImages.set(
         app.history.at(-1).ts,

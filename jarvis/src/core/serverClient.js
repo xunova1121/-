@@ -274,7 +274,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     requestUpdate: () => req('/api/server/update', { method: 'POST' }),
     modelEvents: (body,signal) => req('/api/server/pc-model',{method:'POST',body,raw:true,signal,headers:{Accept:'text/event-stream'}}),
     startTask: (o) => taskWrite('/api/tasks',o),
-    appendTaskNote: (id,text) => taskWrite(`/api/tasks/${encodeURIComponent(id)}/notes`,{text}),
+    appendTaskNote: (id,text,submittedAt) => taskWrite(`/api/tasks/${encodeURIComponent(id)}/notes`,{text, ...(submittedAt && { submittedAt })}),
     getTask: (id) => quickRead(`/api/tasks/${id}`),
     stopTask: (id) => req(`/api/tasks/${id}/stop`, { method: 'POST' }),
     // 要求事件流：手机 App 退到原生网络时也边收边显示（见 mobile/nativeFetch.js 的 wantsStream）
@@ -480,9 +480,9 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
    * @param {{ sessionId: string, userText: string, images?: Array<{ mime: string, data: string }>, emit: (e: object) => void, signal?: AbortSignal, onFile?: (path: string) => void, onStarted?: (task: { id: string }) => void, taskId?: string }} o
    * @returns {Promise<{ text: string, toolCalls: number, steps: number }>}
    */
-  export async function runRemote(client, { sessionId, userText, images = [], voice = false, emit, signal, onFile, onStarted, taskId = null, agentId = null, agentForm = null, observation = {} }) {
+  export async function runRemote(client, { sessionId, userText, submittedAt, images = [], voice = false, emit, signal, onFile, onStarted, taskId = null, agentId = null, agentForm = null, observation = {} }) {
     if(signal?.aborted)throw Object.assign(new Error('aborted'),{name:'AbortError'});
-    const task = taskId ? { id: taskId } : await client.startTask({ sessionId, text: userText, ...(images.length && { images }), ...(voice && { voice: true }), ...(agentId && { agentId }), ...(agentId && agentForm && { agentForm }) });
+    const task = taskId ? { id: taskId } : await client.startTask({ sessionId, text: userText, ...(submittedAt && { submittedAt }), ...(images.length && { images }), ...(voice && { voice: true }), ...(agentId && { agentId }), ...(agentId && agentForm && { agentForm }) });
     const stop = () => client.stopTask(task.id).catch(() => {});
     if(signal?.aborted){await stop();throw Object.assign(new Error('aborted'),{name:'AbortError'});}
     signal?.addEventListener('abort', stop, { once: true });
@@ -493,14 +493,18 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
         ...observation,
         signal,
         onEvent: (ev) => {
-          if (ev.type === 'file') onFile?.(ev.path);
+          if (ev.type === 'file') {
+            if (ev.fileVersion) onFile?.(ev.path, ev.fileVersion);
+            else onFile?.(ev.path);
+          }
           else if (ev.type === 'task_state') { if (ev.status === 'queued' && ev.position) emit({ type: 'tool_progress', id: 'queue', text: `排队中，前面还有 ${ev.position} 个任务` }); }
           else if (ev.type !== 'user_note') emit(ev);
         }
       });
-      if (end.status === 'error') throw Object.assign(new Error(end.error || '服务器上的任务出错了'), { kind: end.errorKind, code: end.code });
-      if (end.status === 'stopped') throw Object.assign(new Error('aborted'), { name: 'AbortError' });
-      return { text: end.text ?? '', toolCalls: end.toolCalls ?? 0, steps: 1, ...(end.timing && { timing: end.timing }) };
+      const completedAt = end.completedAt ?? end.at;
+      if (end.status === 'error') throw Object.assign(new Error(end.error || '服务器上的任务出错了'), { kind: end.errorKind, code: end.code, completedAt });
+      if (end.status === 'stopped') throw Object.assign(new Error('aborted'), { name: 'AbortError', completedAt });
+      return { text: end.text ?? '', toolCalls: end.toolCalls ?? 0, steps: 1, ...(Array.isArray(end.fileDelivery?.files) && end.fileDelivery.files.length && { fileDelivery: end.fileDelivery }), ...(Number.isFinite(completedAt) && { completedAt }), ...(end.timing && { timing: end.timing }) };
     } finally {
       signal?.removeEventListener('abort', stop);
     }

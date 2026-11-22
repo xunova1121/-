@@ -1,3 +1,4 @@
+import { sameTaskReceipt, verifiedTaskFiles } from '../app/nestTaskDelivery.js';
 import { uid } from '../agent/store.js';
 import { catalogGroups, loadCatalog } from './workspaceCatalog.js';
 import { cityRoutes, defaultNestTrip, nestTripStops, readNestNotebook, saveNestNotebook, tripChecklist } from './nestNotebook.js';
@@ -59,7 +60,7 @@ function drawRoute(canvas, count) {
 
 const tabs = { folder: '文件夹', draft: '草稿纸', trip: '旅行手账' };
 
-export function createNestDesk({ scene, deskHost, perform, getWorkspace, getScope, openWorkspace, openFile }) {
+export function createNestDesk({ scene, deskHost, perform, getWorkspace, getScope, getReceipt, useResult, openWorkspace, openFile }) {
   const panel = node('section', '', 'ws-nest-desk');
   panel.hidden = true;
   panel.dataset.nestDesk = '';
@@ -78,6 +79,7 @@ export function createNestDesk({ scene, deskHost, perform, getWorkspace, getScop
   deskHost.append(panel);
 
   let scope = '', tab = '', opener = null, version = 0, notebook, draftDirty = false;
+  let folderReceipt;
   const scopeNow = () => getScope?.() || '';
   const current = token => tab && version === token && scope === scopeNow();
 
@@ -111,6 +113,8 @@ export function createNestDesk({ scene, deskHost, perform, getWorkspace, getScop
   }
 
   async function showFiles(token) {
+    folderReceipt = getReceipt?.();
+    const receipt = folderReceipt;
     const space = button('打开文件空间', () => { close(false); openWorkspace?.(); });
     const list = node('div', '', 'ws-nest-files');
     const info = node('small', '正在读取文件…');
@@ -122,8 +126,38 @@ export function createNestDesk({ scene, deskHost, perform, getWorkspace, getScop
       if (scope !== scopeNow()) { open('folder', opener); return; }
       const [files, items] = await Promise.all([source.list(), loadCatalog(scope)]);
       if (!current(token)) return;
-      const recent = catalogGroups(files, { items }).slice(0, 5);
-      info.textContent = source.locationLabel + (recent.length ? ' · 最近文件' : ' · 暂无文件');
+      if (!sameTaskReceipt(receipt, getReceipt?.())) { select('folder'); return; }
+      const results = verifiedTaskFiles(receipt, files).filter(f => !items[f.path]?.trash);
+      if (results.length) {
+        const group = node('section', '', 'ws-nest-files');
+        group.setAttribute('role', 'group');
+        group.setAttribute('aria-label', '本次任务成品');
+        group.append(node('strong', '本次任务成品'));
+        for (const file of results) {
+          const name = file.path.split('/').pop();
+          const row = node('div', '', 'ws-nest-result');
+          const use = async edit => {
+            if (!current(token)) return;
+            try {
+              await useResult(receipt, file, edit ? modify : preview, edit);
+              if (edit && current(token)) close(false);
+            } catch (error) { if (current(token)) message.textContent = error.message; }
+          };
+          const preview = button(name, () => use(false));
+          preview.className = 'ws-nest-file';
+          preview.dataset.path = file.path;
+          preview.title = file.path;
+          const modify = button('继续修改', () => use(true));
+          modify.className = 'nest-edit';
+          modify.setAttribute('aria-label', '继续修改 ' + name);
+          row.append(preview, modify);
+          group.append(row);
+        }
+        content.prepend(group);
+      }
+      const resultPaths = new Set(results.map(f => f.path));
+      const recent = catalogGroups(files.filter(f => !resultPaths.has(f.path)), { items }).slice(0, 5);
+      info.textContent = source.locationLabel + (recent.length ? ' · 最近文件' : results.length ? '' : ' · 暂无文件');
       for (const group of recent) {
         const path = group.files[0].path;
         const row = button(path.split('/').pop(), () => {
@@ -253,5 +287,8 @@ export function createNestDesk({ scene, deskHost, perform, getWorkspace, getScop
   panel.addEventListener('keydown', event => {
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
   });
-  return { open, close, isOpen: () => Boolean(tab), render() { if (tab && scope !== scopeNow()) close(false); }, setVisible(on) { if (!on) close(false); } };
+  return { open, close, isOpen: () => Boolean(tab), render() {
+    if (tab && scope !== scopeNow()) close(false);
+    else if (tab === 'folder' && !sameTaskReceipt(folderReceipt, getReceipt?.())) select('folder');
+  }, setVisible(on) { if (!on) close(false); } };
 }

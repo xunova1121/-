@@ -1,4 +1,5 @@
 import './mobileNestChat.css';
+import { createNestReplyPreview } from './nestReplyPreview.js';
 
 // 只标记当前两条原消息；流式文字、附件、工具记录和历史滚动均使用原来的节点。
 export function createMobileNestChat(sheet, chat, transcript) {
@@ -11,15 +12,26 @@ export function createMobileNestChat(sheet, chat, transcript) {
   const collapse = document.createElement('button');
   collapse.type = 'button';
   collapse.className = 'nest-chat-collapse';
-  collapse.textContent = '收起全文';
+  collapse.textContent = '收起记录';
   chat.querySelector('header').append(collapse);
   const prompt = document.getElementById('prompt');
   let previousPlaceholder;
-  let latest = [];
+  let unread = false, mediaOpen = false, mediaQuiet = false;
   let scene;
   let caption, roomMenu, roomMenuButton, viewControls;
   let mode = 'preview';
   let readingPosition;
+  const preview = createNestReplyPreview(transcript, () => {
+    if (mode === 'hidden' || mediaQuiet) { unread = true; updateControls(); }
+  }, () => { unread = false; updateControls(); });
+  function updateControls() {
+    const quiet = mode === 'hidden' || mediaQuiet;
+    sheet.toggleAttribute('data-nest-media-quiet', mediaQuiet);
+    toggle.toggleAttribute('data-unread', unread);
+    toggle.setAttribute('aria-label', quiet ? (unread ? '有新回复，展开对话' : '展开对话') : '隐藏对话');
+    toggle.setAttribute('aria-expanded', String(!quiet));
+    preview.show(mode === 'preview' && !mediaQuiet);
+  }
   function rememberPosition() {
     const top = transcript.scrollTop;
     const following = transcript.scrollHeight - top - transcript.clientHeight < 20;
@@ -28,12 +40,15 @@ export function createMobileNestChat(sheet, chat, transcript) {
   const reading = () => scene?.querySelector('.ws-media-panel[data-device="monitor"]:not([hidden]) .ws-media-actions:not([hidden])')
     && scene.querySelector('.ws-media-news:not([hidden])');
   function setMode(next) {
-    if (mode === 'history') rememberPosition();
+    if (mode === 'history') {
+      rememberPosition();
+      if (preview.returnToLatest()) readingPosition = () => { transcript.scrollTop = transcript.scrollHeight; };
+    }
     mode = next;
     sheet.dataset.nestChat = mode;
-    toggle.toggleAttribute('data-unread', false);
-    toggle.setAttribute('aria-label', mode === 'hidden' ? '展开对话' : '隐藏对话');
-    toggle.setAttribute('aria-expanded', String(mode !== 'hidden'));
+    unread = mediaQuiet = false;
+    preview.collapse();
+    updateControls();
   }
   function fitMenu() {
     const bottom = (mode === 'hidden' ? sheet : chat).getBoundingClientRect();
@@ -44,7 +59,7 @@ export function createMobileNestChat(sheet, chat, transcript) {
   function sync() {
     const immersive = sheet.open && scene?.dataset.nestLayout === 'portrait' && scene.dataset.roomView === 'nest';
     const previous = sheet.hasAttribute('data-nest-immersive');
-    if (immersive && !previous) rememberPosition();
+    if (immersive && !previous) { rememberPosition(); preview.start(); updateControls(); }
     sheet.toggleAttribute('data-nest-immersive', Boolean(immersive));
     const controlHost = immersive ? roomMenu : caption;
     if (viewControls[0].parentElement !== controlHost) controlHost.append(...viewControls);
@@ -54,6 +69,7 @@ export function createMobileNestChat(sheet, chat, transcript) {
       menuSize.observe(sheet);
     } else menuSize.disconnect();
     if (!immersive) {
+      if (previous) { preview.stop(); mediaOpen = unread = mediaQuiet = false; }
       if (previous && mode !== 'history') readingPosition?.();
       if (previousPlaceholder !== undefined) prompt.placeholder = previousPlaceholder;
       previousPlaceholder = undefined;
@@ -61,6 +77,13 @@ export function createMobileNestChat(sheet, chat, transcript) {
       return;
     }
     if (previousPlaceholder === undefined) previousPlaceholder = prompt.placeholder;
+    const media = !!scene.querySelector('.ws-media-panel:not([hidden])');
+    if (media !== mediaOpen) {
+      mediaOpen = media;
+      mediaQuiet = media && mode === 'preview' && !preview.expanded;
+      if (!media && mode === 'preview') unread = false;
+      updateControls();
+    }
     const news = Boolean(reading());
     prompt.toggleAttribute('data-nest-news', news);
     prompt.placeholder = news ? '追问这条新闻…' : '和未央说说话…';
@@ -71,6 +94,7 @@ export function createMobileNestChat(sheet, chat, transcript) {
     caption = view.querySelector('.ws-caption');
     roomMenu = scene.querySelector('.ws-room-menu');
     roomMenuButton = scene.querySelector('[data-room-action="menu"]');
+    roomMenu.append(historyButton);
     viewControls = [view.querySelector('.ws-floor-toggle'), view.querySelector('.ws-zoom-toggle')];
     view.querySelector('.ws-header').append(toggle);
     sceneObserver.observe(scene, { attributes: true, attributeFilter: ['data-room-view', 'data-nest-layout'] });
@@ -81,37 +105,20 @@ export function createMobileNestChat(sheet, chat, transcript) {
     }
     sync();
   }
-  function refresh() {
-    if (!sheet.open) return;
-    const messages = [];
-    for (let node = transcript.lastElementChild; node && messages.length < 2; node = node.previousElementSibling) {
-      if (node.classList.contains('msg')) messages.push(node);
-    }
-    if (mode === 'hidden' && messages[0]?.classList.contains('agent') && latest[0] !== messages[0]) {
-      toggle.setAttribute('data-unread', '');
-      toggle.setAttribute('aria-label', '有新回复，展开对话');
-    }
-    for (const node of latest) if (!messages.includes(node)) delete node.dataset.nestRecent;
-    for (const node of messages) if (!node.hasAttribute('data-nest-recent')) node.dataset.nestRecent = '';
-    latest = messages;
-  }
-  function expand(message) {
+  function expand() {
     setMode('history');
-    // 只滚动自己的历史，不把键盘、整页和房间一并带走。
-    if (message) transcript.scrollTop += message.getBoundingClientRect().top - transcript.getBoundingClientRect().top;
+    if (readingPosition) readingPosition(); else transcript.scrollTop = transcript.scrollHeight;
     collapse.focus({ preventScroll: true });
   }
-  toggle.onclick = () => setMode(mode === 'hidden' ? 'preview' : 'hidden');
+  toggle.onclick = () => setMode(mode === 'hidden' || mediaQuiet ? 'preview' : 'hidden');
   collapse.onclick = () => { setMode('preview'); toggle.focus({ preventScroll: true }); };
   chat.addEventListener('focusin', () => {
     if (mode === 'hidden' && sheet.hasAttribute('data-nest-immersive')) setMode('preview');
   });
   sheet.addEventListener('click', event => {
     if (!sheet.hasAttribute('data-nest-immersive')) return;
-    if (event.target.closest('.ws-media-primary') && mode === 'hidden') setMode('preview');
+    if (event.target.closest('.ws-media-primary') && (mediaQuiet || mode === 'hidden')) setMode('preview');
     if (mode !== 'preview') return;
-    const message = event.target.closest('#transcript > .msg');
-    if (message) { event.preventDefault(); event.stopPropagation(); expand(message); return; }
     if (event.target.closest('.ws-floorplan') && !event.target.closest('button,a,input,[role="button"]')) setMode('hidden');
   }, true);
   sheet.addEventListener('click', event => {
@@ -122,16 +129,15 @@ export function createMobileNestChat(sheet, chat, transcript) {
   historyButton.type = 'button';
   historyButton.className = 'nest-chat-history';
   historyButton.textContent = '查看聊天记录';
-  historyButton.onclick = () => expand(latest[0]);
-  chat.prepend(historyButton);
+  historyButton.onclick = () => { if (!roomMenu.hidden) roomMenuButton.click(); expand(); };
   function close() {
     sceneObserver.disconnect();
     menuSize.disconnect();
     const floating = sheet.hasAttribute('data-nest-immersive');
     if (floating && mode === 'history') rememberPosition();
     const restoreReading = floating ? readingPosition : null;
-    for (const node of latest) delete node.dataset.nestRecent;
-    latest = [];
+    preview.stop();
+    mediaOpen = false;
     setMode('preview');
     if (previousPlaceholder !== undefined) prompt.placeholder = previousPlaceholder;
     previousPlaceholder = undefined;
@@ -141,8 +147,10 @@ export function createMobileNestChat(sheet, chat, transcript) {
     return restoreReading;
   }
   setMode('preview');
-  return { attach, refresh, close, back() {
-    if (!sheet.hasAttribute('data-nest-immersive') || mode !== 'history') return false;
+  return { attach, close, back() {
+    if (!sheet.hasAttribute('data-nest-immersive')) return false;
+    if (preview.collapse()) return true;
+    if (mode !== 'history') return false;
     collapse.click();
     return true;
   } };

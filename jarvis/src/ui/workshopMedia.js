@@ -32,7 +32,7 @@ export function animateWorkshopPanel(panel, screen, opening) {
 export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, getPlayers }) {
   const player = createWorkshopTvPlayer({ getPlayers, openSources: () => ui.manageSources.click() });
   const ui = mediaControls(scene, floor, listWorkshopChannels(), player);
-  const selectNewsArticle = createWorkshopNewsReader(ui, newsFeed, row => {
+  const reader = createWorkshopNewsReader(ui, newsFeed, row => {
     article = row;
     draw();
   });
@@ -53,6 +53,7 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
   let loadTimer, rotateTimer, unsubscribe, unsubscribeList;
   let channel = workshopChannel();
   let scope = workshopChannelScope();
+  const readerContext = () => JSON.stringify([scope, sessionId]);
   const workOnMonitor = () => busy && !readDuringWork;
   const sources = createWorkshopSourceManager(ui, {
     preview: candidate => player.preview(candidate),
@@ -63,6 +64,8 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
 
   function updateChannelState() {
     const testing = sources.testing();
+    const station = testing ? '试播中' : channel?.label || '';
+    if (ui.stationName.textContent !== station) ui.stationName.textContent = station;
     ui.network.hidden = testing || !channel?.url;
     if (channel?.url) ui.network.href = channel.url;
     else ui.network.removeAttribute('href');
@@ -78,20 +81,23 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     updateChannelState();
   }
   function catalogChanged() {
-    if (scope !== workshopChannelScope()) { syncChannelScope(); return; }
+    if (scope !== workshopChannelScope()) { syncChannelScope(); syncTimers(); draw(); return; }
     channel = workshopChannel();
     refreshChannels();
     if (visible && device === 'tv' && !sources.testing()) player.select(channel?.id);
   }
   function syncChannelScope() {
     const next = workshopChannelScope();
-    if (scope === next) return;
+    if (scope === next) return false;
     scope = next;
+    bind(null);
+    article = reader.lastArticle(readerContext()) || feed?.items[0] || null;
     sources.reset();
     player.close();
     channel = workshopChannel();
     refreshChannels();
     if (visible && device === 'tv') player.select(channel?.id);
+    return true;
   }
 
   function bind(item) {
@@ -102,6 +108,7 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
   }
   function draw() {
     const reading = device === 'monitor' && !workOnMonitor();
+    reader.select(visible && reading ? article : null, feed?.items, readerContext());
     ui.panel.hidden = !device;
     scene.dataset.mediaDevice = device;
     scene.dataset.mediaWork = String(busy);
@@ -135,7 +142,6 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     ui.latest.textContent = feed?.updatedAt
       ? (feed.stale ? '暂未刷新 · 上次更新 ' : '上次更新 ') + clock(feed.updatedAt) : '';
     ui.actions.hidden = !article;
-    selectNewsArticle(visible && reading ? article : null, feed?.items);
     ui.prev.disabled = ui.next.disabled = !(feed?.items?.length > 1);
     ui.refresh.disabled = !!request;
     updateChannelState();
@@ -240,12 +246,16 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
       player.select(channel?.id);
     } else {
       monitorTrigger = trigger;
+      if (trigger !== ui.ticker) {
+        const last = reader.lastArticle(readerContext());
+        if (last) article = feed?.items.find(item => item.url === last.url) || last;
+      }
       player.close();
       if (perform && !busy) room.perform('news');
     }
     draw();
     motion = animateWorkshopPanel(ui.panel, screen, true);
-    ui.scroll.scrollTop = 0;
+    if (next === 'tv' || workOnMonitor()) ui.scroll.scrollTop = 0;
     ui.back.focus({ preventScroll: true });
   }
   function close(restoreFocus = true) {
@@ -281,7 +291,7 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
   }
   ui.tune.onclick = () => {
     const open = ui.stations.hidden;
-    sources.escape();
+    if (!sources.testing()) sources.escape();
     setTuner(open);
     if (open) ui.channelButtons.querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
   };
@@ -325,7 +335,9 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
       host.append(ui.ticker);
       scene.closest('.work-studio-view')?.toggleAttribute('data-wide-workshop', on || device === 'tv');
       ui.watcher.hidden = on;
-      ui.tune.hidden = !on;
+      ui.tune.hidden = ui.stationName.hidden = !on;
+      if (on) ui.stations.prepend(ui.manageSources);
+      else ui.remote.insertBefore(ui.manageSources, ui.stations);
       setTuner(false);
       for (const target of [ui.monitor, ui.tv]) {
         if (on) target.removeAttribute('title');
@@ -354,19 +366,20 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
       draw();
     },
     setTask(id, working, title, detail) {
-      syncChannelScope();
+      const scopeChanged = syncChannelScope();
       const sessionChanged = id !== sessionId;
       if (sessionChanged) {
-        sessionId = id;
-        bind(null);
         close(false);
+        sessionId = id;
+        article = reader.lastArticle(readerContext()) || feed?.items[0] || null;
+        bind(null);
       }
       const changed = busy !== working;
-      if (!sessionChanged && !changed && taskTitle === title && taskDetail === detail) return;
+      if (!sessionChanged && !scopeChanged && !changed && taskTitle === title && taskDetail === detail) return;
       busy = working;
       taskTitle = title;
       taskDetail = detail;
-      if (changed) { readDuringWork = false; syncTimers(); }
+      if (changed || scopeChanged) { readDuringWork = false; syncTimers(); }
       draw();
     },
     powerOff() { if (device === 'tv') close(false); },

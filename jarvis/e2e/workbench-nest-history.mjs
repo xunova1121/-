@@ -6,7 +6,7 @@ export async function checkNestHistory(page, client) {
   const session = {
     id: 'qa-nest-reading', title: '小窝旧对话翻页验收', titleSet: true, updatedAt: now,
     messages: Array.from({ length: 80 }, (_, i) => ({
-      role: i % 2 ? 'assistant' : 'user', content: '小窝手记第 ' + (i + 1) + ' 条', ts: now - 80000 + i * 1000
+      role: i % 2 ? 'assistant' : 'user', content: '小窝手记第 ' + (i + 1) + ' 条' + (i === 79 ? '长回复里的正文。'.repeat(180) : ''), ts: now - 80000 + i * 1000
     }))
   };
   assert.equal((await client.importSession(session)).imported, true);
@@ -22,10 +22,22 @@ export async function checkNestHistory(page, client) {
   await last.waitFor();
   assert.equal(await first.count(), 0, '进入长会话只挂载最近的一页');
   assert.equal(await transcript.locator('.wy-history-pages:visible').count(), 0, '缩略消息为输入留出空间');
-  await chat.getByRole('button', { name: '展开对话' }).click();
+  const reply = transcript.locator('> .msg.agent[data-nest-recent]').last();
+  await reply.getByRole('button', { name:'展开这条' }).click();
+  assert.equal(await chat.locator('.nest-reply-toggle[aria-expanded="true"]').count(), 1);
+  const size = await reply.evaluate(el => ({height:el.clientHeight, content:el.scrollHeight, viewport:innerHeight}));
+  assert(size.height <= size.viewport / 3 && size.content > size.height, '只滚动当前长回复，最多占三分之一屏');
+  assert.equal(await prompt.isVisible(), true);
+  await reply.getByRole('button', { name:'收起这条' }).click();
+  await chat.getByRole('button', { name: '聊天记录' }).click();
   await transcript.getByRole('button', { name: /查看更早的对话/ }).click();
   await first.waitFor();
   assert.equal(await last.count(), 0);
+  await chat.getByRole('button', { name:'收起记录' }).click();
+  await last.waitFor();
+  assert.equal(await first.count(), 0, '退出旧页会恢复最近气泡');
+  await chat.getByRole('button', { name:'聊天记录' }).click();
+  await transcript.getByRole('button', { name: /查看更早的对话/ }).click();
   await transcript.getByRole('button', { name: '回到最近对话' }).last().click();
   await last.waitFor();
   assert.equal(await first.count(), 0);
@@ -35,10 +47,10 @@ export async function checkNestHistory(page, client) {
   await add.click();
   await add.press('Escape');
   assert.equal(await add.getAttribute('aria-expanded'), 'false');
-  assert.equal(await chat.getByRole('button', { name: '收起全文' }).isVisible(), true);
+  assert.equal(await chat.getByRole('button', { name: '收起记录' }).isVisible(), true);
   await prompt.evaluate(el => el.setSelectionRange(2, 6));
   await prompt.press('Escape');
-  await chat.getByRole('button', { name: '展开对话' }).waitFor();
+  await chat.getByRole('button', { name: '聊天记录' }).waitFor();
   await tabs.getByRole('button', { name: '对话', exact: true }).click();
   await tabs.getByRole('button', { name: '工作台', exact: true }).click();
   assert.equal(await prompt.inputValue(), draft);

@@ -93,7 +93,13 @@ export function createComposerQueue(app, form) {
       }
       if (!current().some((item) => item.id === id)) return;
       // 原任务在上传或等待确认时可能结束；只有它确认接收后，才从队列移除。
-      const accepted = await app.send(row.text, { mode: 'steer', queuedFiles: files, expectedTurn: turn, echo: row.echo });
+      const accepted = await app.send(row.text, {
+        mode: 'steer',
+        queuedFiles: files,
+        expectedTurn: turn,
+        echo: row.echo,
+        submittedAt: row.submittedAt ?? undefined
+      });
       if (accepted) queue.remove(row.scope, row.sessionId, id);
       else queue.pause(row.scope, row.sessionId);
     } catch (error) {
@@ -120,7 +126,7 @@ export function createComposerQueue(app, form) {
       preparing = null;
       refresh();
       // send同步建立active；每轮只取一条，其余等完成事件，不拼接问题。
-      await app.send(row.text, { queuedFiles: files, echo: row.echo });
+      await app.send(row.text, { queuedFiles: files, echo: row.echo, submittedAt: row.submittedAt ?? undefined });
       // 本机动作等入口可能直接完成而不建立模型任务；仍按原顺序接着处理。
       if (!working()) setTimeout(drain, 0);
     } catch (error) {
@@ -132,9 +138,9 @@ export function createComposerQueue(app, form) {
     }
   }
 
-  function enqueue(text, { files = app.attachments, target = app.session, client = scope(), echo = true } = {}) {
+  function enqueue(text, { files = app.attachments, target = app.session, client = scope(), echo = true, submittedAt } = {}) {
     try {
-      queue.add({ scope: client, sessionId: target?.id, text, files, echo });
+      queue.add({ scope: client, sessionId: target?.id, text, files, echo, submittedAt });
       if (files === app.attachments) {
         app.attachments.splice(0);
         app.renderAttachments();

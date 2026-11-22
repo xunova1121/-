@@ -1,4 +1,5 @@
 import './nestClock.css';
+import { localMinute } from '../core/localClock.js';
 
 // 1536×1024 原画中墙钟的轴心为 (567.5,137.5)。只用同一张底图的空白表盘遮掉印在上面的指针，
 // 保留原画的数字、木框和灯光。1080 宽的手机版按比例取样。
@@ -51,7 +52,7 @@ export function createNestClock(floor, art) {
     const now = new Date();
     const hours = now.getHours();
     const minutes = now.getMinutes();
-    const label = String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
+    const label = localMinute(now);
     if (clock.dateTime !== label) {
       clock.dateTime = label;
       clock.setAttribute('aria-label', '墙钟 ' + label);

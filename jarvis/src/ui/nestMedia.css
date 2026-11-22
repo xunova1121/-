@@ -58,6 +58,11 @@
 .ws-scene[data-room-view="nest"] .ws-tv-glass { border-radius: 6px; box-shadow: none; }
 .ws-scene[data-room-view="nest"] .ws-media-remote {
   position: relative; inset: auto; margin-inline-end: 34px; min-height: 32px;
+  gap: 5px; padding-inline-start: 6px;
+}
+.ws-scene[data-room-view="nest"] .ws-remote-station {
+  flex: 1 1 auto; min-width: 0; color: #f5e9d7; font: 550 12px/1.4 var(--font-ui,sans-serif);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
 .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] .ws-media-header { inset: auto 3px 3px auto; }
 .work-studio-view .ws-scene[data-room-view="nest"] .ws-media-remote > button,
@@ -139,15 +144,17 @@
     inset:1% 1% 33% 1%;
   }
   .wb-desk .ws-scene[data-room-view="nest"] .ws-media-remote {
-    position:absolute; inset:4px auto auto 4px; margin:0; border-radius:6px; background:#30251bd9;
+    /* 窄遥控条贴在机框下沿，只占右侧，不遮节目字幕、故障操作或沙发上的未央。 */
+    position:absolute; inset:100% 34px auto auto; width:max-content; max-width:calc(100% - 42px);
+    margin:0; border-radius:0 0 0 6px; padding-inline-start:10px; background:#39291f;
   }
   .wb-desk .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] .ws-media-header {
-    inset:4px 4px auto auto; border-radius:6px; background:#30251bd9;
+    inset:100% 0 auto auto; border-radius:0 0 6px 0; background:#39291f;
   }
   .wb-desk .ws-scene[data-room-view="nest"] .ws-tv-controls .ws-tv-stations {
-    inset:100% auto auto 0; width:min(64cqw,25rem);
+    inset:auto 0 100% auto; width:min(64cqw,25rem);
   }
-  .wb-desk .ws-scene[data-room-view="nest"] .ws-source-manager { inset:39px auto auto 4px; width:min(90%,25rem); }
+  .wb-desk .ws-scene[data-room-view="nest"] .ws-source-manager { inset:auto 4px 4px auto; width:min(90%,25rem); }
 }
 
 @media (max-height:720px) {

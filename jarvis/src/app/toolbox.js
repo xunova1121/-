@@ -1,3 +1,5 @@
+import { noteTaskFile } from '../agent/taskFileReceipts.js';
+import { lastFileWrite } from '../agent/workspace.js';
 import { createPhoneTools } from '../agent/phoneTools.js';
 import { createLookupRuntime } from '../agent/lookupRuntime.js';
 import * as workspace from '../agent/workspace.js';
@@ -81,6 +83,7 @@ export function createToolbox(app) {
       if (!background && !/^skills\//.test(path)) {
         out()?.fileLink?.(path, app.openInWorkspace);
         turn?.files.add(path);
+        noteTaskFile(turn, lastFileWrite(path));
         if (turn) app.studioActivity?.record(turn, { type: 'file', path });
       }
     };

@@ -491,7 +491,7 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
       json(res, 200, await scheduler.upsert({ title: body.title, prompt: body.prompt, unattended: false, ...(typeof body.agentId === 'string' && { agentId: body.agentId }), ...timing })); return true;
     }
     if (pathname === '/api/tasks' && req.method === 'POST') {
-      const { sessionId = null, text, images, voice, requestId, evaluationId, agentId = null, agentForm = null } = await readJson(req, IMPORT_LIMIT); // 可能带图片，放宽大小
+      const { sessionId = null, text, images, voice, submittedAt, requestId, evaluationId, agentId = null, agentForm = null } = await readJson(req, IMPORT_LIMIT); // 可能带图片，放宽大小
       let forcedEvaluationId = evaluationId ?? null;
       if (principal.role === 'evaluation') {
         const existing = sessionId ? await sessions.get(sessionId) : null;
@@ -499,15 +499,15 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
         forcedEvaluationId = existing && !evaluationId ? existing.evaluationId : security.evaluationScope(principal, evaluationId);
       }
       if (principal.role === 'evaluation' && security.remaining(principal.id) < 1) { json(res, 429, { error: '评测令牌今日模型与搜索调用次数已达上限', code: 'EVAL_QUOTA' }); return true; }
-      json(res, 200, await runner.start({ sessionId, text, images, voice: voice === true, requestId:requestId??null, evaluationId: forcedEvaluationId, agentId, agentForm, ...(principal.role === 'evaluation' && { evaluationAuthorization: { id: principal.id } }) })); return true;
+      json(res, 200, await runner.start({ sessionId, text, images, submittedAt, voice: voice === true, requestId:requestId??null, evaluationId: forcedEvaluationId, agentId, agentForm, ...(principal.role === 'evaluation' && { evaluationAuthorization: { id: principal.id } }) })); return true;
     }
     if (pathname === '/api/tasks' && req.method === 'GET') { json(res, 200, runner.list().filter(row => principal.role !== 'evaluation' || accessRoutes.owned(principal, row))); return true; }
     const t = pathname.match(/^\/api\/tasks\/([\w-]+)(\/events|\/stop|\/notes)?$/);
     if (t) {
       if (t[2] === '/notes' && req.method === 'POST') {
         const task=runner.get(t[1]);if(!task){json(res,404,{error:'原任务不存在'});return true;}
-        const {text,requestId}=await readJson(req,IMPORT_LIMIT);
-        json(res,200,await runner.start({sessionId:task.sessionId,text,requestId:requestId??null,targetTaskId:t[1], ...(principal.role === 'evaluation' && { evaluationId: task.evaluationId, evaluationAuthorization: { id: principal.id } })}));return true;
+        const {text,requestId,submittedAt}=await readJson(req,IMPORT_LIMIT);
+        json(res,200,await runner.start({sessionId:task.sessionId,text,submittedAt,requestId:requestId??null,targetTaskId:t[1], ...(principal.role === 'evaluation' && { evaluationId: task.evaluationId, evaluationAuthorization: { id: principal.id } })}));return true;
       }
       if (!t[2] && req.method === 'GET') { const info = runner.get(t[1]); info ? json(res, 200, info) : json(res, 404, { error: '找不到这个任务' }); return true; }
       if (t[2] === '/events' && req.method === 'GET') { streamEvents(req, res, t[1], Number(url.searchParams.get('after') || req.headers['last-event-id'] || 0), url.searchParams.get('batch') === '1'); return true; }

@@ -1,4 +1,5 @@
 import './workbenchNestChat.css';
+import { createNestReplyPreview } from './nestReplyPreview.js';
 
 // 小窝借用当前对话的正文、输入框和队列，只切换显示大小。任务工位使用原有的对话布局。
 export function createWorkbenchNestChat(desk, chat, transcript, form) {
@@ -14,7 +15,18 @@ export function createWorkbenchNestChat(desk, chat, transcript, form) {
   }
   chat.querySelector('header').append(controls);
   let scene, placeholder, mode = 'preview';
-  let reading;
+  let reading, unread = false, mediaOpen = false, mediaQuiet = false;
+  const preview = createNestReplyPreview(transcript, () => {
+    if (mode === 'quiet' || mediaQuiet) { unread = true; updateControls(); }
+  }, () => { unread = false; updateControls(); });
+  function updateControls() {
+    const quiet = mode === 'quiet' || mediaQuiet;
+    desk.toggleAttribute('data-nest-media-quiet', mediaQuiet);
+    hide.toggleAttribute('data-unread', unread);
+    hide.textContent = quiet ? (unread ? '有新回复，显示消息' : '显示消息') : '隐藏消息';
+    hide.setAttribute('aria-expanded', String(!quiet));
+    preview.show(mode === 'preview' && !mediaQuiet);
+  }
 
   function rememberHistory() {
     reading = {
@@ -25,38 +37,44 @@ export function createWorkbenchNestChat(desk, chat, transcript, form) {
   function restoreHistory() {
     if (reading) transcript.scrollTop = reading.atEnd ? transcript.scrollHeight : reading.top;
   }
-  function setMode(next, selectedMessage) {
-    if (mode === 'history') rememberHistory();
+  function setMode(next) {
+    if (mode === 'history') {
+      rememberHistory();
+      if (preview.returnToLatest()) reading = { atEnd: true };
+    }
     mode = next;
+    mediaQuiet = unread = false;
+    preview.collapse();
     desk.dataset.deskChat = next;
-    expand.textContent = next === 'history' ? '收起全文' : '展开对话';
+    expand.textContent = next === 'history' ? '收起记录' : '聊天记录';
     expand.setAttribute('aria-expanded', String(next === 'history'));
-    hide.textContent = next === 'quiet' ? '显示消息' : '隐藏消息';
-    hide.setAttribute('aria-expanded', String(next !== 'quiet'));
-    if (next === 'history' && selectedMessage) {
-      transcript.scrollTop += selectedMessage.getBoundingClientRect().top - transcript.getBoundingClientRect().top;
-    } else if (next === 'history') restoreHistory();
+    updateControls();
+    if (next === 'history') restoreHistory();
     else if (next === 'preview') transcript.scrollTop = transcript.scrollHeight;
   }
   expand.onclick = () => setMode(mode === 'history' ? 'preview' : 'history');
-  hide.onclick = () => setMode(mode === 'quiet' ? 'preview' : 'quiet');
-  transcript.addEventListener('click', event => {
-    if (desk.dataset.deskChat !== 'preview' || event.target.closest('a,button,input,summary,select') || window.getSelection()?.isCollapsed === false) return;
-    const message = event.target.closest('.msg > .body')?.parentElement;
-    if (message) setMode('history', message);
-  });
+  hide.onclick = () => setMode(mode === 'quiet' || mediaQuiet ? 'preview' : 'quiet');
   chat.addEventListener('keydown', event => {
-    if (event.key !== 'Escape' || mode !== 'history' || !desk.hasAttribute('data-desk-chat')) return;
+    if (event.key !== 'Escape' || event.isComposing || !desk.hasAttribute('data-desk-chat') || (!preview.expanded && mode !== 'history')) return;
     // 子菜单拥有自己的 Escape；已经在处理任务时保留原有的全局停止快捷键。
     if (event.defaultPrevented || document.body.classList.contains('generating') || form.querySelector('.composer-more:not([hidden])')) return;
-    setMode('preview');
-    expand.focus({preventScroll: true});
+    if (preview.expanded) {
+      const button = preview.expanded.querySelector('.nest-reply-toggle');
+      preview.collapse();
+      button.focus({preventScroll: true});
+    } else {
+      setMode('preview');
+      expand.focus({preventScroll: true});
+    }
     event.preventDefault();
     event.stopPropagation();
   });
   function leaveNest() {
     if (placeholder === undefined) return;
     if (mode === 'history') rememberHistory();
+    preview.stop();
+    mediaOpen = mediaQuiet = unread = false;
+    delete desk.dataset.nestMediaQuiet;
     delete desk.dataset.deskChat;
     delete prompt.dataset.nestNews;
     prompt.placeholder = placeholder;
@@ -68,13 +86,24 @@ export function createWorkbenchNestChat(desk, chat, transcript, form) {
     if (placeholder === undefined) {
       placeholder = prompt.placeholder;
       rememberHistory();
+      preview.start();
       setMode('preview');
+    }
+    const media = !!scene.querySelector('.ws-media-panel:not([hidden])');
+    if (media !== mediaOpen) {
+      mediaOpen = media;
+      mediaQuiet = media && mode === 'preview' && !preview.expanded;
+      if (!media && mode === 'preview') unread = false;
+      updateControls();
     }
     const newsOpen = scene.querySelector('.ws-media-panel[data-device="monitor"]:not([hidden]) .ws-media-actions:not([hidden])') &&
       scene.querySelector('.ws-media-news:not([hidden])');
     prompt.toggleAttribute('data-nest-news', Boolean(newsOpen));
     prompt.placeholder = newsOpen ? '追问这条新闻…' : '和未央说说话…';
   }
+  desk.addEventListener('click', event => {
+    if (event.target.closest('.ws-media-primary') && (mediaQuiet || mode === 'quiet')) setMode('preview');
+  }, true);
   const observer = new MutationObserver(sync);
   // 多行草稿或附件让输入框变高时，把待发列表放在它上方。
   const composerSize = new ResizeObserver(([entry]) => {

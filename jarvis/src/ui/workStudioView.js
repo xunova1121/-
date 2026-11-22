@@ -218,6 +218,13 @@ export function createWorkStudioView({ workshop = false, newsFeed, newsChat, get
         gesture: showTask && !isReview && (pose === 'stomp' || pose === 'cheer')
       }, state.workOrigin);
       const nestLabel = nest.render(state, {busy: showTask, station, operation: confirmedShred ? 'shred' : backgroundWork ? '' : pose});
+      if (nestLabel && !showTask) {
+        scene.dataset.liveRoomActivity = nestLabel;
+        scene.dataset.routineUntil = String(state.nextAt);
+      } else if (scene.hasAttribute('data-live-room-activity')) {
+        delete scene.dataset.liveRoomActivity;
+        delete scene.dataset.routineUntil;
+      }
       if (state.activity !== 'work') {
         text(mode, '生活中');
         text(stationLabel, routine ? stationNames[station] : '工作台');

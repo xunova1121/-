@@ -205,7 +205,7 @@ export function createStudioActivity({ scope = () => null } = {}) {
       status === 'done' && state.lastOperationFailed ? { pose: 'stomp', title: '已回复，仍有步骤未完成', status: 'error' } : { ...terminal[status], status };
     add(state, outcome);
     // 在新一轮由其他端完成时，旧的内存记录应让位给新回复。
-    state.finishedAt = Date.now();
+    state.finishedAt = turn.completedAt ?? Date.now();
     state.taskId = turn.remoteId || null;
     changed();
   }

@@ -1,3 +1,4 @@
+import { createNestTaskStatus } from './nestTaskStatus.js';
 import { createWorkStudioView } from './workStudioView.js';
 import { createConversationMount } from './conversationMount.js';
 import './workbenchDesk.css';
@@ -30,6 +31,7 @@ export function createWorkbenchStudio({ getSession, activity, newsChat, newsFeed
   desk.append(chat);
   const nestChat = createWorkbenchNestChat(desk, chat, transcript, form);
 
+  const taskStatus = createNestTaskStatus(form, desk, nestDeskOptions);
   let view;
   let open = false;
   let panelClosed = document.body.classList.contains('side-closed');
@@ -44,7 +46,9 @@ export function createWorkbenchStudio({ getSession, activity, newsChat, newsFeed
     const label = session?.title || '';
     if (label !== title.textContent) title.textContent = label;
     title.hidden = !label || label === '新对话';
-    view.render(activity.snapshot(session));
+    const snapshot = activity.snapshot(session);
+    view.render(snapshot);
+    taskStatus.update(snapshot);
   }
   function visibility() {
     refresh();
@@ -72,6 +76,8 @@ export function createWorkbenchStudio({ getSession, activity, newsChat, newsFeed
       restoreScroll = conversation.moveTo(chat);
       updateEmpty();
     } else {
+      nestDeskOptions?.closePreview?.();
+      taskStatus.clear();
       nestChat.close();
       restoreScroll = conversation.restore();
       desk.hidden = true;

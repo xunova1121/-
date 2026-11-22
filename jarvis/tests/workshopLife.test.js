@@ -26,6 +26,20 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
+it('原生前台或网页缓存恢复时立即跳到当地作息', () => {
+  const screen = new EventTarget();
+  vi.stubGlobal('window', screen);
+  const changes = vi.fn();
+  const room = open(changes);
+  room.setVisible(true);
+  at(23);
+  screen.dispatchEvent(new Event('pageshow'));
+  expect(changes.mock.lastCall[0].activity).toBe('sleep');
+  at(12, 5);
+  screen.dispatchEvent(Object.assign(new Event('jarvis:foreground'), {detail:{active:true}}));
+  expect(changes.mock.lastCall[0].activity).toBe('eat');
+});
+
 function open(onChange = () => {}) {
   const room = createWorkshopLife({ onChange });
   opened.push(room);

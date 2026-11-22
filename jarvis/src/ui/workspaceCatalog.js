@@ -1,8 +1,9 @@
+import { PROCESS_FILE } from '../agent/taskFileReceipts.js';
+export { PROCESS_FILE };
 import { collection } from '../agent/store.js';
 import { fileCategory } from './fileOrganization.js';
 const kv = collection('kv');
 export const CATALOG_LIMIT = 2000;
-export const PROCESS_FILE = /(?:^|\/)(?:文档检查|\.workflows|\.checkpoints|检查记录)\//i;
 const rank = (path) => ['docx', 'xlsx', 'pptx', 'svg', 'pdf', 'png'].indexOf(String(path).split('.').pop().toLowerCase());
 function cleanItems(items) {
   const entries = Object.entries(items);

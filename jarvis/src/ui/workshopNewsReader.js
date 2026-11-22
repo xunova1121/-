@@ -10,6 +10,10 @@ export function createWorkshopNewsReader(ui, feed, choose) {
   let request;
   let expanded = false;
   let failed = false;
+  // 只在本次使用期间保留阅读位置；正文复用 newsFeed 已有的缓存。
+  const bookmarks = new Map();
+  let bookmark;
+  let frame = 0;
   let previousItems;
   let photo;
   let photoUrl;
@@ -36,24 +40,31 @@ export function createWorkshopNewsReader(ui, feed, choose) {
   }
 
   function showSummary() {
-    ui.scroll.scrollTop = 0;
     content.hidden = !item?.summary;
     content.textContent = item?.summary ? '导语 · ' + item.summary : '';
     ui.original.textContent = '阅读原文';
     ui.original.setAttribute('aria-expanded', 'false');
   }
-  function reset() {
+  function rememberPosition() {
+    if (bookmark && !frame && !request && ui.scroll.clientHeight) bookmark.top = ui.scroll.scrollTop;
+  }
+  ui.scroll.addEventListener('scroll', rememberPosition, { passive: true });
+  function restorePosition() {
+    if (!bookmark.top) { ui.scroll.scrollTop = 0; return; }
+    if (frame) cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      if (bookmark) ui.scroll.scrollTop = bookmark.top;
+    });
+  }
+  function stop() {
+    if (frame) cancelAnimationFrame(frame);
+    frame = 0;
     request?.abort();
     request = null;
-    expanded = failed = false;
-    showSummary();
   }
-  ui.original.onclick = async event => {
-    event.preventDefault();
-    if (!item) return;
-    if (expanded && !failed) { reset(); return; }
+  async function showArticle() {
     expanded = true;
-    ui.scroll.scrollTop = 0;
     failed = false;
     const pending = new AbortController();
     request = pending;
@@ -74,6 +85,7 @@ export function createWorkshopNewsReader(ui, feed, choose) {
         note.textContent = '本文较长，当前展示前段原文。';
         content.append(note);
       }
+      restorePosition();
     } catch {
       if (request !== pending) return;
       failed = true;
@@ -82,8 +94,23 @@ export function createWorkshopNewsReader(ui, feed, choose) {
     } finally {
       if (request === pending) request = null;
     }
+  }
+  ui.original.onclick = event => {
+    event.preventDefault();
+    if (!item) return;
+    stop();
+    bookmark.top = ui.scroll.scrollTop = 0;
+    if (expanded && !failed) {
+      bookmark.expanded = expanded = false;
+      showSummary();
+    } else {
+      bookmark.expanded = true;
+      return showArticle();
+    }
   };
-  return function select(next, items) {
+  function select(next, items, context) {
+    const same = item?.url === next?.url && (!next || bookmark?.context === context);
+    if (!same) rememberPosition();
     showPhoto(next);
     const summaryChanged = item?.summary !== next?.summary;
     if (items !== previousItems || item?.url !== next?.url || summaryChanged) {
@@ -101,14 +128,37 @@ export function createWorkshopNewsReader(ui, feed, choose) {
         return button;
       }));
     }
-    if (item?.url === next?.url) {
+    if (same) {
       item = next;
       if (summaryChanged && !expanded) showSummary();
       return;
     }
+    stop();
     item = next;
-    reset();
-    if (next) ui.original.href = next.url;
-    else ui.original.removeAttribute('href');
-  };
+    bookmark = null;
+    expanded = failed = false;
+    if (!next) {
+      ui.original.removeAttribute('href');
+      showSummary();
+      return;
+    }
+    const key = JSON.stringify([context, next.url]);
+    bookmark = bookmarks.get(key) || { context, top: 0, expanded: false };
+    bookmark.item = next;
+    bookmarks.delete(key);
+    bookmarks.set(key, bookmark);
+    if (bookmarks.size > 24) bookmarks.delete(bookmarks.keys().next().value);
+    ui.original.href = next.url;
+    if (bookmark.expanded) void showArticle();
+    else {
+      showSummary();
+      restorePosition();
+    }
+  }
+  function lastArticle(context) {
+    let last;
+    for (const entry of bookmarks.values()) if (entry.context === context) last = entry.item;
+    return last;
+  }
+  return { select, lastArticle };
 }

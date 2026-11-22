@@ -96,11 +96,13 @@ try {
       check('收起房间消息时仍可输入', !await page.locator('#transcript').isVisible() && await page.locator('#prompt').isVisible());
       await page.getByRole('button', { name:'显示消息' }).click();
       await page.locator('#transcript .msg.agent .body').filter({hasText:'正在整理原计划'}).click();
+      check('点击回复正文时仍为短气泡', await page.locator('.wb-desk').getAttribute('data-desk-chat') === 'preview');
+      await page.getByRole('button', { name:'聊天记录', exact:true }).click();
       const rect = await page.locator('#transcript').boundingBox();
       check('小窝回复可展开阅读（实测 ' + Math.round(rect.height) + 'px）', rect.height >= 200);
       const final = await page.locator('.wb-desk .ws-floorplan').boundingBox();
       check('阅读时房间与沙发位置保持一致 ' + JSON.stringify([original, final]), Object.keys(original).every(key => Math.abs(original[key] - final[key]) < 1));
-      await page.getByRole('button', { name:'收起全文' }).click();
+      await page.getByRole('button', { name:'收起记录' }).click();
     }
     const queue = page.getByRole('region', { name: '待发送问题' });
     check(`${width} 发送前没有模式按钮`, await page.locator('.composer-send-modes').count() === 0);

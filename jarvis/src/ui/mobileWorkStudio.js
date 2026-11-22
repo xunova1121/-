@@ -1,3 +1,4 @@
+import { createNestTaskStatus } from './nestTaskStatus.js';
 import { createWorkStudioView } from './workStudioView.js';
 import { createConversationMount } from './conversationMount.js';
 import { createMobileNestChat } from './mobileNestChat.js';
@@ -47,6 +48,7 @@ export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsCh
   sheet.append(back, chat);
   const conversation = createConversationMount(transcript, document.getElementById('inputbar'));
   const nestChat = createMobileNestChat(sheet, chat, transcript);
+  const taskStatus = createNestTaskStatus(document.getElementById('inputbar'), sheet, nestDeskOptions);
   const appElement = document.querySelector('.app');
   document.body.append(sheet);
   let view;
@@ -112,8 +114,8 @@ export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsCh
       const name = session?.title || '';
       title.textContent = name === '新对话' ? '' : name;
       empty.hidden = Boolean(transcript.querySelector('.msg, .wy-history-pages, .wy-agent-start, .wy-studio-start'));
-      nestChat.refresh();
       view?.render(snapshot);
+      taskStatus.update(snapshot);
     }
   }
 
@@ -148,6 +150,7 @@ export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsCh
     return false;
   }
   function backInRoom() {
+    if (nestDeskOptions?.closePreview?.()) return;
     if (closeInnerMenu()) return;
     if (document.body.classList.contains('wy-keyboard-open') && document.activeElement?.matches('#prompt')) {
       document.activeElement.blur();
@@ -167,7 +170,7 @@ export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsCh
   };
   document.addEventListener('keydown', overlayEscape, true);
   sheet.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
+    if (e.key !== 'Escape' || e.isComposing) return;
     // 对话页的全局 Esc 会中断任务。在工作台中逐层退回。
     e.stopPropagation();
     e.preventDefault();
@@ -176,6 +179,8 @@ export function initMobileWorkStudio({ getSession, activity, closeDrawer, newsCh
   const closeForPanel = () => { if (sheet.open && document.body.classList.contains('side-open')) exitStudio(); };
   window.addEventListener('jarvis:panel', closeForPanel);
   function leave() {
+    nestDeskOptions?.closePreview?.();
+    taskStatus.clear();
     restoreEntryScroll = null;
     const restoreReading = nestChat.close();
     setRoomActive(false);

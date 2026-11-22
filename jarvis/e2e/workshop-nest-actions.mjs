@@ -16,7 +16,19 @@ export async function checkLivingMotion(page, scene) {
   const portrait = await isPortraitNest(scene);
   const parts = portrait ? scene.locator('.ws-nest-portrait-actor,.ws-nest-portrait-cat')
     : scene.locator('.ws-nest-idle-paint,.ws-nest-cat-body,.ws-nest-cat-face');
-  if (portrait) await scene.locator('.ws-nest-portrait-actor[data-picture="work"]').waitFor();
+  if (portrait) {
+    const deskActor = scene.locator('.ws-nest-portrait-actor[data-picture="work"]');
+    await deskActor.waitFor();
+    const {width, palmX, palmY} = await deskActor.evaluate(el => {
+      const room = el.closest('.ws-floorplan').getBoundingClientRect();
+      const actor = el.getBoundingClientRect();
+      return {width: actor.width / room.width,
+        palmX: (actor.left - room.left + actor.width * .92) / room.width,
+        palmY: (actor.top - room.top + actor.height * .62) / room.height};
+    });
+    assert(width >= .155 && width <= .17, '书桌人物宽度应随房间缩放，390px 竖屏约 61px');
+    assert(Math.abs(palmX - .804) < .007 && Math.abs(palmY - .44) < .007, '放大后右手仍接触原画桌面');
+  }
   else await scene.locator('.ws-nest-living[data-idle-pose="work"]').waitFor();
   await parts.evaluateAll(els => Promise.all(els.filter(el => el instanceof HTMLImageElement && el.currentSrc).map(el => el.decode())));
   async function frame(fraction) {

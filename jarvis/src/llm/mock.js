@@ -83,7 +83,8 @@ export function plan(messages, tools = []) {
     if (used.has('list_files')) return { emotion: '平静', text: `工作区里的文件：\n\n${lastResult.content.slice(0, 500)}` };
     if (used.has('get_current_time')) {
       const t = safeJson(lastResult.content);
-      return { emotion: '平静', text: t ? `现在是 ${t.local}（${t.timeZone}）。` : lastResult.content };
+      const local = t?.local || t?.beijing;
+      return { emotion: '平静', text: local ? `现在是 ${local}${t.timeZone ? '（' + t.timeZone + '）' : ''}。` : lastResult.content };
     }
     if (used.has('get_local_metrics')) {
       const m = safeJson(lastResult.content);
@@ -174,7 +175,9 @@ export function plan(messages, tools = []) {
   const read = q.match(/(读|打开|总结|分析)[一下]*\s*[「“"]?([^\s「」“”"]+\.(docx|pdf|pptx|xlsx|csv|txt|md|html))/i);
   if (read) return { emotion: '专注', calls: [call('read_file', { path: read[2] })] };
   if (/cpu|内存|电脑|系统|状态|负载/i.test(q)) return { calls: [call('get_local_metrics', {})] };
-  if (/几点|时间|日期|星期|今天/.test(q)) return { calls: [call('get_current_time', {})] };
+  if (/现在(?:是)?几点|(?:今天|现在)(?:是)?(?:几号|几月|星期几|周几)|(?:现在|当前|此刻|今天)的?(?:时间|日期)|^(?:请(?:问|告诉我|帮我查一下)\s*)?(?:北京(?:时间)?几点|北京时间|报时|几点(?:钟|了)?|日期|时间|星期几)[？?。！!]*$/u.test(q.trim())) {
+    return { calls: [call('get_current_time', {})] };
+  }
   if (/难过|烦|累|焦虑|压力|担心|糟糕/.test(q)) return { emotion: '安抚', text: '没关系，慢慢来。我理解这种感觉，先深呼吸一下。你愿意的话，可以说说具体发生了什么，我们一起理一理。' };
   if (/成功|通过|完成|好消息|升职|录取/.test(q)) return { emotion: '愉悦', text: '太好了，恭喜你！这份努力很值得。要不要我帮你把下一步计划列一下？' };
   return {

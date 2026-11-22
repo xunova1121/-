@@ -120,7 +120,7 @@ export async function checkFloatingChat(page, scene, shot) {
   const viewport = await scene.boundingBox();
   assert(viewport.height >= await page.evaluate(() => innerHeight * .88), '手机的家具图应铺满整个小窝');
   const prompt = sheet.locator('#prompt');
-  const text = '未央，你现在在做什么？';
+  const text = '未央，你现在在做什么？' + '请逐段说明当前进展。'.repeat(45);
   await prompt.fill(text);
   await sheet.locator('#btn-send').click();
   const user = sheet.locator('#transcript > .msg.user[data-nest-recent]').filter({hasText:text});
@@ -131,9 +131,26 @@ export async function checkFloatingChat(page, scene, shot) {
   const userBox = await user.boundingBox(), answerBox = await agent.boundingBox();
   assert(userBox.x > answerBox.x + 4, '自己的气泡靠右，未央的回复靠左');
   assert.equal(await agent.evaluate(el => getComputedStyle(el).webkitLineClamp), '3');
+  await user.getByRole('button', {name:'展开这条'}).click();
+  const height = await user.evaluate(el => [el.clientHeight, el.scrollHeight]);
+  assert(height[0] <= viewport.height / 3 && height[1] > height[0], '长消息在原位单独滚动');
+  await user.getByRole('button', {name:'收起这条'}).click();
   await checkFurnitureStayed(scene, before, '收到消息');
   await shot('小窝悬浮对话');
+  // 图片/音视频是正文的兄弟节点；即使没有长正文也必须能读到原始交互内容。
+  await agent.evaluate(body => {
+    const media = document.createElement('audio');
+    media.className = 'gen-audio'; media.controls = true;
+    body.parentElement.append(media);
+  });
+  const current = sheet.locator('#transcript > .msg.agent[data-nest-recent]').last();
+  await current.getByRole('button', { name:'展开这条' }).click();
+  assert(await current.locator('audio.gen-audio').isVisible(), '原生播放器在单条展开后可操作');
+  await current.getByRole('button', { name:'收起这条' }).click();
   await agent.click();
+  assert.equal(await sheet.getAttribute('data-nest-chat'), 'preview', '点击短消息仍然留在小窝');
+  await scene.locator('[data-room-action="menu"]').click();
+  await scene.getByRole('button', {name:'查看聊天记录'}).click();
   await sheet.locator('.nest-chat-collapse').waitFor();
   assert.equal(await sheet.getAttribute('data-nest-chat'), 'history');
   await checkFurnitureStayed(scene, before, '展开完整对话');

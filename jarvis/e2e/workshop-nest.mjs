@@ -215,6 +215,22 @@ async function checkMedia(page, room, button, shot) {
     getComputedStyle(scene.querySelector('.ws-floorplan')).translate);
   assert(shift === 'none' || /^0px(?: 0px)?$/.test(shift), '打开电视时房间不应被工作区走路镜头平移 ' + shift);
   await fixed('展开电视');
+  await tv.evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished)));
+  const controlsClear = await tv.evaluate(el => {
+    const screen = el.querySelector('.ws-tv-glass').getBoundingClientRect();
+    return ['.ws-tv-tune', '.ws-media-back'].every(selector => {
+      const control = el.querySelector(selector);
+      const box = control.getBoundingClientRect();
+      return box.top >= screen.bottom - 1 &&
+        control.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
+    });
+  });
+  assert(controlsClear, '遥控器和返回键位于节目下方，点击时不会点到画面');
+  assert(!await button(tv, '管理视频源').isVisible(), '收看的时候遥控条只保留频道和换台');
+  await button(tv, '换台').click();
+  await button(tv, '管理视频源').click();
+  await button(tv, '关闭视频源管理').click();
+  assert(await button(tv, '换台').evaluate(el => el === document.activeElement), '设备源面板关闭后焦点回到可见的换台按钮');
   await button(tv, '换台').click();
   await button(tv, 'CCTV-2 财经').click();
   await page.waitForFunction(() => {
@@ -309,6 +325,16 @@ async function check(mobile, width, clockOnly = false) {
     await checkLocalWallClock(page, scene);
     await checkRestingFurniture(room, scene, hit, shot);
     await checkLivingMotion(page, scene);
+    await room.locator('[data-room-action="menu"]').click();
+    await room.getByRole('button', { name: '找家具', exact: true }).click();
+    assert.equal(await scene.getAttribute('data-furniture-hints'), 'on');
+    assert(await hit('cat').evaluate(el => {
+      const box = el.getBoundingClientRect();
+      return getComputedStyle(el).outlineStyle === 'dashed' &&
+        document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)?.closest('[data-furniture]') === el;
+    }), '提示在真实的家具热区描边，仍可直接点击猫');
+    await page.clock.fastForward(3600);
+    assert.equal(await scene.getAttribute('data-furniture-hints'), null, '提示自动退出');
     const { bright, dark } = await checkRoomLighting(page, scene, hit);
     await checkCoffee(page, room, scene, hit, shot);
 

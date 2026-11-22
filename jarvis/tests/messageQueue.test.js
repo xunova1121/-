@@ -47,7 +47,7 @@ it('2026-11-17 复审：排队消息存本机，重启后同账号同会话恢�
   const owner = { base: 'https://srv.example', account: { userId: 'u1', token: 'secret-token' } };
   const other = { base: 'https://srv.example', account: { userId: 'u2', token: 'other-token' } };
   const before = createMessageQueue({ storage, keyOf });
-  before.add({ scope: owner, sessionId: 's1', text: '第一件事', files: [{ path: '图片/a.png', image: true }] });
+  before.add({ scope: owner, sessionId: 's1', text: '第一件事', submittedAt: 1720000000000, files: [{ path: '图片/a.png', image: true }] });
   before.add({ scope: owner, sessionId: 's1', text: '第二件事' });
   before.add({ scope: other, sessionId: 's1', text: '别人的事' });
   before.remove(owner, 's1', before.list(owner, 's1')[1].id);
@@ -59,7 +59,7 @@ it('2026-11-17 复审：排队消息存本机，重启后同账号同会话恢�
   expect(after.restore(ownerAgain)).toBe(1);
   expect(after.restore(ownerAgain)).toBe(0);
   const [row] = after.list(ownerAgain, 's1');
-  expect(row).toMatchObject({ text: '第一件事', paused: true, files: [{ path: '图片/a.png', image: true }] });
+  expect(row).toMatchObject({ text: '第一件事', submittedAt: 1720000000000, paused: true, files: [{ path: '图片/a.png', image: true }] });
   expect(after.take(ownerAgain, 's1')).toBeNull();
   expect(after.list(ownerAgain, 's2')).toEqual([]);
   // 别的账号的排队消息仍在存储里，等它自己登录再恢复

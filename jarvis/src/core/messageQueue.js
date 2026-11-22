@@ -14,7 +14,7 @@ export function createMessageQueue({ storage = null, keyOf = null } = {}) {
   };
   const save = () => {
     if (!storage || !keyOf) return;
-    const mine = rows.map(row => ({ key: keyOf(row.scope), sessionId: row.sessionId, text: row.text, files: row.files, echo: row.echo })).filter(row => row.key);
+    const mine = rows.map(row => ({ key: keyOf(row.scope), sessionId: row.sessionId, text: row.text, files: row.files, echo: row.echo, submittedAt: row.submittedAt })).filter(row => row.key);
     const loadedKeys = new Set(mine.map(row => row.key));
     // 别的账号存着的排队消息原样保留，只替换当前已载入账号的那部分
     const others = read().filter(row => !loadedKeys.has(row.key) && !restored.has(row.key));
@@ -23,7 +23,7 @@ export function createMessageQueue({ storage = null, keyOf = null } = {}) {
   const restored = new Set();
   const persist = fn => (...args) => { const out = fn(...args); save(); return out; };
   return {
-    add: persist(function add({ scope, sessionId, text, files = [], echo = true, paused = false }) {
+    add: persist(function add({ scope, sessionId, text, files = [], echo = true, paused = false, submittedAt = Date.now() }) {
       text = String(text || '').trim();
       if (!sessionId || !text && !files.length) throw new Error('请先输入问题或添加附件');
       if (rows.length >= 10) throw new Error('最多排队10条，请等待处理或移除一条');
@@ -32,7 +32,7 @@ export function createMessageQueue({ storage = null, keyOf = null } = {}) {
         if (!file.path || file.path.length > 500) throw new Error('附件路径无效，请重新添加');
         return { path: file.path, image: Boolean(file.image) };
       });
-      const row = { id: ++sequence, scope, sessionId, text, files: paths, echo, paused };
+      const row = { id: ++sequence, scope, sessionId, text, files: paths, echo, paused, submittedAt: Number.isSafeInteger(submittedAt) && submittedAt > 0 ? submittedAt : null };
       rows.push(row);
       return row.id;
     }),
@@ -58,7 +58,7 @@ export function createMessageQueue({ storage = null, keyOf = null } = {}) {
       let count = 0;
       for (const row of read().filter(item => item.key === key)) {
         try {
-          this.add({ scope, sessionId: row.sessionId, text: row.text, files: Array.isArray(row.files) ? row.files : [], echo: row.echo !== false, paused: true });
+          this.add({ scope, sessionId: row.sessionId, text: row.text, files: Array.isArray(row.files) ? row.files : [], echo: row.echo !== false, paused: true, submittedAt: row.submittedAt ?? null });
           count++;
         } catch { /* 超出上限或内容无效的旧记录跳过 */ }
       }

@@ -56,7 +56,7 @@ export function createWorkshopSourceManager(ui, { preview, restoreChannel, selec
     testing = true;
     display('preview');
     preview(source);
-    ui.manageSources.focus({ preventScroll: true });
+    focusControl();
   }));
   const remove = control('移除', () => {
     remove.hidden = true;
@@ -81,6 +81,10 @@ export function createWorkshopSourceManager(ui, { preview, restoreChannel, selec
   panel.append(header, body);
   ui.television.append(panel);
 
+  function focusControl() {
+    const control = ui.tune.hidden || !ui.stations.hidden ? ui.manageSources : ui.tune;
+    control.focus({ preventScroll: true });
+  }
   let mode = 'closed';
   let editingId = '';
   let testing = false;
@@ -114,7 +118,7 @@ export function createWorkshopSourceManager(ui, { preview, restoreChannel, selec
   function dismiss(focus) {
     stopTrial();
     reset();
-    if (focus) ui.manageSources.focus({ preventScroll: true });
+    if (focus) focusControl();
   }
   function edit(source) {
     editingId = source?.id || '';
@@ -152,7 +156,7 @@ export function createWorkshopSourceManager(ui, { preview, restoreChannel, selec
     for (const source of [...custom, ...defaults]) {
       if (source === defaults[0]) list.append(mediaNode('h5', 'ws-source-group', '默认频道'));
       const row = mediaNode('div', 'ws-source-row');
-      const tune = control(source.label, () => { reset(); selectChannel(source.id); ui.manageSources.focus({ preventScroll: true }); });
+      const tune = control(source.label, () => { reset(); selectChannel(source.id); focusControl(); });
       tune.setAttribute('aria-label', '播放 ' + source.label);
       if (source.kind === 'custom') {
         const editButton = control('编辑', () => edit(source));
@@ -195,7 +199,7 @@ export function createWorkshopSourceManager(ui, { preview, restoreChannel, selec
       const source = saveWorkshopSource(draft);
       reset();
       selectChannel(source.id);
-      ui.manageSources.focus({ preventScroll: true });
+      focusControl();
     });
   };
   ui.manageSources.onclick = () => {

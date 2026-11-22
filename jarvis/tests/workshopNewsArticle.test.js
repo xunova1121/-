@@ -18,8 +18,8 @@ describe('工作台内读报道', () => {
     const create = () => ({ setAttribute: vi.fn(), remove: vi.fn(), replaceChildren: vi.fn() });
     vi.stubGlobal('document', { createElement: create });
     const ui = { original: { setAttribute: vi.fn(), removeAttribute: vi.fn() }, news: { append: vi.fn(), insertBefore: vi.fn() },
-      digest: {}, headlines: { replaceChildren: vi.fn() }, scroll: {} };
-    const select = createWorkshopNewsReader(ui, {});
+      digest: {}, headlines: { replaceChildren: vi.fn() }, scroll: { addEventListener: vi.fn() } };
+    const { select } = createWorkshopNewsReader(ui, {});
     const image = 'https://p3.img.cctvpic.com/photoworkspace/example.jpg';
     select({ ...item, title: '甲', image });
     const img = ui.news.insertBefore.mock.calls[0][0];
@@ -103,15 +103,37 @@ var contentdate = '<p>[!--begin:htmlVideoCode--]ID[!--end:htmlVideoCode--]</p><p
     expect(native).toHaveBeenCalledTimes(2);
   });
 
+  it('同一 URL 按会话分别记住导语、原文和滚动，重开后继续读', async () => {
+    let nextFrame;
+    vi.stubGlobal('requestAnimationFrame', callback => { nextFrame = callback; return 1; });
+    vi.stubGlobal('cancelAnimationFrame', () => { nextFrame = null; });
+    vi.stubGlobal('document', { createElement: () => ({ setAttribute: vi.fn(), replaceChildren: vi.fn() }) });
+    const scroll = { scrollTop: 0, clientHeight: 240, addEventListener: vi.fn() };
+    const ui = { original: { setAttribute: vi.fn(), removeAttribute: vi.fn() }, news: { append: vi.fn() },
+      digest: {}, headlines: { replaceChildren: vi.fn() }, scroll };
+    const reader = createWorkshopNewsReader(ui, { readArticle: vi.fn().mockResolvedValue(answer) });
+    reader.select(item, [], 'A');
+    await ui.original.onclick({ preventDefault: vi.fn() });
+    scroll.scrollTop = 145;
+    reader.select(null, [], 'A');
+    expect(reader.lastArticle('B')).toBeUndefined();
+    reader.select(item, [], 'B');
+    expect([ui.original.textContent, scroll.scrollTop]).toEqual(['阅读原文', 0]);
+    reader.select(reader.lastArticle('A'), [], 'A');
+    await Promise.resolve();
+    nextFrame();
+    expect([ui.original.textContent, scroll.scrollTop]).toEqual(['收起原文', 145]);
+  });
+
   it('在房间内重试、翻篇和收起，不将迟到的前篇正文写回蒙层', async () => {
     const content = { setAttribute: vi.fn(), replaceChildren: vi.fn() };
     vi.stubGlobal('document', { createElement: tag => tag === 'div' ? content : {} });
     const ui = { original: { setAttribute: vi.fn(), removeAttribute: vi.fn() }, news: { append: vi.fn() },
-      digest: {}, headlines: { replaceChildren: vi.fn() }, scroll: { scrollTop: 120 } };
+      digest: {}, headlines: { replaceChildren: vi.fn() }, scroll: { scrollTop: 120, addEventListener: vi.fn() } };
     let finish;
     const readArticle = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
       .mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ paragraphs: ['新文章正文'] });
-    const select = createWorkshopNewsReader(ui, { readArticle });
+    const { select } = createWorkshopNewsReader(ui, { readArticle });
     const event = { preventDefault: vi.fn() };
     select(item);
     expect(ui.scroll.scrollTop).toBe(0);

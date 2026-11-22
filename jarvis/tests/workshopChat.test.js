@@ -17,6 +17,7 @@ afterEach(() => {
 });
 
 it.each([
+  ['现在几点了？', 'clock'], ['今天星期几', 'clock'],
   ['你在干嘛', 'status'], ['小未央，你现在在做什么呀？', 'status'], ['现在你在忙什么呢', 'status'],
   ['请打开工作台的台灯', 'lamp-on'], ['把房间里的台灯关掉', 'lamp-off'], ['恢复自动灯光', 'lamp-auto'],
   ['未央，去泡杯咖啡吧', 'coffee'], ['给自己冲一杯咖啡', 'coffee'], ['你先去吃饭吧', 'eat'], ['去睡一会儿', 'sleep'],
@@ -39,6 +40,16 @@ it('家中无人打扰时自动作息不会发声；直接明确点唱复用本�
   expect(answerWorkshopCommand('sing')).toContain('正在哼《茉莉花》');
   expect(playWorkshopHum).toHaveBeenCalledTimes(1);
   expect(answerWorkshopCommand('sing')).toContain('暂时无法播放');
+});
+
+it('当地时间跨日和前台实际活动一致，过期画面不能替代作息', () => {
+  vi.setSystemTime(new Date(2026, 10, 22, 0, 2));
+  expect(answerWorkshopCommand('clock')).toContain('11月22日，星期日 00:02');
+  const scene = { liveRoomActivity: '正在小沙发上读新闻', routineUntil: String(getWorkshopLife().nextAt) };
+  expect(answerWorkshopCommand('status', { scene })).toContain('读新闻');
+  expect(answerWorkshopCommand('status', { scene, busy: true })).toContain('当前任务');
+  vi.setSystemTime(new Date(2026, 10, 22, 12, 5));
+  expect(answerWorkshopCommand('status', { scene })).toContain('午饭');
 });
 
 it('自然哼歌时只报候选曲名，用户点唱才接着唱这一首', () => {
@@ -86,8 +97,8 @@ it('运行中“你在干嘛”取实际活跃步骤与文件，避免向模型�
   const { app, chat } = fixture(server);
   app.active = { status: '思考中' };
   const snapshot = { active: true, entries: [{ title: '写入文件', file: '出库.md', status: 'running' }, { title: '上一步', status: 'done' }] };
-  await chat.reply('status', '你在干嘛', { busy: true, echo: true, snapshot });
-  expect(app.transcript.add.mock.calls).toEqual([['user', '你在干嘛'], ['agent', expect.stringContaining('写入文件”（出库.md）')]]);
+  await chat.reply('status', '你在干嘛', { busy: true, echo: true, snapshot, submittedAt: 123456 });
+  expect(app.transcript.add.mock.calls).toEqual([['user', '你在干嘛', 123456], ['agent', expect.stringContaining('写入文件”（出库.md）')]]);
   expect(app.session.messages).toEqual([]);
   expect(server.appendSession).not.toHaveBeenCalled();
   expect(app.setTask).not.toHaveBeenCalled();

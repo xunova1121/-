@@ -2,6 +2,7 @@
  * 对话记录 DOM。流式阶段用 textContent 追加纯文本；回复完成后按极简 Markdown 重排，
  * 全程只用 createElement + textContent，从不把模型输出当 HTML 插入。
  */
+import { localMessageTime } from '../core/localClock.js';
 import { imageButton, previewWorkspaceImage, showImagePreview } from './imagePreview.js';
 import { PROCESS_FILE } from './workspaceCatalog.js';
 import { posterArtifactId, posterArtifactAttempt } from '../../shared/posterArtifactPath.js';
@@ -364,7 +365,10 @@ export function foldPreview(text, max = FOLD_CHARS) {
   return head;
 }
 
-const hhmm = (ts) => new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+function labelMessageTime(stamp, date, today) {
+  stamp.title = date.toLocaleString('zh-CN');
+  stamp.textContent = ` · ${localMessageTime(date, today)}`;
+}
 
 export class Transcript {
   /** @param {HTMLElement} root  @param {{ progress?: boolean }} [o] progress：工具调用合并成一张“工作进展”卡片（手机） */
@@ -375,6 +379,26 @@ export class Transcript {
     this.refreshSports = refreshSports;
     this.loadSong = loadSong;
     this.follow = true;
+    // 整个对话共用一个跨日定时器。前台恢复时刷新已显示的时间，包括旅行途中更改时区的情况。
+    let clockTimer, calendarKey;
+    const syncCalendar = (event) => {
+      clearTimeout(clockTimer);
+      if (document.hidden || event?.detail?.active === false) return;
+      const today = new Date();
+      const key = today.toDateString() + '/' + today.getTimezoneOffset() + '/' + Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (key !== calendarKey) {
+        for (const stamp of root.querySelectorAll('time.who-time[datetime]')) labelMessageTime(stamp, new Date(stamp.dateTime), today);
+        calendarKey = key;
+      }
+      const midnight = new Date(today);
+      midnight.setHours(24, 0, 0, 0);
+      clockTimer = setTimeout(syncCalendar, midnight - today);
+    };
+    document.addEventListener('visibilitychange', syncCalendar);
+    window.addEventListener('focus', syncCalendar);
+    window.addEventListener('pageshow', syncCalendar);
+    window.addEventListener('jarvis:foreground', syncCalendar);
+    syncCalendar();
     root.addEventListener('scroll', () => {
       this.follow = root.scrollHeight - root.scrollTop - root.clientHeight < 140;
       document.body.classList.toggle('wy-reading-history', !this.follow);
@@ -406,7 +430,17 @@ export class Transcript {
     const head = document.createElement('span');
     head.className = 'who';
     // 名字和时间分开放，方便桌面版把名字做成标题、时间淡一些（文字内容不变）
-    head.append(Object.assign(document.createElement('span'), { className: 'who-name', textContent: LABEL[role] ?? role }), Object.assign(document.createElement('span'), { className: 'who-time', textContent: ` · ${hhmm(ts)}` }));
+    const stamp = Object.assign(document.createElement('time'), { className: 'who-time' });
+    const setTimestamp = (value) => {
+      const date = new Date(value);
+      stamp.hidden = value == null || !Number.isFinite(date.getTime());
+      if (stamp.hidden) return;
+      el.dataset.messageTs = String(date.getTime());
+      stamp.dateTime = date.toISOString();
+      labelMessageTime(stamp, date);
+    };
+    setTimestamp(ts);
+    head.append(Object.assign(document.createElement('span'), { className: 'who-name', textContent: LABEL[role] ?? role }), stamp);
     const mascot = role === 'agent' ? createMascot(text ? 'idle' : 'think') : null;
     if (mascot) { mascot.classList.add('who-mood'); head.prepend(mascot); }
     // 小精灵旁的气泡只在回答过程中显示状态（想 / 查资料 / 搓手）；答完就收起，不在每条回答前留一句固定的话
@@ -579,19 +613,20 @@ export class Transcript {
         }
       };
     }
-    function finishProgress() {
+    function finishProgress(elapsedMs) {
       if (!prog) return;
       clearInterval(prog.timer);
       prog.box.classList.remove('working');
       setMascotState(prog.action, prog.list.querySelector('li[data-st=fail]') ? 'think' : 'happy');
       for (const li of prog.list.querySelectorAll('li[data-st="now"]')) li.dataset.st = 'stop';
       prog.count.textContent = `用了 ${prog.n} 步 · 点开查看`;
-      prog.time.textContent = fmt(Date.now() - t0);
+      prog.time.textContent = fmt(elapsedMs ?? Date.now() - t0);
       prog.box.open = false;
     }
     let planBox = null;
     return {
       el,
+      setTimestamp,
       get text() { return raw; },
       /** 任务清单：放在回答最前面，每次更新整份重画（○ 未开始 / ◐ 进行中 / ✓ 已完成 / – 不做了） */
       plan(steps = []) {
@@ -868,7 +903,7 @@ export class Transcript {
         markets = next;
         self.#scroll();
       },
-      done(meta, { onFeedback, fold = false } = {}) {
+      done(meta, { onFeedback, fold = false, elapsedMs } = {}) {
         if (mascot) {
           const paused = /已打断|中断/.test(meta || '');
           present(paused ? 'think' : moodState || 'happy');
@@ -877,7 +912,7 @@ export class Transcript {
         }
         el.classList.remove('streaming');
         for (const flush of pendingLogs) flush();
-        finishProgress();
+        finishProgress(elapsedMs);
         closeGroups();
         const preview = role === 'agent' && curRaw && fold ? foldPreview(stripEmotionTags(curRaw)) : null;
         formatCurrent(preview);

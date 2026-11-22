@@ -71,9 +71,15 @@ export function mediaControls(scene, floor, channels, player) {
   const brief = button('生成简报');
   const actions = mediaNode('div', 'ws-media-actions');
   actions.append(ask, brief, original);
-  const prev = button('上一条');
-  const next = button('下一条');
-  const refresh = button('刷新新闻');
+  function navigation(name, symbol) {
+    const control = button(symbol, 'ws-news-control');
+    control.setAttribute('aria-label', name);
+    control.title = name;
+    return control;
+  }
+  const prev = navigation('上一条', '‹');
+  const next = navigation('下一条', '›');
+  const refresh = navigation('刷新新闻', '↻');
   const nav = mediaNode('div', 'ws-media-nav');
   nav.append(prev, next, refresh);
   const newsTools = mediaNode('div', 'ws-news-tools');
@@ -83,7 +89,9 @@ export function mediaControls(scene, floor, channels, player) {
   digest.setAttribute('aria-label', '本期其他报道');
   const headlines = mediaNode('div', 'ws-news-headlines');
   digest.append(mediaNode('h4', '', '本期其他报道'), headlines);
-  news.append(title, credit, latest, digest);
+  const byline = mediaNode('div', 'ws-news-byline');
+  byline.append(credit, latest);
+  news.append(title, byline, digest);
   const television = mediaNode('div', 'ws-media-tv');
   const receiver = mediaNode('div', 'ws-media-receiver');
   const glass = mediaNode('div', 'ws-tv-glass ws-media-screen');
@@ -106,11 +114,13 @@ export function mediaControls(scene, floor, channels, player) {
   manageSources.setAttribute('aria-expanded', 'false');
   const stations = mediaNode('div', 'ws-tv-stations');
   stations.append(channelButtons, network, power);
+  const stationName = mediaNode('span', 'ws-remote-station');
+  stationName.hidden = true;
   const remote = mediaNode('div', 'ws-media-remote ws-tv-controls');
   const tune = button('换台', 'ws-tv-tune');
   tune.hidden = true;
   tune.setAttribute('aria-expanded', 'false');
-  remote.append(tune, manageSources, stations);
+  remote.append(stationName, tune, manageSources, stations);
   television.append(receiver, remote);
   const task = mediaNode('div', 'ws-media-work');
   const taskTitle = mediaNode('h4', 'ws-media-title');
@@ -121,5 +131,5 @@ export function mediaControls(scene, floor, channels, player) {
   scene.append(ticker);
   return { monitor, mini, tv, ticker, tickerLabel, tickerText, panel, heading, back, switchScreen,
     news, newsTools, title, credit, latest, digest, headlines, original, actions, ask, brief, prev, next, refresh,
-    television, watcher, tune, stations, channelButtons, manageSources, network, power, task, taskTitle, taskDetail, scroll };
+    television, watcher, remote, stationName, tune, stations, channelButtons, manageSources, network, power, task, taskTitle, taskDetail, scroll };
 }

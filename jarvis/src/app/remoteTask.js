@@ -1,3 +1,4 @@
+import { noteTaskFile } from '../agent/taskFileReceipts.js';
 /**
  * 服务器模式：接上服务器上正在做的任务（另一台设备发起的、或 App 重新打开时），把服务器生成的文件取回本机。
  */
@@ -40,14 +41,15 @@ export function createRemoteTask(app) {
     app.setTask('processing', '服务器上正在做');
     const cards = new Map();
     let failed = false;
+    let elapsedMs;
     try {
-      await runRemote(app.server, {
+      const result = await runRemote(app.server, {
         taskId: s.taskId,
         onStarted: (task) => {
           turn.remoteId = task.id;
         },
         signal: ctrl.signal,
-        onFile: (p) => pullServerFile(p, turn),
+        onFile: (p, version) => pullServerFile(p, turn, version),
         emit: (e) => {
           if (turn.streamDone || ctrl.signal.aborted) return;
           app.studioActivity?.record(turn, e);
@@ -81,8 +83,13 @@ export function createRemoteTask(app) {
           }
         }
       });
+      turn.completedAt = result.completedAt ?? Date.now();
+      elapsedMs = result.timing?.totalMs;
+      bubble.setTimestamp?.(turn.completedAt);
       app.studioActivity?.finish(turn, 'done');
     } catch (e) {
+      turn.completedAt = e.completedAt ?? Date.now();
+      bubble.setTimestamp?.(turn.completedAt);
       app.studioActivity?.finish(turn, e.name === 'AbortError' ? 'stopped' : serverTaskMayBeRunning(e) ? 'waiting' : 'error');
       if (e.name !== 'AbortError') {
         failed = true;
@@ -96,7 +103,7 @@ export function createRemoteTask(app) {
     } finally {
       turn.streamDone = true;
       app.backgroundTurns?.delete(turn);
-      bubble.done();
+      bubble.done(undefined, { elapsedMs });
       if (app.active === turn) {
         app.active = null;
         app.setTask(failed ? 'error' : 'idle', failed ? '请求失败' : undefined);
@@ -117,8 +124,9 @@ export function createRemoteTask(app) {
   }
 
   /** 服务器模式：服务器上生成了文件，下载到本机工作区，照常预览、保存 */
-  async function pullServerFile(path, turn) {
+  async function pullServerFile(path, turn, version) {
     turn ??= { files: new Set(), bubble: app.liveBubble };
+    if (version?.path === path) noteTaskFile(turn, version);
     if (turn?.files.has(path)) return; // 同一轮里同一个文件只取一次（画图会同时报“新文件”和“显示图片”）
     const client = app.server;
     const owner = fileIdentity();

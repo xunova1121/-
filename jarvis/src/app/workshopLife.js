@@ -225,10 +225,11 @@ export function createWorkshopLife({ onChange = () => {} } = {}) {
   let busy = false;
   let previous;
   let timer;
+  let inForeground = true;
 
   function refresh() {
     clearTimeout(timer);
-    if (!visible || globalThis.document?.hidden) return;
+    if (!visible || !inForeground || globalThis.document?.hidden) return;
     const now = Date.now();
     const prefs = readPreferences();
     const next = stateAt(now, busy, prefs);
@@ -240,6 +241,11 @@ export function createWorkshopLife({ onChange = () => {} } = {}) {
     onChange(next);
   }
 
+  function foreground(event) {
+    inForeground = event.detail?.active !== false;
+    refresh();
+  }
+
   function stored(event) {
     if (event.key === STORAGE_KEY || event.key === null) refresh();
   }
@@ -248,13 +254,18 @@ export function createWorkshopLife({ onChange = () => {} } = {}) {
     if (visible === value) return;
     visible = value;
     if (visible) {
+      inForeground = true;
       listeners.add(refresh);
       globalThis.window?.addEventListener('storage', stored);
+      globalThis.window?.addEventListener('jarvis:foreground', foreground);
+      globalThis.window?.addEventListener('pageshow', foreground);
       globalThis.document?.addEventListener('visibilitychange', refresh);
       refresh();
     } else {
       listeners.delete(refresh);
       globalThis.window?.removeEventListener('storage', stored);
+      globalThis.window?.removeEventListener('jarvis:foreground', foreground);
+      globalThis.window?.removeEventListener('pageshow', foreground);
       globalThis.document?.removeEventListener('visibilitychange', refresh);
       clearTimeout(timer);
     }

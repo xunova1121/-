@@ -48,3 +48,10 @@
 @media (pointer: coarse) {
   .work-studio-view .ws-furniture-controls button { min-width: 26px; min-height: 26px; }
 }
+
+/* 提示只描出可以直接触碰的原有热区；键盘焦点继续使用独立的实线框。 */
+.ws-scene[data-room-view="nest"][data-furniture-hints] :is(.ws-device,[data-furniture]):not(:disabled):not(:focus-visible) {
+  outline: 2px dashed #fff0bf;
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 3px #5b4428b3;
+}

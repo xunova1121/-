@@ -74,6 +74,7 @@ import { INTERRUPTED_MARK, interruptionMark, errorKind } from '../src/core/sugge
 import { uid } from '../src/agent/store.js';
 import * as skillPacks from '../src/agent/skillPacks.js';
 import * as ws from '../src/agent/workspace.js';
+import { noteTaskFile, taskFileDelivery } from '../src/agent/taskFileReceipts.js';
 import { needsRunner } from '../src/agent/skillDeps.js';
 import { skillRunnerTool } from './skillRunner.mjs';
 import { normalizeMarketSnapshot, mergeMarketSnapshots } from '../shared/marketSnapshot.js';
@@ -225,6 +226,13 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     }
     if (['file','plan','task_state'].includes(e.type)) task.checkpoint=checkpointEvent(task.checkpoint,e,now());
     const ev = { ...e, seq: ++task.seq, at: now() };
+    if (e.type === 'file' && task.files.has(e.path)) {
+      const version = ws.lastFileWrite(e.path);
+      if (version) {
+        noteTaskFile(task, version);
+        ev.fileVersion = version;
+      }
+    }
     if (ev.type === 'tool_end') ev.output = clip(ev.output, 4000);
     task.events.push(ev);
     if (task.events.length > MAX_EVENTS) compact(task);
@@ -482,7 +490,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     }
     return { id, userId: userAccess?.current() || 'owner', sessionId, evaluationId,
       ...(evaluationAuthorization && { evaluationAuthorization: { id: evaluationAuthorization.id } }), text, status: 'queued',
-      seq: 0, events: [], listeners: new Set(), files: new Set(), inbox: [], notes: [], images, voice: Boolean(voice),
+      fileScope: 'server', seq: 0, events: [], listeners: new Set(), files: new Set(), inbox: [], notes: [], images, voice: Boolean(voice),
       ctrl: new AbortController(), createdAt, checkpoint };
   }
 
@@ -496,7 +504,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   async function finish(task, session, { text = '', error = '', errorType = '', stopped = false, shown = '', usedTools = [], toolCalls = 0 }) {
     clearTimeout(task.codeDeadline);
     const timing = task.timing.finish();
-    const extra = { ...(task.sports && { sports: task.sports }), ...(task.markets?.length && { markets: task.markets }), ...(task.failedSteps?.length && { failures: task.failedSteps }), timing, ...(task.review?.outcome && { review: { outcome: task.review.outcome, issueCount: task.review.warnings?.length || 0 } }), ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(task.files.size && { files: [...task.files].slice(-12) }) };
+    const completedAt = now();
+    const extra = { ...(task.files.size && taskFileDelivery(task)), ...(task.sports && { sports: task.sports }), ...(task.markets?.length && { markets: task.markets }), ...(task.failedSteps?.length && { failures: task.failedSteps }), timing, ...(task.review?.outcome && { review: { outcome: task.review.outcome, issueCount: task.review.warnings?.length || 0 } }), ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(task.files.size && { files: [...task.files].slice(-12) }) };
     clearTimeout(task.draftTimer);
     clearTimeout(task.checkpointTimer); task.checkpointTimer = null; // 下面一起写最终的检查点
     evidence.flush().catch(() => {});
@@ -518,13 +527,13 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         task.inbox.length = 0;
       }
       task.status = status;
-      task.endedAt = now();
+      task.endedAt = completedAt;
       // 记一笔用时，方便查“为什么慢”：journalctl -u jarvis 能看到
       const sec = (t) => (t && task.startedAt ? `${((t - task.startedAt) / 1000).toFixed(1)}s` : '—');
       console.log(`[任务] ${task.id} ${task.status}：排队 ${task.startedAt ? ((task.startedAt - task.createdAt) / 1000).toFixed(1) : '—'}s，首字 ${sec(task.firstTextAt)}，共 ${sec(task.endedAt)}，工具 ${usedTools.length} 次${error ? `，出错：${error.slice(0, 120)}` : ''}`);
       task.error = error;
       task.errorType = errorType;
-      record(task, { type: 'task_state', status: task.status, timing, ...(next && { followupTaskId: next.id }), ...(task.review?.outcome && { outcome: task.review.outcome }), ...(error && { error, errorKind: errorType }), ...(task.status === 'done' && { text, toolCalls }), files: [...task.files] });
+      record(task, { type: 'task_state', status: task.status, completedAt, timing, ...(next && { followupTaskId: next.id }), ...(task.review?.outcome && { outcome: task.review.outcome }), ...(error && { error, errorKind: errorType }), ...(task.status === 'done' && { text, toolCalls, ...(task.files.size && taskFileDelivery(task)) }), files: [...task.files] });
       console.log(`[任务耗时] ${task.id} ${JSON.stringify(timing)}`);
       task.listeners.clear();
       task.images = [];
@@ -535,8 +544,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       if (!fresh) throw new Error('会话不存在');
       if (!error && !stopped) applySuggestedTitle(fresh, task.suggestedTitle);
       fresh.messages = fresh.messages.filter((m) => m.draftOf !== task.id);
-      if (!error && !stopped) fresh.messages.push({ role: 'assistant', content: text || '（完成）', ts: now(), ...extra });
-      else if (shown.trim() || usedTools.length || task.markets?.length) fresh.messages.push({ role: 'assistant', content: `${shown.trim()}\n\n${stopped ? '（已打断）' : interruptionMark({ message: error, kind: errorType })}`, ts: now(), ...extra });
+      if (!error && !stopped) fresh.messages.push({ role: 'assistant', content: text || '（完成）', ts: completedAt, ...extra });
+      else if (shown.trim() || usedTools.length || task.markets?.length) fresh.messages.push({ role: 'assistant', content: `${shown.trim()}\n\n${stopped ? '（已打断）' : interruptionMark({ message: error, kind: errorType })}`, ts: completedAt, ...extra });
       fresh.updatedAt = now();
       task.checkpoint = checkpointEvent(task.checkpoint, { type: 'task_state', status, error }, now());
       // 已确认的补充与最终回答一次存入同一会话。写盘期间观察者仍能订阅原任务。
@@ -616,7 +625,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
 
   const api = {
     /** @returns {Promise<{ id: string, sessionId: string }>} */
-    async start({ sessionId = null, text, images = [], voice = false, requestId = null, targetTaskId = null, evaluationId = null, evaluationAuthorization = null, agentId = null, agentForm = null }) {
+    async start({ sessionId = null, text, images = [], voice = false, submittedAt, requestId = null, targetTaskId = null, evaluationId = null, evaluationAuthorization = null, agentId = null, agentForm = null }) {
       text = String(text ?? '').trim();
       if (!text) throw Object.assign(new Error('任务内容是空的'),{status:400});
       if (text.length>20000) throw Object.assign(new Error('任务内容太长'),{status:400});
@@ -657,7 +666,9 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
           const archive=session.recoveryCheckpoints||[];const {evidence:_,...kept}=previous; // 旧版检查点里带着网页正文：归档时去掉，只留最近 5 次
           session.recoveryCheckpoints=[...archive.filter(x=>x.key!==key).map(({evidence,...record})=>record),{key,...kept}].slice(-5);
         }
-        session.messages.push({role:'user',content:text,ts:now()});session.updatedAt=now();
+        const receivedAt = now();
+        const messageTime = Number.isSafeInteger(submittedAt) && submittedAt > 0 ? Math.min(submittedAt, receivedAt) : receivedAt;
+        session.messages.push({role:'user',content:text,ts:messageTime});session.updatedAt=receivedAt;
         // 只有评测程序明确带了 evaluationId 的才按评测隔离；用户本人在评测会话里发的话照常读记忆（用户 2026-10-30：误进评测会话后“不知道我是谁”）
         if (!busy && userAccess && ([...tasks.values()].filter(t => visible(t) && ['queued','running'].includes(t.status)).length >= 20 || tasks.size >= 1000)) throw Object.assign(new Error('任务过多，请等待已有任务完成'), { status: 429 });
         const task = busy || newTask(id, text, { images, voice, evaluationId: evaluationId ? evaluationScope : null, evaluationAuthorization }, previous, evaluationScope);

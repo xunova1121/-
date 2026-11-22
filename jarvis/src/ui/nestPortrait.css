@@ -21,7 +21,8 @@
   display:block; position:absolute; pointer-events:none; object-fit:contain; user-select:none;
   transform-origin:50% 92%; z-index:2;
 }
-.ws-nest-portrait-actor[data-picture="work"] { left:68.332%; top:37.141%; width:13.071%; height:auto; }
+/* 放大书桌处的人物，右手仍落在原画桌沿的 (80.4%, 44.0%)。 */
+.ws-nest-portrait-actor[data-picture="work"] { left:65.91%; top:35.72%; width:15.69%; height:auto; }
 .ws-nest-portrait-actor[data-picture="watch"] { left:35.707%; top:53.05%; width:44.633%; height:auto; }
 .ws-nest-portrait-actor[data-picture="read"] { left:54.41%; top:55.801%; width:23.911%; height:auto; }
 .ws-nest-portrait-actor[data-picture="sleep"] { left:31.35%; top:55.981%; width:51.753%; height:auto; }
@@ -33,7 +34,7 @@
 .ws-nest-portrait-cat[data-picture="cat-sniff"] { left:7.1%; top:60.8%; width:24%; height:auto; }
 .ws-scene[data-nest-pose="cat"] .ws-nest-portrait-cat[data-picture="cat-sniff"] { left:5.8%; }
 .ws-scene[data-nest-layout="portrait"][data-nest-light="off"] :is(.ws-nest-portrait-actor,.ws-nest-portrait-cat,.ws-nest-portrait-quilt) { filter:brightness(.65) saturate(.82); }
-.ws-scene[data-nest-layout="portrait"] .ws-nest-sofa-walk { width:17%; }
+.ws-scene[data-room-view="nest"][data-nest-layout="portrait"][data-sofa-walk] .ws-nest-sofa-walk { width:26%; }
 .ws-scene[data-nest-layout="portrait"] .ws-nest-living { z-index:2; }
 .ws-scene[data-nest-layout="portrait"] .nest-wall-clock { left:28.9%; top:22.7%; width:7%; height:3.95%; }
 .ws-scene[data-nest-layout="portrait"] .nest-wall-photo {

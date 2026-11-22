@@ -1,3 +1,4 @@
+import { localMinute } from '../core/localClock.js';
 import { getWorkshopLife, dispatchWorkshopCommand } from './workshopLife.js';
 import { selectWorkshopChannel } from '../ui/workshopMediaChannels.js';
 import { playWorkshopHum, stopWorkshopHum, suggestWorkshopTune, workshopHumTitle } from '../ui/workshopHum.js';
@@ -36,6 +37,7 @@ export function workshopCommand(text) {
     .replace(/^(?:小?未央[，,、\s]*)?(?:请你|请|麻烦你|你能不能|能不能)?(?:你先|你)?/u, '')
     .trim();
   if (/^(?:现在你?)?在(?:干嘛|干什么|做什么|忙什么)(?:呢|呀|啊)?$|^(?:工作台|房间)(?:里)?(?:现在)?(?:在做什么|什么状态)$/u.test(phrase)) return 'status';
+  if (/^(?:现在|这里|小屋里?|工作台上?)?(?:是)?几点(?:钟|了|啦)?$|^今天(?:是)?(?:几号|星期几|周几)$/u.test(phrase)) return 'clock';
   const command = phrase.replace(/(?:一下吧|一下下|好吗|好不好|吧|哦|啦)$/u, '').replace(/(打开|关掉|关闭|泡|冲|开|关)一下/u, '$1');
   return actions.find(([, matches]) => matches.test(command))?.[0] ?? null;
 }
@@ -53,12 +55,17 @@ export function workshopMediaReply(text) {
 }
 
 // 返回本机实况，房间动作不创建模型任务或碰文件空间。
-export function answerWorkshopCommand(command, { busy, otherWork, taskTitle, taskFile } = {}) {
+export function answerWorkshopCommand(command, { busy, otherWork, taskTitle, taskFile, scene } = {}) {
   const working = Boolean(busy || otherWork);
   const state = getWorkshopLife({ busy: working });
+  if (command === 'clock') {
+    const now = new Date();
+    return `按这台设备的当地时间，现在是${now.getMonth() + 1}月${now.getDate()}日，星期${'日一二三四五六'[now.getDay()]} ${localMinute(now)}。`;
+  }
   if (command === 'status') {
     if (busy) return taskTitle ? `我还在处理任务，当前步骤是“${taskTitle}”${taskFile ? '（' + taskFile + '）' : ''}。` : '我正在处理当前任务。';
     if (otherWork) return '我正在后台处理另一段对话的任务。';
+    if (scene?.liveRoomActivity && Number(scene.routineUntil) === state.nextAt) return `我在工作台，${scene.liveRoomActivity.replace(/^未央/u, '')}。`;
     const title = state.activity === 'sing' && (workshopHumTitle() || (!state.manual && suggestWorkshopTune()));
     return title ? `我在工作台，正在哼《${title}》。` : `我在工作台，${state.label}。`;
   }
@@ -78,7 +85,7 @@ export function answerWorkshopCommand(command, { busy, otherWork, taskTitle, tas
 
 // 普通发送时可以就地问当前进度。明确排队的消息仍排队；引导只作用于绑定的原任务。
 export function shouldAnswerWorkshopCommand(command, { busy, mode, instantStatus }) {
-  return !busy || mode !== 'queue' || ((command === 'status' || command === 'tv-off') && Boolean(instantStatus));
+  return !busy || mode !== 'queue' || ((command === 'status' || command === 'clock' || command === 'tv-off') && Boolean(instantStatus));
 }
 
 export function createWorkshopChat(app, reportSyncError) {
@@ -98,19 +105,22 @@ export function createWorkshopChat(app, reportSyncError) {
     sessions.set(id, saved);
     return saved;
   }
-  async function reply(command, text, { echo, busy, byVoice, snapshot, mediaReply }) {
+  async function reply(command, text, { echo, busy, byVoice, snapshot, mediaReply, submittedAt }) {
     const session = app.session;
     const client = app.server;
     const step = snapshot?.active && snapshot.entries.findLast((entry) => entry.status === 'running' || entry.status === 'waiting');
+    const scene =
+      command === 'status' &&
+      globalThis.document?.querySelector?.('.work-studio-view[data-visible="true"][data-mode="live"] .ws-scene[data-live-room-activity]')?.dataset;
     const words =
       mediaReply ||
-      answerWorkshopCommand(command, { busy, otherWork: snapshot?.otherWork, taskTitle: step?.title || app.active?.status, taskFile: step?.file });
+      answerWorkshopCommand(command, { busy, otherWork: snapshot?.otherWork, taskTitle: step?.title || app.active?.status, taskFile: step?.file, scene });
     const from = session.messages.length;
     if (busy) {
-      if (echo) app.transcript.add('user', text);
+      if (echo) app.transcript.add('user', text, submittedAt);
     } else {
       app.speaker.cancel();
-      app.takeTurnInput(text, echo, []);
+      app.takeTurnInput(text, echo, [], submittedAt);
     }
     const bubble = app.transcript.add('agent', words);
     bubble.done();

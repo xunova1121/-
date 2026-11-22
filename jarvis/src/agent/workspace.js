@@ -9,7 +9,7 @@
  * 架构工作流的私有状态只由专用内部写入器原路径更新，不应用于普通用户成果。
  * 虚拟工作区里覆盖、删除之前自动留一份旧版本，可在“改动记录”里恢复（见 fileHistory.js）。
  */
-import { collection, mapFileMetadata, updateFileRecord } from './store.js';
+import { collection, mapFileMetadata, scopedState, uid, updateFileRecord } from './store.js';
 import { changeTrash, checkSnapshot, fileTimestamp, hasActiveFile, remainingTrash, trashInfo } from './workspaceTrash.js';
 import * as history from './fileHistory.js';
 import { isArchitecturePrivateFilePath, isArchitectureMetadataPath, ownsArchitectureInternalRecord, architectureJsonValue } from './architectureStateOwnership.js';
@@ -18,6 +18,17 @@ import { throwControl } from '../core/networkRequest.js';
 const files = collection('files');
 const kv = collection('kv');
 let dirHandle = null;
+let directoryId = '';
+const writes = scopedState('files', () => new Map());
+export const fileRoot = () => dirHandle ? 'folder:' + directoryId : 'virtual';
+export const lastFileWrite = path => writes().get(fileRoot() + '\0' + path);
+function recordWrite(path, size, mtime) {
+  const recent = writes();
+  const key = fileRoot() + '\0' + path;
+  recent.delete(key);
+  recent.set(key, { path, size, mtime });
+  if (recent.size > 128) recent.delete(recent.keys().next().value);
+}
 
 export const MIME = {
   html: 'text/html', htm: 'text/html', css: 'text/css', js: 'text/javascript', mjs: 'text/javascript', json: 'application/json',
@@ -51,13 +62,17 @@ export const canUseFolders = () => typeof window !== 'undefined' && 'showDirecto
 export async function connectFolder() {
   if (!canUseFolders()) throw new Error('当前浏览器不支持连接本地文件夹，请使用 Chrome 或 Edge');
   const h = await window.showDirectoryPicker({ mode: 'readwrite' });
+  const prior = await kv.get('folder').catch(() => null);
+  const same = prior?.directoryId && await h.isSameEntry?.(prior.handle).catch(() => false);
+  directoryId = same ? prior.directoryId : uid('folder-');
   dirHandle = h;
-  try { await kv.put({ id: 'folder', handle: h }); } catch { /* 部分浏览器不能持久化句柄 */ }
+  try { await kv.put({ id: 'folder', handle: h, directoryId }); } catch { /* 部分浏览器不能持久化句柄 */ }
   return h.name;
 }
 
 export async function disconnectFolder() {
   dirHandle = null;
+  directoryId = '';
   await kv.delete('folder');
 }
 
@@ -67,6 +82,11 @@ export async function restoreFolder({ prompt = false } = {}) {
   if (!rec?.handle) return null;
   const perm = await rec.handle.queryPermission?.({ mode: 'readwrite' });
   if (perm === 'granted' || (prompt && (await rec.handle.requestPermission?.({ mode: 'readwrite' })) === 'granted')) {
+    if (!rec.directoryId) {
+      rec.directoryId = directoryId || uid('folder-');
+      await kv.put(rec).catch(() => {});
+    }
+    directoryId = rec.directoryId;
     dirHandle = rec.handle;
     return dirHandle.name;
   }
@@ -132,6 +152,11 @@ export async function write(path, data) {
     const w = await h.createWritable();
     await w.write(blob);
     await w.close();
+    // The write is already committed even if permission is revoked before its metadata can be read.
+    try {
+      const actual = await h.getFile();
+      recordWrite(target, actual.size, actual.lastModified);
+    } catch { writes().delete(fileRoot() + '\0' + target); }
     return { path: target, renamed: target !== path, backup: null };
   }
   const e = await writeVirtual(path, blob);
@@ -205,6 +230,7 @@ async function writeVirtual(path, blob, note = '') {
     return { ...remainingTrash(row), id: path, data: blob, size: blob.size, mtime };
   });
   await history.markWritten(e.id, mtime);
+  recordWrite(path, blob.size, mtime);
   return e;
 }
 

@@ -5,8 +5,8 @@ import { playWorkshopHum, stopWorkshopHum, suggestWorkshopTune, workshopHumTitle
 import { createNestRadio } from './nestRadio.js';
 import './workshopRoom.css';
 
-const nextClock = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
-const availableDuringWork = new Set(['light', 'lamp-auto', 'photo', 'window', 'folder', 'draft', 'trip', 'tv', 'radio', 'radio-next']);
+import { localMessageTime } from '../core/localClock.js';
+const availableDuringWork = new Set(['discover', 'light', 'lamp-auto', 'photo', 'window', 'folder', 'draft', 'trip', 'tv', 'radio', 'radio-next']);
 
 const choices = [
   ['coffee', '泡咖啡'], ['eat', '吃饭'], ['rest', '歇一会儿'],
@@ -85,7 +85,14 @@ export function createWorkshopRoom(scene, floor, onChange) {
   menu.hidden = true;
   const schedule = document.createElement('small');
   schedule.className = 'ws-nest-next';
-  menu.append(schedule);
+  const discover = button('discover', '找家具');
+  menu.append(schedule, discover);
+  let revealTimer;
+  function clearOutlines() {
+    clearTimeout(revealTimer);
+    delete scene.dataset.furnitureHints;
+  }
+  floor.addEventListener('click', clearOutlines, true);
   const nestActions = new Map(nestFurniture);
   const extraActions = [...nestActions].map(([key, label]) => button(key, label));
   menu.append(...extraActions);
@@ -117,7 +124,7 @@ export function createWorkshopRoom(scene, floor, onChange) {
   function outside(event) {
     if (!tools.contains(event.target)) dismiss(false);
   }
-  scene.addEventListener('workshop:media-opening', () => dismiss(false));
+  scene.addEventListener('workshop:media-opening', () => { clearOutlines(); dismiss(false); });
   function escape(event) {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -148,6 +155,13 @@ export function createWorkshopRoom(scene, floor, onChange) {
     const cmd = event.target.closest('button')?.dataset.roomAction;
     const title = suggested;
     if (!cmd || cmd === 'listen' || cmd === 'light') return;
+    if (nest && cmd === 'discover') {
+      dismiss(!preserveDraftFocus());
+      clearOutlines();
+      scene.dataset.furnitureHints = 'on';
+      revealTimer = setTimeout(clearOutlines, 3500);
+      return;
+    }
     if (nest && (cmd === 'radio' || cmd === 'radio-next')) {
       if (cmd === 'radio') radio.flip();
       else radio.next();
@@ -169,6 +183,8 @@ export function createWorkshopRoom(scene, floor, onChange) {
     perform: life.perform,
     setNest(value) {
       nest = value;
+      clearOutlines();
+      discover.hidden = !value;
       cupTarget.setAttribute('aria-label', value ? '在桌上泡咖啡' : '去茶水桌泡咖啡');
       radio.setNest(value);
       dismiss(false);
@@ -188,7 +204,7 @@ export function createWorkshopRoom(scene, floor, onChange) {
       const menuLabel = compact ? '互动' : '房间互动';
       if (open.textContent !== menuLabel) open.textContent = menuLabel;
       if (nest && state.nextAt) {
-        const nextTime = nextClock.format(state.nextAt);
+        const nextTime = localMessageTime(new Date(state.nextAt));
         const next = (state.manual ? '恢复作息 ' : '接下来 ') + nextTime + ' · ' + state.nextLabel;
         if (schedule.textContent !== next) schedule.textContent = next;
       }
@@ -219,6 +235,7 @@ export function createWorkshopRoom(scene, floor, onChange) {
       else window.removeEventListener('jarvis:workshop-song', onChange);
       life.setVisible(on);
       if (!on) {
+        clearOutlines();
         life.setBusy(false);
         dismiss(false);
         display.suspend();

@@ -72,6 +72,12 @@ describe('模型适配器', () => {
 });
 
 describe('智能体循环（离线演示模型）', () => {
+  it('用时间工具的实际日期、时间和时区报时，安排工作不误报时', async () => {
+    const { events, text } = await run('现在几点了？');
+    const result = JSON.parse(events.find(e => e.type === 'tool_end' && e.name === 'get_current_time').output);
+    expect(text).toBe(`现在是 ${result.beijing}（${result.timeZone}）。`);
+    expect(plan([{ role: 'user', content: '按上午、下午和晚上的时间顺序帮我安排今天的工作' }]).calls).toBeUndefined();
+  });
   it('写网页 → 预览 → 总结', async () => {
     const previews = [];
     const events = [];
