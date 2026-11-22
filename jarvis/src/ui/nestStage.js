@@ -2,6 +2,7 @@ import { createNestCat } from './nestCat.js';
 import { createNestClock } from './nestClock.js';
 import { createNestDesk } from './nestDesk.js';
 import { createNestLiving } from './nestLiving.js';
+import { createNestFramePacing } from './nestFramePacing.js';
 import { createNestWindow } from './nestWindow.js';
 import { createNestPhoto } from './nestPhoto.js';
 import { createNestSofa } from './nestSofa.js';
@@ -50,6 +51,7 @@ export function createNestStage({scene, floor, room, caption, deskHost, onChange
   const photo = createNestPhoto({world: floor, panel});
   const controls = floor.querySelector('.ws-furniture-controls');
   const living = createNestLiving(floor);
+  const framePacing = createNestFramePacing(scene);
   let active = false;
   let visible = false;
   let upright = false;
@@ -113,6 +115,7 @@ export function createNestStage({scene, floor, room, caption, deskHost, onChange
     photo.setVisible(shown);
     desk.setVisible(shown);
     if (!shown) {
+      framePacing.stop();
       sofa.settle();
       lastPose = '';
       closePanels();
@@ -151,6 +154,7 @@ export function createNestStage({scene, floor, room, caption, deskHost, onChange
       const viewing = !busy && (pose === 'tv' || pose === 'news' && state.activity === 'news') ? pose : '';
       if (upright) portrait.draw(pose, viewing, catState.state);
       if (pose !== lastPose || dark !== lastDark || viewing !== lastViewing) {
+        framePacing.sample();
         const sprite = nestNeedsSprite(pose);
         const sleepInFront = !upright && pose === 'sleep';
         const url = upright ? portraitArt(dark ? 'room-off' : 'room-lit') : nestArt(viewing || sleepInFront ? 'work' : pose, dark, MOBILE);

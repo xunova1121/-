@@ -45,6 +45,12 @@
   display:block;visibility:visible;left:59%;bottom:22%;width:17%;z-index:2;
 }
 .ws-scene[data-room-view="nest"] .ws-furniture-controls button { touch-action:manipulation; }
+/* 低帧率电脑仍播放每个呼吸、转头和落笔关键帧；减少慢动作间重复合成相同像素。
+   行走、电视画面和点家具的反应继续按它们自己的时序播放。 */
+.wb-desk .ws-scene[data-room-view="nest"][data-paced-motion] :is(.ws-nest-cat-motion img,.ws-nest-idle-paint),
+body.wb-studio:has(.wb-desk .ws-scene[data-room-view="nest"][data-paced-motion]) .wy-mascot {
+  animation-timing-function: steps(3, end);
+}
 .ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="lamp"] { left:49.2%; top:21.8%; width:6%; height:12%; cursor:ns-resize; touch-action:none; }
 .ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="cup"] { left:71.5%; top:53.2%; width:14.4%; height:9.8%; z-index:1; }
 .work-studio-view .ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="cup"]:hover:not(:focus-visible) { background:transparent; box-shadow:none; }

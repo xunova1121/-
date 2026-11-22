@@ -48,7 +48,7 @@ export function createWorkbenchNestChat(desk, chat, transcript, form) {
   chat.addEventListener('keydown', event => {
     if (event.key !== 'Escape' || mode !== 'history' || !desk.hasAttribute('data-desk-chat')) return;
     // 子菜单拥有自己的 Escape；已经在处理任务时保留原有的全局停止快捷键。
-    if (event.defaultPrevented || document.body.classList.contains('generating')) return;
+    if (event.defaultPrevented || document.body.classList.contains('generating') || form.querySelector('.composer-more:not([hidden])')) return;
     setMode('preview');
     expand.focus({preventScroll: true});
     event.preventDefault();

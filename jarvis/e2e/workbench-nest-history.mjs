@@ -31,6 +31,11 @@ export async function checkNestHistory(page, client) {
   assert.equal(await first.count(), 0);
   const draft = '先把本周的手记留在这里';
   await prompt.fill(draft);
+  const add = chat.getByRole('button', { name: '添加到对话', exact: true });
+  await add.click();
+  await add.press('Escape');
+  assert.equal(await add.getAttribute('aria-expanded'), 'false');
+  assert.equal(await chat.getByRole('button', { name: '收起全文' }).isVisible(), true);
   await prompt.evaluate(el => el.setSelectionRange(2, 6));
   await prompt.press('Escape');
   await chat.getByRole('button', { name: '展开对话' }).waitFor();
