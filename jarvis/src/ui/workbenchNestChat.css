@@ -81,7 +81,7 @@ body.workbench .wb-desk[data-desk-chat="preview"] #transcript > .msg[data-nest-o
 @container workbench-area (min-width:731px) {
   body.workbench .wb-desk[data-desk-chat="preview"] .wb-desk-chat > #transcript {
     position:absolute; grid-area:auto; left:0; bottom:0; width:52%; padding:0 9px 8px; height:auto;
-    max-height:36cqh; overflow:visible; pointer-events:none;
+    min-height:36px; max-height:36cqh; overflow:visible; pointer-events:none;
   }
   body.workbench .wb-desk[data-desk-chat]:not([data-desk-chat="history"]) .wb-desk-chat > .wb-desk-chat-head {
     align-self:start; position:relative; z-index:2;
