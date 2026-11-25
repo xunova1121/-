@@ -1,0 +1,66 @@
+/*
+ * 电脑小窝：对话浮在房间上（2026-11-25 用户：PC 端小窝有问题，借鉴手机那种浮在上面的对话）。
+ * 原来宽屏时对话区排在房间下面一整行，房间被压小，最近一条回复的浮层还会盖住任务进度条。
+ * 看小窝时房间用满工作台高度：最近的回复和输入框浮在房间右下（不挡猫、沙发和书桌边的未央）；
+ * 翻聊天记录仍用原来的浮动纸页，但房间保持同样大小，不来回缩放。任务工位和手机不受影响。
+ */
+@container workbench-area (min-width:731px) {
+  /* 只剩房间一个排版块（对话浮在上面）：不用网格，免得别处的网格规则多切出一行把房间压扁 */
+  body.workbench .wb-desk[data-desk-chat]:has(.ws-scene[data-room-view="nest"]) {
+    display: flex; flex-direction: column;
+  }
+  body.workbench .wb-desk[data-desk-chat]:has(.ws-scene[data-room-view="nest"]) > .work-studio-view {
+    flex: 1 1 auto; min-height: 0;
+  }
+  /* 看小窝时房间下面的“任务记录”条收起：右下角状态栏和“任务工位”已显示进度，不再挤占房间、也不被输入框压住 */
+  body.workbench .wb-desk[data-desk-chat]:has(.ws-scene[data-room-view="nest"]) .work-studio-view .ws-timeline { display: none; }
+  /* 房间不再给对话让出一行：按工作台可用高度放大，仍保持 3:2 原画坐标 */
+  body.workbench .wb-desk[data-desk-chat]:has(.ws-scene[data-room-view="nest"]) .work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] {
+    width: min(100%, calc(150vh - 225px)); margin-inline: auto;
+  }
+  body.workbench .wb-desk[data-desk-chat]:not([data-desk-chat="history"]):has(.ws-scene[data-room-view="nest"]) > .wb-desk-chat {
+    position: absolute; z-index: 8; grid-area: auto;
+    /* 窗口比房间宽时房间居中，对话贴房间右边缘而不是工作台边缘，不悬在画外 */
+    right: max(clamp(22px, 2.6vw, 40px), calc((100% - (150vh - 225px)) / 2 + 22px)); left: auto; bottom: clamp(58px, 7.5vh, 72px);
+    /* 靠右下（电视柜下半和地毯右侧，没有可点的家具）；左下有地毯上的猫和沙发，中间是书桌边的未央，都不能挡 */
+    width: min(500px, 42%); max-height: calc(100% - 140px);
+    display: flex; flex-direction: column; justify-content: flex-end; gap: 6px;
+    background: transparent; border: 0; border-radius: 0; box-shadow: none; overflow: visible;
+    pointer-events: none;
+  }
+  body.workbench .wb-desk[data-desk-chat]:not([data-desk-chat="history"]):has(.ws-scene[data-room-view="nest"]) > .wb-desk-chat > * { pointer-events: auto; }
+  /* 标题行只留“聊天记录 / 隐藏消息”两个小按钮，贴在输入框右上角 */
+  body.workbench .wb-desk[data-desk-chat]:not([data-desk-chat="history"]):has(.ws-scene[data-room-view="nest"]) .wb-desk-chat > .wb-desk-chat-head {
+    order: 1; align-self: flex-end; position: static; min-height: 0; padding: 0; border: 0; background: transparent;
+  }
+  body.workbench .wb-desk[data-desk-chat]:not([data-desk-chat="history"]):has(.ws-scene[data-room-view="nest"]) .wb-desk-chat-head > :is(h2,.wb-desk-chat-title) { display: none; }
+  body.workbench .wb-desk[data-desk-chat]:not([data-desk-chat="history"]):has(.ws-scene[data-room-view="nest"]) .wb-nest-chat-controls button {
+    background: #fffdf5e6; border-color: #d5d8c7cc; box-shadow: 0 1px 4px #3a301c26;
+  }
+  /* 最近的回复：在输入框上方按顺序排成气泡，不再绝对定位，不会盖住任务进度 */
+  body.workbench .wb-desk[data-desk-chat="preview"]:has(.ws-scene[data-room-view="nest"]) .wb-desk-chat > #transcript,
+  body.workbench .wb-desk[data-desk-chat="preview"]:has(.ws-scene[data-room-view="nest"]) .wb-desk-chat:has(#transcript .nest-reply-toggle:not([hidden])) > #transcript,
+  body.workbench .wb-desk[data-desk-chat="preview"]:has(.ws-scene[data-room-view="nest"]) .wb-desk-chat:has(#transcript .msg[data-nest-open]) > #transcript {
+    /* 新会话还没有消息时也留一点高度，会话区始终在工作台里可见 */
+    order: 2; position: static; inset: auto; flex: none; width: 100%; height: auto; min-height: 36px;
+    max-height: min(38vh, 360px); padding: 0; gap: 6px; overflow: visible;
+    display: flex; flex-direction: column; justify-content: flex-end; pointer-events: none; background: transparent;
+  }
+  body.workbench .wb-desk[data-desk-chat="preview"]:has(.ws-scene[data-room-view="nest"]) #transcript > .msg[data-nest-recent] {
+    max-width: 100%; padding: 7px 13px; border-radius: 14px; box-shadow: 0 2px 10px #2c22142e; font-size: 14px;
+  }
+  body.workbench .wb-desk[data-desk-chat]:not([data-desk-chat="history"]):has(.ws-scene[data-room-view="nest"]) .wb-desk-chat > .composer-message-queue:not([hidden]) {
+    order: 3; position: static; width: 100%; max-height: min(140px, 20vh);
+  }
+  /* 输入框浮在房间上：半透明纸色、圆角、投影；不用毛玻璃，免得每帧重算模糊 */
+  body.workbench .wb-desk[data-desk-chat]:not([data-desk-chat="history"]):has(.ws-scene[data-room-view="nest"]) .wb-desk-chat > #inputbar {
+    order: 4; grid-row: auto; align-self: stretch; margin: 0; width: 100%;
+    background: #fffdf5eb; border: 1px solid #d5d8c7; border-radius: 18px; box-shadow: 0 4px 22px #2c221440;
+  }
+}
+:root[data-theme="dark"] body.workbench .wb-desk[data-desk-chat]:not([data-desk-chat="history"]):has(.ws-scene[data-room-view="nest"]) .wb-desk-chat > #inputbar {
+  background: #253028eb; border-color: #485547;
+}
+:root[data-theme="dark"] body.workbench .wb-desk[data-desk-chat]:not([data-desk-chat="history"]):has(.ws-scene[data-room-view="nest"]) .wb-nest-chat-controls button {
+  background: #253028e6; border-color: #485547;
+}

@@ -1,4 +1,5 @@
 import './workbenchNestChat.css';
+import './workbenchNestFloat.css';
 import { createNestReplyPreview } from './nestReplyPreview.js';
 
 // 小窝借用当前对话的正文、输入框和队列，只切换显示大小。任务工位使用原有的对话布局。

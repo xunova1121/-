@@ -516,6 +516,7 @@ jobs:
           node e2e/workbench-action-studio.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/workshop-media.mjs "$RUNNER_TEMP/jarvis-e2e/workshop-media"
           node e2e/workshop-nest.mjs "$RUNNER_TEMP/jarvis-e2e/nest"
+          node e2e/workbench-nest-float.mjs "$RUNNER_TEMP/jarvis-e2e/nest-float"
           # 单文件测试先验证“没有网关”，随后会自己启动测试网关；不能复用网页版的服务。
           kill "$SERVER_PID"
           wait "$SERVER_PID" 2>/dev/null || true
