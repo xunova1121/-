@@ -78,7 +78,11 @@ export function createNestTaskStatus(form, studio, options) {
   }
   line.onclick = () => {
     if (action === 'steps') {
-      studio.querySelector('.ws-scene[data-room-view="nest"]') && studio.querySelector('.ws-floor-toggle')?.click();
+      // 在小窝里看步骤：就地展开聊天记录（步骤卡片就在对话里），不再跳到旧的任务工位房间
+      // （2026-11-25 用户：刚刚对话出现最早那一版小屋）。没有人接手时才按原来切到任务工位。
+      const inNest = studio.querySelector('.ws-scene[data-room-view="nest"]');
+      if (inNest && !studio.dispatchEvent(new CustomEvent('nest:show-steps', { cancelable: true }))) return;
+      inNest && studio.querySelector('.ws-floor-toggle')?.click();
       const list = studio.querySelector('.ws-list');
       if (list) { list.tabIndex = -1; list.focus({ preventScroll: true }); list.scrollIntoView({ block: 'nearest' }); }
     } else if (receipt && sameTaskReceipt(receipt, options.getReceipt())) {

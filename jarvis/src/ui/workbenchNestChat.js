@@ -102,6 +102,13 @@ export function createWorkbenchNestChat(desk, chat, transcript, form) {
     prompt.toggleAttribute('data-nest-news', Boolean(newsOpen));
     prompt.placeholder = newsOpen ? '追问这条新闻…' : '和未央说说话…';
   }
+  // 小窝里点任务进度：就地打开聊天记录并滚到最新的步骤
+  desk.addEventListener('nest:show-steps', event => {
+    if (scene?.dataset.roomView !== 'nest') return;
+    event.preventDefault();
+    if (mode !== 'history') setMode('history');
+    transcript.scrollTop = transcript.scrollHeight;
+  });
   desk.addEventListener('click', event => {
     if (event.target.closest('.ws-media-primary') && (mediaQuiet || mode === 'quiet')) setMode('preview');
   }, true);

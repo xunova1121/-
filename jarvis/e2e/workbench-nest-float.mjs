@@ -52,6 +52,11 @@ try {
     await page.locator('.wb-desk[data-desk-chat=preview]').waitFor();
     const backScene = await box('.wb-desk .ws-scene');
     check(`${tag} 收起记录后房间大小不变`, Math.abs(backScene.h - scene.h) < 2, JSON.stringify({ scene, backScene }));
+    // 2026-11-25 用户：对话时冒出最早那一版小屋。点任务进度（查看任务步骤）要在小窝里就地打开记录，不切到任务工位
+    const handled = await page.evaluate(() => !document.querySelector('.wb-desk').dispatchEvent(new CustomEvent('nest:show-steps', { cancelable: true })));
+    await page.waitForTimeout(200);
+    check(`${tag} 点任务进度留在小窝并打开聊天记录`, handled && await page.locator('.wb-desk[data-desk-chat=history] .ws-scene[data-room-view="nest"]').count() === 1);
+    await page.getByRole('button', { name: '收起记录', exact: true }).click();
     await page.locator('[data-action="work-floor"]').first().click();
     await page.locator('.wb-desk .ws-scene:not([data-room-view="nest"])').waitFor();
     const floorDesk = await page.locator('.wb-desk').evaluate(el => getComputedStyle(el).display);

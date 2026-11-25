@@ -51,3 +51,26 @@ it('新任务已经开始但尚无事件时不显示上一轮成品，迟到的�
   expect(line.title).toBe('查看任务步骤');
   status.clear();
 });
+// 2026-11-25 用户：刚刚对话出现最早那一版小屋——点任务进度会跳到旧的任务工位。小窝里改为就地展开聊天记录
+it('小窝里点“查看任务步骤”交给小窝就地展开记录，不切到任务工位；没人接手才按原来切换', () => {
+  vi.useFakeTimers();
+  const form = { prepend(el) { el.parentElement = form; el.isConnected = true; } };
+  const line = { setAttribute() {}, remove() {} };
+  vi.stubGlobal('document', { hidden: false, createElement: () => line });
+  vi.stubGlobal('window', new EventTarget());
+  const toggle = { click: vi.fn() };
+  const studio = new EventTarget();
+  studio.isConnected = true;
+  studio.querySelector = sel => sel.includes('data-room-view="nest"') ? {} : sel === '.ws-floor-toggle' ? toggle : null;
+  const status = createNestTaskStatus(form, studio, { getReceipt: () => null, readResults: vi.fn() });
+  status.update({ active: true, entries: [{ title: '正在阅读网页', status: 'running' }] });
+  const handled = vi.fn(e => e.preventDefault());
+  studio.addEventListener('nest:show-steps', handled);
+  line.onclick();
+  expect(handled).toHaveBeenCalledOnce();
+  expect(toggle.click).not.toHaveBeenCalled();
+  studio.removeEventListener('nest:show-steps', handled);
+  line.onclick();
+  expect(toggle.click).toHaveBeenCalledOnce();
+  status.clear();
+});

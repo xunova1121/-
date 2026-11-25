@@ -110,6 +110,13 @@ export function createMobileNestChat(sheet, chat, transcript) {
     if (readingPosition) readingPosition(); else transcript.scrollTop = transcript.scrollHeight;
     collapse.focus({ preventScroll: true });
   }
+  // 小窝里点任务进度：就地展开聊天记录并滚到最新的步骤，不切到任务工位
+  sheet.addEventListener('nest:show-steps', event => {
+    if (!sheet.hasAttribute('data-nest-immersive')) return;
+    event.preventDefault();
+    if (mode !== 'history') expand();
+    transcript.scrollTop = transcript.scrollHeight;
+  });
   toggle.onclick = () => setMode(mode === 'hidden' || mediaQuiet ? 'preview' : 'hidden');
   collapse.onclick = () => { setMode('preview'); toggle.focus({ preventScroll: true }); };
   chat.addEventListener('focusin', () => {
