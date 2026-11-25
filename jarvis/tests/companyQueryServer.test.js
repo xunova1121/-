@@ -203,6 +203,19 @@ describe('企业直查纯逻辑边界', () => {
     expect(transport).toHaveBeenCalledTimes(1);
   });
 
+  // 2026-11-25 发布构建偶发：单个请求自己的超时比总期限计时器早几毫秒触发，查询换下一个来源时多发一次请求。
+  // 那几毫秒的竞争本机复现不了，这里只核对“总期限到了就不再发新请求”这条规则
+  it('总期限已到时不再发新请求，即使总计时器还没来得及触发', async () => {
+    const base = Date.now();
+    let offset = 0;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => base + offset);
+    try {
+      const transport = vi.fn(async () => { offset = 60000; throw new TypeError('fetch failed'); });
+      await expect(runCompanyLookup(config, { company, source: 'qibook' }, { get: transport, timeBudgetMs: 50000 })).rejects.toMatchObject({ code: 'RETRIEVAL_BUDGET' });
+      expect(transport).toHaveBeenCalledTimes(1);
+    } finally { clock.mockRestore(); }
+  });
+
   it('期限到达会取消真实在途请求并抛预算错误', async () => {
     let aborted = false;
     const transport = vi.fn(async (_url, init) => new Promise((_, reject) => init.signal.addEventListener('abort', () => { aborted = true; reject(init.signal.reason); }, { once: true })));

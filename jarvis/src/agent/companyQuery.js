@@ -33,7 +33,9 @@ export async function runCompanyLookup(cfg = {}, args, {
   const cancel = () => controller.abort(signal.reason ?? Object.assign(new Error('企业查询已停止'), { name: 'AbortError' }));
   signal?.addEventListener('abort', cancel, { once: true });
   const duration = Math.min(COMPANY_QUERY_MS, Math.max(1, Number(timeBudgetMs) || COMPANY_QUERY_MS));
-  const timer = setTimeout(() => controller.abort(Object.assign(new Error('本次企业查询已达到时间上限，请缩小范围后再试'), { code: 'RETRIEVAL_BUDGET' })), duration);
+  const overtime = () => Object.assign(new Error('本次企业查询已达到时间上限，请缩小范围后再试'), { code: 'RETRIEVAL_BUDGET' });
+  const started = Date.now();
+  const timer = setTimeout(() => controller.abort(overtime()), duration);
   let rejectStopped;
   const stopped = new Promise((_, reject) => { rejectStopped = () => reject(controller.signal.reason); });
   controller.signal.addEventListener('abort', rejectStopped, { once: true });
@@ -41,6 +43,12 @@ export async function runCompanyLookup(cfg = {}, args, {
   const transport = fetcher => async (url, init = {}) => {
     controller.signal.throwIfAborted();
     init.signal?.throwIfAborted();
+    // 总期限已到就不再发新请求：单个请求自己的超时可能比总期限计时器早几毫秒触发，
+    // 查询随即换下一个来源，总计时器还没来得及取消就多发一次（2026-11-25 发布构建偶发多一次请求）
+    if (Date.now() - started >= duration) {
+      controller.abort(overtime());
+      throw controller.signal.reason;
+    }
     if (requests >= COMPANY_QUERY_REQUESTS) {
       controller.abort(Object.assign(new Error('本次企业查询已达到请求次数上限，请缩小范围后再试'), { code: 'RETRIEVAL_BUDGET' }));
       throw controller.signal.reason;
