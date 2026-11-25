@@ -138,8 +138,11 @@ it('本机、不同服务器、同机成员的频道和最后选择互相隔离'
   expect(workshopChannel().id).toBe(local.id);
 });
 
-it('只交给播放器 HTTPS 直链，保留自定义端口、大小写后缀和无后缀的实际视频', () => {
-  for (const url of ['http://media.example/v.m3u8', 'https:media.example', 'https://u:p@media.example/v.m3u8',
+it('只交给播放器 HTTP(S) 直链，保留自定义端口、大小写后缀和无后缀的实际视频', () => {
+  // 2026-11-25 用户要求 http 的 m3u8 也能播：原断言“http 直链被拒”改为“http 直链被接受”，其余非法地址仍全部拒绝
+  expect(normalizeWorkshopSource({ ...source, url: 'http://media.example/v.m3u8' }).source).toMatchObject({ url: 'http://media.example/v.m3u8', format: 'hls' });
+  expect(normalizeWorkshopSource({ ...source, url: 'http://192.168.1.8:8080/live/index.m3u8' }).source.format).toBe('hls');
+  for (const url of ['http:media.example', 'http://u:p@media.example/v.m3u8', 'ftp://media.example/v.m3u8', 'https:media.example', 'https://u:p@media.example/v.m3u8',
     'javascript:alert(1)', 'file:///x.mp4', 'https://media.example/player.html', 'https://media.example/list.m3u']) {
     expect(() => saveWorkshopSource({ ...source, url })).toThrow();
   }

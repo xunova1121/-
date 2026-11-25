@@ -3,9 +3,10 @@ export function parseWorkshopVideoSource(address, format = 'auto') {
   const raw = typeof address === 'string' ? address.trim() : '';
   let url;
   try { url = new URL(raw); } catch { /* 统一提供面向用户的提示。 */ }
-  if (!url || !/^https:\/\//i.test(raw) || url.protocol !== 'https:' || url.username || url.password ||
+  // 2026-11-25 用户：很多直播源只有 http 的 m3u8，也要能播。只接受完整写出的 http(s)://，仍不允许账号密码。
+  if (!url || !/^https?:\/\//i.test(raw) || !['http:', 'https:'].includes(url.protocol) || url.username || url.password ||
       raw.length > 4096 || /[\s\\]/u.test(raw)) {
-    throw new Error('请填入完整的 HTTPS 视频直链，地址中不能包含用户名或密码。');
+    throw new Error('请填入完整的 HTTP 或 HTTPS 视频直链，地址中不能包含用户名或密码。');
   }
   if (!['auto', 'hls', 'video'].includes(format)) throw new Error('请选择 HLS 或视频格式。');
   const path = url.pathname;

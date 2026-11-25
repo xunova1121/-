@@ -36,7 +36,7 @@ export function createWorkshopSourceManager(ui, { preview, restoreChannel, selec
   name.autocomplete = 'off';
   const url = mediaNode('input', '');
   url.type = 'url';
-  url.placeholder = 'https://…';
+  url.placeholder = 'http(s)://…/直播.m3u8';
   url.autocomplete = 'off';
   url.spellcheck = false;
   const format = mediaNode('select', '');
