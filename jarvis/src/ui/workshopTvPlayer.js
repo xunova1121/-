@@ -137,6 +137,15 @@ export function createWorkshopTvPlayer({ getPlayers, openSources, loadHls = () =
     health.tryPlay();
   }
 
+  function jumpToLive(video) {
+    const range = video.seekable;
+    if (!range?.length) return;
+    const end = range.end(range.length - 1), start = range.start(0);
+    if ((video.duration === Infinity || Number.isNaN(video.duration) || end - start > 30) && end - video.currentTime > 30) {
+      try { video.currentTime = Math.max(start, end - 10); } catch { /* 不支持跳转的源照常播放 */ }
+    }
+  }
+
   async function attachHls(video, url, channel, signal) {
     const active = () => !signal.aborted && viewer === video;
     try {
@@ -252,6 +261,9 @@ export function createWorkshopTvPlayer({ getPlayers, openSources, loadHls = () =
       if (couldFallback()) void useHls();
       else failed();
     };
+    // 原生播放直播时跳到最新处（2026-11-25 用户：每次打开都是同一个开头）：手机系统播放器对部分直播会从播放列表
+    // 最早的片段放起；可回看的范围超过半分钟就从最后 10 秒开始。仍先用系统播放器（省电），hls.js 本身默认从最新处开始。
+    if (isHls) media.addEventListener?.('loadedmetadata', () => jumpToLive(media), { once: true });
     media.src = source.url;
     health.tryPlay();
   }

@@ -45,7 +45,7 @@ export function createWorkshopSourceManager(ui, { preview, restoreChannel, selec
     option.value = value;
     format.append(option);
   }
-  const note = mediaNode('small', 'ws-source-note', '保存到此设备。支持 HTTPS 的 M3U8 和视频直链。');
+  const note = mediaNode('small', 'ws-source-note', '保存到此设备。支持 HTTP / HTTPS 的 M3U8 和视频直链。');
   const error = mediaNode('p', 'ws-source-error');
   error.setAttribute('role', 'alert');
   const actions = mediaNode('div', 'ws-source-actions');

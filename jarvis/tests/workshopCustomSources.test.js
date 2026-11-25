@@ -89,7 +89,12 @@ it('默认电影、演示、央视均可逐台移除；清空后重载仍停播�
   expect(setWorkshopBuiltinVisible(original[0].id, true)).toBe(true);
   expect(workshopChannel().id).toBe('cctv9');
   expect(setWorkshopBuiltinVisible(original[0].id, true)).toBe(false);
-  expect(() => saveWorkshopSource({ ...source, name: '央视1' })).toThrow();
+  // 2026-11-25 用户：老是提示此频道名称已被使用。原断言“不能用内置台的名字（央视1）”改为：可以用，按名字换台时自己加的优先；
+  // 和另一个自定义频道重名仍然拒绝
+  const mine = saveWorkshopSource({ ...source, name: '央视1' });
+  expect(mine.title).toBe('央视1');
+  expect(selectWorkshopChannel('换到央视1').id).toBe(mine.id);
+  expect(() => saveWorkshopSource({ ...source, name: '央视 1' })).toThrow(/同名频道「央视1」/);
 });
 
 it('默认台的移除记录依本机、服务器及使用者隔离，选中的个人频道也能删到空', () => {
@@ -146,7 +151,9 @@ it('只交给播放器 HTTP(S) 直链，保留自定义端口、大小写后缀�
     'javascript:alert(1)', 'file:///x.mp4', 'https://media.example/player.html', 'https://media.example/list.m3u']) {
     expect(() => saveWorkshopSource({ ...source, url })).toThrow();
   }
-  for (const name of ['', '字'.repeat(41), 'CCTV-1', '央视1']) expect(() => saveWorkshopSource({ ...source, name })).toThrow();
+  // 2026-11-25：内置台的名字（CCTV-1、央视1）允许自定义频道使用，原断言改为只拒空名和超长名，另核对与自定义频道重名仍拒绝
+  for (const name of ['', '字'.repeat(41)]) expect(() => saveWorkshopSource({ ...source, name })).toThrow();
+  expect(normalizeWorkshopSource({ ...source, name: 'CCTV-1' }).title).toBe('CCTV-1');
   expect(() => normalizeWorkshopSource({ ...source, format: 'embed' })).toThrow();
   expect(normalizeWorkshopSource({ ...source, url: 'https://media.example:8443/v.M3U8' }).source.format).toBe('hls');
   expect(normalizeWorkshopSource({ ...source, url: 'https://media.example/watch?id=1', format: 'video' }).source.format).toBe('video');

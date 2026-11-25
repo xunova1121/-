@@ -178,6 +178,26 @@ describe('工作台自定义视频源与 HLS 解码', () => {
     expect(engine.destroy).toHaveBeenCalledOnce();
   });
 
+  // 2026-11-25 用户：给的视频源每次打开都是一样的开头，应该是最新的。手机系统播放器直放直播时跳到最新处
+  it('原生直放直播：加载后跳到可回看范围的最后 10 秒，不从列表最早的片段放起；短片和点播不跳', async () => {
+    const nodes = mockPlayerDocument(() => 'probably');
+    const { Hls } = setupHls();
+    const player = createWorkshopTvPlayer({ loadHls: vi.fn().mockResolvedValue({ default: Hls }) });
+    const listeners = {};
+    const realCreate = document.createElement;
+    document.createElement = tag => { const el = realCreate(tag); el.addEventListener = (type, fn) => { listeners[type] = fn; }; return el; };
+    await player.preview(channel);
+    const video = player.element.children[0];
+    Object.assign(video, { currentTime: 0, duration: Infinity, seekable: { length: 1, start: () => 0, end: () => 3600 } });
+    listeners.loadedmetadata();
+    expect(video.currentTime).toBe(3590);
+    Object.assign(video, { currentTime: 0, duration: 20, seekable: { length: 1, start: () => 0, end: () => 20 } });
+    listeners.loadedmetadata();
+    expect(video.currentTime).toBe(0);
+    player.close();
+    expect(nodes.length).toBeGreaterThan(0);
+  });
+
   it('桌面通过 HLS 解码，只在致命错误时显示重试，关掉旧播放器后不再响应旧错误', async () => {
     mockPlayerDocument();
     const { engine, Hls } = setupHls();

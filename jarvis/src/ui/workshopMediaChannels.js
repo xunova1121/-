@@ -112,7 +112,7 @@ export function selectWorkshopChannel(input) {
   const keys = [text, phrase, phrase.replace(/(?:频道|台)$/u, '')];
   for (const value of keys) {
     const key = compactName(value);
-    const channel = channels.find(ch => matchesName(ch, key));
+    const channel = channels.find(ch => ch.kind === 'custom' && matchesName(ch, key)) || channels.find(ch => matchesName(ch, key));
     if (channel) return publishChoice(channel);
   }
   return null;
@@ -122,7 +122,10 @@ export function saveWorkshopSource({ id, name, url, format } = {}) {
   const channel = normalizeWorkshopSource({ name, url, format });
   const channels = [...builtins, ...getWorkshopCustomChannels()];
   if (id != null && !channels.some(ch => ch.kind === 'custom' && ch.id === id)) throw new Error('这个自定义频道已不存在。');
-  if (channels.some(ch => ch.id !== id && matchesName(ch, compactName(channel.title)))) throw new Error('此频道名称已被使用。');
+  // 自定义频道可以和内置频道同名（2026-11-25 用户：老是提示此频道名称已被使用——想把 CCTV2 的直链命名为 CCTV2）；
+  // 按名字换台时自己加的优先。只拦和另一个自定义频道重名。
+  const same = channels.find(ch => ch.kind === 'custom' && ch.id !== id && matchesName(ch, compactName(channel.title)));
+  if (same) throw new Error(`已经添加过同名频道「${same.title}」：换个名字，或到“我的视频源”里修改那一个。`);
   channel.id = id || 'custom-' + (globalThis.crypto?.randomUUID?.() ?? (Date.now().toString(36) + Math.random().toString(36).slice(2)));
   const scope = workshopChannelScope();
   const selected = choiceId(scope) === channel.id;
