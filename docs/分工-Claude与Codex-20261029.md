@@ -544,3 +544,5 @@
 - 安装包、服务器更新包和自动更新索引均在公开后实取核对。Android 正式包保留原签名，版本码 494，Windows ASAR 的 211 项网页资源和 Android 的 235 项前端资源与本地构建相符。另用 Linux Electron 44.4.5 加载正式 Windows 前端，1366×820 静置帧间隔 P50/P95 为 16.7/33.3ms，键入为 16.7/66.7ms，最长一帧约 200ms。42 字草稿与焦点切回后保留。服务器包核对 1199 项运行清单，Windows 更新用 SHA-512、服务器更新用 SHA-256 对上实际下载。华为及 Windows 实体设备、自建服务器实际升级仍待验。
 
 2026-11-25 Claude 发布 1.0.495（run 45601183596，95bcb79）：电脑小窝对话浮在房间上（`src/ui/workbenchNestFloat.css`，新增 `e2e/workbench-nest-float.mjs` 已进发布流程）；电视自定义源接受 http 的 m3u8（`shared/workshopVideoSource.js`，`capacitor.config.json` allowMixedContent=true，清单 usesCleartextTraffic=true）。APK versionCode 495、证书 56e3579b…363d6 一致，APK 内两项安卓设置已核对；服务器包 1460 项、sha256 与清单一致，两个更新入口为 1.0.495。Codex 后续改小窝布局请保持对话不挡地毯上的猫、翻记录时房间大小不变。
+
+2026-11-25 Claude 发布 1.0.497（run 45636614519，f22ebec）。1.0.496（run 45630275251）安卓任务单测 `companyQueryServer` 偶发多一次请求而失败、未公开，已修 `companyQuery.js`（总期限到时不再发新请求）。本版：电视自定义频道可与内置台同名、原生直放直播跳到最新处（保留原生优先）、小窝点任务进度发 `nest:show-steps` 就地展开记录、任务中 `nestFigure` 一律整幅书桌人物。APK versionCode 497、证书一致、APK 内 allowMixedContent=true；服务器包 1460 项、sha256 与清单一致，两个更新入口为 1.0.497。
