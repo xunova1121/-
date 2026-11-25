@@ -351,7 +351,9 @@ try {
   assert.equal(await owner.getSession(roomSession), null, '房间对话存入成员自己的空间');
   assert.equal(requests.filter(req => req.method === 'POST' && req.path === '/api/tasks').length, 0, '房间灯控没有提交云任务');
   await send(remote, '请列出已有文件，再写一份简报保存到' + cloudFile + '，最后核对成果记录并核验交付文件。');
-  await stage(remote).locator('.ws-scene[data-room-view="nest"][data-nest-pose="archive"] .ws-actor').waitFor();
+  // 2026-11-25：小窝里取文件时不再换成早期工坊的小人（用户：那个小未央太小了），保持书桌边的整幅人物
+  await stage(remote).locator('.ws-scene[data-room-view="nest"][data-nest-pose="work"]').waitFor();
+  assert.equal(await stage(remote).locator('.ws-scene[data-room-view="nest"] .ws-floorplan > .ws-actor').isVisible(), false, '小窝任务中不出现小人贴纸');
   await openTaskFloor(stage(remote));
   await stage(remote).locator('.ws-scene[data-station="archive"]').waitFor();
   await checkWorkingHands(remote, 'archive');

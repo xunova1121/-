@@ -3,10 +3,15 @@ import { nestArt, nestFigure, nestIsDark, nestNeedsSprite } from '../src/ui/nest
 
 describe('小窝内的工作与生活画面', () => {
   it('真实任务先于猫的邀请，人物图随任务所在工位变化', () => {
-    expect(nestFigure('sleep', 'archive', true, true)).toBe('archive');
+    // 2026-11-25 用户：那个小未央太小了，很奇怪。原断言“取文件/碎纸/跺脚时换成对应小人姿势”改为：任务中一律用整幅书桌人物，
+    // 并逐个核对这些时刻都不再需要小人贴纸
+    expect(nestFigure('sleep', 'archive', true, true)).toBe('work');
     expect(nestFigure('tv', 'review', true, true)).toBe('news');
-    expect(nestFigure('work', 'bench', true, true, 'shred')).toBe('shred');
-    expect(nestFigure('work', 'bench', true, true, 'stomp')).toBe('stomp');
+    for (const operation of ['shred', 'stomp', 'cheer', 'stop', 'archive']) {
+      expect(nestFigure('work', 'bench', true, true, operation)).toBe('work');
+      expect(nestFigure('work', 'archive', true, true, operation)).toBe('work');
+      expect(nestNeedsSprite(nestFigure('work', 'bench', true, true, operation))).toBe(false);
+    }
     expect(nestFigure('sleep', 'bench', true, true)).toBe('work');
     expect(nestFigure('rest', 'bench', true, false)).toBe('cat');
     expect(nestFigure('cat-visit', 'bench', false, false)).toBe('tv');

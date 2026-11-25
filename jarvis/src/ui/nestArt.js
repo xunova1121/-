@@ -51,8 +51,10 @@ export function nestIsDark(state) {
 }
 
 export function nestFigure(activity, station, withCat, busy, operation = '') {
-  if (busy && ['shred', 'cheer', 'stomp', 'stop'].includes(operation)) return operation;
-  if (busy) return station === 'archive' ? 'archive' : station === 'review' ? 'news' : 'work';
+  // 做任务时只用按房间比例画的整幅人物（书桌工作 / 读新闻）。欢呼、跺脚、叫停、取文件、碎纸原来换成早期工坊的小人贴纸，
+  // 只有画面 17% 宽、画风也不同，像突然冒出另一个小未央（2026-11-25 用户：那个小未央太小了，很奇怪）。
+  void operation;
+  if (busy) return station === 'review' ? 'news' : 'work';
   if (withCat) return 'cat';
   switch (activity) {
     case 'trip': case 'tv': case 'sleep': case 'news': return activity;
