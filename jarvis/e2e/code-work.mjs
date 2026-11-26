@@ -100,12 +100,14 @@ async function send(page, state, text, mode = 'answer', image = false) {
     await page.waitForFunction(() => document.querySelector('#attach-list').children.length > 0);
   }
   await page.fill('#prompt', text);
-  const started = page.waitForResponse((response) => response.url().endsWith('/api/tasks') && response.request().method() === 'POST');
+  // 1.0.499 起云端发消息走同一条连接直推首字（/api/tasks?stream=1），旧路径 /api/tasks 仍可能用到：按路径认，不看查询串
+  const started = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/tasks' && response.request().method() === 'POST');
   await page.click('#btn-send');
   const response = await started;
   assert(response.ok(), '浏览器任务必须被服务器实际接收');
   if (image) assert.equal(response.request().postDataJSON().images?.length, 1, '截图必须作为真实图像送达任务API');
-  state.taskId = (await response.json()).id;
+  // 直推时回的是事件流，连接要等任务结束才关；只在普通 JSON 回执时读任务编号
+  if (!String(response.headers()['content-type'] || '').includes('text/event-stream')) state.taskId = (await response.json()).id;
 }
 async function finish(page, runner) {
   await runner.settled();
