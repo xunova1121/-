@@ -109,6 +109,6 @@ export function requirementsTool(record) {
       offset: { type: 'integer', minimum: 0 },
       max_chars: { type: 'integer', minimum: 256, maximum: 12000 }
     }, additionalProperties: false },
-    run: async (args = {}) => readRequirements(record, args)
+    run: async (args = {}) => readRequirements(typeof record === 'function' ? record() : record, args)
   };
 }

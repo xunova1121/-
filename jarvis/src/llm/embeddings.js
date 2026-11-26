@@ -31,11 +31,13 @@ export function resolveEmbedding(cfg, gateway = null, { direct = false } = {}) {
   return EMBEDDING_ENGINES.filter((e) => e.id === want).find((e) => has(e.keyFrom) && (e.browser || gateway)) ?? null;
 }
 
+export const EMBED_COOLDOWN_MS = 45_000;
+
 /**
- * @param {{ gateway?: object, fetchImpl?: Function, direct?: boolean }} [o]  direct：没有跨域限制（手机 App、服务器）
+ * @param {{ gateway?: object, fetchImpl?: Function, direct?: boolean, now?: () => number }} [o]  direct：没有跨域限制（手机 App、服务器）
  * @returns {{ model: string, embed: (texts: string[]) => Promise<number[][]> } | null}
  */
-export function createEmbedder(cfg, { gateway = null, fetchImpl = globalThis.fetch, direct = false } = {}) {
+export function createEmbedder(cfg, { gateway = null, fetchImpl = globalThis.fetch, direct = false, now = Date.now } = {}) {
   const e = resolveEmbedding(cfg, gateway, { direct });
   if (!e) return null;
   // 能力表挑出来的：用那家服务商的接口地址（有网关时经网关），和画图同一套
@@ -43,9 +45,10 @@ export function createEmbedder(cfg, { gateway = null, fetchImpl = globalThis.fet
   const key = e.local ? 'ollama' : cfg.keys?.[e.keyFrom] || '';
   const base = ep ? ep.base : gateway ? `${gateway.origin}/api/llm/${e.id}` : e.base;
   // 检索时（一次只算一句话）：同一句话 5 分钟内复用结果；向量服务 1.2 秒没回就先不等它（这一轮只用关键词检索）。
-  // 以前等 2.5 秒，评测里很多轮都正好等满，每次对话先白等两三秒
+  // 服务连续超时或报错后冷却 45 秒，避免中转站不支持向量接口时每发一句话都先白等 1.2 秒。
   const cache = new Map();
   const QUERY_TIMEOUT = 1200;
+  let cooldownUntil = 0;
   const raw = async (texts) => {
     const res = await fetchImpl(`${base}/embeddings`, {
       method: 'POST',
@@ -62,14 +65,23 @@ export function createEmbedder(cfg, { gateway = null, fetchImpl = globalThis.fet
       if (texts.length !== 1) return raw(texts);
       const key = String(texts[0]);
       const hit = cache.get(key);
-      if (hit && Date.now() - hit.t < 300_000) return [await hit.p];
+      if (hit && now() - hit.t < 300_000) return [await hit.p];
+      if (now() < cooldownUntil) throw new Error('向量服务冷却中，本次仅用本地检索');
       const p = raw([key]).then((v) => v[0]);
-      cache.set(key, { p, t: Date.now() });
+      cache.set(key, { p, t: now() });
       if (cache.size > 64) cache.delete(cache.keys().next().value);
       p.catch(() => cache.delete(key));
       let timer;
       const timeout = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('向量服务超时')), QUERY_TIMEOUT); });
-      try { return [await Promise.race([p, timeout])]; } finally { clearTimeout(timer); }
+      try {
+        const vec = await Promise.race([p, timeout]);
+        cooldownUntil = 0;
+        return [vec];
+      } catch (err) {
+        cache.delete(key);
+        cooldownUntil = now() + EMBED_COOLDOWN_MS;
+        throw err;
+      } finally { clearTimeout(timer); }
     }
   };
 }

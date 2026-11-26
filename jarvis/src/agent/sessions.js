@@ -3,13 +3,15 @@ import { dropSessionWork } from './workLedger.js';
  * 多会话：每段对话单独保存（本机 IndexedDB），可以新建、切换、搜索、重命名、导出、删除。
  * 消息只存文本（用户原话与未央的回答），工具调用记录只存名字，用于回看时显示“用了哪些工具”。
  */
-import { collection, localRecentSessionRows, uid } from './store.js';
+import { collection, localRecentSessionRows, scopedState, uid } from './store.js';
 import { buildIndex } from './search.js';
 import { archiveRequirements } from './taskRequirements.js';
 import { evidence } from './evidenceStore.js';
 import { taskStateFromMessages } from '../core/taskIntent.js';
 
 const sessions = collection('sessions');
+// 每个用户作用域只保留当前会话集对应的 1 份倒排索引快照（上限 1 份，不随轮次增长；其他会话变动即原地替换）
+const messageIndexCache = scopedState('sessionMessageIndex', () => ({ sig: '', units: [], search: null, byId: null }));
 const TITLE_MAX = 24;
 /** 服务器模式：对话存在自己的服务器上（见 core/serverClient.js 的 remoteSessions），读写都交给它 */
 let remote = null;
@@ -229,25 +231,34 @@ export async function listUserMessages({ query = '', from = 0, to = Infinity, pa
 }
 
 export async function searchMessages(query, { exclude = null, current = null, k = 3, minScore = 2 } = {}) {
+  if (!String(query || '').trim()) return [];
   const all = (await sessions.all()).filter((s) => !s.evaluationId && s.id !== exclude);
-  const units = [];
-  for (const s of all) {
-    s.messages.forEach((m, i) => {
-      if (m.role !== 'user') return;
-      const reply = s.messages[i + 1]?.role === 'assistant' ? s.messages[i + 1].content : '';
-      // 本段对话里正在回答的这句问话不算结果：每段对话只取一处，它会把前面真正有用的原话挤掉
-      if (s.id === current && !reply && i >= s.messages.length - 2) return;
-      units.push({ id: `${s.id}#${i}`, sessionId: s.id, title: s.title, ts: m.ts ?? s.updatedAt, user: m.content, reply });
-    });
+  if (!all.length) return [];
+  const sig = `${exclude ?? ''}|${current ?? ''}|${all.map((s) => `${s.id}:${s.updatedAt}:${s.messages.length}`).join(',')}`;
+  const cache = messageIndexCache();
+  if (cache.sig !== sig) {
+    const units = [];
+    for (const s of all) {
+      s.messages.forEach((m, i) => {
+        if (m.role !== 'user') return;
+        const reply = s.messages[i + 1]?.role === 'assistant' ? s.messages[i + 1].content : '';
+        // 本段对话里正在回答的这句问话不算结果：每段对话只取一处，它会把前面真正有用的原话挤掉
+        if (s.id === current && !reply && i >= s.messages.length - 2) return;
+        units.push({ id: `${s.id}#${i}`, sessionId: s.id, title: s.title, ts: m.ts ?? s.updatedAt, user: m.content, reply });
+      });
+    }
+    cache.sig = sig;
+    cache.units = units;
+    cache.byId = new Map(units.map((u) => [u.id, u]));
+    cache.search = units.length ? buildIndex(units.map((u) => ({ id: u.id, text: `${u.user}\n${u.reply.slice(0, 800)}` }))) : null;
   }
-  if (!units.length || !String(query || '').trim()) return [];
-  const byId = new Map(units.map((u) => [u.id, u]));
-  const hits = buildIndex(units.map((u) => ({ id: u.id, text: `${u.user}\n${u.reply.slice(0, 800)}` })))(query, k * 3);
+  if (!cache.search) return [];
+  const hits = cache.search(query, k * 3);
   const seen = new Set();
   const out = [];
   for (const h of hits) {
     if (h.score < minScore) continue;
-    const u = byId.get(h.id);
+    const u = cache.byId.get(h.id);
     if (seen.has(u.sessionId)) continue; // 每段对话最多取一处，覆盖更多对话
     seen.add(u.sessionId);
     out.push({ ...u, score: h.score });

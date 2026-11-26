@@ -199,6 +199,8 @@ export function createServer({
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no'
     });
+    res.socket?.setNoDelay?.(true);
+    res.flushHeaders?.();
     activeChats++;
     try {
       for await (const ev of agent.run(messages, { signal: ctrl.signal })) {
@@ -218,6 +220,7 @@ export function createServer({
 
   function handleEvents(req, res) {
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+    res.socket?.setNoDelay?.(true);
     res.write(': connected\n\n');
     subscribers.add(res);
     const ping = setInterval(() => res.write(': ping\n\n'), 25000);
@@ -269,17 +272,40 @@ export function createServer({
     }
     const chunks = [];
     for await (const c of req) chunks.push(c);
-    const upstream = await fetch(`${base.replace(/\/$/, '')}/${rest}${search}`, {
-      method: req.method,
-      headers,
-      body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks)
-    });
-    res.writeHead(upstream.status, {
-      'Content-Type': upstream.headers.get('content-type') || 'application/json',
-      'Cache-Control': 'no-cache'
-    });
-    if (upstream.body) for await (const chunk of upstream.body) res.write(chunk);
-    res.end();
+    const ac = new AbortController();
+    const onClose = () => { if (!res.writableEnded) ac.abort(); };
+    res.once('close', onClose);
+    try {
+      const upstream = await fetch(`${base.replace(/\/$/, '')}/${rest}${search}`, {
+        method: req.method,
+        headers,
+        body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks),
+        signal: ac.signal
+      });
+      const contentType = upstream.headers.get('content-type') || 'application/json';
+      const isSse = /text\/event-stream/i.test(contentType);
+      res.writeHead(upstream.status, {
+        'Content-Type': contentType,
+        'Cache-Control': isSse ? 'no-cache, no-transform' : 'no-cache',
+        ...(isSse && { 'X-Accel-Buffering': 'no', Connection: 'keep-alive' })
+      });
+      if (isSse) {
+        res.socket?.setNoDelay?.(true);
+        res.flushHeaders?.();
+      }
+      if (upstream.body) {
+        for await (const chunk of upstream.body) {
+          if (ac.signal.aborted) break;
+          res.write(chunk);
+        }
+      }
+      res.end();
+    } catch (err) {
+      if (!ac.signal.aborted && !res.headersSent) json(res, 502, { error: String(err?.message || err) });
+      else if (!res.writableEnded) res.end();
+    } finally {
+      res.off('close', onClose);
+    }
   }
 
   async function handleFetch(req, res, target) {

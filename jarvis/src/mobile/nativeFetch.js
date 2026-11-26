@@ -84,9 +84,8 @@ export function wrapFetch(webFetch, native, selfOrigin, g = globalThis) {
       return init.stream && !nativeHosts.has(url.host) ? webFetch(input, init) : native(url.href, init);
     }
     if (init.stream) {
-      const get = (init.method || input?.method || 'GET').toUpperCase() === 'GET';
-      // 已选原生网络的服务器可直接订阅事件。旧安装包仍优先使用能逐段返回的 WebView。
-      if (get && nativeHosts.has(url.host) && wantsStream(init) && g.Capacitor?.isPluginAvailable?.('NativeStream')) {
+      // 已选原生网络的服务器可直接流式提交任务或订阅事件。旧安装包仍优先使用能逐段返回的 WebView。
+      if (nativeHosts.has(url.host) && wantsStream(init) && g.Capacitor?.isPluginAvailable?.('NativeStream')) {
         try {
           return await native(url.href, init);
         } catch (error) {

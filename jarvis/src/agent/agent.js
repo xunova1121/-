@@ -89,7 +89,7 @@ import { questionToolProfile, toolsForQuestion, BASIC_ANSWER_PROMPT } from './qu
 import { createPlanTool, unfinished } from './plan.js';
 import { loadRules, rulesBlock } from './projectRules.js';
 import { canFallback, needsComputer, computerTaskKind } from '../llm/router.js';
-import { compactToolResults } from './turnContext.js';
+import { compactToolResults, createTurnArchive } from './turnContext.js';
 import { requirementsTool } from './taskRequirements.js';
 import * as holdings from './holdings.js';
 import { recentFailures, recentWorkLog } from './failedSteps.js';
@@ -153,6 +153,8 @@ ${STABLE_PROMPT.slice(STABLE_PROMPT.indexOf('## 不写表情标签'))}`;
 /** 语音对话：回答会被念出来 */
 export const VOICE_NOTE = '## 语音对话\n用户正在和你语音对话，你的回答会被念出来：用口语，简短（一般两三句话），不用列表、表格、标题、链接和符号；做了文件就说一句文件名和放在哪，细节让用户看屏幕。';
 
+const beijingMinute = () => new Date().toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Shanghai' });
+
 export async function buildContext(userText, { sessionId = null, turns = 0, summary = null, light = false, history = [], isolated = false } = {}) {
   // 评测会话（isolated）：不读用户的个人记忆、过往对话、持仓、知识库和文档偏好——结果要能复现，也不把真实信息带进评测报告
   if (isolated) return isolatedContext(userText, { sessionId, summary, history });
@@ -171,7 +173,8 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
   const held = !light && holdings.STOCK_TOPIC.test(String(userText)) ? await holdings.list().catch(() => []) : [];
   const period = reviewPeriod(userText);
   const periodText = period ? periodBlock(await sessions.listLocal().catch(() => []), period, { currentId: sessionId }) : '';
-  const parts = [`当前时间：${new Date().toLocaleString('zh-CN', { hour12: false, timeZone:'Asia/Shanghai' })}（${'Asia/Shanghai'}）`];
+  // 把整段对话期间固定不变的内容放在前面，每轮随问题变化的内容和时间（精确到分钟）放在后面，提高大模型前缀缓存命中率、加快首字响应。
+  const parts = [];
   const desktop = typeof window !== 'undefined' ? window.jarvisDesktop : null;
   if (desktop) {
     const os = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' }[desktop.platform] ?? desktop.platform;
@@ -180,11 +183,19 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
   if (typeof document !== 'undefined' && document.body?.classList.contains('compact')) {
     parts.push('运行环境：未央手机 App（安卓）。屏幕上只有对话，没有“右侧预览区”：生成的文件、网页、PPT 在左上角菜单 →“工作区”里查看，回答时这样告诉用户（不要说“看右侧”）。不能操作电脑。');
   }
+  parts.push(ws.mode() === 'folder' ? `工作区：已连接本地文件夹「${ws.folderName()}」` : '工作区：浏览器内的虚拟工作区（用户可下载文件，或连接本地文件夹）');
+  if (rules) parts.push(rulesBlock(rules));
+  if (ctx.core?.human || ctx.core?.persona) parts.push(`## 核心记忆\n${ctx.core.human ? `【关于用户】${ctx.core.human}\n` : ''}${ctx.core.persona ? `【我的设定】${ctx.core.persona}` : ''}`.trim());
+  const memLine = (m) => `- [id:${m.id}; ${m.pending ? '线索; ' : ''}来源:${m.source || '未记录'}; 时间:${new Date(m.updatedAt || m.ts).toISOString()}; 版本:${(m.history?.length || 0)+1}] ${m.content.length > 280 ? m.content.slice(0, 280) + '…（详情用read_memory按ID读取）' : m.content}`;
+  // 用户的基本情况：每轮都带上（问“我多大了 / 我住哪”时不用再去猜）
+  if (ctx.basics?.length) parts.push(`## 用户的基本情况（用户说过的；标“线索”的没找到原话依据，不能当事实说；和当前原话冲突时以当前为准）\n${ctx.basics.map(memLine).join('\n')}`);
+  if (installed.length && !light) parts.push(packs.catalog(installed)); // 闲聊用不到技能清单
   // 各模式共用来源边界，旧答复不能在换模型后变成新规则。
   if (history.length || summary?.text) parts.push(HISTORY_SOURCE_RULE);
   // 长对话：较早的消息已压缩成摘要（见 compress.js）
   const earlier = summaryBlock(summary, sessionId);
   if (earlier) parts.push(earlier);
+  parts.push(`当前时间：${beijingMinute()}（Asia/Shanghai）`);
   // 即使闲聊或摘要漏掉文件，仍从整段保存记录提取有界索引。
   const work = sessionWorkBlock(currentSession);
   if (work) parts.push(work);
@@ -193,12 +204,6 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
     const styles = await memory.documentStyleContext();
     if (styles) parts.push(styles);
   }
-  parts.push(ws.mode() === 'folder' ? `工作区：已连接本地文件夹「${ws.folderName()}」` : '工作区：浏览器内的虚拟工作区（用户可下载文件，或连接本地文件夹）');
-  if (rules) parts.push(rulesBlock(rules));
-  if (ctx.core?.human || ctx.core?.persona) parts.push(`## 核心记忆\n${ctx.core.human ? `【关于用户】${ctx.core.human}\n` : ''}${ctx.core.persona ? `【我的设定】${ctx.core.persona}` : ''}`.trim());
-  const memLine = (m) => `- [id:${m.id}; ${m.pending ? '线索; ' : ''}来源:${m.source || '未记录'}; 时间:${new Date(m.updatedAt || m.ts).toISOString()}; 版本:${(m.history?.length || 0)+1}] ${m.content.length > 280 ? m.content.slice(0, 280) + '…（详情用read_memory按ID读取）' : m.content}`;
-  // 用户的基本情况：每轮都带上（问“我多大了 / 我住哪”时不用再去猜）
-  if (ctx.basics?.length) parts.push(`## 用户的基本情况（用户说过的；标“线索”的没找到原话依据，不能当事实说；和当前原话冲突时以当前为准）\n${ctx.basics.map(memLine).join('\n')}`);
   const related = ctx.memories.filter((m) => !ctx.basics?.includes(m));
   if (related.length) parts.push(`## 相关记忆（标“线索”的是以前对话里推测出来的、没找到用户原话依据：不能当事实说；其余是用户亲口说过或多次提到的；和当前原话或证据冲突时以当前为准）\n${related.map(memLine).join('\n')}`);
   const day = (ts) => new Date(ts).toLocaleDateString('zh-CN');
@@ -215,26 +220,30 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
   if (open.length) parts.push(`## 之前对话里说好以后再做的事（只在当前请求相关时参考；用户没要求就不要转回旧任务；用户说不用了就不再提）\n${open.map((o) => `- ${o.text}${o.sessionTitle ? `（来自「${o.sessionTitle}」，${day(o.ts)}）` : ''}`).join('\n')}`);
   if (ctx.lessons.length) parts.push(`## 经验教训（来自用户反馈）\n${ctx.lessons.map((l) => `- ${l.content}`).join('\n')}`);
   if (ctx.skills.length) parts.push(`## 已掌握的技能\n${ctx.skills.map((s) => `### ${s.name}\n${s.description ? `${s.description}\n` : ''}${s.steps}`).join('\n')}`);
-  if (installed.length && !light) parts.push(packs.catalog(installed)); // 闲聊用不到技能清单
   if (kbHits.length) parts.push(`## 知识库检索结果（回答时注明来源）\n${kbHits.map((h) => `【来源：${h.name}】\n${h.text}`).join('\n\n')}`);
-  return { dynamic: parts.join('\n\n'), kbHits, ...ctx };
+  const out = { dynamic: parts.join('\n\n'), kbHits, ...ctx };
+  Object.defineProperty(out, '_session', { value: currentSession });
+  return out;
 }
 
 /** 评测用的上下文：只有时间、本段对话、项目规则和未央自己的经验 / 技能，没有用户个人信息 */
 async function isolatedContext(userText, { sessionId, summary, history }) {
   const [ctx, rules, currentSession] = await Promise.all([memory.contextFor(conversationFocus(userText, history).memoryQuery, { vector: false }), loadRules().catch(() => null), sessionId ? sessions.get(sessionId) : null]);
-  const parts = [`当前时间：${new Date().toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' })}（Asia/Shanghai）`, '这是评测会话：不知道用户的个人信息（称呼、家人、过往对话、持仓、偏好），需要时就问或按题面作答。'];
-  if (history.length || summary?.text) parts.push(HISTORY_SOURCE_RULE);
-  const earlier = summaryBlock(summary, sessionId);
-  if (earlier) parts.push(earlier);
-  const work = sessionWorkBlock(currentSession);
-  if (work) parts.push(work);
+  const parts = ['这是评测会话：不知道用户的个人信息（称呼、家人、过往对话、持仓、偏好），需要时就问或按题面作答。'];
   parts.push(ws.mode() === 'folder' ? `工作区：已连接本地文件夹「${ws.folderName()}」` : '工作区：浏览器内的虚拟工作区（用户可下载文件，或连接本地文件夹）');
   if (rules) parts.push(rulesBlock(rules));
   if (ctx.core?.persona) parts.push(`## 核心记忆\n【我的设定】${ctx.core.persona}`);
+  if (history.length || summary?.text) parts.push(HISTORY_SOURCE_RULE);
+  const earlier = summaryBlock(summary, sessionId);
+  if (earlier) parts.push(earlier);
+  parts.push(`当前时间：${beijingMinute()}（Asia/Shanghai）`);
+  const work = sessionWorkBlock(currentSession);
+  if (work) parts.push(work);
   if (ctx.lessons?.length) parts.push(`## 经验教训（来自用户反馈）\n${ctx.lessons.map((l) => `- ${l.content}`).join('\n')}`);
   if (ctx.skills?.length) parts.push(`## 已掌握的技能\n${ctx.skills.map((s) => `### ${s.name}\n${s.description ? `${s.description}\n` : ''}${s.steps}`).join('\n')}`);
-  return { dynamic: parts.join('\n\n'), kbHits: [], core: ctx.core?.persona ? { persona: ctx.core.persona } : null, basics: [], memories: [], episodes: [], lessons: ctx.lessons || [], skills: ctx.skills || [] };
+  const out = { dynamic: parts.join('\n\n'), kbHits: [], core: ctx.core?.persona ? { persona: ctx.core.persona } : null, basics: [], memories: [], episodes: [], lessons: ctx.lessons || [], skills: ctx.skills || [] };
+  Object.defineProperty(out, '_session', { value: currentSession });
+  return out;
 }
 
 /**
@@ -334,28 +343,23 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   let stoppedBatches = 0;
   let answerCompleted = false;
   emit({ type: 'state', value: 'processing' });
-  const { ctx: preparedContext, record, requirementContext, archive } = await prepareAgentContext({ userText, priorMessages: history, context, sessionId, summary, light: light || Boolean(questionProfile), requirements, depth, requirementText, emit, buildContext, isolated });
-  // 动态规则只属于本轮，不能修改调用方复用的上下文，让新闻规则污染后面的写作。
-  const ctx = { ...preparedContext };
-  if (!light && !questionProfile) ctx.dynamic = (ctx.dynamic || '') + '\n' + taskMethodContext(requirementText, availableTools);
-  if (complaint) ctx.dynamic = (ctx.dynamic || '') + '\n用户当前是在询问状态或抱怨，不是要求重新搜索。根据已有任务状态简短回答；没有正在执行的任务就不假称还在查。本条仅问状态时不要调用联网工具；之后明确追加新查询则按新要求处理。';
-  else if (!light && !questionProfile && !codeWork?.enabled && !images.length && (isQuickLookup(requirementText, images) || todayNewsIntent(requirementText) || /深度调研|查资料|联网查询|逐项核验/.test(requirementText))) ctx.dynamic = (ctx.dynamic || '') + '\n' + lookupAnswerNote(lookupIntent(requirementText, { history }), requirementText);
-  ctx.dynamic = (ctx.dynamic || '') + await workHistoryBlock(requirementText, sessionId, { signal });
-  if (codeWork?.enabled) ctx.dynamic = (ctx.dynamic || '') + '\n' + codeWorkBlock(codeWork, await packs.get('code-development'));
-  const convo = [...history.map((m) => ({ ...m })), { role: 'user', content: userText, ...(images.length && { images }) }];
-  if (images.length || IMAGE_RECHECK.test(requirementText) || /OCR|读数|数值|重新看|看错|识图|截图/i.test(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n' + IMAGE_READING_RULES + '\n图片核对：用户纠正读数或要求OCR时，先用inspect_image读取工作区原图（需要时指定region），不要复述旧识别结果；密集多列用regions最多4个物理分区一次复核，保留列行对应。用户提供数字只能标作用户纠正，不能直接改口称独立看清；不确定必须具体到字符，已看清的部分照常给出。成功回执只能证明本次执行，不能证明数字正确；来源冲突明确报告。没有原图或能力时说明缺失，不声称已重新识别。';
-  if (visualSceneRequest(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n' + VISUAL_SCENE_GUIDANCE;
-  else if (textPosterRequest(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n' + POSTER_GUIDANCE;
-  else if (/架构图|流程图|关系图|原图|旧图|先前.*图|SVG|画图|改图|生成图片/i.test(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n' + DIAGRAM_PLANNING + '\n图形任务：先明确读者、主结论及主次关系，再选主题和结构。分层架构一律create_diagram生成同一.diagram.json设计稿，SVG/PNG/PDF/PPT共用坐标与换行；换格式用export_diagram，不让普通PPT工具重新画。多页汇报里插入架构图也先生成同稿图片再引用。PPT展示版是同图，不冒充可编辑；原生可编辑版须实际渲染对比通过。Image2只做创意图片/视觉素材，不承担精确文字连线。已有图片修改必须传真实原图referencePaths。用户说先前那张时核对确切路径版本，不凭名称或时间替换；多候选无法区分需简短追问。SVG可inspect_image，转PNG可render_diagram。不把展示当验收、源图改了旧验收失效，失败只修指定问题再核。';
-  // 当前模型看不了图：图片先交给看图模型写成文字（见 imageSight.js）
-  const see = createImageSight({ model, describe: describeImages, label: visionLabel, emit, readText: readImageText, onEvidence: review.noteVisual });
-  for (const m of convo) await see(m, { hint: requirementText, signal, ocr: m === convo.at(-1) });
-  const imagePreferenceNote = images.length ? await memory.communicationImageContext({ signal }) : '';
+  const hardCap = Number.isInteger(maxTotalSteps) && maxTotalSteps > 0 ? Math.min(maxTotalSteps, maxSteps * HARD_CAP) : maxSteps * HARD_CAP;
+  let limit = Math.min(maxSteps, hardCap);
+  let toolCount = 0;
+  let failCount = 0;
+  let lastToolOk = true;
+  if (!depth && adapter.deepseekWeb && !codeWork?.enabled && !agent?.profile && !inbox?.length && reverseImageMode(requirementText, images)) {
+    const found = await tryDeepseekQuestion({ adapter, model, text: requirementText, intent: { kind: 'general' }, tools: availableTools, signal, retrieval, lookupControl, emit, review, now, images, requestTitle: !history.length });
+    if (found && !inbox?.length) {
+      emit({ type: 'text', delta: found.text });
+      return finishAgentRun({ step: 0, limit, retrievalStopped: false, retrieval, stuck: false, review, nativeSearchCalls: found.calls, light, signal, quiet, toolCount, lastToolOk, failCount, userText, finalText: found.text, emit, lookupDeadline, answerCompleted: true });
+    }
+  }
   // 任务清单（update_plan）和子任务分身（delegate_task，只有主线能派）由循环自己提供
   const plan = createPlanTool((steps) => emit({ type: 'plan', steps }));
+  const hasPhoneGuidance = tools.some(t => t.name === 'phone_action') && /手机|安卓|微信|闹钟|拨号|导航/.test(requirementText);
+  let computerNote = tools.some(t => t.name === 'computer_search') && (computerTask || needsComputer(requirementText, { history })) ? COMPUTER_NOTE : '';
   // 简单闲聊（light）：不带工具，回得快
-  if (tools.some(t => t.name === 'phone_action') && /手机|安卓|微信|闹钟|拨号|导航/.test(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n' + PHONE_GUIDANCE;
-  let computerNote = tools.some(t => t.name === 'computer_search') && (computerTask || needsComputer(requirementText,{history})) ? COMPUTER_NOTE : '';
   if (light) tools = [];
   const executionTool = {
     name: 'execution_capabilities',
@@ -380,9 +384,11 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   // 画一张图也算单件交付：不给外层任务清单（实测一张架构图列清单、改清单用了 5 轮模型）
   const oneFile = (singleDocumentTask(requirementText) && String(requirementText).length <= 150 && !/方案|调研|研究|论文/.test(requirementText)) || (!pipelineContext && /架构图|流程图|示意图|拓扑图|关系图/.test(requirementText) && String(requirementText).length <= 300);
   const executionScope = {};
+  const archive = createTurnArchive();
+  let record = requirements;
   // 本批只在文字任务升级；不能把正在看图/操作电脑的上下文切给未知看图能力的线路。
   const capabilityUpgrade = createCapabilityUpgrade({ routes: images.length || computerTask || history.some(message => message.images?.length) ? [] : capabilityRoutes, intent: taskIntent, signal, emit });
-  const own = [...(oneFile ? [] : [plan.tool]), review.tool, executionTool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: sportsNewsOnly ? tools : availableTools })] : []), ...(lookupDeadline && lookupControl?.release ? [moreTimeTool] : [])].filter((t) => !tools.some((x) => x.name === t.name));
+  const own = [...(oneFile ? [] : [plan.tool]), review.tool, executionTool, requirementsTool(() => record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: sportsNewsOnly ? tools : availableTools })] : []), ...(lookupDeadline && lookupControl?.release ? [moreTimeTool] : [])].filter((t) => !tools.some((x) => x.name === t.name));
   own.push(createTaskMethodsTool(availableTools));
   if (!isolated && availableTools.some(tool => tool.name === 'recall')) own.push(createMemoryReadTool());
   if (availableTools.some(tool => tool.name === 'read_file')) own.push(createDeliveryAccessTool());
@@ -391,8 +397,94 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   // 普通问答、查资料：做文档的工具先只列名字（用到时按名字调用或 tool_search 加载）
   // “字大点 / 不要横线”这类短句是在改刚做的文件：做文档的工具要常驻（第一轮 30 题实测：被当成普通问答，先搜工具、再找文件、先试改文字失败，一道题 15 次调用）
   let loader = createToolLoader(light ? [] : questionProfile ? tools : [...tools, ...own], { defer: isQuickLookup(requirementText, images) && !styleRequests(requirementText).length ? DOCUMENT_TOOLS : null, core: codeWork?.enabled ? new Set([...CODE_TASK_CORE, ...taskToolCore(taskIntent, requirementText)]) : makingFile && !pipelineContext && !images.length && !textPosterRequest(requirementText) && !visualSceneRequest(requirementText) && !/架构图|流程图|关系图|拓扑图|生成图片/.test(requirementText) ? DOCUMENT_TASK_CORE : taskToolCore(taskIntent, requirementText, { images, computerTask, strict: pipelineContext }) });
-  const loadGUI=()=>{if(availableTools.some(t=>t.name==='computer_look'))for(const name of ['computer_look','computer_click','computer_type','computer_key','computer_scroll','computer_drag'])loader.get(name);};
-  if(!light&&(computerTask==='gui'||computerTaskKind(requirementText,{history})==='gui'))loadGUI();
+  const loadGUI = () => { if (availableTools.some(t => t.name === 'computer_look')) for (const name of ['computer_look', 'computer_click', 'computer_type', 'computer_key', 'computer_scroll', 'computer_drag']) loader.get(name); };
+  if (!light && (computerTask === 'gui' || computerTaskKind(requirementText, { history }) === 'gui')) loadGUI();
+  const diagramRecovery = createDiagramRecovery();
+  const seen = new Map(); // 同样的调用（工具 + 参数）做过几次
+  const sportsScope = sportsFollowupScope(requirementText, history);
+  if (sportsScope) retrieval.sportsScope = sportsScope;
+  const strictArch = depth === 0 && !images.length && strictArchitecture(userText);
+  const shouldPrefetchLookup = depth === 0 && !strictArch && !sportsScope && !codeWork?.enabled && !light && !images.length && !creativeWithoutLookup(requirementText);
+
+  let preClassifiedIntent = null;
+  if (shouldPrefetchLookup && adapter.deepseekWeb && !makingFile && !computerTask && !agent?.profile && !complaint && !questionProfile &&
+      !taskIntent.inherited && !inbox?.length && userText === requirementText &&
+      !review.report().contract.calculation && !review.report().sourceRequirement) {
+    let preferences = LOOKUP_DEFAULT_PREFERENCES;
+    if (lookupPreferences && lookupIntent(requirementText, { history }).kind === 'sports_live') {
+      try { preferences = await withWebDeadline(() => lookupPreferences(), { signal, timeoutMs: 500 }); } catch (error) { if (signal?.aborted) throw error; }
+    }
+    preClassifiedIntent = await classifyLookupIntent(requirementText, { history, preferences, classify: lookupClassifier, signal });
+    retrieval.intent = preClassifiedIntent; retrieval.intentRequest = requirementText;
+    const native = await tryDeepseekQuestion({ adapter, model, text: userText, intent: preClassifiedIntent, tools: availableTools, signal, retrieval, lookupControl, emit, review, now, requestTitle: !history.length });
+    if (native && !inbox?.length) {
+      emit({ type: 'text', delta: native.text });
+      return finishAgentRun({ step: 0, limit, retrievalStopped: false, retrieval, stuck: false, review, nativeSearchCalls: native.calls,
+        light, signal, quiet, toolCount, lastToolOk, failCount, userText, finalText: native.text, emit, lookupDeadline, answerCompleted: true });
+    }
+  }
+
+  // 上下文读取（记忆/向量/知识库）与联网预取互不依赖：并行推进，省去串行等待。
+  const lookupCtrl = new AbortController();
+  const relayLookupAbort = () => lookupCtrl.abort(signal.reason);
+  if (signal?.aborted) relayLookupAbort();
+  else signal?.addEventListener('abort', relayLookupAbort, { once: true });
+  let preparedBundle;
+  let lookupOutcome = null;
+  try {
+    const contextPromise = Promise.all([
+      prepareAgentContext({ userText, priorMessages: history, context, sessionId, summary, light: light || Boolean(questionProfile), requirements, depth, requirementText, emit, buildContext, isolated, archive }),
+      workHistoryBlock(requirementText, sessionId, { signal }),
+      codeWork?.enabled ? packs.get('code-development') : null
+    ]);
+    const lookupPromise = shouldPrefetchLookup ? (async () => {
+      let intent = preClassifiedIntent;
+      if (!intent) {
+        let preferences = LOOKUP_DEFAULT_PREFERENCES;
+        if (lookupPreferences && lookupIntent(requirementText, { history }).kind === 'sports_live') {
+          try { preferences = await withWebDeadline(() => lookupPreferences(), { signal: lookupCtrl.signal, timeoutMs: 500 }); } catch (error) { if (lookupCtrl.signal.aborted) throw error; }
+        }
+        intent = await classifyLookupIntent(requirementText, { history, preferences, classify: lookupClassifier, signal: lookupCtrl.signal });
+        retrieval.intent = intent; retrieval.intentRequest = requirementText;
+      }
+      const found = await runLookup(intent, {
+        text: requirementText, getTool: name => loader.get(name), now: now(), signal: lookupCtrl.signal, clock: lookupControl,
+        execute: async (calls, s) => {
+          const results = await executeToolCalls(calls, { loader, emit, seen, diagramRecovery, executionScope, closing: false, retrieval, approve, signal: s, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch: true });
+          for (const r of results) retrieval.end(r.ok);
+          return results;
+        }
+      });
+      return { intent, found };
+    })() : null;
+    [preparedBundle, lookupOutcome] = await Promise.all([contextPromise, lookupPromise]);
+  } catch (err) {
+    lookupCtrl.abort(err);
+    throw err;
+  } finally {
+    signal?.removeEventListener('abort', relayLookupAbort);
+  }
+
+  const [{ ctx: preparedContext, record: resolvedRecord, requirementContext }, historyNote, codePack] = preparedBundle;
+  record = resolvedRecord;
+  // 动态规则只属于本轮，不能修改调用方复用的上下文，让新闻规则污染后面的写作。
+  const ctx = { ...preparedContext };
+  if (!light && !questionProfile) ctx.dynamic = (ctx.dynamic || '') + '\n' + taskMethodContext(requirementText, availableTools);
+  if (complaint) ctx.dynamic = (ctx.dynamic || '') + '\n用户当前是在询问状态或抱怨，不是要求重新搜索。根据已有任务状态简短回答；没有正在执行的任务就不假称还在查。本条仅问状态时不要调用联网工具；之后明确追加新查询则按新要求处理。';
+  else if (!light && !questionProfile && !codeWork?.enabled && !images.length && (isQuickLookup(requirementText, images) || todayNewsIntent(requirementText) || /深度调研|查资料|联网查询|逐项核验/.test(requirementText))) ctx.dynamic = (ctx.dynamic || '') + '\n' + lookupAnswerNote(lookupIntent(requirementText, { history }), requirementText);
+  ctx.dynamic = (ctx.dynamic || '') + historyNote;
+  if (codeWork?.enabled) ctx.dynamic = (ctx.dynamic || '') + '\n' + codeWorkBlock(codeWork, codePack);
+  const convo = [...history.map((m) => ({ ...m })), { role: 'user', content: userText, ...(images.length && { images }) }];
+  if (images.length || IMAGE_RECHECK.test(requirementText) || /OCR|读数|数值|重新看|看错|识图|截图/i.test(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n' + IMAGE_READING_RULES + '\n图片核对：用户纠正读数或要求OCR时，先用inspect_image读取工作区原图（需要时指定region），不要复述旧识别结果；密集多列用regions最多4个物理分区一次复核，保留列行对应。用户提供数字只能标作用户纠正，不能直接改口称独立看清；不确定必须具体到字符，已看清的部分照常给出。成功回执只能证明本次执行，不能证明数字正确；来源冲突明确报告。没有原图或能力时说明缺失，不声称已重新识别。';
+  if (visualSceneRequest(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n' + VISUAL_SCENE_GUIDANCE;
+  else if (textPosterRequest(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n' + POSTER_GUIDANCE;
+  else if (/架构图|流程图|关系图|原图|旧图|先前.*图|SVG|画图|改图|生成图片/i.test(requirementText)) ctx.dynamic = (ctx.dynamic || '') + '\n' + DIAGRAM_PLANNING + '\n图形任务：先明确读者、主结论及主次关系，再选主题和结构。分层架构一律create_diagram生成同一.diagram.json设计稿，SVG/PNG/PDF/PPT共用坐标与换行；换格式用export_diagram，不让普通PPT工具重新画。多页汇报里插入架构图也先生成同稿图片再引用。PPT展示版是同图，不冒充可编辑；原生可编辑版须实际渲染对比通过。Image2只做创意图片/视觉素材，不承担精确文字连线。已有图片修改必须传真实原图referencePaths。用户说先前那张时核对确切路径版本，不凭名称或时间替换；多候选无法区分需简短追问。SVG可inspect_image，转PNG可render_diagram。不把展示当验收、源图改了旧验收失效，失败只修指定问题再核。';
+  // 当前模型看不了图：图片先交给看图模型写成文字（见 imageSight.js）
+  const see = createImageSight({ model, describe: describeImages, label: visionLabel, emit, readText: readImageText, onEvidence: review.noteVisual });
+  for (const m of convo) await see(m, { hint: requirementText, signal, ocr: m === convo.at(-1) });
+  const imagePreferenceNote = images.length ? await memory.communicationImageContext({ signal }) : '';
+  if (hasPhoneGuidance) ctx.dynamic = (ctx.dynamic || '') + '\n' + PHONE_GUIDANCE;
+  if (sportsScope) ctx.dynamic = (ctx.dynamic || '') + '\n' + SPORTS_FOLLOWUP_NOTE;
   let outputRepairs = 0;
   let answerRepairs = 0;
   let checks = 0; // 收尾核对提醒过几次（最多两次，避免来回拉扯）
@@ -401,18 +493,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   let infoPrompt = isQuickLookup(requirementText, images);
   let finalText = '';
   let checkedText = ''; // 收尾核对前已经显示给用户的回答（核对之后的步骤整段写完再显示，重复的不再显示）
-  let toolCount = 0;
-  let failCount = 0;
-  let lastToolOk = true;
   let step = 0;
-  // 步数上限：到了 maxSteps 时，只要还在推进（最近没有大量失败）就自动接着做，不停下来问用户；
-  // 最多做到 HARD_CAP 倍，防止原地打转一直消耗额度
-  let limit = maxSteps;
-  const hardCap = Number.isInteger(maxTotalSteps) && maxTotalSteps > 0 ? Math.min(maxTotalSteps, maxSteps * HARD_CAP) : maxSteps * HARD_CAP;
-  limit = Math.min(limit, hardCap);
   const recent = []; // 最近工具调用的成败
-  const diagramRecovery = createDiagramRecovery();
-  const seen = new Map(); // 同样的调用（工具 + 参数）做过几次
   let stuck = false;
   // 当前用的模型；出错时换成备用模型（fallbacks，按顺序），这一轮剩下的步骤都用新模型
   let cur = { adapter, model };
@@ -475,7 +557,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     return selfDriveNote({ kind: retrieval.intent?.kind || 'general', place: preFound?.args?.place || '', tried: triedSummary({ recovery, calls: triedCalls }), cooled: loader.cooled() });
   };
   // 严格架构流水线只在用户明确要逐条核对需求原文时接管；平时架构图由主模型直接 create_diagram 出图（见 diagramPlanning.js）
-  if (depth === 0 && !images.length && strictArchitecture(userText)) {
+  if (strictArch) {
     const directed = await runArchitectureDirector({
       text: userText, tools: availableTools, emit, signal, shouldYield: () => Boolean(inbox?.length),
       onStart: () => { lookupControl?.release?.(); retrieval.upgrade('制作架构图'); light = false; if (!loader.get('build_architecture')) loader = createToolLoader([...availableTools, ...own]); },
@@ -492,41 +574,9 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       takeInbox();
     }
   }
-  if (!depth && adapter.deepseekWeb && !codeWork?.enabled && !agent?.profile && !inbox?.length && reverseImageMode(requirementText, images)) {
-    const found = await tryDeepseekQuestion({ adapter, model, text: requirementText, intent: { kind: 'general' }, tools: availableTools, signal, retrieval, lookupControl, emit, review, now, images, requestTitle: !history.length });
-    if (found && !inbox?.length) {
-      emit({ type: 'text', delta: found.text });
-      return finishAgentRun({ step: 0, limit, retrievalStopped: false, retrieval, stuck: false, review, nativeSearchCalls: found.calls, light, signal, quiet, toolCount, lastToolOk, failCount, userText, finalText: found.text, emit, lookupDeadline, answerCompleted: true });
-    }
-  }
-  const sportsScope = sportsFollowupScope(requirementText, history);
-  if (sportsScope) { retrieval.sportsScope = sportsScope; ctx.dynamic = (ctx.dynamic || '') + '\n' + SPORTS_FOLLOWUP_NOTE; }
-  // 所有查询在此唯一入口预取；原工具承担数据/卡片/安全校验，执行器保留真实进度回执。
-  if (depth === 0 && !sportsScope && !codeWork?.enabled && !light && !images.length && !creativeWithoutLookup(requirementText)) {
-    let preferences = LOOKUP_DEFAULT_PREFERENCES;
-    if (lookupPreferences && lookupIntent(requirementText, { history }).kind === 'sports_live') {
-      try { preferences = await withWebDeadline(() => lookupPreferences(), { signal, timeoutMs: 500 }); } catch (error) { if (signal?.aborted) throw error; }
-    }
-    const intent = await classifyLookupIntent(requirementText, { history, preferences, classify: lookupClassifier, signal });
-    retrieval.intent = intent; retrieval.intentRequest = requirementText;
-    if (adapter.deepseekWeb && !makingFile && !computerTask && !agent?.profile && !complaint && !questionProfile &&
-        !taskIntent.inherited && !inbox?.length && userText === requirementText &&
-        !review.report().contract.calculation && !review.report().sourceRequirement) {
-      const native = await tryDeepseekQuestion({ adapter, model, text: userText, intent, tools: availableTools, signal, retrieval, lookupControl, emit, review, now, requestTitle: !history.length });
-      if (native && !inbox?.length) {
-        emit({ type: 'text', delta: native.text });
-        return finishAgentRun({ step: 0, limit, retrievalStopped: false, retrieval, stuck: false, review, nativeSearchCalls: native.calls,
-          light, signal, quiet, toolCount, lastToolOk, failCount, userText, finalText: native.text, emit, lookupDeadline, answerCompleted: true });
-      }
-    }
-    let found = await runLookup(intent, {
-      text: requirementText, getTool: name => loader.get(name), now: now(), signal, clock: lookupControl,
-      execute: async (calls, s) => {
-        const results = await executeToolCalls(calls, { loader, emit, seen, diagramRecovery, executionScope, closing: false, retrieval, approve, signal: s, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch: true });
-        for (const r of results) retrieval.end(r.ok);
-        return results;
-      }
-    });
+  if (lookupOutcome) {
+    const { intent } = lookupOutcome;
+    let { found } = lookupOutcome;
     if (found && intent.kind === 'general' && lookupControl && !fallbacks.length && !['failed', 'input'].includes(found.recovery?.state)) lookupControl.phased = true;
     if (found && ['recovered', 'cached'].includes(found.recovery?.state)) lookupControl?.extend?.(RECOVERED_ANSWER_MS);
     // 取到的东西跟问的对象毫不相干（问日本，回来全是国内新闻）：当没查到，交给模型接着查

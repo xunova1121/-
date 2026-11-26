@@ -246,12 +246,13 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
     json(res, 200, security.login(req, body.password));
   }
 
-  function streamEvents(req, res, id, after, batch) {
+  function streamEvents(req, res, id, after, batch, initialTask = null) {
     const backlog = runner.events(id, after);
     if (!backlog) return json(res, 404, { error: '找不到这个任务（可能已经做完很久了，结果在对话记录里）' });
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store, no-transform', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' });
     res.socket?.setNoDelay?.(true);
     res.flushHeaders?.();
+    if (initialTask) res.write(`data: ${JSON.stringify({ type: 'task_created', id: initialTask.id, sessionId: initialTask.sessionId })}\n\n`);
     const send = (ev) => res.write(`id: ${ev.seq}\ndata: ${JSON.stringify(ev)}\n\n`);
     for (const ev of backlog) send(ev);
     const last = backlog.at(-1);
@@ -328,7 +329,7 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
       if (!authorized(req)) { json(res, 401, { error: '服务器登录已失效' }); return true; }
       return codeRoutes(req, res, pathname);
     }
-    if (pathname === '/api/server/status' && req.method === 'GET') { json(res, 200, { ok: true, features:{evaluationMemoryIsolation:true,taskRequestIds:true,taskNotes:true,taskCheckpoints:true,pcModelBridge:true,skillSync:true,multiUser:true,workshopTvSync:true}, identity: security.users.identity(principal), running: runner.running, tasks: runner.list().filter((t) => t.status === 'running' || t.status === 'queued') }); return true; }
+    if (pathname === '/api/server/status' && req.method === 'GET') { json(res, 200, { ok: true, features:{evaluationMemoryIsolation:true,taskRequestIds:true,taskStreamStart:true,taskNotes:true,taskCheckpoints:true,pcModelBridge:true,skillSync:true,multiUser:true,workshopTvSync:true}, identity: security.users.identity(principal), running: runner.running, tasks: runner.list().filter((t) => t.status === 'running' || t.status === 'queued') }); return true; }
     if(pathname==='/api/server/pc-model'&&req.method==='POST'){
       if(!authorized(req)){json(res,401,{error:'服务器登录已失效'});return true;}
       if(activePCModels>=2){json(res,429,{error:'PC模型请求繁忙，请稍后重试'});return true;}
@@ -502,7 +503,11 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
         forcedEvaluationId = existing && !evaluationId ? existing.evaluationId : security.evaluationScope(principal, evaluationId);
       }
       if (principal.role === 'evaluation' && security.remaining(principal.id) < 1) { json(res, 429, { error: '评测令牌今日模型与搜索调用次数已达上限', code: 'EVAL_QUOTA' }); return true; }
-      json(res, 200, await runner.start({ sessionId, text, images, submittedAt, voice: voice === true, requestId:requestId??null, evaluationId: forcedEvaluationId, agentId, agentForm, ...(principal.role === 'evaluation' && { evaluationAuthorization: { id: principal.id } }) })); return true;
+      const started = await runner.start({ sessionId, text, images, submittedAt, voice: voice === true, requestId:requestId??null, evaluationId: forcedEvaluationId, agentId, agentForm, ...(principal.role === 'evaluation' && { evaluationAuthorization: { id: principal.id } }) });
+      const wantsSse = url.searchParams.get('stream') === '1' && /text\/event-stream/i.test(String(req.headers.accept || '')) && !started.joined && !started.duplicate;
+      if (wantsSse) streamEvents(req, res, started.id, 0, false, started);
+      else json(res, 200, started);
+      return true;
     }
     if (pathname === '/api/tasks' && req.method === 'GET') { json(res, 200, runner.list().filter(row => principal.role !== 'evaluation' || accessRoutes.owned(principal, row))); return true; }
     const t = pathname.match(/^\/api\/tasks\/([\w-]+)(\/events|\/stop|\/notes)?$/);

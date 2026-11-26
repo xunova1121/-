@@ -4,6 +4,7 @@ import { createStudioClient } from './studioClient.js';
 import { createPhoneClient } from './phoneClient.js';
 import { createTenderClient } from './tenderClient.js';
 import { onServerResume } from './serverResume.js';
+import { canStreamTaskStart, startAndStreamTask } from './serverTaskStream.js';
 import { serverModelPreview } from './serverModelPreview.js';
 /**
  * 服务器模式的客户端：手机 / 电脑把任务交给自己的云服务器做（服务器端见 server/serverMode.mjs）。
@@ -122,6 +123,12 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
   const responseTimings = new WeakMap();
   let taskProtocol = null;
   const requestId = () => globalThis.crypto?.randomUUID?.() || 'r_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2);
+  async function retryWriteIfSupported(path, payload, e) {
+    if (e.status || (e.name === 'AbortError' && !e.timeout)) throw e;
+    taskProtocol ??= quickRead('/api/server/status', { retry: false }).then((x) => Boolean(x.features?.taskRequestIds)).catch(() => false);
+    if (!(await taskProtocol)) throw e;
+    return req(path, { method: 'POST', body: payload });
+  }
   async function taskWrite(path, body) {
     // 只有服务器明确支持请求去重时才重试写请求；旧服务器保持不自动重发。
     const payload={...body,requestId:body.requestId||requestId()};
@@ -129,12 +136,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     // （服务器按请求编号去重，重发不会做两遍）；带图片的数据大，照旧多等
     const firstTimeout = body.images?.length ? timeoutMs : Math.min(FIRST_WRITE_MS, timeoutMs);
     try{return await req(path,{method:'POST',body:payload,timeout:firstTimeout});}
-    catch(e){
-      if(e.status||e.name==='AbortError'&&!e.timeout)throw e;
-      taskProtocol ??= quickRead('/api/server/status',{retry:false}).then(x=>Boolean(x.features?.taskRequestIds)).catch(()=>false);
-      if(!await taskProtocol)throw e;
-      return req(path,{method:'POST',body:payload});
-    }
+    catch(e){return retryWriteIfSupported(path, payload, e);}
   }
   const note = (path, t0, ok, extra = {}) => {
     const via = globalThis.__jarvisNetVia?.(`${root}${path}`);
@@ -276,6 +278,27 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     requestUpdate: () => req('/api/server/update', { method: 'POST' }),
     modelEvents: (body,signal) => req('/api/server/pc-model',{method:'POST',body,raw:true,signal,headers:{Accept:'text/event-stream'}}),
     startTask: (o) => taskWrite('/api/tasks',o),
+    async startTaskStream(body, signal) {
+      const payload = { ...body, requestId: body.requestId || requestId() };
+      const firstTimeout = body.images?.length ? timeoutMs : Math.min(FIRST_WRITE_MS, timeoutMs);
+      try {
+        const res = await req('/api/tasks?stream=1', {
+          method: 'POST',
+          body: payload,
+          raw: true,
+          stream: true,
+          retry: false,
+          timeout: firstTimeout,
+          signal,
+          headers: { Accept: 'text/event-stream' }
+        });
+        return { res, payload };
+      } catch (e) {
+        if (e && typeof e === 'object' && Object.isExtensible(e)) e.taskPayload = payload;
+        throw e;
+      }
+    },
+    retryStartTask: (payload, err) => retryWriteIfSupported('/api/tasks', payload, err),
     appendTaskNote: (id,text,submittedAt) => taskWrite(`/api/tasks/${encodeURIComponent(id)}/notes`,{text, ...(submittedAt && { submittedAt })}),
     getTask: (id) => quickRead(`/api/tasks/${id}`),
     stopTask: (id) => req(`/api/tasks/${id}/stop`, { method: 'POST' }),
@@ -484,29 +507,53 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
    */
   export async function runRemote(client, { sessionId, userText, submittedAt, images = [], voice = false, emit, signal, onFile, onStarted, taskId = null, agentId = null, agentForm = null, observation = {} }) {
     if(signal?.aborted)throw Object.assign(new Error('aborted'),{name:'AbortError'});
-    const task = taskId ? { id: taskId } : await client.startTask({ sessionId, text: userText, ...(submittedAt && { submittedAt }), ...(images.length && { images }), ...(voice && { voice: true }), ...(agentId && { agentId }), ...(agentId && agentForm && { agentForm }) });
-    const stop = () => client.stopTask(task.id).catch(() => {});
-    if(signal?.aborted){await stop();throw Object.assign(new Error('aborted'),{name:'AbortError'});}
-    signal?.addEventListener('abort', stop, { once: true });
-    try {
-      await onStarted?.(task);
-      if(signal?.aborted)throw Object.assign(new Error('aborted'),{name:'AbortError'});
-      const end = await followTask(client, task.id, {
-        ...observation,
-        signal,
-        onEvent: (ev) => {
-          if (ev.type === 'file') {
-            if (ev.fileVersion) onFile?.(ev.path, ev.fileVersion);
-            else onFile?.(ev.path);
-          }
-          else if (ev.type === 'task_state') { if (ev.status === 'queued' && ev.position) emit({ type: 'tool_progress', id: 'queue', text: `排队中，前面还有 ${ev.position} 个任务` }); }
-          else if (ev.type !== 'user_note') emit(ev);
-        }
-      });
+    const handleEvent = (ev) => {
+      if (ev.type === 'file') {
+        if (ev.fileVersion) onFile?.(ev.path, ev.fileVersion);
+        else onFile?.(ev.path);
+      }
+      else if (ev.type === 'task_state') { if (ev.status === 'queued' && ev.position) emit({ type: 'tool_progress', id: 'queue', text: `排队中，前面还有 ${ev.position} 个任务` }); }
+      else if (ev.type !== 'user_note') emit(ev);
+    };
+    const finishEnd = (end) => {
       const completedAt = end.completedAt ?? end.at;
       if (end.status === 'error') throw Object.assign(new Error(end.error || '服务器上的任务出错了'), { kind: end.errorKind, code: end.code, completedAt });
       if (end.status === 'stopped') throw Object.assign(new Error('aborted'), { name: 'AbortError', completedAt });
       return { text: end.text ?? '', toolCalls: end.toolCalls ?? 0, steps: 1, ...(Array.isArray(end.fileDelivery?.files) && end.fileDelivery.files.length && { fileDelivery: end.fileDelivery }), ...(Number.isFinite(completedAt) && { completedAt }), ...(end.timing && { timing: end.timing }) };
+    };
+    const body = { sessionId, text: userText, ...(submittedAt && { submittedAt }), ...(images.length && { images }), ...(voice && { voice: true }), ...(agentId && { agentId }), ...(agentId && agentForm && { agentForm }) };
+    let task = null;
+    let after = 0;
+    let startedNotified = false;
+    if (!taskId && client.streaming && typeof client.startTaskStream === 'function' && canStreamTaskStart()) {
+      const streamed = await startAndStreamTask(client, body, {
+        parseSse,
+        firstMs: observation.firstMs ?? STREAM_FIRST_MS,
+        signal,
+        onStarted,
+        onEvent: handleEvent,
+        ...(observation.subscribeResume && { subscribeResume: observation.subscribeResume })
+      });
+      if (streamed.mode === 'done') return finishEnd(streamed.end);
+      task = streamed.task;
+      after = streamed.after || 0;
+      startedNotified = Boolean(streamed.startedNotified);
+    } else {
+      task = taskId ? { id: taskId } : await client.startTask(body);
+    }
+    const stop = () => client.stopTask(task.id).catch(() => {});
+    if(signal?.aborted){await stop();throw Object.assign(new Error('aborted'),{name:'AbortError'});}
+    signal?.addEventListener('abort', stop, { once: true });
+    try {
+      if (!startedNotified) await onStarted?.(task);
+      if(signal?.aborted)throw Object.assign(new Error('aborted'),{name:'AbortError'});
+      const end = await followTask(client, task.id, {
+        ...observation,
+        after,
+        signal,
+        onEvent: handleEvent
+      });
+      return finishEnd(end);
     } finally {
       signal?.removeEventListener('abort', stop);
     }
