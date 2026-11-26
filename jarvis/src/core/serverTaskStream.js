@@ -4,6 +4,9 @@
  */
 import { onServerResume } from './serverResume.js';
 
+/** 与 followTask 的 idleMs 默认值一致：连上后 45 秒没收到任何数据（含心跳）就当连接已断 */
+export const STREAM_IDLE_MS = 45000;
+
 const abortedError = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
 
 /** 当前运行环境能否对 POST 响应边收边读（旧安卓壳无 NativeStream 插件时仍走两步） */
@@ -12,9 +15,13 @@ export function canStreamTaskStart(g = globalThis) {
   return true;
 }
 
-async function readInitialTaskStream(res, { client, parseSse, firstMs, attempt, closeStream, signal, onStarted, onEvent, state }) {
+async function readInitialTaskStream(res, { client, parseSse, firstMs, idleMs, attempt, closeStream, signal, onStarted, onEvent, state }) {
   const reader = res.body.getReader();
   state.reader = reader;
+  // 连上后也要看门：手机换网等情况连接可能“半死”（不断开也不再来数据）。服务器每 20 秒发一次心跳，
+  // 超过 idleMs 什么都没收到就掐掉这条，交给 followTask 按已收到的序号续接（和原来两步走时的 45 秒规则一致）
+  let touched = Date.now();
+  const idleTimer = idleMs > 0 ? setInterval(() => { if (Date.now() - touched >= idleMs) closeStream(); }, Math.min(5000, Math.max(50, idleMs / 3))) : 0;
   const firstTimer = setTimeout(() => {
     if (!state.gotFrame) {
       client.streamFailed?.();
@@ -27,6 +34,7 @@ async function readInitialTaskStream(res, { client, parseSse, firstMs, attempt, 
     for (;;) {
       const { value, done } = await reader.read();
       if (attempt.signal.aborted || done) break;
+      touched = Date.now();
       const input = buf + dec.decode(value, { stream: true });
       const { events, rest } = parseSse(input);
       buf = rest;
@@ -62,6 +70,7 @@ async function readInitialTaskStream(res, { client, parseSse, firstMs, attempt, 
     return null;
   } finally {
     clearTimeout(firstTimer);
+    clearInterval(idleTimer);
     reader.cancel().catch(() => {});
   }
 }
@@ -69,7 +78,7 @@ async function readInitialTaskStream(res, { client, parseSse, firstMs, attempt, 
 /**
  * @returns {Promise<{ mode: 'done', task: object, end: object } | { mode: 'follow', task: object, after: number, startedNotified?: boolean }>}
  */
-export async function startAndStreamTask(client, body, { parseSse, firstMs, signal, onStarted, onEvent, subscribeResume = onServerResume }) {
+export async function startAndStreamTask(client, body, { parseSse, firstMs, idleMs = STREAM_IDLE_MS, signal, onStarted, onEvent, subscribeResume = onServerResume }) {
   if (signal?.aborted) throw abortedError();
   const attempt = new AbortController();
   const state = { reader: null, task: null, last: 0, gotFrame: false, startedNotified: false };
@@ -112,7 +121,7 @@ export async function startAndStreamTask(client, body, { parseSse, firstMs, sign
       state.task = await res.json();
       return { mode: 'follow', task: state.task, after: 0 };
     }
-    const done = await readInitialTaskStream(res, { client, parseSse, firstMs, attempt, closeStream, signal, onStarted, onEvent, state });
+    const done = await readInitialTaskStream(res, { client, parseSse, firstMs, idleMs, attempt, closeStream, signal, onStarted, onEvent, state });
     if (done) return done;
   } catch (err) {
     if (signal?.aborted) {

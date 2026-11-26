@@ -142,6 +142,51 @@ describe('回复提速：云端一步建流、前置并行、向量冷却与前�
     expect(legacyCalls).toEqual(['postJson', 'events:t_old:0']);
   });
 
+  it('一步建流连上后连接“半死”（不断开也不再来数据）时，超时后按已收到的序号续接，不卡住也不重复提交', async () => {
+    // 2026-11-26 Claude 复核：两步走时 followTask 有 45 秒无数据重连；一步建流的首段原来没有，手机换网时回复会一直转圈
+    const events = [
+      { seq: 1, type: 'task_state', status: 'running' },
+      { seq: 2, type: 'text', delta: '先到的，' },
+      { seq: 3, type: 'text', delta: '续上的。' },
+      { seq: 4, type: 'task_state', status: 'done', text: '先到的，续上的。', completedAt: 700 }
+    ];
+    const calls = [];
+    let cancelled = false;
+    const client = {
+      streaming: true,
+      async startTaskStream(body) {
+        calls.push(['streamPost', body.text]);
+        const enc = new TextEncoder();
+        const head = [frame({ type: 'task_created', id: 't_stall', sessionId: 'c1' }), frame(events[0]), frame(events[1])];
+        let i = 0;
+        const stream = new ReadableStream({
+          pull(ctl) {
+            if (i < head.length) { ctl.enqueue(enc.encode(head[i++])); return; }
+            return new Promise(() => {}); // 之后既不来数据也不断开
+          },
+          cancel() { cancelled = true; }
+        });
+        return { res: new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }), payload: body };
+      },
+      async retryStartTask() { calls.push(['retryPost']); throw new Error('不应重发 POST'); },
+      async startTask() { calls.push(['startTask']); throw new Error('不应重发 startTask'); },
+      async stopTask() { calls.push(['stop']); },
+      async getTask() { return { status: 'running', seq: 2 }; },
+      async events(id, after) {
+        calls.push(['followEvents', id, after]);
+        return new Response(events.filter((e) => e.seq > after).map(frame).join(''), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+      }
+    };
+    const texts = [];
+    const t0 = Date.now();
+    const out = await runRemote(client, { sessionId: 'c1', userText: '测试半死连接', emit: (e) => { if (e.type === 'text') texts.push(e.delta); }, observation: { idleMs: 150 } });
+    expect(Date.now() - t0).toBeLessThan(3000);
+    expect(cancelled).toBe(true);
+    expect(texts).toEqual(['先到的，', '续上的。']);
+    expect(out.text).toBe('先到的，续上的。');
+    expect(calls).toEqual([['streamPost', '测试半死连接'], ['followEvents', 't_stall', 2]]);
+  });
+
   it('联网预取与上下文准备并行执行，且上下文报错时立即取消在途预取', async () => {
     let seenMessages = null;
     const adapter = {

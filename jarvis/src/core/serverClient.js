@@ -529,6 +529,7 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
       const streamed = await startAndStreamTask(client, body, {
         parseSse,
         firstMs: observation.firstMs ?? STREAM_FIRST_MS,
+        ...(observation.idleMs && { idleMs: observation.idleMs }),
         signal,
         onStarted,
         onEvent: handleEvent,
