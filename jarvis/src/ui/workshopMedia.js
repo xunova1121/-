@@ -1,5 +1,6 @@
 import { listWorkshopChannels, workshopChannel, workshopChannelScope, selectWorkshopChannel,
-  onWorkshopChannel, onWorkshopChannelListChanged } from './workshopMediaChannels.js';
+  onWorkshopChannel, onWorkshopChannelListChanged, syncWorkshopChannels } from './workshopMediaChannels.js';
+import { onServerResume } from '../core/serverResume.js';
 import { mediaControls, renderWorkshopChannelButtons } from './workshopMediaView.js';
 import { createWorkshopTvPlayer } from './workshopTvPlayer.js';
 import { createWorkshopNewsReader } from './workshopNewsReader.js';
@@ -50,7 +51,7 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
   let article = null;
   let bound = null;
   let request = null;
-  let loadTimer, rotateTimer, unsubscribe, unsubscribeList;
+  let loadTimer, rotateTimer, unsubscribe, unsubscribeList, unsubscribeResume;
   let channel = workshopChannel();
   let scope = workshopChannelScope();
   const readerContext = () => JSON.stringify([scope, sessionId]);
@@ -244,6 +245,7 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
     if (next === 'tv') {
       if (perform) room.perform('tv');
       player.select(channel?.id);
+      void syncWorkshopChannels();
     } else {
       monitorTrigger = trigger;
       if (trigger !== ui.ticker) {
@@ -353,12 +355,16 @@ export function createWorkshopMedia({ scene, floor, room, newsFeed, newsChat, ge
         refreshChannels();
         unsubscribe = onWorkshopChannel(selectChannel);
         unsubscribeList = onWorkshopChannelListChanged(catalogChanged);
+        unsubscribeResume = onServerResume(() => void syncWorkshopChannels());
+        void syncWorkshopChannels();
         if (device === 'tv') player.select(channel?.id);
       } else {
         if (folding) close(false);
         else cancelMotion();
         unsubscribe?.();
         unsubscribeList?.();
+        unsubscribeResume?.();
+        unsubscribeResume = null;
         sources.suspend();
         player.close();
       }

@@ -6,6 +6,7 @@ import { memberModelConfig } from './userRoutes.mjs';
 import { validateOpenaiSearchConfig } from '../src/agent/openaiSearch.js';
 import { createAgentProfileRoutes } from './agentProfileRoutes.mjs';
 import { createStudioRoutes } from './studioRoutes.mjs';
+import { createWorkshopTvSourcesRoutes } from './workshopTvSources.mjs';
 import { createEvaluationAccess } from './evaluationAccess.mjs';
 import { createAccessSecurity, legacyAccessToken } from './accessSecurity.mjs';
 import { createAccessRoutes } from './accessRoutes.mjs';
@@ -285,6 +286,7 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
   const tenderRoutes = createTenderRoutes({ center: tenders, readJson, json });
   const agentProfileRoutes = createAgentProfileRoutes({ readJson, json });
   const studioRoutes = createStudioRoutes({ dataDir, readJson, json, activeUser: id => security.users.active(id) });
+  const workshopTvSourcesRoutes = createWorkshopTvSourcesRoutes({ store, readJson, json });
   const phoneRoutes = createPhoneRoutes({ broker: phoneBroker, readJson, json, principal: security.authenticate });
   /** 处理服务器模式的接口；不是这些接口返回 false */
   async function handle(req, res, pathname) {
@@ -306,6 +308,7 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
     if (await accessRoutes.handle(req, res, pathname)) return true;
     if (await agentProfileRoutes(req, res, pathname, url)) return true;
     if (await studioRoutes(req, res, pathname, url)) return true;
+    if (await workshopTvSourcesRoutes(req, res, pathname)) return true;
     if (await tenderRoutes(req, res, pathname, url, principal)) return true;
     if (await deepseekVoiceRoute(req, res, pathname, principal)) return true;
     if (await phoneRoutes(req, res, pathname)) return true;
@@ -325,7 +328,7 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
       if (!authorized(req)) { json(res, 401, { error: '服务器登录已失效' }); return true; }
       return codeRoutes(req, res, pathname);
     }
-    if (pathname === '/api/server/status' && req.method === 'GET') { json(res, 200, { ok: true, features:{evaluationMemoryIsolation:true,taskRequestIds:true,taskNotes:true,taskCheckpoints:true,pcModelBridge:true,skillSync:true,multiUser:true}, identity: security.users.identity(principal), running: runner.running, tasks: runner.list().filter((t) => t.status === 'running' || t.status === 'queued') }); return true; }
+    if (pathname === '/api/server/status' && req.method === 'GET') { json(res, 200, { ok: true, features:{evaluationMemoryIsolation:true,taskRequestIds:true,taskNotes:true,taskCheckpoints:true,pcModelBridge:true,skillSync:true,multiUser:true,workshopTvSync:true}, identity: security.users.identity(principal), running: runner.running, tasks: runner.list().filter((t) => t.status === 'running' || t.status === 'queued') }); return true; }
     if(pathname==='/api/server/pc-model'&&req.method==='POST'){
       if(!authorized(req)){json(res,401,{error:'服务器登录已失效'});return true;}
       if(activePCModels>=2){json(res,429,{error:'PC模型请求繁忙，请稍后重试'});return true;}

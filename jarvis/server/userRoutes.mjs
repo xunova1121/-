@@ -1,6 +1,8 @@
 /** 普通成员允许的接口；未知接口默认拒绝，避免新增管理接口绕过隔离。 */
 export function memberRoute(method, pathname) {
   if (pathname === '/api/workshop/tv-players') return method === 'GET';
+  if (pathname === '/api/server/workshop-tv-sources') return method === 'GET';
+  if (pathname === '/api/server/workshop-tv-sources/sync') return method === 'POST';
   if (pathname === '/api/server/company-query') return method === 'POST';
   if (pathname === '/api/tenders/catalog') return method === 'GET';
   if (pathname === '/api/tenders/mine') return ['GET', 'PATCH'].includes(method);

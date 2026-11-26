@@ -242,6 +242,8 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     async login(password) { return (await req('/api/server/login', { method: 'POST', body: { password } })).token; },
     health: () => quickRead('/api/health'),
     workshopTvPlayers: (signal) => quickRead('/api/workshop/tv-players', {signal}),
+    workshopTvSources: (signal) => quickRead('/api/server/workshop-tv-sources', { signal }),
+    syncWorkshopTvSources: (body, signal) => req('/api/server/workshop-tv-sources/sync', { method: 'POST', body, signal }),
     status: (signal) => quickRead('/api/server/status',{signal}),
     async getConfig() {
       const config = await quickRead('/api/server/config');

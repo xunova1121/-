@@ -3,6 +3,9 @@ import { workshopPublicChannels } from '../../shared/workshopPublicTv.js';
 import { parseWorkshopVideoSource } from '../../shared/workshopVideoSource.js';
 import { userStorageSuffix } from '../core/userStorage.js';
 import { loadServerSettings, normalizeUrl } from '../core/serverClient.js';
+import { createWorkshopChannelSync, MAX_WORKSHOP_SOURCES } from './workshopChannelSync.js';
+
+export { MAX_WORKSHOP_SOURCES };
 
 const STORAGE_KEY = 'jarvis.workshopTv.channel.v1';
 const SOURCE_KEY = 'jarvis.workshopTv.source.v1:';
@@ -122,6 +125,9 @@ export function saveWorkshopSource({ id, name, url, format } = {}) {
   const channel = normalizeWorkshopSource({ name, url, format });
   const channels = [...builtins, ...getWorkshopCustomChannels()];
   if (id != null && !channels.some(ch => ch.kind === 'custom' && ch.id === id)) throw new Error('这个自定义频道已不存在。');
+  if (channels.filter(ch => ch.kind === 'custom' && ch.id !== id).length >= MAX_WORKSHOP_SOURCES) {
+    throw new Error(`自定义频道最多保存 ${MAX_WORKSHOP_SOURCES} 个，请先移除不用的视频源。`);
+  }
   // 自定义频道可以和内置频道同名（2026-11-25 用户：老是提示此频道名称已被使用——想把 CCTV2 的直链命名为 CCTV2）；
   // 按名字换台时自己加的优先。只拦和另一个自定义频道重名。
   const same = channels.find(ch => ch.kind === 'custom' && ch.id !== id && matchesName(ch, compactName(channel.title)));
@@ -135,6 +141,7 @@ export function saveWorkshopSource({ id, name, url, format } = {}) {
       name: channel.title, url: channel.source.url, format: channel.source.format
     }));
   } catch { throw new Error('此设备未能保存频道，请检查浏览器的存储权限或可用空间。'); }
+  syncEngine.recordSave(scope, channel.id);
   for (const notify of listSubscribers) notify();
   if (selected) for (const notify of subscribers) notify(channel);
   return channel;
@@ -146,6 +153,7 @@ export function removeWorkshopSource(id) {
   const previous = workshopChannel();
   try { globalThis.localStorage.removeItem(SOURCE_KEY + scope + '/' + id); }
   catch { throw new Error('此设备未能删除频道，请检查浏览器的存储权限。'); }
+  syncEngine.recordRemove(scope, id);
   catalogChanged(previous);
   return true;
 }
@@ -166,13 +174,56 @@ export function setWorkshopBuiltinVisible(id, visible) {
   const alreadyVisible = !removedWorkshopChannels().includes(builtin);
   if (alreadyVisible === visible) return false;
   const previous = workshopChannel();
-  const key = HIDDEN_KEY + workshopChannelScope() + '/' + id;
+  const scope = workshopChannelScope();
+  const key = HIDDEN_KEY + scope + '/' + id;
   try {
     if (visible) globalThis.localStorage.removeItem(key);
     else globalThis.localStorage.setItem(key, '1');
   } catch { throw new Error('此设备未能保存频道设置，请检查浏览器的存储权限。'); }
+  syncEngine.recordHidden(scope);
   catalogChanged(previous);
   return true;
+}
+
+const syncEngine = createWorkshopChannelSync({
+  sourcePrefix: SOURCE_KEY,
+  hiddenPrefix: HIDDEN_KEY,
+  builtinIds: builtins.map(ch => ch.id),
+  getScope: workshopChannelScope,
+  readCustom: getWorkshopCustomChannels,
+  readHiddenIds: () => removedWorkshopChannels().map(ch => ch.id),
+  getSelectedId: choiceId,
+  setSelectedId(scope, id) {
+    try {
+      globalThis.localStorage.setItem(STORAGE_KEY + ':' + scope, id);
+      temporaryChoice.delete(scope);
+    } catch { temporaryChoice.set(scope, id); }
+  },
+  onApplied: {
+    current: workshopChannel,
+    notify(previous, updatedInPlace) {
+      catalogChanged(previous);
+      if (updatedInPlace) {
+        const current = workshopChannel();
+        if (current) for (const notify of subscribers) notify(current);
+      }
+    }
+  },
+  onModeChanged() {
+    for (const notify of listSubscribers) notify();
+  }
+});
+
+export function useWorkshopChannelRemote(remote) {
+  syncEngine.setRemote(remote);
+}
+
+export function workshopChannelSyncMode() {
+  return syncEngine.mode();
+}
+
+export function syncWorkshopChannels(signal) {
+  return syncEngine.sync(signal);
 }
 
 export function onWorkshopChannel(notify) {

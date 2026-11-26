@@ -1,6 +1,7 @@
 import {
   listWorkshopChannels, removedWorkshopChannels, setWorkshopBuiltinVisible,
-  normalizeWorkshopSource, removeWorkshopSource, saveWorkshopSource
+  normalizeWorkshopSource, removeWorkshopSource, saveWorkshopSource,
+  syncWorkshopChannels, workshopChannelSyncMode
 } from './workshopMediaChannels.js';
 import { mediaNode } from './workshopMediaView.js';
 import './workshopSourceManager.css';
@@ -46,6 +47,15 @@ export function createWorkshopSourceManager(ui, { preview, restoreChannel, selec
     format.append(option);
   }
   const note = mediaNode('small', 'ws-source-note', '保存到此设备。支持 HTTP / HTTPS 的 M3U8 和视频直链。');
+  function updateNote() {
+    const syncMode = workshopChannelSyncMode();
+    const prefix = syncMode === 'server'
+      ? '同步到当前云服务器账号，手机和电脑共用。'
+      : syncMode === 'server-legacy'
+        ? '已保存到此设备（更新云服务器后可与手机/电脑同步）。'
+        : '保存到此设备。';
+    note.textContent = prefix + '支持 HTTP / HTTPS 的 M3U8 和视频直链。';
+  }
   const error = mediaNode('p', 'ws-source-error');
   error.setAttribute('role', 'alert');
   const actions = mediaNode('div', 'ws-source-actions');
@@ -90,6 +100,7 @@ export function createWorkshopSourceManager(ui, { preview, restoreChannel, selec
   let testing = false;
   function display(next) {
     mode = next;
+    updateNote();
     const visible = mode === 'list' || mode === 'edit';
     ui.manageSources.textContent = mode === 'preview' ? '返回编辑' : '视频源';
     ui.manageSources.setAttribute('aria-label', mode === 'preview' ? '返回编辑视频源' : '管理视频源');
@@ -183,6 +194,7 @@ export function createWorkshopSourceManager(ui, { preview, restoreChannel, selec
     renderList();
     display('list');
     list.firstElementChild.focus({ preventScroll: true });
+    void syncWorkshopChannels();
   }
   function readDraft(act) {
     error.textContent = '';
@@ -217,7 +229,10 @@ export function createWorkshopSourceManager(ui, { preview, restoreChannel, selec
       testing = false;
       if (mode === 'preview') display('edit');
     },
-    refresh() { if (mode === 'list') renderList(); },
+    refresh() {
+      updateNote();
+      if (mode === 'list') renderList();
+    },
     escape() {
       if (mode === 'closed') return false;
       dismiss(true);
