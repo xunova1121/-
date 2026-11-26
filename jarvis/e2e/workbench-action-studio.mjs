@@ -57,7 +57,8 @@ const url = server => 'http://127.0.0.1:' + server.address().port;
 cloud.on('request', (req, res) => {
   const parsed = new URL(req.url, url(cloud));
   requests.push({ path: parsed.pathname, method: req.method, after: Number(parsed.searchParams.get('after') || 0) });
-  if (req.method === 'GET' && parsed.pathname.endsWith('/events')) eventsResponse = res;
+  // 1.0.499 起发消息那条 POST /api/tasks?stream=1 本身就是实时事件流，和 GET /events 一样记作“正在收的连接”
+  if ((req.method === 'GET' && parsed.pathname.endsWith('/events')) || (req.method === 'POST' && parsed.pathname === '/api/tasks' && parsed.searchParams.get('stream') === '1')) eventsResponse = res;
 });
 const config = { provider: 'custom', models: { custom: 'studio-fixture' }, keys: { custom: 'fixture' }, baseURLs: { custom: url(desktop) + '/v1' }, routing: { enabled: false }, hedgeBackup: false };
 const errors = [];

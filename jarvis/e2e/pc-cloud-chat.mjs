@@ -38,7 +38,7 @@ await owner.putConfig({ provider: 'custom', models: { custom: 'fixture-chat' }, 
 const member = await owner.createUser('PC跨域合成验收');
 const login = await owner.loginAccount(member.accessCode);
 const client = createServerClient({ base, token: login.token });
-server.on('request', req => requests.push({ method: req.method, path: new URL(req.url, base).pathname }));
+server.on('request', req => { const u = new URL(req.url, base); requests.push({ method: req.method, path: u.pathname, stream: u.searchParams.get('stream') === '1' }); });
 const browser = await chromium.launch();
 const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
 const check = (name, ok) => { results.push({ name, ok }); console.log(`${ok ? '✓' : '✗'} ${name}`); if (!ok) throw new Error(name); };
@@ -74,7 +74,8 @@ try {
   }
   await page.locator('.rail .wb-new').click();
   const ordinary = await sendAndCheck('ordinary', '你好', '云端任务合成回复已收到');
-  check('普通聊天提交任务并读取事件流', ordinary.some(r => r.method === 'POST' && r.path === '/api/tasks') && ordinary.some(r => r.method === 'GET' && /\/api\/tasks\/[^/]+\/events$/.test(r.path)));
+  check('普通聊天提交任务并读取事件流', ordinary.some(r => r.method === 'POST' && r.path === '/api/tasks') && ordinary.some(r => (r.method === 'GET' && /\/api\/tasks\/[^/]+\/events$/.test(r.path)) || (r.method === 'POST' && r.path === '/api/tasks' && r.stream)));
+  // 1.0.499 起发消息那条 POST /api/tasks?stream=1 本身就在读事件流（一步建流），旧服务器才另开 GET /events
   check('普通聊天保存在本人服务器会话', (await client.listSessions()).some(s => s.count === 2));
   await page.locator('.rail [data-destination="agents"]').click();
   await page.locator('.wy-agent-card[data-agent="health-advisor"]').click();
@@ -86,7 +87,7 @@ try {
   check('电脑任务使用模型桥，不错误提交云端执行任务', bridge.some(r => r.method === 'POST' && r.path === '/api/server/pc-model') && !bridge.some(r => r.method === 'POST' && r.path === '/api/tasks'));
   check('实际浏览器对任务和模型桥发送OPTIONS预检', ['/api/tasks', '/api/server/pc-model'].every(p => requests.some(r => r.method === 'OPTIONS' && r.path === p)));
   // 流读到最终结果后客户端主动cancel reader，Chromium记ERR_ABORTED；前面已核验回复完整。
-  const broken = failed.filter(r => !(r.error === 'net::ERR_ABORTED' && (r.path.endsWith('/events') || r.path === '/api/server/pc-model')));
+  const broken = failed.filter(r => !(r.error === 'net::ERR_ABORTED' && (r.path.endsWith('/events') || r.path === '/api/server/pc-model' || (r.method === 'POST' && r.path === '/api/tasks'))));
   rejections = await page.evaluate(() => window.__pcChatRejections);
   check('三类正常请求没有连接失败或脚本异常', broken.length === 0 && errors.length === 0 && rejections.length === 0);
   if (process.env.WEIYANG_CHAT_OUTAGE === '1') {
