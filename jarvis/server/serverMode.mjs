@@ -66,6 +66,7 @@ import { createServerSchedules, notices as scheduleNotices } from './serverSched
 import * as scheduler from '../src/agent/scheduler.js';
 import { useBackend } from '../src/agent/store.js';
 import { seedBuiltins } from '../src/agent/skillPacks.js';
+import { seedBundledSkills } from './bundledSkills.mjs';
 import * as skillPacks from '../src/agent/skillPacks.js';
 import { needsRunner } from '../src/agent/skillDeps.js';
 import { createSkillRunner, SKILL_RUNNER_IMAGE } from './skillRunner.mjs';
@@ -149,7 +150,8 @@ export function createServerMode({ dataDir, password, maxRunning = 2, runner: in
   const seeded = new Map(); // 用户最多50人；每人升级一次内置技能，不覆盖个人启停状态。
   const initialize = () => {
     const id = currentUser();
-    if (!seeded.has(id)) seeded.set(id, seedBuiltins());
+    // 随服务器带的 Anthropic docx / pptx / xlsx 技能（改已有文件用，见 bundledSkills.mjs）：装不上不影响别的
+    if (!seeded.has(id)) seeded.set(id, seedBuiltins().then(async (added) => [...added, ...(await seedBundledSkills().catch((e) => { console.warn('[内置技能] docx/pptx/xlsx 没装上：', e?.message || e); return []; }))]));
     return seeded.get(id);
   };
   const ready = initialize();

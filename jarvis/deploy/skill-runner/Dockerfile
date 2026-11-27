@@ -4,16 +4,20 @@ ARG BASE=python:3.12-slim-bookworm
 FROM ${BASE}
 
 # 国内服务器：系统软件、Python 包、npm 包都走国内镜像（APT_MIRROR 留空就用官方源）
+# LibreOffice、中文字体、zip：随服务器带的 Anthropic docx / pptx / xlsx 技能要用（转 PDF、重算 Excel 公式，见 server/bundled-skills）
 ARG APT_MIRROR=mirrors.cloud.tencent.com
+ARG PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
 RUN if [ -n "$APT_MIRROR" ] && [ -f /etc/apt/sources.list.d/debian.sources ]; then sed -i "s#deb.debian.org#${APT_MIRROR}#g" /etc/apt/sources.list.d/debian.sources; fi \
  && apt-get update \
  && apt-get install -y --no-install-recommends nodejs npm ca-certificates curl \
+    libreoffice-writer-nogui libreoffice-calc-nogui libreoffice-impress-nogui fonts-noto-cjk poppler-utils zip \
  && rm -rf /var/lib/apt/lists/* \
- && pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+ && pip config --global set global.index-url "$PIP_INDEX" \
  && npm config --global set registry https://registry.npmmirror.com
 
 # 取数据、读网页、处理表格最常用的几个库先装好；技能自己要的依赖第一次用时另装（装在每个技能自己的目录）
-RUN pip install --no-cache-dir requests httpx beautifulsoup4 lxml pandas
+RUN pip install --no-cache-dir requests httpx beautifulsoup4 lxml pandas \
+    openpyxl python-pptx defusedxml pillow
 
 # 运行时用 65534（nobody）账号、只读根目录，由未央在 docker run 时指定，这里不用再设
 CMD ["python3", "--version"]

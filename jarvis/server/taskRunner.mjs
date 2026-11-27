@@ -410,7 +410,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       tools.push(skillRunnerTool({
         runner: skillRunner,
         getPack: (name) => skillPacks.get(name),
-        saveFile: async (p, data) => { await ws.write(p, new Blob([data])); task.files.add(p); record(task, { type: 'file', path: p }); }
+        saveFile: async (p, data) => { await ws.write(p, new Blob([data])); task.files.add(p); record(task, { type: 'file', path: p }); },
+        readFile: (p) => ws.readBlob(p) // 改用户已有的文件时带进隔离环境（input_files）
       }));
     }
 

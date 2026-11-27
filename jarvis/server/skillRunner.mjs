@@ -30,6 +30,10 @@ const INSTALL_S = 300;
 const OUT_MAX = 32000;
 const ERR_MAX = 8000;
 const FILES_MAX = 20;
+// 带进容器的工作区文件（改已有的 Word / Excel / PPT 时用）：最多 10 个，单个 32MB，合计 64MB；放在 input/ 下
+const INPUT_MAX = 10;
+const INPUT_FILE_BYTES = 32 * 1024 * 1024;
+const INPUT_BYTES = 64 * 1024 * 1024;
 const FILES_BYTES = 8 * 1024 * 1024;
 const safeName = (n) => String(n ?? '').replace(/[^a-z0-9._-]/gi, '-').slice(0, 80);
 
@@ -131,7 +135,7 @@ export function createSkillRunner({ image = SKILL_RUNNER_IMAGE, baseDir, runDock
    * 运行一条命令
    * @returns {Promise<{ exitCode: number, stdout: string, stderr: string, timedOut: boolean, files: Array<{ path: string, data: Buffer }> }>}
    */
-  async function run(pack, command, { timeoutSec = 60, signal, onProgress, extra = {} } = {}) {
+  async function run(pack, command, { timeoutSec = 60, signal, onProgress, extra = {}, inputs = [] } = {}) {
     throwControl(null, signal);
     if (['', '.', '..'].includes(safeName(pack.name))) throw Object.assign(new Error('技能名不能是空白或目录跳转符'), { code: 'INVALID_SKILL_NAME' });
     const cmd = String(command ?? '').trim();
@@ -142,15 +146,25 @@ export function createSkillRunner({ image = SKILL_RUNNER_IMAGE, baseDir, runDock
     const built = await builder.prepare(pack, dir, { signal, onProgress });
     try {
       const src = built?.src || (await prepareSource(pack)).src;
-      return await runPrepared(pack, dir, src, cmd, { timeoutSec, signal, onProgress, extra, built: Boolean(built) });
+      return await runPrepared(pack, dir, src, cmd, { timeoutSec, signal, onProgress, extra, built: Boolean(built), inputs });
     } finally { built?.release(); }
   }
 
-  async function runPrepared(pack, dir, src, cmd, { timeoutSec, signal, onProgress, extra, built }) {
+  async function runPrepared(pack, dir, src, cmd, { timeoutSec, signal, onProgress, extra, built, inputs = [] }) {
     const depsDir = await ensureDeps(pack, dir, src, { signal, onProgress, extra, built });
     const work = path.join(dir, 'runs', randomUUID());
     await fs.mkdir(work, { recursive: true });
     await fs.chmod(work, 0o777);
+    // 工作区里要处理的文件放进 input/（容器里 cp 技能文件时不会覆盖它）
+    if (inputs.length) {
+      await fs.mkdir(path.join(work, 'input'), { recursive: true, mode: 0o777 });
+      await fs.chmod(path.join(work, 'input'), 0o777);
+      // 写完再 chmod：writeFile 的 mode 会被 umask 吃掉写权限，容器里的 nobody 就改不了原文件（xlsx 的 recalc.py 要写回）
+      for (const f of inputs) {
+        await fs.writeFile(path.join(work, 'input', f.name), f.data);
+        await fs.chmod(path.join(work, 'input', f.name), 0o666);
+      }
+    }
     const secs = Math.max(5, Math.min(RUN_MAX_S, Math.round(Number(timeoutSec) || 60)));
     const container = `jarvis-skill-${randomUUID()}`;
     let out = { stdout: '', stderr: '' };
@@ -175,7 +189,7 @@ export function createSkillRunner({ image = SKILL_RUNNER_IMAGE, baseDir, runDock
       timedOut = exitCode === 137 || Boolean(e.killed);
       if (e.killed) await dockerRun(['rm', '-f', container], { timeout: 5000 }).catch(() => {});
     }
-    const files = await producedFiles(work, src).catch(() => []);
+    const files = await producedFiles(work, src, new Map(inputs.map((f) => [`input/${f.name}`, f.data]))).catch(() => []);
     await removeWork(work);
     return { exitCode, timedOut, stdout: String(out.stdout || '').slice(-OUT_MAX), stderr: String(out.stderr || '').slice(-ERR_MAX), files };
   }
@@ -203,7 +217,7 @@ function withExtra(deps, { python = [], node = [] } = {}) {
 const quote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 /** 这次运行新做出来的文件（技能自带的不算），最多 20 个、8 MB */
-async function producedFiles(work, src) {
+export async function producedFiles(work, src, inputs = new Map()) {
   const out = [];
   let bytes = 0;
   async function walk(rel) {
@@ -215,7 +229,8 @@ async function producedFiles(work, src) {
       const full = path.join(work, r);
       const st = await fs.stat(full);
       // 技能自带、内容没变的文件不算
-      const orig = await fs.readFile(path.join(src, r)).catch(() => null);
+      // 带进来的工作区文件没改的也不算（改过的算，比如技能在原文件上直接改）
+      const orig = inputs.get(r) ?? (await fs.readFile(path.join(src, r)).catch(() => null));
       if (orig && orig.length === st.size && orig.equals(await fs.readFile(full))) continue;
       if (bytes + st.size > FILES_BYTES) continue;
       bytes += st.size;
@@ -232,10 +247,34 @@ export const UNAVAILABLE = '服务器还没装技能运行器（Docker 里的 Py
  * 给模型用的工具
  * @param {{ runner: ReturnType<typeof createSkillRunner>, getPack: (name: string) => Promise<object|null>, saveFile: (path: string, data: Buffer) => Promise<void> }} o
  */
-export function skillRunnerTool({ runner, getPack, saveFile }) {
+/** 模型给的 input_files → [{ name, data }]：只认工作区里的相对路径，个数和大小有上限，重名加序号 */
+export async function readSkillInputs(list, readFile) {
+  if (list == null) return [];
+  if (!Array.isArray(list) || list.length > INPUT_MAX) throw Object.assign(new Error(`input_files 最多 ${INPUT_MAX} 个`), { code: 'SKILL_INPUT_INVALID', kind: 'input' });
+  const out = [];
+  const used = new Set();
+  let total = 0;
+  for (const raw of list) {
+    const rel = String(raw ?? '').trim().replace(/^\/?workspace\//, '').replace(/^\.?\//, '');
+    if (!rel || rel.length > 500 || rel.includes('\0') || rel.split('/').some((part) => !part || part === '.' || part === '..'))
+      throw Object.assign(new Error(`input_files 里的“${String(raw).slice(0, 80)}”不是工作区里的文件路径`), { code: 'SKILL_INPUT_INVALID', kind: 'input' });
+    const blob = await readFile(rel).catch(() => null);
+    if (!blob) throw Object.assign(new Error(`工作区里没有“${rel}”`), { code: 'SKILL_INPUT_MISSING', kind: 'input' });
+    const data = Buffer.from(await blob.arrayBuffer());
+    total += data.length;
+    if (data.length > INPUT_FILE_BYTES || total > INPUT_BYTES) throw Object.assign(new Error(`“${rel}”太大：带进隔离环境的文件单个最多 32MB、合计 64MB`), { code: 'SKILL_INPUT_TOO_LARGE', kind: 'input' });
+    let name = rel.split('/').pop();
+    for (let i = 2; used.has(name); i++) name = rel.split('/').pop().replace(/(\.[^.]*)?$/, (ext) => `(${i})${ext}`);
+    used.add(name);
+    out.push({ name, path: rel, data });
+  }
+  return out;
+}
+
+export function skillRunnerTool({ runner, getPack, saveFile, readFile = null }) {
   return {
     name: 'run_skill_command',
-    description: '在服务器的隔离环境（Docker，带 Python 3 和 Node，可以联网）里运行已安装技能说明中的命令，比如“python scripts/report.py --team 山东泰山”“sports-skills football get_scoreboard”。先用 use_skill 读技能说明，照说明里的命令写；工作目录就是技能文件夹，依赖第一次用时自动装（可能要几分钟）。命令做出的新文件会存进工作区 skills-output/<技能名>/。每次最长 2 分钟，读不到你的对话、记忆和密钥。命令失败会返回错误信息，看懂再改，别原样重试；报“找不到命令 / No module named”多半是没装包：照技能或它所在仓库首页写的 pip install / npm install，把包名填进 python_packages / npm_packages 再运行。',
+    description: '在服务器的隔离环境（Docker，带 Python 3 和 Node，可以联网）里运行已安装技能说明中的命令，比如“python scripts/report.py --team 山东泰山”“sports-skills football get_scoreboard”。先用 use_skill 读技能说明，照说明里的命令写；工作目录就是技能文件夹，依赖第一次用时自动装（可能要几分钟）。命令做出的新文件会存进工作区 skills-output/<技能名>/。要处理工作区里已有的文件（比如改用户的 Word / Excel / PPT），把路径填进 input_files，文件会放在当前目录的 input/ 里，命令里写 input/文件名；改好的另存成新文件名。每次最长 2 分钟，读不到你的对话、记忆和密钥。命令失败会返回错误信息，看懂再改，别原样重试；报“找不到命令 / No module named”多半是没装包：照技能或它所在仓库首页写的 pip install / npm install，把包名填进 python_packages / npm_packages 再运行。',
     input_schema: {
       type: 'object',
       properties: {
@@ -243,12 +282,13 @@ export function skillRunnerTool({ runner, getPack, saveFile }) {
         command: { type: 'string', description: '要运行的命令，照技能说明写' },
         timeout_seconds: { type: 'number', description: '最长运行秒数，默认 60，最多 120' },
         python_packages: { type: 'array', items: { type: 'string' }, description: '可选：技能说明里没写、但运行要先 pip install 的包（如技能仓库首页写的 sports-skills），只写包名或“包名==版本”，装一次以后缓存' },
-        npm_packages: { type: 'array', items: { type: 'string' }, description: '可选：要先 npm install 的包，只写包名或“包名@版本”' }
+        npm_packages: { type: 'array', items: { type: 'string' }, description: '可选：要先 npm install 的包，只写包名或“包名@版本”' },
+        input_files: { type: 'array', items: { type: 'string' }, description: '可选：要带进隔离环境处理的工作区文件路径（最多 10 个，单个 32MB），放在 input/ 下，命令里写 input/文件名' }
       },
       required: ['skill', 'command'],
       additionalProperties: false
     },
-    run: async ({ skill, command, timeout_seconds, python_packages, npm_packages }, { signal, progress, rawRequestText = '' } = {}) => {
+    run: async ({ skill, command, timeout_seconds, python_packages, npm_packages, input_files }, { signal, progress, rawRequestText = '' } = {}) => {
       throwControl(null, signal);
       const pack = await getPack(skill);
       if (!pack) throw Object.assign(new Error(`服务器上没有技能「${skill}」：先在“技能”里安装，并同步到服务器`), { code: 'SKILL_NOT_FOUND', kind: 'api' });
@@ -261,7 +301,10 @@ export function skillRunnerTool({ runner, getPack, saveFile }) {
         if (!named || denied) throw Object.assign(new Error('本轮没有点名使用此技能；普通架构图请继续使用内置create_diagram'), { code: 'SKILL_EXPLICIT_REQUIRED' });
       }
       throwControl(null, signal);
-      const r = await runner.run(pack, command, { timeoutSec: timeout_seconds, signal, onProgress: progress, extra: { python: python_packages, node: npm_packages } });
+      if (input_files?.length && !readFile) throw Object.assign(new Error('这里不能带工作区文件进隔离环境'), { code: 'SKILL_INPUT_UNSUPPORTED', kind: 'api' });
+      const inputs = await readSkillInputs(input_files, readFile);
+      throwControl(null, signal);
+      const r = await runner.run(pack, command, { timeoutSec: timeout_seconds, signal, onProgress: progress, extra: { python: python_packages, node: npm_packages }, inputs });
       throwControl(null, signal);
       const outputs = r.files.map(file => ({ path: `skills-output/${safeName(pack.name)}/${file.path}`, data: file.data }));
       // 容器前缀不等于内容可信；整个结果批次先核对，不能先保存普通文件再伪造架构清单。

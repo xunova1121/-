@@ -38,7 +38,10 @@ export function skillDeps(pack) {
   const files = pack?.files ?? {};
   const python = new Set();
   const node = new Set();
-  for (const line of commandLines(pack?.body)) {
+  // 开头写了 jarvis-auto-install: false 的技能（如随服务器带的 docx / pptx）：不按说明里的 npm / pip install 自动装，
+  // 那些包只在用 JS 新建文档时用，未央新建文档走 create_document；模型另外指定的包照装
+  const auto = String(pack?.meta?.['jarvis-auto-install'] ?? '').trim().toLowerCase() !== 'false';
+  for (const line of auto ? commandLines(pack?.body) : []) {
     const py = line.match(PY_INSTALL);
     if (py) for (const p of packagesOf(py[1], PY_SPEC)) python.add(p);
     const js = line.match(NPM_INSTALL);
