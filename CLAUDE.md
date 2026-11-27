@@ -1,6 +1,6 @@
 # 未央（WEIYANG AI，原名贾维斯）开发约定
 
-> **当前版本：1.0.500 之后的下一版（北京时间 2026-11-27 发布）**。三样从“未央2”试验里挪过来的：安卓“分享 → 未央”（别的 App 里的文件、文字直接分享进来）；回答下面的用时分到每个工具，等你点确认的时间单独算；服务器自带 Anthropic 的 docx / pptx / xlsx 技能（Apache 2.0），专门改你已有的 Word / PPT / Excel（保留格式改字、修订痕迹、批注、Excel 重算查错），新建文档仍走原来的 create_document。[问题与修复](docs/已修问题清单-不许回退.md)
+> **当前版本 1.0.501（北京时间 2026-11-27）**。三样从“未央2”试验里挪过来的：安卓“分享 → 未央”（别的 App 里的文件、文字直接分享进来）；回答下面的用时分到每个工具，等你点确认的时间单独算；服务器自带 Anthropic 的 docx / pptx / xlsx 技能（Apache 2.0），专门改你已有的 Word / PPT / Excel（保留格式改字、修订痕迹、批注、Excel 重算查错），新建文档仍走原来的 create_document。[问题与修复](docs/已修问题清单-不许回退.md)
 > 未验收：安卓分享真机；服务器要手动跑一次 `deploy/skill-runner/setup.sh` 重建运行器镜像（加了 LibreOffice、中文字体）才能用上这三个技能——自动更新不重建镜像；运行器只在 Ubuntu 底的替代镜像上实测过（云端连不上 Debian 源）。
 
 个人 AI 智能体。界面上的名字叫“未央”；代码、数据目录、环境变量（JARVIS_*）、安装包文件名里的 jarvis / Jarvis 保持不变（改了会丢用户数据、断自动更新）。已确认形象在 `src/ui/mascot-approved.webp`，运行 `node scripts/make-icons.mjs` 从首格生成 `src/ui/logo.svg` 和电脑、安卓16张图标，`--check`只读核对像素一致性。代码在 `jarvis/`：网页界面（Vite）、本机网关（`server/`）、Windows 桌面版（`desktop/`，Electron）、安卓 App（`android/`，Capacitor）。
