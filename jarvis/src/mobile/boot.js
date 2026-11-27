@@ -39,6 +39,7 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
     globalThis.__jarvisBackgroundTask = registerPlugin('BackgroundTask');
     globalThis.__jarvisPhoneControl = registerPlugin('PhoneControl');
     globalThis.__jarvisKeepAwake = registerPlugin('KeepAwake'); // 屏幕常亮（app/screenAwake.js）
+    globalThis.__jarvisShareIntake = registerPlugin('ShareIntake'); // 从别的 App“分享 → 未央”（app/shareIntake.js）
     globalThis.__jarvisSpeech.addListener('dialog', ({ active }) => {
       globalThis.__jarvisSystemSpeechDialog = active;
     }); // 直接对话用系统语音识别（见 nativeVoice.js）

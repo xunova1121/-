@@ -49,6 +49,7 @@ export async function executeToolCalls(
     // 执行器分配操作ID，不依赖中转站可能重复的工具ID；同一实际调用的回执可幂等保存。
     const workCallId = uid('op') + ':' + c.id;
     const t0 = Date.now();
+    let waitMs = 0; // 等用户点确认的时间（工具用时里扣出来单独显示，不算慢在程序上）
     emit({ type: 'state', value: 'processing' });
     emit({ type: 'tool_start', id: c.id, name: c.name, args: c.name === 'phone_action' ? { action: c.args?.action, deviceId: c.args?.deviceId } : c.args });
     let output;
@@ -80,7 +81,7 @@ export async function executeToolCalls(
       // 文件已验过可用（能读回、没报错、之后没改过）且已经核实过一次：不再读，免得“读取 → 核实 → 再核实”绕圈
       if (review.rereadBlocked?.(c.name, c.args)) {
         output = `${c.args.path} 本轮已经核实过：能正常读回，没有报错，之后也没改过。不需要再读，直接把结果交给用户；没查到的内容（如“待查”）在回答里说明即可。`;
-        emit({ type: 'tool_end', id: c.id, name: c.name, ok, output, ms: Date.now() - t0 });
+        emit({ type: 'tool_end', id: c.id, name: c.name, ok, output, ms: Date.now() - t0, waitMs });
         review.record({ name: c.name, args: c.args, ok });
         return { c, ok, output, outImages };
       }
@@ -93,7 +94,10 @@ export async function executeToolCalls(
       }
       const ask = tool.approval?.(c.args);
       // 没确认：可能是用户点了拒绝，也可能是在服务器上运行、没法弹确认框。别让模型改做别的事来“补”
-      if (ask && approve && !(await approve(ask, tool))) throw Object.assign(new Error('这个操作需要用户确认，这次没有得到确认（用户拒绝了，或在服务器上运行没法弹出确认框）。不要改做别的事来代替；在回答里说明没做成，并告诉用户可以自己在界面上操作（比如安装技能：在“技能”页粘贴地址安装）。'), { code: 'NOT_APPROVED' });
+      const askedAt = Date.now();
+      const approved = !ask || !approve || (await approve(ask, tool));
+      if (ask && approve) waitMs = Date.now() - askedAt;
+      if (!approved) throw Object.assign(new Error('这个操作需要用户确认，这次没有得到确认（用户拒绝了，或在服务器上运行没法弹出确认框）。不要改做别的事来代替；在回答里说明没做成，并告诉用户可以自己在界面上操作（比如安装技能：在“技能”页粘贴地址安装）。'), { code: 'NOT_APPROVED' });
       if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
       await checkpoint?.({ type: 'tool_start', id: c.id, name: c.name, args: c.args });
       if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
@@ -172,7 +176,7 @@ export async function executeToolCalls(
       output += '\n成果记录保存失败；已有文件不受影响，统计可能不完整，不要重新提交生成请求。';
     }
     await checkpoint?.({ type: 'tool_end', id: c.id, name: c.name, ok, output, ...(failure?.code && { code: failure.code }) });
-    emit({ type: 'tool_end', id: c.id, name: c.name, ok, output: c.name === 'phone_action' && ok ? '手机已返回操作回执；页面文字和截图仅供本轮核对，不写入进度记录。' : output, ...(failure && { errorKind: errorKind(failure), code: failure.code }), ms: Date.now() - t0 });
+    emit({ type: 'tool_end', id: c.id, name: c.name, ok, output: c.name === 'phone_action' && ok ? '手机已返回操作回执；页面文字和截图仅供本轮核对，不写入进度记录。' : output, ...(failure && { errorKind: errorKind(failure), code: failure.code }), ms: Date.now() - t0, waitMs });
     if (failure?.code !== 'RETRIEVAL_BUDGET') throwControl(failure, signal);
     const receipt = review.record({ name: c.name, args: c.args, ok, output, code: failure?.code, lookupRecovery });
     const phoneStopped = c.name === 'phone_action' && /^PHONE_(RESULT_UNKNOWN|STOPPED|CANCELLED|LOCKED|DISABLED|PAUSED|DISCONNECTED|OFFLINE|EXPIRED|SCOPE|AUTH)$/.test(failure?.code || '');

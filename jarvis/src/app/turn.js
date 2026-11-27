@@ -32,6 +32,8 @@ import { serverObservationActions, serverTaskMayBeRunning } from '../core/server
 import { HEDGE_MS } from '../agent/hedgedRequest.js';
 import { createTaskKeeper } from '../mobile/backgroundTasks.js';
 import { noteAction } from '../mobile/renderDiagnostics.js';
+import { createToolTiming } from './toolTiming.js';
+import { toolLabel } from '../ui/transcript.js';
 import { createWorkshopNewsChat } from './workshopNewsChat.js';
 import { workshopNewsInstruction } from '../core/workshopNewsReference.js';
 import { createWorkshopChat, workshopCommand, workshopMediaReply, shouldAnswerWorkshopCommand } from './workshopChat.js';
@@ -362,7 +364,8 @@ export function createTurn(app) {
       ctxMs: null,
       teamCard: null,
       usedModel: '',
-      usedTools: []
+      usedTools: [],
+      tools: createToolTiming() // 每个工具用了多久、等确认多久（回答下面那行用时里显示）
     };
     // 手机：记下正在做的任务（App 被划掉时，下次打开接着做）
     const doneSteps = [];
@@ -563,7 +566,7 @@ export function createTurn(app) {
                 ? `${seen}${st.usedModel}（${st.capabilityUpgraded ? '按任务切换能力模型' : `${model} ${st.fellSlow ? '没反应' : '出错'}后换用`}） · `
                 : `${seen}${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
       bubble.done(
-        `${modelTag}${tierTag}${team ? `团队 ${result.steps} 步 · ` : ''}${st.ctxMs !== null && st.ctxMs >= 300 ? `准备 ${(st.ctxMs / 1000).toFixed(1)}s · ` : ''}${firstTokenMs !== null ? `首字 ${(firstTokenMs / 1000).toFixed(1)}s · ` : ''}${serverSlowTag(result.timing)}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}${MOBILE && st.textChunks ? ` · 分 ${st.textChunks} 次收到${globalThis.__jarvisNetVia?.(app.llmConfig.baseURLs?.[app.llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`,
+        `${modelTag}${tierTag}${team ? `团队 ${result.steps} 步 · ` : ''}${st.ctxMs !== null && st.ctxMs >= 300 ? `准备 ${(st.ctxMs / 1000).toFixed(1)}s · ` : ''}${firstTokenMs !== null ? `首字 ${(firstTokenMs / 1000).toFixed(1)}s · ` : ''}${serverSlowTag(result.timing)}耗时 ${(total / 1000).toFixed(1)}s${st.tools.tag(result.toolCalls, toolLabel)}${MOBILE && st.textChunks ? ` · 分 ${st.textChunks} 次收到${globalThis.__jarvisNetVia?.(app.llmConfig.baseURLs?.[app.llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`,
         {
           elapsedMs: total,
           onFeedback: async (kind, comment) => {

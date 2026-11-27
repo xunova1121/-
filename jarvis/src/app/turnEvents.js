@@ -149,6 +149,7 @@ export function createTurnEvents(app) {
         app.setTask('processing', e.text.slice(0, 30));
       } else if (e.type === 'tool_end') {
         cards.get(e.id)?.done(e.ok, e.output, e.ms);
+        st.tools?.add(e);
         app.hud.toolEnd(e.id, e.ok);
         if (MOBILE && !turn.remote) {
           if (e.ok) doneSteps.push(toolLabel(e.name));

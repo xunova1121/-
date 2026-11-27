@@ -38,7 +38,15 @@ public class MainActivity extends BridgeActivity {
     public boolean isRendererGone(){return rendererGone;}
     boolean usesSoftwareDrawing(){return softwareDrawing;}
     boolean usesWorkshopDrawing(){return workshopDrawing.active();}
-    @Override public void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);}
+    @Override public void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);takeShare(intent);}
+    /** “分享 → 未央”：交给 ShareIntakePlugin 复制文件，网页再取（见 src/app/shareIntake.js） */
+    private void takeShare(Intent intent){
+        if(intent==null||getBridge()==null)return;
+        String action=intent.getAction();
+        if(!Intent.ACTION_SEND.equals(action)&&!Intent.ACTION_SEND_MULTIPLE.equals(action))return;
+        com.getcapacitor.PluginHandle h=getBridge().getPlugin("ShareIntake");
+        if(h!=null)((ShareIntakePlugin)h.getInstance()).receive(intent);
+    }
     private SharedPreferences health() { return getSharedPreferences("render-health",MODE_PRIVATE); }
     static boolean safeDisplay(Context context) {
         SharedPreferences prefs=context.getSharedPreferences("render-health",MODE_PRIVATE);
@@ -148,7 +156,10 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(WeatherLocationPlugin.class);registerPlugin(CompanionWallpaperPlugin.class);registerPlugin(WindowColorPlugin.class);registerPlugin(AppUpdatePlugin.class);registerPlugin(CrashLogPlugin.class);
         registerPlugin(NativeStreamPlugin.class);registerPlugin(MobileSpeechPlugin.class);registerPlugin(EdgeSpeechPlugin.class);
         registerPlugin(QwenRealtimePlugin.class);registerPlugin(BackgroundTaskPlugin.class);registerPlugin(KeepAwakePlugin.class);
+        registerPlugin(ShareIntakePlugin.class);
         super.onCreate(state);
+        // 被系统回收后重建时 state 不为空，这时的启动意图是旧的分享，不再收一次
+        if(state==null)takeShare(getIntent());
         // 开着“后台待命”的：每次打开都挂上通知（被系统关掉、划掉后再打开时恢复）
         if(StandbyService.enabled(this))StandbyService.apply(this,true);
         if (getBridge() == null) return; // 系统没有可用 WebView 时保留 Capacitor 的原生提示页。

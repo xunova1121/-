@@ -20,6 +20,7 @@ import { createCodeProjectsUI } from './app/codeProjects.js';
  *   app/agents.js         智能体广场、智能体起始页、顶栏智能体名字
  *   app/sync.js           服务器模式设置面板
  *   app/recovery.js       启动时接回上次的对话 / 没做完的任务
+ *   app/shareIntake.js    安卓“分享 → 未央”：把别的 App 分享来的文件、文字放进输入框
  *   app/shortcuts.js      键盘快捷键
  *   app/screenAwake.js    屏幕常亮：说话时不灭、久不碰调暗
  *
@@ -69,6 +70,7 @@ import { createSessionLists } from './app/sessionLists.js';
 import { createAgents } from './app/agents.js';
 import { createSync } from './app/sync.js';
 import { createRecovery } from './app/recovery.js';
+import { createShareIntake } from './app/shareIntake.js';
 import { createShortcuts } from './app/shortcuts.js';
 import { createScreenAwake } from './app/screenAwake.js';
 
@@ -114,6 +116,7 @@ mount(app, createRecovery(app));
 mount(app, createShortcuts(app));
 mount(app, createScreenAwake(app));
 mount(app, createPhoneControl(app));
+mount(app, createShareIntake(app));
 globalThis.__jarvisToast = toast; // 手机原生保存文件时的进度提示
 
 // ---------------------------------------------------------------- 恢复上次的设置
@@ -155,7 +158,8 @@ app.initSync();
 
 app.initDrawer();
 app.initSchedules();
-app.resumeOnStart();
+// 安卓“分享 → 未央”：接回上次对话之后再收分享来的文件，免得刚放进输入框就被切走
+Promise.resolve(app.resumeOnStart()).finally(() => app.shareIntake.start());
 agentMemory.maintain().catch(() => {});
 
 // ---------------------------------------------------------------- 光核旁的建议标注
