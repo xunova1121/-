@@ -1,0 +1,43 @@
+.ws-media-remote.ws-tv-controls { overflow: visible; }
+.ws-tv-controls .ws-tv-stations {
+  display: flex; align-items: center; gap: 4px; flex: 1 1 auto; min-width: 0; overflow-x: auto;
+  overscroll-behavior-x: contain; scrollbar-width: thin;
+}
+.ws-tv-stations > * { flex: none; }
+.ws-tv-stations .ws-media-channels button { max-width: 12em; overflow: hidden; }
+
+.ws-media-panel .ws-source-manager {
+  position: absolute; z-index: 2; inset: auto auto calc(2% + 38px) 2%;
+  display: flex; flex-direction: column; box-sizing: border-box;
+  width: min(25rem,93%,var(--tv-width)); max-height: calc(94% - 40px);
+  background: #fffdf4; color: #263d32; border: 1px solid #cdbf9e; border-radius: 12px;
+  box-shadow: 0 5px 20px #1e302940; pointer-events: auto;
+}
+.ws-source-head { display: flex; justify-content: space-between; align-items: center; padding: 5px 10px; border-bottom: 1px solid #e7dec9; }
+.ws-source-head h4 { margin: 0; font: 650 15px/1.4 var(--font-ui,sans-serif); }
+.ws-source-body { padding: 9px 10px; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.ws-source-list, .ws-source-form { display: grid; gap: 7px; }
+.ws-source-list > button { justify-self: start; }
+.ws-source-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 6px; }
+.ws-source-group { margin: 4px 0 0; font-size: 13px; }
+.ws-source-row > span { align-self: center; font-size: 13px; }
+.work-studio-view .ws-source-row button:first-child { justify-content: flex-start; white-space: normal; overflow-wrap: anywhere; }
+.ws-source-field { display: grid; grid-template-columns: 4.5em minmax(0,1fr); align-items: center; gap: 5px; font-size: 12px; }
+.ws-source-field :is(input,select) {
+  box-sizing: border-box; width: 100%; min-width: 0; min-height: 32px; padding: 4px 7px; color: #21382e;
+  background: #fff; border: 1px solid #bdb8a7; border-radius: 6px; font: inherit;
+}
+.ws-source-field :is(input,select):focus-visible { outline: 2px solid #356b50; outline-offset: 1px; }
+.ws-source-note { color: #53635a; font: 12px/1.4 var(--font-ui,sans-serif); }
+.ws-source-error { margin: 0; color: #a03626; font-size: 12px; overflow-wrap: anywhere; }
+.ws-source-error:empty { display: none; }
+.ws-source-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.work-studio-view .ws-media-panel[data-device="tv"] button.ws-source-save,
+.work-studio-view .ws-media-panel[data-device="tv"] button.ws-source-switch[aria-expanded="true"] {
+  background: #315943; border-color: #315943; color: #fff;
+}
+.work-studio-view .ws-media-panel[data-device="tv"] button.ws-source-remove { color: #993728; }
+@media (pointer: coarse) {
+  .ws-source-field :is(input,select) { min-height: 36px; font-size: 16px; }
+  .work-studio-view .ws-media-panel[data-device="tv"] .ws-source-manager button { min-height: 36px; }
+}

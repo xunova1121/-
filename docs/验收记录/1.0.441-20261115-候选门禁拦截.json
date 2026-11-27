@@ -1,0 +1,71 @@
+{
+  "version": "1.0.441",
+  "runId": 43686176692,
+  "runUrl": "https://github.com/xunova1121/-/actions/runs/43686176692",
+  "status": "blocked_not_published",
+  "buildRevision": "d268b4ed0343d6793f5597078586167991b12bcb",
+  "runtimeRevision": "0323b4dc42f65e6b48d4c927afca63b66f89265c",
+  "unit": {
+    "files": 464,
+    "passedFiles": 463,
+    "tests": 4022,
+    "passed": 4021,
+    "failed": 1,
+    "case": "tests/agentTurn.test.js：内置智能体说明字符预算",
+    "actual": 1300,
+    "maximum": 1200
+  },
+  "jobs": [
+    {
+      "id": 132727010318,
+      "name": "清理旧的构建产物",
+      "conclusion": "success"
+    },
+    {
+      "id": 132727011187,
+      "name": "同步现有安装包到公开仓库",
+      "conclusion": "skipped"
+    },
+    {
+      "id": 132727031369,
+      "name": "建草稿发布",
+      "conclusion": "success"
+    },
+    {
+      "id": 132727053445,
+      "name": "打包安卓 App",
+      "conclusion": "failure"
+    },
+    {
+      "id": 132727053446,
+      "name": "发布前完整验证",
+      "conclusion": "failure"
+    },
+    {
+      "id": 132727053598,
+      "name": "打包 (windows-latest)",
+      "conclusion": "cancelled"
+    },
+    {
+      "id": 132728268775,
+      "name": "发布到 Releases",
+      "conclusion": "cancelled"
+    }
+  ],
+  "release": {
+    "source": "draft（release list已确认；按tag接口对草稿返回404）",
+    "publicStable": "desktop-v1.0.440",
+    "published": false
+  },
+  "correction": {
+    "runtimeRevision": "b2c3b89afdea69c0c1ac9a98a0870fd8a52bc6db",
+    "skillCharacters": 1194,
+    "maximum": 1200,
+    "focusedTestsPassed": 34
+  },
+  "notes": [
+    "保留全部原测试和1200字符上限，没有降低门禁",
+    "此前本地候选复制工具调用对象导致回执丢失，已保留对象身份修复并通过182相关单测；该本地候选未推送和发布",
+    "正式结果需以新一轮完整CI、公开安装包与更新索引核对为准"
+  ]
+}

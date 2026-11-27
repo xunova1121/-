@@ -1,0 +1,178 @@
+/* 家具热区随整幅小窝取景。原来的播放器、视频源和简报继续使用。 */
+.ws-scene[data-room-view="nest"] [data-media-device="monitor"] {
+  left: 78.8%; top: 35.7%; width: 9%; height: 13%;
+}
+.ws-scene[data-room-view="nest"] [data-media-device="tv"] {
+  left: 89%; top: 53%; width: 11%; height: 15%;
+}
+.ws-scene[data-room-view="nest"] .ws-mini-screen {
+  inset: 1% 5% 8%; width: auto; height: auto; transform: none;
+  background: none; opacity: 0; pointer-events: none;
+}
+.ws-scene[data-room-view="nest"] .ws-monitor-ticker { max-width: min(65%,33em); }
+.ws-nest-loveseat { display: none; }
+.ws-scene[data-room-view="nest"] .ws-nest-loveseat {
+  display: block; position: absolute; z-index: 3; pointer-events: none;
+  left: 1.5%; top: 52.6%; width: 30.5%; aspect-ratio: 596 / 380;
+  background: url('./assets/nestRoom/loveseat.webp') 0 0 / 300% 100% no-repeat;
+  filter: drop-shadow(0 .45cqw .32cqw #45301865);
+  /* 沙发右扶手在猫尾后。沿地毯上橘猫的脊背、臀部和尾巴避让，兼容静态绘制。 */
+  clip-path:polygon(0 0,100% 0,100.0% 62.1%,99.5% 62.4%,96.3% 66.1%,93.9% 69.8%,92.2% 73.8%,90.9% 78.1%,90.1% 81.8%,90.3% 85.8%,91.6% 89.2%,94.3% 92.2%,99.2% 93.9%,100.0% 94.2%,100% 100%,0 100%);
+}
+.ws-scene[data-nest-light="off"] .ws-nest-loveseat {
+  filter: brightness(.43) saturate(.62) drop-shadow(0 .4cqw .3cqw #120e0c88);
+}
+.ws-scene[data-nest-viewing="tv"] .ws-nest-loveseat { --viewer-frame: 50%; }
+.ws-scene[data-nest-viewing="news"] .ws-nest-loveseat { --viewer-frame: 100%; }
+.ws-scene[data-room-view="nest"][data-nest-viewing] .ws-nest-loveseat { background-position:var(--viewer-frame) 0; }
+.ws-scene[data-nest-viewing] .ws-nest-loveseat::after {
+  content:''; position:absolute; inset:0;
+  background:inherit; background-position:var(--viewer-frame) 0;
+  clip-path:polygon(66.7% 34%,67.6% 12%,73% 7.5%,81% 9.8%,86% 17%,88.3% 31%,88% 40%,98% 38.5%,98% 44%,94% 53%,91% 60%,82% 63%,73% 60%,71% 56%,73% 40%);
+  transform-origin:81% 57%;
+}
+@media (prefers-reduced-motion:no-preference) {
+  body:not(.reduced-motion) .work-studio-view[data-visible="true"] .ws-scene[data-nest-viewing] .ws-nest-loveseat::after {
+    animation: ws-movie-breath 4.4s ease-in-out infinite;
+  }
+}
+@keyframes ws-movie-breath { 50% { transform: scale(1.004,1.015) rotate(-.45deg); } }
+
+/* 房间与沙发始终使用日常机位。只给播放器、简报做打开/收起变换。 */
+.ws-scene[data-room-view="nest"] .ws-media-panel { transform-origin: top left; }
+.work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] {
+  --tv-width: min(78cqw,calc((67cqh - 34px) * 1.76));
+  inset: 1% 1% auto auto; width: var(--tv-width); box-sizing: border-box;
+  padding: 3px; overflow: visible; pointer-events: auto;
+  border: 1px solid #795636; border-radius: 10px;
+  color: #fff8eb; background: #39291f; box-shadow: 0 4px 12px #1f130c66;
+}
+.ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"]::before,
+.ws-scene[data-room-view="nest"] .ws-media-panel .ws-tv-grille,
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] .ws-tv-watcher,
+.work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] .ws-media-receiver::after { display:none; }
+.work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] .ws-media-receiver {
+  position: relative; inset: auto; width: 100%; padding: 0; margin: 0; transform: none;
+  translate: none; background: transparent; box-shadow: none; animation: none;
+}
+.ws-scene[data-room-view="nest"] .ws-tv-glass { border-radius: 6px; box-shadow: none; }
+.ws-scene[data-room-view="nest"] .ws-media-remote {
+  position: relative; inset: auto; margin-inline-end: 34px; min-height: 32px;
+  gap: 5px; padding-inline-start: 6px;
+}
+.ws-scene[data-room-view="nest"] .ws-remote-station {
+  flex: 1 1 auto; min-width: 0; color: #f5e9d7; font: 550 12px/1.4 var(--font-ui,sans-serif);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] .ws-media-header { inset: auto 3px 3px auto; }
+.work-studio-view .ws-scene[data-room-view="nest"] .ws-media-remote > button,
+.work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] .ws-media-back {
+  min-height: 32px; padding-inline: 9px; color: #fff5df; background: transparent; border: 0;
+}
+.ws-scene[data-room-view="nest"] .ws-media-panel .ws-media-back {
+  font-size: 0; min-width: 32px; min-height: 32px;
+}
+.ws-scene[data-room-view="nest"] .ws-media-panel .ws-media-back::before { content: '×'; font: 22px/1 sans-serif; }
+.work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] .ws-media-back {
+  width: 32px; padding-inline: 0;
+}
+.ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] .ws-media-back::before {
+  content: '×'; display: grid; place-items: center; box-sizing: border-box;
+  width: 21px; height: 21px; border: 1.5px solid currentColor; border-radius: 50%;
+  font: 600 17px/1 Arial, sans-serif;
+}
+.ws-scene[data-room-view="nest"] .ws-tv-controls .ws-tv-stations {
+  position: absolute; z-index: 2; inset: auto 0 100%; flex-wrap: wrap;
+  max-height: min(40cqh,170px); overflow: auto; padding: 7px;
+  border-radius: 8px; background: #312820; box-shadow: 0 2px 7px #21160d55;
+}
+.ws-scene[data-room-view="nest"] .ws-tv-stations .ws-media-channels {
+  display: contents;
+}
+.ws-scene[data-room-view="nest"] .ws-source-manager {
+  inset: 3px 3px 35px; width: auto; max-height: none;
+}
+.work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="monitor"] {
+  inset: 1% 1% 35%; border-color: #c8ac89; border-radius: 14px;
+  --ws-panel:#fff7e7; --ws-ink:#38291e; --ws-dim:#675440; --ws-line:#d5c3a9; --ws-on-tint:#73502d;
+  background:var(--ws-panel); color:var(--ws-ink);
+}
+/* 固定纵向全景，下半的沙发给未央留座。节目保留本身的宽高比。 */
+.work-studio-view .ws-scene[data-room-view="nest"][data-nest-layout="portrait"] .ws-media-panel[data-device="tv"] {
+  --tv-width: min(95cqw,calc((49cqh - 38px) * 1.76));
+  inset: max(52px,calc(37% - var(--tv-width) * .4)) auto auto calc(50% - var(--tv-width) / 2);
+}
+.work-studio-view .ws-scene[data-room-view="nest"][data-nest-layout="portrait"] .ws-media-panel[data-device="monitor"] {
+  inset: max(54px,9%) 5% 47%; border-radius: 15px;
+  padding: clamp(12px,3cqw,19px);
+}
+.ws-scene[data-room-view="nest"][data-media-device="tv"] > .ws-room-tools,
+.ws-scene[data-room-view="nest"][data-media-device="monitor"] > .ws-room-tools { visibility: hidden; }
+
+@container workbench-area (min-width: 731px) {
+  /* 进入小窝就留出完整电视墙。点设备时上下分区与房间机位都不动。 */
+  .wb-desk > .work-studio-view[data-wide-workshop]:has(.ws-scene[data-room-view="nest"]) {
+    width: auto; margin-inline: calc(3px - clamp(10px,1.25vw,21px));
+  }
+  .wb-desk .work-studio-view[data-wide-workshop][data-workshop] .ws-scene[data-room-view="nest"] {
+    width:100%; flex:1; aspect-ratio:auto; align-self:stretch; margin:0;
+  }
+  .wb-desk .work-studio-view[data-wide-workshop] .ws-timeline:not(:has(.ws-list:empty)) {
+    flex:none; max-height:68px; overflow:auto;
+  }
+  body.workbench .wb-desk:has(.work-studio-view[data-wide-workshop] .ws-scene[data-room-view="nest"]) {
+    padding-block: 6px; grid-template-rows:minmax(0,1fr) minmax(112px,14%); gap:6px;
+  }
+  .wb-desk .work-studio-view[data-wide-workshop]:has(.ws-scene[data-room-view="nest"]) .ws-header {
+    inset:6px auto auto 6px; pointer-events:auto;
+  }
+  .wb-desk .work-studio-view[data-wide-workshop]:has(.ws-scene[data-room-view="nest"]) .ws-performance {
+    position:relative;
+  }
+  .wb-desk .work-studio-view[data-wide-workshop]:has(.ws-scene[data-room-view="nest"]) .ws-caption {
+    position:absolute; z-index:6; bottom:5px; right:5px; width:auto; max-width:calc(100% - 10px);
+    min-height:28px; padding:3px 6px; border-radius:7px;
+  }
+  .wb-desk .work-studio-view[data-wide-workshop] .ws-scene[data-room-view="nest"] {
+    background:#573522 url('./assets/nestRoom/portrait/ceiling-lit.webp') top center / 100% auto no-repeat;
+  }
+  .wb-desk .work-studio-view[data-wide-workshop] .ws-scene[data-room-view="nest"][data-nest-light="off"] {
+    background-image:url('./assets/nestRoom/portrait/ceiling-off.webp');
+  }
+  /* 保留原画全宽。额外上沿是真实绘制的天花，下方露出前排沙发和猫。 */
+  .wb-desk .work-studio-view[data-wide-workshop] .ws-scene[data-room-view="nest"] > .ws-floorplan {
+    width:100%; left:0; top:min(11cqw,16cqh); bottom:auto; transform:scale(var(--ws-scene-scale,1));
+  }
+  .wb-desk .work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] {
+    --tv-width:min(83.8cqw,158cqh); inset:1% .6% auto auto;
+  }
+  .wb-desk .work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="monitor"] {
+    inset:1% 1% 33% 1%;
+  }
+  .wb-desk .ws-scene[data-room-view="nest"] .ws-media-remote {
+    /* 窄遥控条贴在机框下沿，只占右侧，不遮节目字幕、故障操作或沙发上的未央。 */
+    position:absolute; inset:100% 34px auto auto; width:max-content; max-width:calc(100% - 42px);
+    margin:0; border-radius:0 0 0 6px; padding-inline-start:10px; background:#39291f;
+  }
+  .wb-desk .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="tv"] .ws-media-header {
+    inset:100% 0 auto auto; border-radius:0 0 6px 0; background:#39291f;
+  }
+  .wb-desk .ws-scene[data-room-view="nest"] .ws-tv-controls .ws-tv-stations {
+    inset:auto 0 100% auto; width:min(64cqw,25rem);
+  }
+  .wb-desk .ws-scene[data-room-view="nest"] .ws-source-manager {
+    inset:4px 4px auto auto; width:min(90%,25rem); max-height:calc(100% - 8px);
+  }
+}
+
+@media (max-height:720px) {
+  @container workbench-area (min-width:731px) {
+    /* 矮屏优先取景到地毯上的猫，给对话留在视口里。开设备时保持同一取景。 */
+    .wb-desk .work-studio-view[data-wide-workshop] .ws-scene[data-room-view="nest"] > .ws-floorplan {
+      top:min(11cqw,16cqh,calc(100cqh - 59.5cqw));
+    }
+    .wb-desk .work-studio-view .ws-scene[data-room-view="nest"] .ws-media-panel[data-device="monitor"] {
+      inset:1% 1% 9% 26%;
+    }
+  }
+}

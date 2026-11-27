@@ -1,0 +1,205 @@
+{
+  "report": {
+    "format": "pptx",
+    "bytes": 367501,
+    "structure": "passed",
+    "readback": "passed",
+    "render": "not_checked",
+    "extractedCharacters": 193,
+    "slides": 4,
+    "styleFacts": {
+      "format": "pptx",
+      "body": 20,
+      "title": 40,
+      "rules": null,
+      "underlines": 0,
+      "scope": "原生幻灯片文字，不含图片内文字或图表内部样式"
+    },
+    "presentation": {
+      "pages": [
+        {
+          "minBodyFont": 14,
+          "minTableFont": null,
+          "outside": false,
+          "page": 1,
+          "pictures": 1,
+          "contentImages": 1,
+          "icons": 0,
+          "decorations": 0,
+          "imageAreaRatio": 0.99997,
+          "maxCropRatio": 0.00002,
+          "images": [
+            {
+              "areaRatio": 0.99997,
+              "cropRatio": 0.00002,
+              "shortSide": 7.5
+            }
+          ],
+          "imageLayout": "cover",
+          "imageSide": null,
+          "tables": 0,
+          "textBoxes": 2,
+          "estimatedBlankRatio": 0
+        },
+        {
+          "minBodyFont": 20,
+          "minTableFont": null,
+          "outside": false,
+          "page": 2,
+          "pictures": 1,
+          "contentImages": 1,
+          "icons": 0,
+          "decorations": 0,
+          "imageAreaRatio": 0.25252,
+          "maxCropRatio": 0.08516,
+          "images": [
+            {
+              "areaRatio": 0.25252,
+              "cropRatio": 0.08516,
+              "shortSide": 4.55
+            }
+          ],
+          "imageLayout": "split-wide",
+          "imageSide": "right",
+          "tables": 0,
+          "textBoxes": 7,
+          "estimatedBlankRatio": 0.493
+        },
+        {
+          "minBodyFont": 20,
+          "minTableFont": null,
+          "outside": false,
+          "page": 3,
+          "pictures": 1,
+          "contentImages": 1,
+          "icons": 0,
+          "decorations": 0,
+          "imageAreaRatio": 0.25252,
+          "maxCropRatio": 0.08516,
+          "images": [
+            {
+              "areaRatio": 0.25252,
+              "cropRatio": 0.08516,
+              "shortSide": 4.55
+            }
+          ],
+          "imageLayout": "split-wide",
+          "imageSide": "left",
+          "tables": 0,
+          "textBoxes": 7,
+          "estimatedBlankRatio": 0.427
+        },
+        {
+          "minBodyFont": null,
+          "minTableFont": null,
+          "outside": false,
+          "page": 4,
+          "pictures": 1,
+          "contentImages": 1,
+          "icons": 0,
+          "decorations": 0,
+          "imageAreaRatio": 0.25252,
+          "maxCropRatio": 0.08516,
+          "images": [
+            {
+              "areaRatio": 0.25252,
+              "cropRatio": 0.08516,
+              "shortSide": 4.55
+            }
+          ],
+          "imageLayout": "split-wide",
+          "imageSide": "right",
+          "tables": 0,
+          "textBoxes": 3,
+          "estimatedBlankRatio": 0.361
+        }
+      ],
+      "imagePages": 4,
+      "missingImagePages": [],
+      "scope": "真实页面引用的嵌入图片；图标/装饰单列；图片面积为可见图片框并集，裁切从srcRect读取；空白为包围框估算，不是视觉验收"
+    },
+    "issues": [],
+    "errors": 0,
+    "issueCount": 0,
+    "facts": "not_verified",
+    "visual": "not_checked",
+    "pdfCheck": "not_checked"
+  },
+  "imageLayouts": [
+    {
+      "page": 1,
+      "name": "cover",
+      "reason": "全幅图片背景，过量裁切改完整容纳，按真实亮度加深色遮罩保证白字清晰",
+      "pictures": [
+        {
+          "path": "cover.png",
+          "x": 0,
+          "y": 0,
+          "w": 13.333,
+          "h": 7.5,
+          "sizing": "cover",
+          "cropRatio": 0.000024999999999941735,
+          "areaRatio": 1
+        }
+      ],
+      "contrast": {
+        "opacity": 0.6,
+        "brightnessMeasured": true
+      }
+    },
+    {
+      "page": 2,
+      "name": "split-wide",
+      "imageSide": "right",
+      "reason": "表格或密集正文保留约六成文字宽度，图片不再缩成窄栏",
+      "pictures": [
+        {
+          "path": "portrait.png",
+          "x": 8.183,
+          "y": 1.3,
+          "w": 4.55,
+          "h": 5.55,
+          "sizing": "cover",
+          "cropRatio": 0.08516483516483508,
+          "areaRatio": 0.252531313282832
+        }
+      ]
+    },
+    {
+      "page": 3,
+      "name": "split-wide",
+      "imageSide": "left",
+      "reason": "表格或密集正文保留约六成文字宽度，图片不再缩成窄栏",
+      "pictures": [
+        {
+          "path": "portrait.png",
+          "x": 0.6,
+          "y": 1.3,
+          "w": 4.55,
+          "h": 5.55,
+          "sizing": "cover",
+          "cropRatio": 0.08516483516483508,
+          "areaRatio": 0.252531313282832
+        }
+      ]
+    },
+    {
+      "page": 4,
+      "name": "split-wide",
+      "imageSide": "right",
+      "reason": "表格或密集正文保留约六成文字宽度，图片不再缩成窄栏",
+      "pictures": [
+        {
+          "path": "portrait.png",
+          "x": 8.183,
+          "y": 1.3,
+          "w": 4.55,
+          "h": 5.55,
+          "sizing": "cover",
+          "cropRatio": 0.08516483516483508,
+          "areaRatio": 0.252531313282832
+        }
+      ]
+    }
+  ]
+}

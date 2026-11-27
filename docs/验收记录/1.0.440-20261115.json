@@ -1,0 +1,1285 @@
+{
+  "version": "1.0.440",
+  "status": "published_and_audited",
+  "publishedAtBeijing": "2026-11-15T10:54:49+08:00",
+  "buildRevision": "d2ce3a268af65b436663775d52ab68821c4cfb78",
+  "runtimeRevision": "46cf0a0f5d594975e423b8e8bcf195e7ca6c1095",
+  "ciRunId": 43668285239,
+  "ciUrl": "https://github.com/xunova1121/-/actions/runs/43668285239",
+  "releaseUrl": "https://github.com/xunova1121/weiyang-release/releases/tag/desktop-v1.0.440",
+  "unitTests": {
+    "files": 463,
+    "passed": 3995
+  },
+  "targetedTests": 120,
+  "visualChecks": 104,
+  "packageAudit": {
+    "version": "1.0.440",
+    "runId": 43668285239,
+    "buildRevision": "d2ce3a268af65b436663775d52ab68821c4cfb78",
+    "runtimeRevision": "46cf0a0f5d594975e423b8e8bcf195e7ca6c1095",
+    "status": "passed",
+    "checks": [
+      {
+        "label": "source/public正式版本一致且均已公开",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "源码Release绑定冻结构建提交",
+        "passed": true,
+        "detail": "d2ce3a268af65b436663775d52ab68821c4cfb78"
+      },
+      {
+        "label": "两仓七份资产齐全",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "七份原件大小和GitHub SHA256一致",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "实际下载五份原件，摘要与正式资产一致",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "服务器更新索引版本/文件/SHA256一致",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "Windows安装器是真实PE文件",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "Windows更新索引版本和原EXE SHA512一致",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "服务器全运行文件与冻结清单逐字节一致",
+        "passed": true,
+        "detail": {
+          "manifestFiles": 963,
+          "checked": 962,
+          "revision": "46cf0a0f5d594975e423b8e8bcf195e7ca6c1095"
+        }
+      },
+      {
+        "label": "服务器归档全项可读/目录可进入、root属主且无链接",
+        "passed": true,
+        "detail": {
+          "entries": 1139,
+          "bad": []
+        }
+      },
+      {
+        "label": "服务器版本及包内清单相符",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "APK沿用原始签名证书",
+        "passed": true,
+        "detail": "56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6"
+      },
+      {
+        "label": "APK包名/版本名/版本号保持更新链",
+        "passed": true,
+        "detail": {
+          "package": "com.xunova.jarvis",
+          "versionName": "1.0.440",
+          "versionCode": 440
+        }
+      },
+      {
+        "label": "APK实际前端包含新分层功能和原消息菜单/编辑链",
+        "passed": true,
+        "detail": {
+          "layered-1": true,
+          "design-current-state": true,
+          "改为引导": true,
+          "取消消息": true,
+          "/images/edits": true
+        }
+      },
+      {
+        "label": "公开latest固定入口指向本版原件：latest.yml",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "label": "公开latest固定入口指向本版原件：jarvis-server-latest.json",
+        "passed": true,
+        "detail": null
+      }
+    ],
+    "downloaded": [
+      {
+        "name": "Jarvis-1.0.440-android.apk",
+        "bytes": 18701017,
+        "sha256": "397b490c9f5979fb9692e5ffdf3eec8febd0dff7bd2a727e390a0336eb2a921b"
+      },
+      {
+        "name": "Jarvis-Setup-1.0.440.exe",
+        "bytes": 142148983,
+        "sha256": "638431a422ea680b313fb6b6ab1419168033824d27fdad7c1dbb4fd57ce15e08"
+      },
+      {
+        "name": "jarvis-server-1.0.440.tar.gz",
+        "bytes": 28508804,
+        "sha256": "83a45f09b0627ff82daa946819d3db5c9d96411207c46605297f6110237c991e"
+      },
+      {
+        "name": "latest.yml",
+        "bytes": 347,
+        "sha256": "6764c8dece5177bbc108033225cdb89e639106c2d1db165484d102c764b41ca4"
+      },
+      {
+        "name": "jarvis-server-latest.json",
+        "bytes": 136,
+        "sha256": "e452e71732f89565f2fb81b53b1c0c109bc231841c0f8ebbf96c8e770af61846"
+      }
+    ],
+    "assetMetadata": {
+      "Jarvis-1.0.440-android.apk": {
+        "size": 18701017,
+        "digest": "sha256:397b490c9f5979fb9692e5ffdf3eec8febd0dff7bd2a727e390a0336eb2a921b",
+        "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.440/Jarvis-1.0.440-android.apk"
+      },
+      "Jarvis-1.0.440-win-x64.zip": {
+        "size": 177923627,
+        "digest": "sha256:ead32131cffe7ce39d36286b6a7f1626e9871f37a6c52f6ff9aa1131b3bc3dcd",
+        "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.440/Jarvis-1.0.440-win-x64.zip"
+      },
+      "Jarvis-Setup-1.0.440.exe": {
+        "size": 142148983,
+        "digest": "sha256:638431a422ea680b313fb6b6ab1419168033824d27fdad7c1dbb4fd57ce15e08",
+        "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.440/Jarvis-Setup-1.0.440.exe"
+      },
+      "Jarvis-Setup-1.0.440.exe.blockmap": {
+        "size": 150437,
+        "digest": "sha256:43fd9dfe8df6928bb8d432dfb1ae64c01b43936b92605a286951e108fcb35f6a",
+        "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.440/Jarvis-Setup-1.0.440.exe.blockmap"
+      },
+      "jarvis-server-1.0.440.tar.gz": {
+        "size": 28508804,
+        "digest": "sha256:83a45f09b0627ff82daa946819d3db5c9d96411207c46605297f6110237c991e",
+        "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.440/jarvis-server-1.0.440.tar.gz"
+      },
+      "jarvis-server-latest.json": {
+        "size": 136,
+        "digest": "sha256:e452e71732f89565f2fb81b53b1c0c109bc231841c0f8ebbf96c8e770af61846",
+        "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.440/jarvis-server-latest.json"
+      },
+      "latest.yml": {
+        "size": 347,
+        "digest": "sha256:6764c8dece5177bbc108033225cdb89e639106c2d1db165484d102c764b41ca4",
+        "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.440/latest.yml"
+      }
+    },
+    "latest": {
+      "latest.yml": {
+        "bytes": 347,
+        "sha256": "6764c8dece5177bbc108033225cdb89e639106c2d1db165484d102c764b41ca4"
+      },
+      "jarvis-server-latest.json": {
+        "bytes": 136,
+        "sha256": "e452e71732f89565f2fb81b53b1c0c109bc231841c0f8ebbf96c8e770af61846"
+      }
+    },
+    "apkCertificateSha256": "56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6",
+    "limitations": [
+      "实际下载五件；Windows ZIP与blockmap只对照两仓七件元数据摘要",
+      "APK核对签名证书和编译包元数据/实际JS，不是用户真机安装或独立apksigner全签名验证",
+      "未部署用户服务器；未测试实际付费模型或Claude独立复审"
+    ]
+  },
+  "ciJobs": [
+    {
+      "id": 132672456031,
+      "name": "清理旧的构建产物",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": 132672457691,
+      "name": "同步现有安装包到公开仓库",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": 132672491029,
+      "name": "建草稿发布",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": 132672540080,
+      "name": "打包安卓 App",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": 132672540084,
+      "name": "打包 (windows-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": 132672540085,
+      "name": "发布前完整验证",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": 132677504635,
+      "name": "发布到 Releases",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": null,
+      "completed_at": null
+    }
+  ],
+  "visualProducts": [
+    {
+      "name": "editorial-poster",
+      "receipt": {
+        "kind": "poster",
+        "status": "complete",
+        "width": 1080,
+        "height": 1920,
+        "files": [
+          {
+            "format": "png",
+            "path": "分层验收/editorial-poster.png",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "passed"
+          },
+          {
+            "format": "svg",
+            "path": "分层验收/editorial-poster.svg",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "pptx",
+            "path": "分层验收/editorial-poster.pptx",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          }
+        ],
+        "textRendering": "program",
+        "fontCheck": "passed",
+        "visual": "not_checked",
+        "interaction": "not_checked",
+        "dataMode": "demo",
+        "designVersion": "layered-1",
+        "assets": [],
+        "contrast": {
+          "status": "passed",
+          "failed": []
+        },
+        "notes": [
+          "同一分层源稿生成各格式；文字不由生图模型画，图标为独立矢量对象",
+          "文案原样保留，不证明文案中的事实或错别字已被编辑校正",
+          "4K仅表示导出画布；素材放大倍率单独记录，未自动付费重画/放大"
+        ],
+        "errors": [],
+        "copyCheck": {
+          "status": "passed",
+          "failed": []
+        },
+        "layoutCheck": {
+          "status": "passed",
+          "failed": []
+        },
+        "designPath": "分层验收/editorial-poster.design.json",
+        "visualReport": {
+          "status": "not_checked",
+          "reason": "未配置视觉能力、未生成PNG或原图超过核验上限"
+        },
+        "editableLayers": [
+          {
+            "id": "eyebrow",
+            "type": "text"
+          },
+          {
+            "id": "title",
+            "type": "text"
+          },
+          {
+            "id": "subtitle",
+            "type": "text"
+          },
+          {
+            "id": "section-1-icon",
+            "type": "icon"
+          },
+          {
+            "id": "section-1-label",
+            "type": "text"
+          },
+          {
+            "id": "section-1-title",
+            "type": "text"
+          },
+          {
+            "id": "section-1-body",
+            "type": "text"
+          },
+          {
+            "id": "section-2-icon",
+            "type": "icon"
+          },
+          {
+            "id": "section-2-label",
+            "type": "text"
+          },
+          {
+            "id": "section-2-title",
+            "type": "text"
+          },
+          {
+            "id": "section-2-body",
+            "type": "text"
+          },
+          {
+            "id": "section-3-icon",
+            "type": "icon"
+          },
+          {
+            "id": "section-3-label",
+            "type": "text"
+          },
+          {
+            "id": "section-3-title",
+            "type": "text"
+          },
+          {
+            "id": "section-3-body",
+            "type": "text"
+          },
+          {
+            "id": "section-4-icon",
+            "type": "icon"
+          }
+        ]
+      }
+    },
+    {
+      "name": "baby-poster",
+      "receipt": {
+        "kind": "poster",
+        "status": "complete",
+        "width": 1080,
+        "height": 1920,
+        "files": [
+          {
+            "format": "png",
+            "path": "分层验收/baby-poster.png",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "passed"
+          },
+          {
+            "format": "svg",
+            "path": "分层验收/baby-poster.svg",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "pptx",
+            "path": "分层验收/baby-poster.pptx",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          }
+        ],
+        "textRendering": "program",
+        "fontCheck": "passed",
+        "visual": "not_checked",
+        "interaction": "not_checked",
+        "dataMode": "demo",
+        "designVersion": "layered-1",
+        "assets": [
+          {
+            "id": "hero",
+            "width": 1600,
+            "height": 1000,
+            "scale": 0.595,
+            "upscaled": false,
+            "detail": "not_checked"
+          }
+        ],
+        "contrast": {
+          "status": "passed",
+          "failed": []
+        },
+        "notes": [
+          "同一分层源稿生成各格式；文字不由生图模型画，图标为独立矢量对象",
+          "文案原样保留，不证明文案中的事实或错别字已被编辑校正",
+          "4K仅表示导出画布；素材放大倍率单独记录，未自动付费重画/放大"
+        ],
+        "errors": [],
+        "copyCheck": {
+          "status": "passed",
+          "failed": []
+        },
+        "layoutCheck": {
+          "status": "passed",
+          "failed": []
+        },
+        "designPath": "分层验收/baby-poster.design.json",
+        "visualReport": {
+          "status": "not_checked",
+          "reason": "未配置视觉能力、未生成PNG或原图超过核验上限"
+        },
+        "editableLayers": [
+          {
+            "id": "eyebrow",
+            "type": "text"
+          },
+          {
+            "id": "title",
+            "type": "text"
+          },
+          {
+            "id": "subtitle",
+            "type": "text"
+          },
+          {
+            "id": "hero-image",
+            "type": "image"
+          },
+          {
+            "id": "section-1-title",
+            "type": "text"
+          },
+          {
+            "id": "section-1-value",
+            "type": "text"
+          },
+          {
+            "id": "section-2-title",
+            "type": "text"
+          },
+          {
+            "id": "section-2-value",
+            "type": "text"
+          },
+          {
+            "id": "section-3-title",
+            "type": "text"
+          },
+          {
+            "id": "section-3-value",
+            "type": "text"
+          },
+          {
+            "id": "section-4-title",
+            "type": "text"
+          },
+          {
+            "id": "section-4-value",
+            "type": "text"
+          },
+          {
+            "id": "footer",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    {
+      "name": "editorial-demo",
+      "receipt": {
+        "kind": "visual_demo",
+        "status": "complete",
+        "width": 1080,
+        "height": 1920,
+        "files": [
+          {
+            "format": "png",
+            "path": "分层验收/editorial-demo.png",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "passed"
+          },
+          {
+            "format": "svg",
+            "path": "分层验收/editorial-demo.svg",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "pptx",
+            "path": "分层验收/editorial-demo.pptx",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "html",
+            "path": "分层验收/editorial-demo.html",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "zip",
+            "path": "分层验收/editorial-demo.zip",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          }
+        ],
+        "textRendering": "program",
+        "fontCheck": "passed",
+        "visual": "not_checked",
+        "interaction": "not_checked",
+        "dataMode": "demo",
+        "designVersion": "layered-1",
+        "assets": [],
+        "contrast": {
+          "status": "passed",
+          "failed": []
+        },
+        "notes": [
+          "同一分层源稿生成各格式；文字不由生图模型画，图标为独立矢量对象",
+          "文案原样保留，不证明文案中的事实或错别字已被编辑校正",
+          "4K仅表示导出画布；素材放大倍率单独记录，未自动付费重画/放大"
+        ],
+        "errors": [],
+        "copyCheck": {
+          "status": "passed",
+          "failed": []
+        },
+        "layoutCheck": {
+          "status": "passed",
+          "failed": []
+        },
+        "designPath": "分层验收/editorial-demo.design.json",
+        "visualReport": {
+          "status": "not_checked",
+          "reason": "未配置视觉能力、未生成PNG或原图超过核验上限"
+        },
+        "editableLayers": [
+          {
+            "id": "eyebrow",
+            "type": "text"
+          },
+          {
+            "id": "title",
+            "type": "text"
+          },
+          {
+            "id": "subtitle",
+            "type": "text"
+          },
+          {
+            "id": "section-1-icon",
+            "type": "icon"
+          },
+          {
+            "id": "section-1-label",
+            "type": "text"
+          },
+          {
+            "id": "section-1-title",
+            "type": "text"
+          },
+          {
+            "id": "section-1-body",
+            "type": "text"
+          },
+          {
+            "id": "section-2-icon",
+            "type": "icon"
+          },
+          {
+            "id": "section-2-label",
+            "type": "text"
+          },
+          {
+            "id": "section-2-title",
+            "type": "text"
+          },
+          {
+            "id": "section-2-body",
+            "type": "text"
+          },
+          {
+            "id": "section-3-icon",
+            "type": "icon"
+          },
+          {
+            "id": "section-3-label",
+            "type": "text"
+          },
+          {
+            "id": "section-3-title",
+            "type": "text"
+          },
+          {
+            "id": "section-3-body",
+            "type": "text"
+          },
+          {
+            "id": "section-4-icon",
+            "type": "icon"
+          }
+        ]
+      }
+    },
+    {
+      "name": "baby-demo",
+      "receipt": {
+        "kind": "visual_demo",
+        "status": "complete",
+        "width": 1080,
+        "height": 1920,
+        "files": [
+          {
+            "format": "png",
+            "path": "分层验收/baby-demo.png",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "passed"
+          },
+          {
+            "format": "svg",
+            "path": "分层验收/baby-demo.svg",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "pptx",
+            "path": "分层验收/baby-demo.pptx",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "html",
+            "path": "分层验收/baby-demo.html",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "zip",
+            "path": "分层验收/baby-demo.zip",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          }
+        ],
+        "textRendering": "program",
+        "fontCheck": "passed",
+        "visual": "not_checked",
+        "interaction": "not_checked",
+        "dataMode": "demo",
+        "designVersion": "layered-1",
+        "assets": [
+          {
+            "id": "hero",
+            "width": 1600,
+            "height": 1000,
+            "scale": 0.595,
+            "upscaled": false,
+            "detail": "not_checked"
+          }
+        ],
+        "contrast": {
+          "status": "passed",
+          "failed": []
+        },
+        "notes": [
+          "同一分层源稿生成各格式；文字不由生图模型画，图标为独立矢量对象",
+          "文案原样保留，不证明文案中的事实或错别字已被编辑校正",
+          "4K仅表示导出画布；素材放大倍率单独记录，未自动付费重画/放大"
+        ],
+        "errors": [],
+        "copyCheck": {
+          "status": "passed",
+          "failed": []
+        },
+        "layoutCheck": {
+          "status": "passed",
+          "failed": []
+        },
+        "designPath": "分层验收/baby-demo.design.json",
+        "visualReport": {
+          "status": "not_checked",
+          "reason": "未配置视觉能力、未生成PNG或原图超过核验上限"
+        },
+        "editableLayers": [
+          {
+            "id": "eyebrow",
+            "type": "text"
+          },
+          {
+            "id": "title",
+            "type": "text"
+          },
+          {
+            "id": "subtitle",
+            "type": "text"
+          },
+          {
+            "id": "hero-image",
+            "type": "image"
+          },
+          {
+            "id": "section-1-title",
+            "type": "text"
+          },
+          {
+            "id": "section-1-value",
+            "type": "text"
+          },
+          {
+            "id": "section-2-title",
+            "type": "text"
+          },
+          {
+            "id": "section-2-value",
+            "type": "text"
+          },
+          {
+            "id": "section-3-title",
+            "type": "text"
+          },
+          {
+            "id": "section-3-value",
+            "type": "text"
+          },
+          {
+            "id": "section-4-title",
+            "type": "text"
+          },
+          {
+            "id": "section-4-value",
+            "type": "text"
+          },
+          {
+            "id": "footer",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    {
+      "name": "dashboard-4k",
+      "receipt": {
+        "kind": "visual_demo",
+        "status": "complete",
+        "width": 3840,
+        "height": 2160,
+        "files": [
+          {
+            "format": "png",
+            "path": "分层验收/dashboard-4k.png",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "passed"
+          },
+          {
+            "format": "svg",
+            "path": "分层验收/dashboard-4k.svg",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "pptx",
+            "path": "分层验收/dashboard-4k.pptx",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "html",
+            "path": "分层验收/dashboard-4k.html",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "zip",
+            "path": "分层验收/dashboard-4k.zip",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          }
+        ],
+        "textRendering": "program",
+        "fontCheck": "passed",
+        "visual": "not_checked",
+        "interaction": "not_checked",
+        "dataMode": "demo",
+        "designVersion": "layered-1",
+        "assets": [
+          {
+            "id": "hero",
+            "width": 1536,
+            "height": 864,
+            "scale": 1.664,
+            "upscaled": true,
+            "detail": "not_checked"
+          }
+        ],
+        "contrast": {
+          "status": "passed",
+          "failed": []
+        },
+        "notes": [
+          "同一分层源稿生成各格式；文字不由生图模型画，图标为独立矢量对象",
+          "文案原样保留，不证明文案中的事实或错别字已被编辑校正",
+          "4K仅表示导出画布；素材放大倍率单独记录，未自动付费重画/放大"
+        ],
+        "errors": [],
+        "copyCheck": {
+          "status": "passed",
+          "failed": []
+        },
+        "layoutCheck": {
+          "status": "passed",
+          "failed": []
+        },
+        "designPath": "分层验收/dashboard-4k.design.json",
+        "visualReport": {
+          "status": "not_checked",
+          "reason": "未配置视觉能力、未生成PNG或原图超过核验上限"
+        },
+        "editableLayers": [
+          {
+            "id": "eyebrow",
+            "type": "text"
+          },
+          {
+            "id": "title",
+            "type": "text"
+          },
+          {
+            "id": "subtitle",
+            "type": "text"
+          },
+          {
+            "id": "section-1-icon",
+            "type": "icon"
+          },
+          {
+            "id": "section-1-title",
+            "type": "text"
+          },
+          {
+            "id": "section-1-value",
+            "type": "text"
+          },
+          {
+            "id": "section-2-icon",
+            "type": "icon"
+          },
+          {
+            "id": "section-2-title",
+            "type": "text"
+          },
+          {
+            "id": "section-2-value",
+            "type": "text"
+          },
+          {
+            "id": "section-3-icon",
+            "type": "icon"
+          },
+          {
+            "id": "section-3-title",
+            "type": "text"
+          },
+          {
+            "id": "section-3-value",
+            "type": "text"
+          },
+          {
+            "id": "section-4-icon",
+            "type": "icon"
+          },
+          {
+            "id": "section-4-title",
+            "type": "text"
+          },
+          {
+            "id": "section-4-value",
+            "type": "text"
+          },
+          {
+            "id": "hero-image",
+            "type": "image"
+          }
+        ]
+      }
+    },
+    {
+      "name": "baby-revised",
+      "receipt": {
+        "kind": "poster",
+        "status": "complete",
+        "width": 1080,
+        "height": 1920,
+        "files": [
+          {
+            "format": "png",
+            "path": "分层验收/baby-revised.png",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "passed"
+          },
+          {
+            "format": "svg",
+            "path": "分层验收/baby-revised.svg",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "pptx",
+            "path": "分层验收/baby-revised.pptx",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          }
+        ],
+        "textRendering": "program",
+        "fontCheck": "passed",
+        "visual": "not_checked",
+        "interaction": "not_checked",
+        "dataMode": "demo",
+        "designVersion": "layered-1",
+        "assets": [
+          {
+            "id": "hero",
+            "width": 1600,
+            "height": 1000,
+            "scale": 0.595,
+            "upscaled": false,
+            "detail": "not_checked"
+          }
+        ],
+        "contrast": {
+          "status": "passed",
+          "failed": []
+        },
+        "notes": [
+          "同一分层源稿生成各格式；文字不由生图模型画，图标为独立矢量对象",
+          "文案原样保留，不证明文案中的事实或错别字已被编辑校正",
+          "4K仅表示导出画布；素材放大倍率单独记录，未自动付费重画/放大"
+        ],
+        "errors": [],
+        "copyCheck": {
+          "status": "passed",
+          "failed": []
+        },
+        "layoutCheck": {
+          "status": "passed",
+          "failed": []
+        },
+        "designPath": "分层验收/baby-revised.design.json",
+        "visualReport": {
+          "status": "not_checked",
+          "reason": "未配置视觉能力、未生成PNG或原图超过核验上限"
+        },
+        "editableLayers": [
+          {
+            "id": "eyebrow",
+            "type": "text"
+          },
+          {
+            "id": "title",
+            "type": "text"
+          },
+          {
+            "id": "subtitle",
+            "type": "text"
+          },
+          {
+            "id": "hero-image",
+            "type": "image"
+          },
+          {
+            "id": "section-1-title",
+            "type": "text"
+          },
+          {
+            "id": "section-1-value",
+            "type": "text"
+          },
+          {
+            "id": "section-2-title",
+            "type": "text"
+          },
+          {
+            "id": "section-2-value",
+            "type": "text"
+          },
+          {
+            "id": "section-3-title",
+            "type": "text"
+          },
+          {
+            "id": "section-3-value",
+            "type": "text"
+          },
+          {
+            "id": "section-4-title",
+            "type": "text"
+          },
+          {
+            "id": "section-4-value",
+            "type": "text"
+          },
+          {
+            "id": "footer",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    {
+      "name": "baby-revised-demo",
+      "receipt": {
+        "kind": "visual_demo",
+        "status": "complete",
+        "width": 1080,
+        "height": 1920,
+        "files": [
+          {
+            "format": "png",
+            "path": "分层验收/baby-revised-demo.png",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "passed"
+          },
+          {
+            "format": "svg",
+            "path": "分层验收/baby-revised-demo.svg",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "pptx",
+            "path": "分层验收/baby-revised-demo.pptx",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "html",
+            "path": "分层验收/baby-revised-demo.html",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          },
+          {
+            "format": "zip",
+            "path": "分层验收/baby-revised-demo.zip",
+            "readback": "passed",
+            "structure": "passed",
+            "render": "not_checked"
+          }
+        ],
+        "textRendering": "program",
+        "fontCheck": "passed",
+        "visual": "not_checked",
+        "interaction": "not_checked",
+        "dataMode": "demo",
+        "designVersion": "layered-1",
+        "assets": [
+          {
+            "id": "hero",
+            "width": 1600,
+            "height": 1000,
+            "scale": 0.595,
+            "upscaled": false,
+            "detail": "not_checked"
+          }
+        ],
+        "contrast": {
+          "status": "passed",
+          "failed": []
+        },
+        "notes": [
+          "同一分层源稿生成各格式；文字不由生图模型画，图标为独立矢量对象",
+          "文案原样保留，不证明文案中的事实或错别字已被编辑校正",
+          "4K仅表示导出画布；素材放大倍率单独记录，未自动付费重画/放大"
+        ],
+        "errors": [],
+        "copyCheck": {
+          "status": "passed",
+          "failed": []
+        },
+        "layoutCheck": {
+          "status": "passed",
+          "failed": []
+        },
+        "designPath": "分层验收/baby-revised-demo.design.json",
+        "visualReport": {
+          "status": "not_checked",
+          "reason": "未配置视觉能力、未生成PNG或原图超过核验上限"
+        },
+        "editableLayers": [
+          {
+            "id": "eyebrow",
+            "type": "text"
+          },
+          {
+            "id": "title",
+            "type": "text"
+          },
+          {
+            "id": "subtitle",
+            "type": "text"
+          },
+          {
+            "id": "hero-image",
+            "type": "image"
+          },
+          {
+            "id": "section-1-title",
+            "type": "text"
+          },
+          {
+            "id": "section-1-value",
+            "type": "text"
+          },
+          {
+            "id": "section-2-title",
+            "type": "text"
+          },
+          {
+            "id": "section-2-value",
+            "type": "text"
+          },
+          {
+            "id": "section-3-title",
+            "type": "text"
+          },
+          {
+            "id": "section-3-value",
+            "type": "text"
+          },
+          {
+            "id": "section-4-title",
+            "type": "text"
+          },
+          {
+            "id": "section-4-value",
+            "type": "text"
+          },
+          {
+            "id": "footer",
+            "type": "text"
+          }
+        ]
+      }
+    }
+  ],
+  "minifiedBrowserCheck": {
+    "status": "passed",
+    "runtimeRevision": "46cf0a0f5d594975e423b8e8bcf195e7ca6c1095",
+    "buildRevision": "d2ce3a268af65b436663775d52ab68821c4cfb78",
+    "target": "es2022",
+    "compiledBytes": 167242,
+    "checks": [
+      "production minified module",
+      "standalone script from minified function",
+      "whole chart actual pointer hit area",
+      "high precision positive/negative values",
+      "keyword filter",
+      "zero script errors"
+    ],
+    "limitations": [
+      "浏览器压缩构建检查，不是真机APK安装"
+    ]
+  },
+  "localGate": {
+    "status": "stopped_after_same_frozen_revision_full_ci_success",
+    "buildRevision": "d2ce3a268af65b436663775d52ab68821c4cfb78",
+    "runtimeRevision": "46cf0a0f5d594975e423b8e8bcf195e7ca6c1095",
+    "ciRunId": 43668285239,
+    "stoppedGateRoots": [
+      48750
+    ],
+    "stoppedProcesses": 9,
+    "localPhasesStarted": [
+      "完整单元测试",
+      "代码检查（没定义的变量、浏览器同名全局、格式）",
+      "验证评测入口与耗时统计",
+      "验证架构实测固定版本、隔离与实际文件验收",
+      "验证项目菜单确认与隔离预览",
+      "验证Claude协议完成与断流取消",
+      "验证代码隔离与取消",
+      "验证四格式结构编辑与目录连续分页",
+      "验证Word、PPT、Excel真实转PDF",
+      "验证PPT和Excel字号及Word97转换",
+      "验证Word字体字号与有界真实分页",
+      "验证四种PPT风格、可编辑元素与真实PDF",
+      "验证政企汇报风格、原生渐变与真实PDF",
+      "验证六份PPT图片美学版式、真实PDF与逐页截图",
+      "验证中文图片程序排字、三格式交付与真实浏览器及Office渲染",
+      "验证4K大屏同设计PNG与离线交互Demo",
+      "验证分层海报、同稿Demo、中文可读性与Office真实导出",
+      "验证沉浸海报连续渐变、中文与可编辑PPTX",
+      "验证分享返回状态、原字节和同账号会话恢复（原生事件模拟）",
+      "验证四种Excel样式、公式筛选与真实PDF",
+      "验证文档场景模板、精确修改及真实PDF逐页检查",
+      "验证只排版正文保留与真实Word、PDF读回",
+      "验证上传Word结构、图片和原件保留",
+      "验证手机与桌面失败步骤显示实际错误",
+      "构建网页版",
+      "服务器模式端到端测试，打包服务器版",
+      "构建并验证手机版界面"
+    ],
+    "localUnitSummary": [
+      " Test Files  463 passed (463)",
+      "      Tests  3995 passed (3995)"
+    ],
+    "failureMarkers": [],
+    "note": "本机重复门禁未完整结束，不称本机完整全绿；同一冻结版本完整CI及成品核验已通过。"
+  },
+  "previousCandidates": {
+    "1.0.438": "主动取消，未正式发布",
+    "1.0.439": "完整CI及成品核验通过并于10:19:37正式发布；随后因高精度原值被坐标舍入发现问题，已两仓标预发布并退出稳定更新，资产保留；旧源稿丢失精度须用原数据重做"
+  },
+  "limitations": [
+    "真实用户配置的GPT/付费服务未测试，样例素材为原创矢量插画实际栅格化",
+    "用户手机/WeChat/Windows实际安装未测试",
+    "用户业务服务器未直接部署；只发布服务器更新包和索引",
+    "Claude尚未独立审核，交接文档已保存",
+    "本机重复门禁在同冻结完整CI成功后停止，不称本机完整全绿"
+  ]
+}

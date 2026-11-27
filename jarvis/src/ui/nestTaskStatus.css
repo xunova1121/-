@@ -1,0 +1,33 @@
+#inputbar > .nest-task-status {
+  display: block;
+  grid-column: 1 / -1;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  border-inline-start: 2px solid currentColor;
+  padding: 2px 9px;
+  margin: 2px 4px;
+  font: inherit;
+  font-size: .78rem;
+  text-align: start;
+  cursor: pointer;
+}
+#inputbar > .nest-task-status[hidden],
+.wb-desk:not([data-desk-chat]) #inputbar > .nest-task-status,
+#mobile-work-studio:has(.ws-scene[data-room-view="floor"]) #inputbar > .nest-task-status { display: none; }
+#mobile-work-studio[data-nest-immersive] .nest-task-status { color: #fff2d9; }
+.nest-file-preview {
+  box-sizing: border-box; width: min(94vw, 880px); max-height: 85dvh; overflow: auto;
+  padding: 12px; background: var(--panel,#fff9ed); color: var(--fg,#27251f);
+  border: 1px solid #88796388; border-radius: 12px;
+}
+.nest-file-preview::backdrop { background: #21181090; }
+.nest-file-preview > .viewer { display: block; margin: .5rem 0 0; }
+.nest-file-preview .viewer-body { min-height: 100px; }
+.ws-nest-result { display: flex; gap: 4px; align-items: center; }
+.ws-nest-result .ws-nest-file { flex: 1; min-width: 0; }
+.ws-nest-result .nest-edit { font-size: 12px; flex: none; }

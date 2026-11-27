@@ -1,0 +1,144 @@
+{
+  "version": "1.0.455",
+  "build": "c90eac85a163f4ac0b83ca027e9cc99038340d34",
+  "frozen": "6a7f8e7f4a36c6523b1ff1a2da1bd2362c9d0e85",
+  "publishedUtc": "2026-11-17T01:36:25Z",
+  "release": "https://github.com/xunova1121/weiyang-release/releases/tag/desktop-v1.0.455",
+  "workflow": {
+    "id": 43993709345,
+    "url": "https://github.com/xunova1121/-/actions/runs/43993709345",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "id": 133740455111,
+        "name": "清理旧的构建产物",
+        "conclusion": "success"
+      },
+      {
+        "id": 133740456842,
+        "name": "同步现有安装包到公开仓库",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 133740508174,
+        "name": "建草稿发布",
+        "conclusion": "success"
+      },
+      {
+        "id": 133740585989,
+        "name": "打包 (windows-latest)",
+        "conclusion": "success"
+      },
+      {
+        "id": 133740586096,
+        "name": "发布前完整验证",
+        "conclusion": "success"
+      },
+      {
+        "id": 133740586267,
+        "name": "打包安卓 App",
+        "conclusion": "success"
+      },
+      {
+        "id": 133750664826,
+        "name": "发布到 Releases",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "checks": [
+    "完整正式CI成功且构建提交一致",
+    "源和公开两仓正式稳定发布",
+    "公开latest指向本版",
+    "两仓七件资源名称尺寸和摘要一致",
+    "实际下载六件资源逐字节摘要符合公开清单",
+    "服务器更新索引版本和摘要对应真实归档",
+    "服务器999项冻结清单及998原样源文件完整一致",
+    "归档root属主且服务账号可读，版本正确",
+    "实际公开APK仍使用原证书",
+    "实际APK包名与新版版本号正确",
+    "实际APK客户端含云端源文件和预览去重修复",
+    "Windows包具有实际PE入口和原生渲染依赖",
+    "Windows实际后端包含预检和新折行协议",
+    "Windows实际ASAR版本及云端文件和预览修复正确",
+    "Windows更新索引包含实际安装器SHA512",
+    "两个固定latest入口均指向实际新版索引"
+  ],
+  "assets": [
+    {
+      "name": "Jarvis-1.0.455-android.apk",
+      "size": 18744337,
+      "digest": "sha256:ee48d4a0b92e523e5d71b3d3ef8a83e5a91d2c8a53cfccfab11503c9c2831f08"
+    },
+    {
+      "name": "Jarvis-1.0.455-win-x64.zip",
+      "size": 193712402,
+      "digest": "sha256:5924bb4d776660aa88076b02930ed19a476d455a0739491d154f8d0ce10fe5c5"
+    },
+    {
+      "name": "jarvis-server-1.0.455.tar.gz",
+      "size": 28627194,
+      "digest": "sha256:ce51644e574030955fe5c0a2d01243b067e54f456b8a1af6bf01e827c4946bff"
+    },
+    {
+      "name": "jarvis-server-latest.json",
+      "size": 136,
+      "digest": "sha256:339ec4820b04de814e9bed93315c5747fe8018ef46f6e77672ad439a6d1ea2f0"
+    },
+    {
+      "name": "Jarvis-Setup-1.0.455.exe",
+      "size": 152864778,
+      "digest": "sha256:38e8b223f72a99d45cb8dfbd7613ba8597047c9048873d3275cf9c9fd73bc94c"
+    },
+    {
+      "name": "Jarvis-Setup-1.0.455.exe.blockmap",
+      "size": 162212,
+      "digest": "sha256:348ee30c59e8992ad383bb1cf35a00cbc167f621e809ea2943b25d1970385ac4"
+    },
+    {
+      "name": "latest.yml",
+      "size": 347,
+      "digest": "sha256:d3c2e19a1c87eba6b0aae6882784c2c54a5b4aaab4d5ade9d411c46e78b849cf"
+    }
+  ],
+  "runtimeManifestFiles": 999,
+  "actualSourceFiles": 998,
+  "permissionEntries": 1175,
+  "apkCertificate": "56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6",
+  "serverDeployed": false,
+  "providerTested": false,
+  "deviceTested": false,
+  "validation": {
+    "formalCi": {
+      "testFilesPassed": 477,
+      "testsPassed": 4150,
+      "newCloudDeliveryChecksPassed": 26,
+      "allRequiredJobsPassed": true,
+      "originalAssertionsAndThresholdsPreserved": true
+    },
+    "local": {
+      "newCloudDeliveryChecksPassed": 26,
+      "initialUnitRun": {
+        "filesPassed": 470,
+        "filesFailed": 7,
+        "testsPassed": 4142,
+        "testsFailed": 8,
+        "failedFilesPassedOnSeparateRecheck": true
+      },
+      "firstGateInterruptedByEnvironmentRestart": true,
+      "resumedGate": {
+        "passed": 24,
+        "failed": 3,
+        "skipped": 2,
+        "failures": [
+          "office-typography: availability probe failed; separate real rendering retry timed out",
+          "spreadsheet-styles: expected PDF page count absent",
+          "smoke: animated holo-pet click stability timeout"
+        ]
+      },
+      "completeLocalGateGreen": false
+    },
+    "userOriginalSourceFilesInspected": false,
+    "claudeIndependentReviewCompleted": false
+  }
+}

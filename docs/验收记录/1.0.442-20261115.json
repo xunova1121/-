@@ -1,0 +1,799 @@
+{
+  "version": "1.0.442",
+  "runId": 43686798455,
+  "buildRevision": "9c22c7bb26a461c71ce1519ac6e03f1f5b2c835c",
+  "runtimeRevision": "b2c3b89afdea69c0c1ac9a98a0870fd8a52bc6db",
+  "status": "passed",
+  "checks": [
+    {
+      "label": "source/public正式版本一致且均已公开",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "源码Release绑定冻结构建提交",
+      "passed": true,
+      "detail": "9c22c7bb26a461c71ce1519ac6e03f1f5b2c835c"
+    },
+    {
+      "label": "两仓七份资产齐全",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "七份原件大小和GitHub SHA256一致",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "实际下载五份原件，摘要与正式资产一致",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "服务器更新索引版本/文件/SHA256一致",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "Windows安装器是真实PE文件",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "Windows更新索引版本和原EXE SHA512一致",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "服务器全运行文件与冻结清单逐字节一致",
+      "passed": true,
+      "detail": {
+        "manifestFiles": 967,
+        "checked": 966,
+        "revision": "b2c3b89afdea69c0c1ac9a98a0870fd8a52bc6db"
+      }
+    },
+    {
+      "label": "服务器归档全项可读/目录可进入、root属主且无链接",
+      "passed": true,
+      "detail": {
+        "entries": 1143,
+        "bad": []
+      }
+    },
+    {
+      "label": "服务器版本及包内清单相符",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "APK沿用原始签名证书",
+      "passed": true,
+      "detail": "56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6"
+    },
+    {
+      "label": "APK包名/版本名/版本号保持更新链",
+      "passed": true,
+      "detail": {
+        "package": "com.xunova.jarvis",
+        "versionName": "1.0.442",
+        "versionCode": 442
+      }
+    },
+    {
+      "label": "APK实际前端包含手机阅读与构图修复和原消息菜单/编辑链",
+      "passed": true,
+      "detail": {
+        "layered-1": true,
+        "design-current-state": true,
+        "改为引导": true,
+        "取消消息": true,
+        "/images/edits": true,
+        "poster_art": true,
+        "DESIGN_PRESENTATION_UNREADABLE": true,
+        "timeline-spine": true,
+        "newspaper-divider": true,
+        "phonePreview": true
+      }
+    },
+    {
+      "label": "公开latest固定入口指向本版原件：latest.yml",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "公开latest固定入口指向本版原件：jarvis-server-latest.json",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "downloaded": [
+    {
+      "name": "Jarvis-1.0.442-android.apk",
+      "bytes": 18707425,
+      "sha256": "97d790096cda8fc241bf950b754d3e32d5d0cc7c8cf1902f6e0ba6e14f06ba84"
+    },
+    {
+      "name": "Jarvis-Setup-1.0.442.exe",
+      "bytes": 142163998,
+      "sha256": "77c8cf48384e7144233f9690e4138ddedd8b7a23374ac3a24e58afe9f1e7e7c8"
+    },
+    {
+      "name": "jarvis-server-1.0.442.tar.gz",
+      "bytes": 28523447,
+      "sha256": "f742bdce6afde590cd6796c26626e04df9bfee15c648ad491e2af74c172a4b6f"
+    },
+    {
+      "name": "latest.yml",
+      "bytes": 347,
+      "sha256": "79b7fc595cb06a38343b9f3b0e51d711e13f3de5a2a1bc655dc3be617b1dddb0"
+    },
+    {
+      "name": "jarvis-server-latest.json",
+      "bytes": 136,
+      "sha256": "a7c56e247d22e217392ccc2aa00193d1344c9fd725442041a17f90653d636bb2"
+    }
+  ],
+  "assetMetadata": {
+    "Jarvis-1.0.442-android.apk": {
+      "size": 18707425,
+      "digest": "sha256:97d790096cda8fc241bf950b754d3e32d5d0cc7c8cf1902f6e0ba6e14f06ba84",
+      "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.442/Jarvis-1.0.442-android.apk"
+    },
+    "Jarvis-1.0.442-win-x64.zip": {
+      "size": 177936395,
+      "digest": "sha256:7e7e7b6725c7d9f120f3caf7ae2fd959db5305b4d8d5afb5ea4f068c2b0ee599",
+      "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.442/Jarvis-1.0.442-win-x64.zip"
+    },
+    "Jarvis-Setup-1.0.442.exe": {
+      "size": 142163998,
+      "digest": "sha256:77c8cf48384e7144233f9690e4138ddedd8b7a23374ac3a24e58afe9f1e7e7c8",
+      "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.442/Jarvis-Setup-1.0.442.exe"
+    },
+    "Jarvis-Setup-1.0.442.exe.blockmap": {
+      "size": 150257,
+      "digest": "sha256:12648908e34c90c5fbef03c1a4572157dd8b620f12e9fdf893d38c48964a5cdf",
+      "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.442/Jarvis-Setup-1.0.442.exe.blockmap"
+    },
+    "jarvis-server-1.0.442.tar.gz": {
+      "size": 28523447,
+      "digest": "sha256:f742bdce6afde590cd6796c26626e04df9bfee15c648ad491e2af74c172a4b6f",
+      "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.442/jarvis-server-1.0.442.tar.gz"
+    },
+    "jarvis-server-latest.json": {
+      "size": 136,
+      "digest": "sha256:a7c56e247d22e217392ccc2aa00193d1344c9fd725442041a17f90653d636bb2",
+      "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.442/jarvis-server-latest.json"
+    },
+    "latest.yml": {
+      "size": 347,
+      "digest": "sha256:79b7fc595cb06a38343b9f3b0e51d711e13f3de5a2a1bc655dc3be617b1dddb0",
+      "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.442/latest.yml"
+    }
+  },
+  "latest": {
+    "latest.yml": {
+      "bytes": 347,
+      "sha256": "79b7fc595cb06a38343b9f3b0e51d711e13f3de5a2a1bc655dc3be617b1dddb0"
+    },
+    "jarvis-server-latest.json": {
+      "bytes": 136,
+      "sha256": "a7c56e247d22e217392ccc2aa00193d1344c9fd725442041a17f90653d636bb2"
+    }
+  },
+  "apkCertificateSha256": "56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6",
+  "limitations": [
+    "实际下载五件；Windows ZIP与blockmap只对照两仓七件元数据摘要",
+    "APK核对签名证书和编译包元数据/实际JS，不是用户真机安装或独立apksigner全签名验证",
+    "未部署用户服务器；未测试实际付费模型或Claude独立复审"
+  ],
+  "ci": {
+    "jobs": [
+      {
+        "id": 132728861686,
+        "name": "清理旧的构建产物",
+        "status": "completed",
+        "conclusion": "success",
+        "run_id": 43686798455,
+        "logs_url": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "删除以前运行留下的构建产物",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3
+          }
+        ]
+      },
+      {
+        "id": 132728862487,
+        "name": "同步现有安装包到公开仓库",
+        "status": "completed",
+        "conclusion": "skipped",
+        "run_id": 43686798455,
+        "logs_url": null,
+        "steps": null
+      },
+      {
+        "id": 132728896562,
+        "name": "建草稿发布",
+        "status": "completed",
+        "conclusion": "success",
+        "run_id": 43686798455,
+        "logs_url": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "建草稿发布（只在正式分支/版本标签）",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3
+          }
+        ]
+      },
+      {
+        "id": 132728927667,
+        "name": "打包 (windows-latest)",
+        "status": "completed",
+        "conclusion": "success",
+        "run_id": 43686798455,
+        "logs_url": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2
+          },
+          {
+            "name": "Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3
+          },
+          {
+            "name": "安装网页依赖",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4
+          },
+          {
+            "name": "安装桌面版依赖",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5
+          },
+          {
+            "name": "版本号",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6
+          },
+          {
+            "name": "打包",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7
+          },
+          {
+            "name": "上传安装包（正式发版：直接传到草稿发布）",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8
+          },
+          {
+            "name": "上传安装包（验证分支：构建产物）",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 9
+          },
+          {
+            "name": "Post Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 17
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 18
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 19
+          }
+        ]
+      },
+      {
+        "id": 132728927673,
+        "name": "打包安卓 App",
+        "status": "completed",
+        "conclusion": "success",
+        "run_id": 43686798455,
+        "logs_url": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2
+          },
+          {
+            "name": "Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3
+          },
+          {
+            "name": "Run actions/setup-java@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4
+          },
+          {
+            "name": "安装依赖",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5
+          },
+          {
+            "name": "使用Ubuntu官方软件源（仅临时构建机）",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6
+          },
+          {
+            "name": "安装 ffmpeg 和海报中文字体（单元测试需真实栅格化与字体检查）",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7
+          },
+          {
+            "name": "单元测试",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8
+          },
+          {
+            "name": "构建手机版网页并同步到安卓工程",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 9
+          },
+          {
+            "name": "签名密钥",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 10
+          },
+          {
+            "name": "打包 APK",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 11
+          },
+          {
+            "name": "上传 APK（正式发版：直接传到草稿发布）",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 12
+          },
+          {
+            "name": "上传 APK（验证分支：构建产物）",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 13
+          },
+          {
+            "name": "Post Run actions/setup-java@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 24
+          },
+          {
+            "name": "Post Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 25
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 26
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 27
+          }
+        ]
+      },
+      {
+        "id": 132728927695,
+        "name": "发布前完整验证",
+        "status": "completed",
+        "conclusion": "success",
+        "run_id": 43686798455,
+        "logs_url": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2
+          },
+          {
+            "name": "Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3
+          },
+          {
+            "name": "使用Ubuntu官方软件源（仅临时构建机）",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4
+          },
+          {
+            "name": "安装依赖和测试浏览器",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5
+          },
+          {
+            "name": "安装 ffmpeg 和海报中文字体（单元测试需真实栅格化与字体检查）",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6
+          },
+          {
+            "name": "完整单元测试",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7
+          },
+          {
+            "name": "代码检查（没定义的变量、浏览器同名全局、格式）",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8
+          },
+          {
+            "name": "验证评测入口与耗时统计",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 9
+          },
+          {
+            "name": "验证架构实测固定版本、隔离与实际文件验收",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 10
+          },
+          {
+            "name": "验证多文件项目隔离执行与取消",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 11
+          },
+          {
+            "name": "验证项目菜单确认与隔离预览",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 12
+          },
+          {
+            "name": "验证Claude协议完成与断流取消",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 13
+          },
+          {
+            "name": "验证代码隔离与取消",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 14
+          },
+          {
+            "name": "安装Office真实渲染环境",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 15
+          },
+          {
+            "name": "验证四格式结构编辑与目录连续分页",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 16
+          },
+          {
+            "name": "验证Word、PPT、Excel真实转PDF",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 17
+          },
+          {
+            "name": "验证PPT和Excel字号及Word97转换",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 18
+          },
+          {
+            "name": "验证Word字体字号与有界真实分页",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 19
+          },
+          {
+            "name": "验证四种PPT风格、可编辑元素与真实PDF",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 20
+          },
+          {
+            "name": "验证政企汇报风格、原生渐变与真实PDF",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 21
+          },
+          {
+            "name": "验证六份PPT图片美学版式、真实PDF与逐页截图",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 22
+          },
+          {
+            "name": "验证中文图片程序排字、三格式交付与真实浏览器及Office渲染",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 23
+          },
+          {
+            "name": "验证4K大屏同设计PNG与离线交互Demo",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 24
+          },
+          {
+            "name": "验证分层海报、同稿Demo、中文可读性与Office真实导出",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 25
+          },
+          {
+            "name": "验证海报手机整图字号、三种结构、素材用途与真实Office导出",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 26
+          },
+          {
+            "name": "验证沉浸海报连续渐变、中文与可编辑PPTX",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 27
+          },
+          {
+            "name": "验证分享返回状态、原字节和同账号会话恢复（原生事件模拟）",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 28
+          },
+          {
+            "name": "验证四种Excel样式、公式筛选与真实PDF",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 29
+          },
+          {
+            "name": "验证文档场景模板、精确修改及真实PDF逐页检查",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 30
+          },
+          {
+            "name": "验证只排版正文保留与真实Word、PDF读回",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 31
+          },
+          {
+            "name": "验证上传Word结构、图片和原件保留",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 32
+          },
+          {
+            "name": "验证手机与桌面失败步骤显示实际错误",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 33
+          },
+          {
+            "name": "构建网页版",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 34
+          },
+          {
+            "name": "服务器模式端到端测试，打包服务器版",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 35
+          },
+          {
+            "name": "上传服务器版（正式发版：直接传到草稿发布）",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 36
+          },
+          {
+            "name": "上传服务器版（验证分支：构建产物）",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 37
+          },
+          {
+            "name": "构建并验证手机版界面",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 38
+          },
+          {
+            "name": "验证 Electron 全息桌面互动",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 39
+          },
+          {
+            "name": "网页版和单文件版端到端测试",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 40
+          },
+          {
+            "name": "保存验证截图和日志",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 41
+          },
+          {
+            "name": "Post Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 81
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 82
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 83
+          }
+        ]
+      },
+      {
+        "id": 132733646160,
+        "name": "发布到 Releases",
+        "status": "completed",
+        "conclusion": "success",
+        "run_id": 43686798455,
+        "logs_url": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "取回草稿发布里的安装包",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2
+          },
+          {
+            "name": "写发布说明",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3
+          },
+          {
+            "name": "发布",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4
+          },
+          {
+            "name": "检查安装包仓库令牌",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5
+          },
+          {
+            "name": "同步发布到安装包仓库",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7
+          }
+        ]
+      }
+    ]
+  },
+  "verification": {
+    "testFiles": 464,
+    "unitTests": 4022,
+    "unitStatus": "passed",
+    "existingLayeredChecks": 104,
+    "posterReadingChecks": 62,
+    "source": "同一冻结版本完整CI；新旧检查保持"
+  },
+  "localGate": {
+    "ciRun": 43686798455,
+    "buildRevision": "9c22c7bb26a461c71ce1519ac6e03f1f5b2c835c",
+    "reason": "同冻结版本完整CI已成功，实际公开包、原证书、全运行文件和两索引16项均通过；停止重复本机门禁，不称本机完整全绿",
+    "state": "duplicate_stopped",
+    "pid": 98165,
+    "group": 98162,
+    "log": "/tmp/weiyang-poster-rework-release-gate-442.log"
+  },
+  "publishedAt": "2026-11-15T07:06:22Z",
+  "publishedAtBeijing": "2026-11-15T15:06:22+08:00"
+}

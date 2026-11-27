@@ -1,0 +1,918 @@
+{
+  "results": [
+    {
+      "name": "正式PC页面和云服务器使用不同源",
+      "ok": true
+    },
+    {
+      "name": "ordinary 真实点击发送后收到完整回复",
+      "ok": true
+    },
+    {
+      "name": "普通聊天提交任务并读取事件流",
+      "ok": true
+    },
+    {
+      "name": "普通聊天保存在本人服务器会话",
+      "ok": true
+    },
+    {
+      "name": "health-agent 真实点击发送后收到完整回复",
+      "ok": true
+    },
+    {
+      "name": "内置智能体也经远端任务完成",
+      "ok": true
+    },
+    {
+      "name": "pc-bridge 真实点击发送后收到完整回复",
+      "ok": true
+    },
+    {
+      "name": "电脑任务使用模型桥，不错误提交云端执行任务",
+      "ok": true
+    },
+    {
+      "name": "实际浏览器对任务和模型桥发送OPTIONS预检",
+      "ok": true
+    },
+    {
+      "name": "三类正常请求没有连接失败或脚本异常",
+      "ok": true
+    },
+    {
+      "name": "断线重连提示真实显示在PC回答末尾",
+      "ok": true
+    },
+    {
+      "name": "持续断线在有限时间内停止转圈",
+      "ok": true
+    },
+    {
+      "name": "保留半句并说明原任务可能仍执行、不要重复提交",
+      "ok": true
+    },
+    {
+      "name": "断线不会重新提交或停止原任务",
+      "ok": true
+    },
+    {
+      "name": "断线建议仅提供原对话和连接设置，不提供重发",
+      "ok": true
+    },
+    {
+      "name": "断线处理没有脚本异常或未捕获错误",
+      "ok": true
+    }
+  ],
+  "requests": [
+    {
+      "method": "OPTIONS",
+      "path": "/api/server/config"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/server/skills"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/config"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/skills"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/server/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/server/schedules"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/schedules"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/server/update"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/update"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/health"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/tasks"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/tasks/tmwd11rrlr8c40z/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11rrlr8c40z/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/agent-profiles"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-profiles"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/studio/preferences"
+    },
+    {
+      "method": "GET",
+      "path": "/api/studio/preferences"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/studio/works"
+    },
+    {
+      "method": "GET",
+      "path": "/api/studio/works"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/studio/preferences"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/tasks/tmwd11t0c1b72r0/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11t0c1b72r0/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/sessions/cmwd11st9mxkxbe"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/cmwd11st9mxkxbe"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/sessions/cmwd11tfyzdjsji"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/cmwd11tfyzdjsji"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/status"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/server/pc-model"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/pc-model"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/sessions/cmwd11tfyzdjsji/append"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sessions/cmwd11tfyzdjsji/append"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/server/notices"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/notices"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/tasks/tmwd11uablexpbo/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events"
+    }
+  ],
+  "browserRequests": [
+    {
+      "method": "GET",
+      "path": "/api/server/config"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/skills"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/schedules"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/update"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/health"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11rrlr8c40z/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-profiles"
+    },
+    {
+      "method": "GET",
+      "path": "/api/studio/preferences"
+    },
+    {
+      "method": "GET",
+      "path": "/api/studio/works"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/studio/preferences"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11t0c1b72r0/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/cmwd11st9mxkxbe"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/cmwd11tfyzdjsji"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/pc-model"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sessions/cmwd11tfyzdjsji/append"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/notices"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash"
+    }
+  ],
+  "responses": [
+    {
+      "method": "GET",
+      "path": "/api/server/config",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/status",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/schedules",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/update",
+      "status": 403
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/skills",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11rrlr8c40z/events",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-profiles",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/studio/preferences",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/studio/works",
+      "status": 200
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/studio/preferences",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11t0c1b72r0/events",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/cmwd11st9mxkxbe",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/cmwd11tfyzdjsji",
+      "status": 404
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/status",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/pc-model",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/sessions/cmwd11tfyzdjsji/append",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/notices",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events",
+      "status": 200
+    }
+  ],
+  "failed": [
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11rrlr8c40z/events",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11t0c1b72r0/events",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/pc-model",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events",
+      "error": "net::ERR_INCOMPLETE_CHUNKED_ENCODING"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/tmwd11uablexpbo/events",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/trash",
+      "error": "net::ERR_CONNECTION_REFUSED"
+    }
+  ],
+  "errors": [],
+  "rejections": [],
+  "adapterCalls": [
+    {
+      "kind": "task",
+      "model": "fixture-chat"
+    },
+    {
+      "kind": "task",
+      "model": "fixture-chat"
+    },
+    {
+      "kind": "bridge",
+      "model": "fixture-chat"
+    },
+    {
+      "kind": "task",
+      "model": "fixture-chat"
+    }
+  ]
+}

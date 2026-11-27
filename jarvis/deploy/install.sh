@@ -1,0 +1,205 @@
+#!/usr/bin/env bash
+# 未央服务器版：安装 / 更新（同一个脚本）。在服务器上用 root 运行：
+#   bash install.sh jarvis-server-1.0.xxx.tar.gz
+# 做的事：
+#   1. 解压到 /opt/jarvis/app-<版本>，用国内镜像安装依赖（不运行任何安装脚本）
+#   2. 第一次安装时：建一个专门运行未央的系统账号 jarvis，问你设访问密码，写进 /opt/jarvis/jarvis.env（只有 root 能读）
+#   3. 注册成系统服务 jarvis（开机自启、崩了自动重启、最多用 1.2GB 内存），只在本机 127.0.0.1:8787 上监听
+#   另外：补装 LibreOffice 和 ffmpeg（文档检查与SVG备用渲染；失败明确提示，不伪装验收成功）
+#   4. 切换到新版本并重启；旧版本保留最近 2 个，出问题可以切回去
+#   5. 装上自动更新：每天凌晨 4 点左右（北京时间）检查新版本；手机 / 电脑上点“立即更新服务器”也会马上更新（见 update.sh）
+# 你的对话、记忆、文件在 /opt/jarvis/data，更新不会动它。
+set -euo pipefail
+
+PKG="${1:-}"
+if [[ -z "$PKG" ]]; then PKG="$(ls -t jarvis-server-*.tar.gz 2>/dev/null | head -1 || true)"; fi
+[[ -f "$PKG" ]] || { echo "用法：bash install.sh jarvis-server-1.0.xxx.tar.gz（找不到安装包）"; exit 1; }
+[[ "$(id -u)" == 0 ]] || { echo "请用 root 运行"; exit 1; }
+NODE="$(command -v node || true)"
+[[ -n "$NODE" ]] || { echo "没找到 Node.js，请先安装 Node 22（宝塔：软件商店 → Node.js 版本管理器）"; exit 1; }
+"$NODE" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)' || { echo "Node.js 版本太旧（需要 20 以上），当前 $("$NODE" -v)"; exit 1; }
+NPM="$(dirname "$NODE")/npm"; [[ -x "$NPM" ]] || NPM="$(command -v npm)"
+
+BASE=/opt/jarvis
+VER="$(basename "$PKG" .tar.gz | sed 's/^jarvis-server-//')"
+APP="$BASE/app-$VER"
+mkdir -p "$BASE" "$BASE/data"
+
+echo "== 解压 $VER"
+rm -rf "$APP.tmp" && mkdir -p "$APP.tmp"
+tar -xzf "$PKG" -C "$APP.tmp" --strip-components=1
+echo "== 安装依赖（国内镜像，几分钟）"
+(cd "$APP.tmp" && "$NPM" install --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund --registry=https://registry.npmmirror.com)
+rm -rf "$APP" && mv "$APP.tmp" "$APP"
+
+# SVG备用解码：不能假定服务器/CI镜像自带ffmpeg；不自动开启第三方RPM软件源。
+if [[ "${JARVIS_NO_FFMPEG:-}" != 1 ]] && ! command -v ffmpeg >/dev/null 2>&1; then
+  echo "== 安装 ffmpeg（SVG备用渲染）"
+  if command -v apt-get >/dev/null 2>&1; then
+    (export DEBIAN_FRONTEND=noninteractive; timeout 360 apt-get update -qq && timeout 360 apt-get install -y -qq --no-install-recommends ffmpeg) \
+      || echo "== 缺 ffmpeg：安装失败，SVG备用渲染不可用；请按部署说明补装"
+  elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
+    FFMPEG_PM="$(command -v dnf || command -v yum)"
+    timeout 360 "$FFMPEG_PM" install -y -q ffmpeg \
+      || echo "== 缺 ffmpeg：当前软件源安装失败；请从系统支持的软件源补装，不自动启用第三方源"
+  else
+    echo "== 缺 ffmpeg：未找到包管理器，请按部署说明手动安装"
+  fi
+fi
+
+# Office 真实渲染（生成的 Word / PPT / Excel 转成 PDF 逐页检查）：没装 LibreOffice 就装上，带中文字体。
+# 只装一次（几百 MB，几分钟）；装不上不影响使用，只是文档少一步检查。不想装：JARVIS_NO_OFFICE=1 bash install.sh …
+if [[ "${JARVIS_NO_OFFICE:-}" != 1 ]] && ! command -v soffice >/dev/null 2>&1; then
+  echo "== 安装 Office 渲染（LibreOffice + 中文字体，只装一次，几分钟）"
+  if command -v apt-get >/dev/null 2>&1; then
+    (export DEBIAN_FRONTEND=noninteractive; timeout 1200 apt-get update -qq && timeout 1800 apt-get install -y -qq --no-install-recommends libreoffice-writer libreoffice-impress libreoffice-calc fonts-noto-cjk) \
+      || echo "== Office 渲染没装上（不影响使用，文档少一步检查）"
+  elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
+    PM="$(command -v dnf || command -v yum)"
+    timeout 1800 "$PM" install -y -q libreoffice-writer libreoffice-impress libreoffice-calc google-noto-sans-cjk-ttc-fonts \
+      || timeout 1800 "$PM" install -y -q libreoffice-writer libreoffice-impress libreoffice-calc \
+      || echo "== Office 渲染没装上（不影响使用，文档少一步检查）"
+  else
+    echo "== 没找到 apt / dnf，跳过 Office 渲染（不影响使用）"
+  fi
+fi
+
+# 海报文字栅格化独立于 Office；已有 Office 的升级也可能缺少字体。
+# 仅跳过字体可设 JARVIS_NO_POSTER_FONTS=1；失败不能阻断既有服务的安装与启动。
+bash "$APP/deploy/install-poster-fonts.sh" \
+  || echo "== 海报字体准备失败，继续安装服务；中文海报 PNG 暂不可用，请按上方提示补装"
+
+if ! id jarvis >/dev/null 2>&1; then
+  echo "== 新建系统账号 jarvis（不能登录，只用来运行未央）"
+  useradd --system --home-dir "$BASE" --shell /sbin/nologin jarvis
+fi
+
+ENVF="$BASE/jarvis.env"
+if [[ ! -f "$ENVF" ]]; then
+  echo "== 设置访问密码（手机 / 电脑登录用，至少 6 位；输入时不显示）"
+  while :; do
+    read -rsp "访问密码：" P1; echo
+    read -rsp "再输一次：" P2; echo
+    [[ "$P1" == "$P2" && ${#P1} -ge 6 ]] && break
+    echo "两次不一样或少于 6 位，请重输"
+  done
+  umask 077
+  printf 'PORT=8787\nHOST=127.0.0.1\nJARVIS_DATA=%s/data\nJARVIS_PASSWORD=%s\nJARVIS_MAX_TASKS=1\nNODE_OPTIONS=--max-old-space-size=512\n' "$BASE" "$P1" > "$ENVF"
+  unset P1 P2
+fi
+chmod 600 "$ENVF"
+chown -R jarvis:jarvis "$BASE/data"
+# 记下 Node 所在目录：自动更新由系统定时运行，那时 PATH 里找不到 nvm 装的 Node 和 npm
+dirname "$NODE" > "$BASE/node-dir"
+# Node 装在 jarvis 账号进不去的地方（比如 /root/.nvm）：复制一份到 /usr/local/bin/node-jarvis 给未央用
+if ! su -s /bin/sh jarvis -c "\"$NODE\" -v" >/dev/null 2>&1; then
+  install -m 755 "$NODE" /usr/local/bin/node-jarvis
+  NODE=/usr/local/bin/node-jarvis
+  echo "== Node 在 jarvis 账号读不到的目录里，已复制一份到 $NODE"
+fi
+chown -R root:root "$APP"
+# 权限根治（1.0.419 事故：包里文件 0600，jarvis 账号读不了，服务起不来）：
+# 只规范程序目录——目录755、文件644（原本可执行的保留755），不给别人写权限；
+# 不碰 data、jarvis.env 和密钥；find 不跟随符号链接，不会越界改包外文件。
+chmod 755 "$APP"
+find "$APP" -type d -exec chmod 755 {} +
+find "$APP" -type f -perm -u+x -exec chmod 755 {} +
+find "$APP" -type f ! -perm -u+x -exec chmod 644 {} +
+# 切换前先用 jarvis 账号真实读一遍：读不了就中止，不把坏版本切成当前版本。
+# 注意进不去目录时 find 没有正常输出、只有报错，所以关键文件直接试读，find 的报错也算进证据。
+chmod 755 "$BASE"
+if ! su -s /bin/sh jarvis -c "test -x '$APP' && test -r '$APP/server/server.mjs' && test -r '$APP/package.json' && test -r '$APP/dist/index.html'"; then
+  echo "== 安装中止（没有切换版本）：jarvis 账号读不了新版本的程序目录或入口文件"; exit 1
+fi
+UNREADABLE="$(su -s /bin/sh jarvis -c "find '$APP' \( -type d ! -executable \) -o \( -type f ! -readable \) 2>&1" | head -3 || true)"
+if [[ -n "$UNREADABLE" ]]; then
+  echo "== 安装中止（没有切换版本）：jarvis 账号读不了新版本里的这些文件："; echo "$UNREADABLE"; exit 1
+fi
+PREV="$(readlink "$BASE/current" 2>/dev/null || true)"
+ln -sfn "$APP" "$BASE/current"
+
+cat > /etc/systemd/system/jarvis.service <<UNIT
+[Unit]
+Description=未央 WEIYANG AI 服务器版
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=jarvis
+Group=jarvis
+WorkingDirectory=$BASE/current
+EnvironmentFile=$ENVF
+ExecStart=$NODE server/server.mjs
+Restart=always
+RestartSec=3
+# 转 PDF 时 LibreOffice 也算在这个服务里，留够余量
+MemoryMax=1200M
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=$BASE/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+# 自动更新：定时检查一次；手机上点“立即更新”会在 data 目录里留一个 update-request 文件，看到就马上更新
+install -m 755 "$APP/deploy/update.sh" "$BASE/update.sh"
+cat > /etc/systemd/system/jarvis-update.service <<UNIT
+[Unit]
+Description=未央服务器版：检查并安装新版本
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash $BASE/update.sh
+UNIT
+cat > /etc/systemd/system/jarvis-update.timer <<UNIT
+[Unit]
+Description=未央服务器版：每天检查一次新版本
+
+[Timer]
+# 20:00 UTC = 北京时间凌晨 4 点，再随机错开最多 1 小时
+OnCalendar=*-*-* 20:00:00 UTC
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+cat > /etc/systemd/system/jarvis-update.path <<UNIT
+[Unit]
+Description=未央服务器版：手机上点了“立即更新服务器”
+
+[Path]
+PathExists=$BASE/data/update-request
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable jarvis >/dev/null 2>&1
+systemctl enable --now jarvis-update.timer jarvis-update.path >/dev/null 2>&1 || echo "== 自动更新没开起来（不影响使用）：systemctl status jarvis-update.timer"
+systemctl restart jarvis
+# 等它启动（最多 20 秒）
+for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8787/api/health 2>/dev/null | grep -q '"serverMode":true' && break; sleep 1; done
+if curl -fsS http://127.0.0.1:8787/api/health | grep -q '"serverMode":true'; then
+  echo "== 好了：未央 $VER 已在运行（本机 127.0.0.1:8787）"
+else
+  echo "== 启动好像没成功，看看日志：journalctl -u jarvis -n 50"
+  # 新版本起不来就自动切回旧版本，别让更新失败把服务一直打挂
+  if [[ -n "${PREV:-}" && -d "$PREV" && "$PREV" != "$APP" ]]; then
+    echo "== 自动切回旧版本 $(basename "$PREV")"
+    ln -sfn "$PREV" "$BASE/current"
+    systemctl restart jarvis
+    for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8787/api/health 2>/dev/null | grep -q '"serverMode":true' && break; sleep 1; done
+    curl -fsS http://127.0.0.1:8787/api/health 2>/dev/null | grep -q '"serverMode":true' \
+      && echo "== 已回到旧版本，服务恢复；新版本 $VER 没有启用" \
+      || echo "== 旧版本也没起来，请看日志：journalctl -u jarvis -n 50"
+  fi
+  exit 1
+fi
+# 只留最近 2 个旧版本
+ls -dt "$BASE"/app-* 2>/dev/null | tail -n +4 | xargs -r rm -rf

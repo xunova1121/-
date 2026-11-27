@@ -1,0 +1,244 @@
+/* 热区跟随家具移动。媒体面板直接叠在同一个场景中，不参与聊天布局。 */
+.work-studio-view button.ws-device {
+  position: absolute; z-index: 4; border: 0; padding: 0; min-width: 26px; min-height: 25px;
+  color: #f6f8d9; cursor: pointer; background: transparent; border-radius: 4px;
+  transform: translate(-50%, -50%); touch-action: manipulation;
+}
+.ws-device[data-media-device="monitor"] { left: 89.9%; top: 44%; width: 11%; height: 10%; }
+.ws-device[data-media-device="tv"] { left: 83%; top: 71.5%; width: 14%; height: 14%; }
+.ws-device:hover, .ws-device:focus-visible { outline: 2px solid #f2c476; outline-offset: 1px; }
+.ws-mini-screen {
+  position: absolute; display: -webkit-box; left: 21%; top: 23%; width: 58%; height: 53%;
+  padding: 3%; overflow: hidden; box-sizing: border-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  font: bold clamp(2px,.7cqw,7px)/1.18 var(--font-ui,sans-serif); letter-spacing: .02em;
+  text-align: left; color: #d9efbc; background: #294435; border-radius: 12%; transform: skewY(5deg);
+}
+.work-studio-view button.ws-monitor-ticker {
+  position: absolute; z-index: 3; inset: auto auto 5px 5px; display: flex; gap: 7px; align-items: baseline;
+  max-width: calc(100% - 10px); min-height: 26px; padding: 3px 9px; border: 1px solid #decfaf;
+  border-radius: 6px; background: #fff9e9f5; color: #2b382f; box-shadow: 0 2px 5px #332b201f;
+  text-align: start; cursor: pointer; font: 550 12px/1.5 var(--font-ui,sans-serif);
+}
+.ws-monitor-ticker small { flex: none; color: #536e5c; font-size: 10px; }
+.ws-monitor-ticker span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.work-studio-view .ws-media-panel {
+  position: absolute; z-index: 5; inset: 5% auto auto 3%;
+  display: flex; flex-direction: column; gap: 7px; width: min(82%, 38rem);
+  max-height: 90%; padding: clamp(9px,2.5cqw,20px); min-width: 0; min-height: 0;
+  overflow: hidden; background: var(--ws-panel); color: var(--ws-ink);
+  border: 1px solid var(--ws-line); border-radius: 12px;
+  box-shadow: 0 7px 28px #19261750;
+}
+.work-studio-view .ws-media-panel[data-device="monitor"] .ws-media-header { border-bottom: 2px solid var(--ws-on-tint); }
+.work-studio-view .ws-media-panel[data-device="monitor"] .ws-media-header h3,
+.work-studio-view .ws-media-panel[data-device="monitor"] .ws-media-title { font-family: "Songti SC","Noto Serif CJK SC",serif; }
+.work-studio-view .ws-media-panel [hidden], .work-studio-view .ws-media-panel[hidden],
+.work-studio-view .ws-monitor-ticker[hidden] { display: none !important; }
+.ws-media-header { display: flex; flex: none; align-items: center; gap: 5px; border-bottom: 1px solid var(--ws-line); padding-bottom: 5px; }
+.ws-media-header h3 { flex: 1; margin: 0; color: var(--ws-ink); font: 650 14px/1.4 var(--font-ui,sans-serif); }
+.ws-media-scroll { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.ws-media-news, .ws-media-work, .ws-media-tv { display: grid; align-content: start; gap: 6px; }
+.ws-media-title { margin: 0; color: var(--ws-ink); font: 650 clamp(16px,3.7cqw,22px)/1.4 var(--font-ui,sans-serif); overflow-wrap: anywhere; }
+.ws-media-credit, .ws-media-updated { margin: 0; color: var(--ws-dim); font: 12px/1.45 var(--font-ui,sans-serif); }
+.ws-media-credit:empty, .ws-media-updated:empty { display: none; }
+.ws-media-actions, .ws-media-nav, .ws-media-channels { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.work-studio-view .ws-media-panel :is(button,a) {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 4px 9px;
+  border: 1px solid var(--ws-line); border-radius: 7px; background: var(--ws-panel); color: var(--ws-ink);
+  font: 550 12px/1.4 var(--font-ui,sans-serif); cursor: pointer; text-decoration: none;
+}
+.work-studio-view .ws-media-panel :is(.ws-media-primary,[aria-pressed="true"]) { background: #315e4c; color: #fff; border-color: #315e4c; }
+.work-studio-view .ws-media-panel a { color: var(--ws-on-tint); text-decoration: underline; text-underline-offset: 2px; }
+.ws-media-panel :is(button,a):focus-visible, .ws-monitor-ticker:focus-visible { outline: 2px solid var(--ws-on-tint); outline-offset: -2px; }
+.ws-media-panel button:disabled { opacity: .55; cursor: default; }
+/* 镜头对准电视时，节目占据主要面积。右侧留出真实工位，底边是遥控器。 */
+.work-studio-view .ws-scene:has(.ws-media-panel[data-device="tv"]) {
+  --tv-inset: 1cqw;
+  /* 预留 40px 遥控区并计入机壳厚度。聊天队列变高时，剩余画幅也可充分利用。 */
+  --tv-width: min(85.5cqw, calc((100cqh - 42px) * 1.7777 - .4cqw));
+}
+.work-studio-view[data-floor-media="tv"][data-visible="true"] .ws-scene {
+  background: #bda27e url('./assets/workStudio/workshop.webp') center / cover;
+}
+.work-studio-view .ws-media-panel[data-device="tv"] {
+  inset: 0; width: auto; max-height: none; padding: 0; display: block;
+  border: none; border-radius: 0; box-shadow: none; background: transparent; pointer-events: none;
+}
+.ws-media-panel[data-device="tv"] .ws-media-header {
+  position: absolute; z-index: 1; inset: auto 1% 4px auto; padding: 0; border: 0; pointer-events: auto;
+}
+.ws-media-panel[data-device="tv"]::before {
+  content: ''; position: absolute; inset: auto 0 0; height: 39px;
+  background: var(--ws-panel); border-top: 1px solid var(--ws-line); pointer-events: none;
+}
+.ws-media-panel[data-device="tv"] .ws-media-header h3 { display: none; }
+.ws-media-panel[data-device="tv"] .ws-media-scroll,
+.ws-media-panel[data-device="tv"] .ws-media-tv { display: contents; }
+.ws-media-receiver {
+  position: absolute; left: var(--tv-inset); top: calc(50% - 20px); transform: translateY(-50%);
+  width: var(--tv-width); min-width: 0; padding: .75% 1.9% .9% .65%;
+  box-sizing: border-box; border-radius: clamp(6px,1.9cqw,19px);
+  background: repeating-linear-gradient(0deg,transparent 0 2px,#51301d16 2px 3px),
+    linear-gradient(125deg,#d3ad75,#99673d 12%,#684227 56%,#a77542 81%,#633c24);
+  box-shadow: inset 1px 1.5px 1px #ecd1a0,inset -2px -2px 2px #513824,0 4px 9px #211b1690;
+  pointer-events: auto;
+}
+.ws-tv-glass {
+  position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; isolation: isolate;
+  border-radius: clamp(4px,1.4cqw,14px); background: #13201c; color: #eef5e9;
+  box-shadow: 0 0 0 1.5px #342c23,0 0 0 2.5px #bfa06e;
+}
+.ws-tv-grille {
+  position: absolute; right: .45%; top: 9%; bottom: 9%; width: 1.1%; border-radius: 7px;
+  background: repeating-linear-gradient(0deg,#4e3726 0 1px,transparent 2px 4px);
+}
+.ws-tv-grille::before,.ws-tv-grille::after {
+  content: ''; position: absolute; top: 0; left: 0; width: 100%; aspect-ratio: 1;
+  border-radius: 50%; background: linear-gradient(125deg,#d1bb8c,#8f704a 47%,#58452f 48%,#b69b6e 56%);
+  box-shadow: 0 1px 2px #30261e;
+}
+.ws-tv-grille::after { top: 16%; }
+.ws-media-remote {
+  position: absolute; inset: auto calc(2% + 67px) 4px 1%; gap: 4px; display: flex; align-items: center;
+  overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; pointer-events: auto;
+}
+.ws-media-remote > *, .ws-media-channels > * { flex: none; }
+.ws-media-remote .ws-media-channels { flex-wrap: nowrap; gap: 3px; }
+.work-studio-view .ws-media-panel[data-device="tv"] :is(button,a) {
+  white-space: nowrap; padding: 4px 7px; min-height: 31px; background: #fffaeb; color: #2b4033; border-color: #e2d7c5;
+}
+.work-studio-view .ws-media-panel[data-device="tv"] [aria-pressed="true"] { background: #335442; border-color: #335442; color: #fffbed; }
+@media (prefers-reduced-motion: no-preference) {
+  .ws-media-panel[data-device="tv"]:not([hidden]) .ws-media-receiver { animation: ws-tv-approach .24s ease-out; }
+  @keyframes ws-tv-approach { from { transform: translate(10%,-42%) scale(.82); opacity: .5; } }
+}
+/* 灯和显示器随原画一起推到右边，保留同一组可点家具。 */
+.work-studio-view[data-floor-media][data-workshop] .ws-floorplan {
+  width: 125%; left: 60%; bottom: 50%; transform: translate(-50%,50%);
+}
+.ws-scene:not(:has(.ws-media-panel[data-device="tv"])) .ws-floorplan { translate: none !important; }
+.work-studio-view[data-floor-media="tv"][data-workshop] .ws-scene .ws-floorplan {
+  /* 按当前工位的脚底取景。书架、纸面、键盘和角色同步移动，工作时仍使用原动作。 */
+  width: 94%; bottom: auto; top: 73%;
+  left: calc((100% + var(--tv-inset) + var(--tv-width)) / 2);
+  transform: translate(calc(0% - var(--ws-station-x)),calc(var(--ws-station-floor) - 100%));
+}
+.work-studio-view[data-floor-media="tv"][data-workshop] .ws-scene[data-life-place] .ws-floorplan {
+  transform: translate(calc(0% - var(--life-x)),calc(0% - var(--life-ground)));
+}
+/* 看电视时才把坐姿画到机壳前。走动和工作仍在房间里进行。 */
+.ws-tv-watcher { display: none; pointer-events: none; }
+.ws-scene[data-life-pose="tv"][data-life-phase="settled"]:has(.ws-media-panel[data-device="tv"]) .ws-life-actor {
+  visibility: hidden;
+}
+.ws-scene[data-life-pose="tv"][data-life-phase="settled"] .ws-media-panel[data-device="tv"] .ws-media-receiver {
+  --watcher-size: min(20cqw, 30cqh);
+  padding-block: .45cqw .3cqw; translate: 0 -.45cqw;
+}
+.ws-scene[data-life-pose="tv"][data-life-phase="settled"] .ws-media-panel[data-device="tv"] .ws-media-receiver::after {
+  content: ''; position: absolute; pointer-events: none;
+  left: calc(100% - 2.15cqw + var(--watcher-size) * .05);
+  bottom: calc(-8px - var(--watcher-size) * .04); width: calc(var(--watcher-size) * .47);
+  height: calc(var(--watcher-size) * .09);
+  background: radial-gradient(ellipse closest-side, #44332880, transparent);
+}
+.ws-scene[data-life-pose="tv"][data-life-phase="settled"] .ws-media-panel[data-device="tv"] .ws-tv-watcher {
+  display: block; position: absolute; z-index: 1;
+  left: calc(100% - 2.15cqw); bottom: calc(-8px - var(--watcher-size) * .068);
+  width: var(--watcher-size); aspect-ratio: 1;
+  /* 图集左半幅包含未央和凳子，镜像后面对电视；落脚点与右侧机壳重叠。 */
+  background: url('./assets/workStudio/workshop-life.webp') 40% 50% / 600% 300% no-repeat;
+  --life-frame-a: 40%; --life-frame-b: 60%;
+  clip-path: inset(0 46% 0 0); scale: -1 1; translate: -46% 0;
+}
+.ws-scene[data-life-period="night"][data-lamp-lit="off"] .ws-tv-watcher { filter: brightness(.82); }
+@media (prefers-reduced-motion: no-preference) {
+  body:not(.reduced-motion) .ws-tv-watcher { animation: ws-life-contact 4s steps(1,end) infinite; }
+}
+.work-studio-view[data-floor-media] .ws-scene > .ws-room-tools { visibility: hidden; }
+.work-studio-view[data-floor-media="tv"] .ws-scene:not([data-life-pose="tv"]):has(.ws-media-panel[data-device="tv"]) > .ws-room-tools {
+  visibility: visible; inset: 17% 1% auto auto; padding: 0;
+}
+.work-studio-view[data-floor-media="tv"] .ws-room-tools > :not([data-room-action="light"]) { display: none; }
+.work-studio-view[data-floor-media="tv"] .ws-room-tools [data-room-action="light"] { padding-inline: 5px; }
+@container (max-width: 480px) {
+  .work-studio-view[data-floor-media="tv"] .ws-room-tools [data-room-action="light"]::before { display: none; }
+}
+.wb-desk .work-studio-view[data-floor-media] .ws-scene { aspect-ratio: 1.6; }
+.work-studio-view[data-floor-media] :is(.ws-caption,.ws-timeline,.ws-playback-controls) { display: none; }
+.work-studio-view[data-floor-media="monitor"] .ws-floorplan {
+  width: max(125cqw,125cqh); left: auto; right: 6%; transform: translate(22%,50%);
+}
+@container workbench-area (min-width: 731px) {
+  body.workbench .wb-desk:has([data-floor-media="monitor"]) {
+    grid-template-columns: minmax(0,1.9fr) minmax(252px,1fr);
+  }
+  .wb-desk .work-studio-view[data-floor-media="monitor"] :is(.ws-performance,.ws-scene) { flex: 1; }
+  .wb-desk .work-studio-view[data-floor-media="monitor"] .ws-scene {
+    aspect-ratio: auto; border-radius: 14px;
+  }
+  body.workbench .wb-desk:has([data-wide-workshop]) {
+    grid-template-columns: minmax(0,1fr); grid-template-rows: minmax(0,1fr) minmax(134px,18%); gap: 8px;
+  }
+  .wb-desk .work-studio-view[data-wide-workshop] .ws-performance,
+  .wb-desk .work-studio-view[data-wide-workshop] .ws-scene { flex: 1; }
+  .wb-desk .work-studio-view[data-wide-workshop] .ws-scene { aspect-ratio: auto; margin: 0; border-radius: 14px; }
+  .wb-desk .work-studio-view[data-wide-workshop] .ws-header {
+    position: absolute; z-index: 6; inset: 8px 8px auto auto; min-height: 26px; padding: 3px 7px;
+    border-radius: 8px; pointer-events: none;
+  }
+  .wb-desk .work-studio-view[data-wide-workshop] .ws-heading { font-size: 12px; }
+  .wb-desk .work-studio-view[data-wide-workshop] .ws-mode { display: none; }
+  .wb-desk:has([data-wide-workshop]) > .wb-desk-chat {
+    display: grid; grid-template: auto minmax(0,1fr) / minmax(0,1.2fr) minmax(260px,1fr);
+  }
+  .wb-desk:has([data-wide-workshop]) .wb-desk-chat-head {
+    grid-area: 1 / 1; min-height: 30px; padding-block: 4px;
+  }
+  .wb-desk:has([data-wide-workshop]) #transcript { grid-area: 2 / 1; }
+  .wb-desk:has([data-wide-workshop]) .wb-desk-empty { right: 46%; }
+  .wb-desk:has([data-wide-workshop]) #inputbar { grid-area: 1 / 2 / span 2; align-self: center; }
+  .wb-desk:has([data-wide-workshop]) .composer-message-queue { grid-area: 1 / 2; max-height: 54px; }
+  .wb-desk:has([data-wide-workshop]) .composer-message-queue:not([hidden]) ~ #inputbar { grid-row: 2; }
+  body.workbench .wb-desk:has([data-wide-workshop]):has(.composer-message-queue:not([hidden])) {
+    grid-template-rows: minmax(0,1fr) minmax(175px,23%);
+  }
+}
+@container workbench-area (max-width: 730px) {
+  body.workbench .wb-desk:has(.work-studio-view[data-floor-media]) { grid-template-rows: minmax(180px,64%) minmax(0,1fr); }
+  .wb-desk .work-studio-view[data-floor-media] .ws-body {
+    display: flex; flex-direction: column; gap: 1px;
+  }
+  .wb-desk .work-studio-view[data-floor-media] .ws-performance { flex: 1; }
+  .wb-desk .work-studio-view[data-floor-media] .ws-scene { flex: 1; aspect-ratio: auto; }
+  .wb-desk .work-studio-view[data-floor-media] .ws-timeline { flex: none; max-height: 38px; margin-top: 2px; flex-flow: row; }
+  .wb-desk .work-studio-view[data-floor-media] .ws-list { display: flex; overflow: auto; }
+  .wb-desk .work-studio-view[data-floor-media] .ws-list li { flex: none; }
+}
+.mobile-studio-sheet .work-studio-view[data-floor-media] .ws-scene {
+  width: 100%; aspect-ratio: 1.50; max-height: 42cqh;
+}
+@container mobile-workroom (max-height: 540px) {
+  .mobile-studio-sheet .work-studio-view[data-floor-media] .ws-scene { max-height: 47cqh; }
+}
+@container mobile-workroom (min-width: 600px) and (min-aspect-ratio: 1.25) {
+  .mobile-studio-sheet .work-studio-view[data-floor-media="tv"] { align-self: start; height: auto; }
+  .mobile-studio-sheet .work-studio-view[data-floor-media] .ws-scene { max-height: 67cqh; }
+}
+/* 阅读时为报纸增加高度。下方仍留有独立的会话和输入栏，键盘弹起时按实际可见高度收缩。 */
+.mobile-studio-sheet .work-studio-view[data-floor-media="monitor"] .ws-scene {
+  width: 100%; height: min(64cqh,calc(100cqh - 150px)); max-height: none; aspect-ratio: auto;
+}
+@container mobile-workroom (min-width: 600px) and (min-aspect-ratio: 1.25) {
+  .mobile-studio-sheet .work-studio-view[data-floor-media="monitor"] .ws-scene {
+    height: calc(100cqh - 47px);
+  }
+}
+@container (max-width: 560px) {
+  .ws-media-remote .ws-channel-prefix { display: none; }
+  .work-studio-view .ws-media-panel[data-device="tv"] :is(button,a) { padding-inline: 5px; }
+}
+@container (max-height: 170px) {
+  .ws-monitor-ticker small { display: none; }
+  .work-studio-view button.ws-monitor-ticker { min-height: 20px; font-size: 10px; padding-block: 1px; }
+}

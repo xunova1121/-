@@ -1,0 +1,197 @@
+/* 手机陪伴是完整页面；原生 dialog 的焦点管理、返回关闭和语音生命周期不变。 */
+:root body.compact.companion-edition .wy-companion {
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  width: 100%;
+  max-width: 100%;
+  height: var(--wy-viewport-height, 100dvh);
+  max-height: var(--wy-viewport-height, 100dvh);
+  padding: max(16px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
+  border: 0;
+  border-radius: 0;
+  background: var(--side-bg);
+  color: var(--text);
+  box-shadow: none;
+  overflow-y: auto;
+}
+:root body.compact.companion-edition .wy-companion[open] {
+  display: flex;
+  flex-direction: column;
+}
+:root body.compact.companion-edition .wy-companion-head {
+  order: 0;
+  font-size: 1.0625rem;
+  min-height: 44px;
+  color: var(--text);
+  letter-spacing: 0;
+}
+:root body.compact.companion-edition .wy-companion-title {
+  order: 1;
+  font-size: 1.25rem;
+  font-weight: 550;
+  line-height: 1.5;
+  color: var(--text);
+  margin: 20px 0 6px;
+  letter-spacing: 0;
+}
+:root body.compact.companion-edition .wy-companion-stage {
+  order: 2;
+  min-height: 150px;
+  height: clamp(170px, 31svh, 280px);
+  margin: 8px 0 10px;
+  background: transparent;
+}
+:root body.compact.companion-edition .wy-companion-stage .wy-mascot {
+  --mascot-size: clamp(156px, 29svh, 250px);
+}
+:root body.compact.companion-edition .wy-companion-say {
+  order: 3;
+  min-height: 24px;
+  max-height: 100px;
+  flex-shrink: 0;
+  padding: 8px 14px;
+  margin: 0 auto 16px;
+  width: fit-content;
+  max-width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--accent);
+}
+:root body.compact.companion-edition .wy-actions {
+  order: 4;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+:root body.compact.companion-edition .wy-actions button {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 8px 5px;
+  font-size: 0.8125rem;
+  background: var(--surface);
+  color: var(--text);
+}
+:root body.compact.companion-edition .wy-actions button .wy-action-symbol {
+  color: var(--accent);
+  font-size: 16px;
+}
+:root body.compact.companion-edition .wy-actions-switch {
+  order: 5;
+  min-height: 40px;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+:root body.compact.companion-edition .wy-companion-tip {
+  order: 6;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  margin: 8px 0;
+}
+:root body.compact.companion-edition .wy-companion-controls {
+  order: 7;
+  margin-top: auto;
+  padding-top: 16px;
+  gap: 28px;
+}
+:root body.compact.companion-edition .wy-companion-form {
+  order: 8;
+  margin: 16px 0 0;
+}
+:root body.compact.companion-edition .wy-companion-form input {
+  font-size: 1rem;
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--text);
+}
+:root body.compact.companion-edition .wy-companion .wy-companion-voice {
+  width: 76px;
+  height: 76px;
+  background: linear-gradient(135deg, #aa92fa, #8256ec);
+  color: #fff;
+  border: 5px solid var(--accent-soft);
+  box-shadow: none;
+}
+:root body.compact.companion-edition .wy-companion :is(.wy-companion-keyboard, .wy-companion-end) {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--accent);
+}
+:root body.compact.companion-edition .wy-companion .wy-companion-end {
+  color: #bd4f68;
+  background: #ffe8ec;
+  border-color: #f4d5df;
+}
+:root body.compact.companion-edition.wy-keyboard-open .wy-companion {
+  top: var(--wy-viewport-top, 0px);
+}
+:root body.compact.companion-edition.wy-keyboard-open .wy-companion-stage {
+  height: 90px;
+  min-height: 90px;
+}
+:root body.compact.companion-edition.wy-keyboard-open .wy-companion-stage .wy-mascot {
+  --mascot-size: 84px;
+}
+:root body.compact.companion-edition.wy-keyboard-open .wy-companion-title {
+  margin-top: 4px;
+  font-size: 1.0625rem;
+}
+:root body.compact.companion-edition.wy-keyboard-open .wy-companion-tip {
+  display: none;
+}
+@media (max-height: 700px) {
+  :root body.compact.companion-edition .wy-companion-stage {
+    height: 145px;
+    min-height: 100px;
+  }
+  :root body.compact.companion-edition .wy-companion-stage .wy-mascot {
+    --mascot-size: 138px;
+  }
+  :root body.compact.companion-edition .wy-companion-title {
+    margin-top: 8px;
+  }
+  :root body.compact.companion-edition .wy-companion-say {
+    margin-bottom: 8px;
+  }
+  :root body.compact.companion-edition .wy-companion-controls {
+    padding-top: 8px;
+  }
+}
+/* 输入时优先保留消息、键盘切换和发送；动作列表在收起键盘后恢复。 */
+:root body.compact.companion-edition.wy-keyboard-open .wy-companion :is(.wy-actions, .wy-actions-switch) {
+  display: none !important;
+}
+:root body.compact.companion-edition.wy-keyboard-open .wy-companion-stage {
+  height: 64px;
+  min-height: 64px;
+  margin: 4px 0;
+}
+:root body.compact.companion-edition.wy-keyboard-open .wy-companion-stage .wy-mascot {
+  --mascot-size: 60px;
+}
+:root body.compact.companion-edition.wy-keyboard-open .wy-companion-say {
+  max-height: 42px;
+  margin-bottom: 4px;
+  padding: 5px 10px;
+}
+:root body.compact.companion-edition.wy-keyboard-open .wy-companion-controls {
+  padding-top: 4px;
+}
+:root body.compact.companion-edition.wy-keyboard-open .wy-companion .wy-companion-voice {
+  width: 48px;
+  height: 48px;
+  border-width: 2px;
+}
+:root body.compact.companion-edition.wy-keyboard-open .wy-companion :is(.wy-companion-keyboard, .wy-companion-end) {
+  width: 44px;
+  height: 44px;
+}
+:root body.compact.companion-edition.wy-keyboard-open .wy-companion-form {
+  margin-top: 8px;
+}

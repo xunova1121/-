@@ -1,0 +1,368 @@
+{
+  "version": "1.0.446",
+  "runId": 43720404316,
+  "buildRevision": "8928acd54c6253e043fe72fbdc8104c27f53a0f8",
+  "runtimeRevision": "377898555a7cd58cf1f5df76b405f9b69a2b38af",
+  "status": "passed",
+  "checks": [
+    {
+      "label": "source/public正式版本一致且均已公开",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "源码Release绑定冻结构建提交",
+      "passed": true,
+      "detail": "8928acd54c6253e043fe72fbdc8104c27f53a0f8"
+    },
+    {
+      "label": "两仓七份资产齐全",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "七份原件大小和GitHub SHA256一致",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "实际下载六份原件，摘要与正式资产一致",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "服务器更新索引版本/文件/SHA256一致",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "Windows安装器是真实PE文件",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "Windows更新索引版本和原EXE SHA512一致",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "服务器全运行文件与冻结清单逐字节一致",
+      "passed": true,
+      "detail": {
+        "manifestFiles": 983,
+        "checked": 982,
+        "revision": "377898555a7cd58cf1f5df76b405f9b69a2b38af"
+      }
+    },
+    {
+      "label": "服务器归档全项可读/目录可进入、root属主且无链接",
+      "passed": true,
+      "detail": {
+        "entries": 1159,
+        "bad": []
+      }
+    },
+    {
+      "label": "服务器版本及包内清单相符",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "服务器显式固定Canvas原生依赖并保持模块配置",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "APK沿用原始签名证书",
+      "passed": true,
+      "detail": "56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6"
+    },
+    {
+      "label": "APK包名/版本名/版本号保持更新链",
+      "passed": true,
+      "detail": {
+        "package": "com.xunova.jarvis",
+        "versionName": "1.0.446",
+        "versionCode": 446
+      }
+    },
+    {
+      "label": "APK实际前端包含Canvas原图填字及旧海报/消息菜单/编辑链",
+      "passed": true,
+      "detail": {
+        "layered-1": true,
+        "design-current-state": true,
+        "改为引导": true,
+        "取消消息": true,
+        "/images/edits": true,
+        "poster_art": true,
+        "DESIGN_PRESENTATION_UNREADABLE": true,
+        "timeline-spine": true,
+        "newspaper-divider": true,
+        "phonePreview": true,
+        "canvas-image-text-1": true,
+        "CANVAS_TEXT_OVERFLOW": true,
+        "CANVAS_PROTECTED_OVERLAP": true,
+        "正在对照原图": true,
+        "allow-downloads": true,
+        "jarvis.server.model-preview.v1": true,
+        "正在同步最新配置": true,
+        "SERVER_SCOPE_CHANGED": true
+      }
+    },
+    {
+      "label": "Windows ZIP实际包含独立渲染入口：canvasImageText.mjs",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "Windows ZIP实际包含独立渲染入口：canvasImageTextWorker.mjs",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "Windows ZIP携带x64原生Canvas且为真实PE二进制",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "Windows实际Canvas包装模块版本固定",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "Windows实际渲染代码包含Node子进程和ASAR解包路径",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "Windows ASAR内部应用版本正确",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "Windows实际ASAR携带本版恢复与预览代码",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "公开latest固定入口指向本版原件：latest.yml",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "label": "公开latest固定入口指向本版原件：jarvis-server-latest.json",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "downloaded": [
+    {
+      "name": "Jarvis-1.0.446-android.apk",
+      "bytes": 18724769,
+      "sha256": "1e22e71dc8a6bdb28e7ffb08bff92bd330d37fbca3fa042a486f259c7700f0c2"
+    },
+    {
+      "name": "Jarvis-Setup-1.0.446.exe",
+      "bytes": 151372751,
+      "sha256": "fc62686d3f154284cd43fa048f44836062d0ce5b7aeff833fb19ef8652474d0c"
+    },
+    {
+      "name": "Jarvis-1.0.446-win-x64.zip",
+      "bytes": 191781231,
+      "sha256": "7619bb07dafa898b3ab3353cd2e2f80bfe5ba213d62f80e4b1687a82c6ddb202"
+    },
+    {
+      "name": "jarvis-server-1.0.446.tar.gz",
+      "bytes": 28583783,
+      "sha256": "5faa970fe986c3f5dd8cc23c50ac4f6efa319193b1944012f2a4822223cbc781"
+    },
+    {
+      "name": "latest.yml",
+      "bytes": 347,
+      "sha256": "4cc57ee0a5fe0210e7aaf871e01c69aa7928291cc43b66c968e930ebdc5ad40e"
+    },
+    {
+      "name": "jarvis-server-latest.json",
+      "bytes": 136,
+      "sha256": "d198afe56144aba1210f492976b564628d192f1e268b15842b9c83c7abbc55a7"
+    }
+  ],
+  "assetMetadata": {
+    "Jarvis-1.0.446-android.apk": {
+      "size": 18724769,
+      "digest": "sha256:1e22e71dc8a6bdb28e7ffb08bff92bd330d37fbca3fa042a486f259c7700f0c2",
+      "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.446/Jarvis-1.0.446-android.apk"
+    },
+    "Jarvis-1.0.446-win-x64.zip": {
+      "size": 191781231,
+      "digest": "sha256:7619bb07dafa898b3ab3353cd2e2f80bfe5ba213d62f80e4b1687a82c6ddb202",
+      "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.446/Jarvis-1.0.446-win-x64.zip"
+    },
+    "Jarvis-Setup-1.0.446.exe": {
+      "size": 151372751,
+      "digest": "sha256:fc62686d3f154284cd43fa048f44836062d0ce5b7aeff833fb19ef8652474d0c",
+      "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.446/Jarvis-Setup-1.0.446.exe"
+    },
+    "Jarvis-Setup-1.0.446.exe.blockmap": {
+      "size": 160435,
+      "digest": "sha256:879c51cc3afe91648ef8b5f507a49706bd3045aa80498cb968f6d23aa1c6ef37",
+      "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.446/Jarvis-Setup-1.0.446.exe.blockmap"
+    },
+    "jarvis-server-1.0.446.tar.gz": {
+      "size": 28583783,
+      "digest": "sha256:5faa970fe986c3f5dd8cc23c50ac4f6efa319193b1944012f2a4822223cbc781",
+      "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.446/jarvis-server-1.0.446.tar.gz"
+    },
+    "jarvis-server-latest.json": {
+      "size": 136,
+      "digest": "sha256:d198afe56144aba1210f492976b564628d192f1e268b15842b9c83c7abbc55a7",
+      "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.446/jarvis-server-latest.json"
+    },
+    "latest.yml": {
+      "size": 347,
+      "digest": "sha256:4cc57ee0a5fe0210e7aaf871e01c69aa7928291cc43b66c968e930ebdc5ad40e",
+      "browser_download_url": "https://github.com/xunova1121/weiyang-release/releases/download/desktop-v1.0.446/latest.yml"
+    }
+  },
+  "latest": {
+    "latest.yml": {
+      "bytes": 347,
+      "sha256": "4cc57ee0a5fe0210e7aaf871e01c69aa7928291cc43b66c968e930ebdc5ad40e"
+    },
+    "jarvis-server-latest.json": {
+      "bytes": 136,
+      "sha256": "d198afe56144aba1210f492976b564628d192f1e268b15842b9c83c7abbc55a7"
+    }
+  },
+  "apkCertificateSha256": "56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6",
+  "limitations": [
+    "实际下载公开六件；blockmap仅对照两仓七件元数据摘要",
+    "APK本地独立核对摘要/证书/编译结构；正式CI另以apksigner验证完整性及原证书，未做用户真机安装",
+    "用户服务器未直接部署；真实Android/Windows/微信/VPN与WiFi流量切换及真实模型未验收；Claude待独立复审",
+    "本机完整脚本有两项环境失败且均按原断言独立复核；不称本机完整全绿"
+  ],
+  "publishedAt": "2026-11-15T14:10:40Z",
+  "releaseURL": "https://github.com/xunova1121/weiyang-release/releases/tag/desktop-v1.0.446",
+  "ci": {
+    "status": "completed",
+    "conclusion": "success",
+    "url": "https://github.com/xunova1121/-/actions/runs/43720404316",
+    "unitFiles": 469,
+    "unitTests": 4061,
+    "jobs": [
+      {
+        "name": "清理旧的构建产物",
+        "conclusion": "success"
+      },
+      {
+        "name": "同步现有安装包到公开仓库",
+        "conclusion": "skipped"
+      },
+      {
+        "name": "建草稿发布",
+        "conclusion": "success"
+      },
+      {
+        "name": "发布前完整验证",
+        "conclusion": "success"
+      },
+      {
+        "name": "打包安卓 App",
+        "conclusion": "success"
+      },
+      {
+        "name": "打包 (windows-latest)",
+        "conclusion": "success"
+      },
+      {
+        "name": "发布到 Releases",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "ciApkSignature": {
+    "jobId": 132831105629,
+    "integrityVerifiedByApksigner": true,
+    "originalCertificateSha256": "56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6",
+    "parsedToolFormat": "V2 Signer: certificate SHA-256 digest",
+    "verificationBeforeUpload": true
+  },
+  "localGate": {
+    "status": "completed_with_environment_failures_rechecked",
+    "passedSteps": 28,
+    "failedSteps": 2,
+    "skippedSteps": 7,
+    "runtimeRevision": "377898555a7cd58cf1f5df76b405f9b69a2b38af",
+    "unitFiles": 468,
+    "unitPassed": 4054,
+    "unitTimedOut": 1,
+    "originalTeamSixRecheckPassed": true,
+    "standaloneOriginalFourteenRecheckPassed": true,
+    "notes": [
+      "原团队用例在本机并发时超过原5秒期限；未改断言/期限，原6项独立通过，最终CI全部4061通过",
+      "单文件模拟.test网关两项在环境代理开启时失败，NODE_USE_ENV_PROXY=0按原14项通过；产品代码未因此修改",
+      "本机完整脚本不称全绿；完整最终CI全项成功另计"
+    ]
+  },
+  "foregroundBrowser": {
+    "realAndroid": false,
+    "realUserServer": false,
+    "syntheticHTTP": true,
+    "resumeMs": 10,
+    "cachedMs": 242,
+    "checks": [
+      {
+        "label": "联网成功后模型选择器显示服务器型号",
+        "ok": true
+      },
+      {
+        "label": "持久化预览不含模型Key、访问Token或上游URL",
+        "ok": true
+      },
+      {
+        "label": "前台立即续接同一任务，不等10秒轮询或45秒失活",
+        "ok": true
+      },
+      {
+        "label": "前台/焦点双事件只续接一次，任务没有重复提交",
+        "ok": true
+      },
+      {
+        "label": "结果完整续回且旧段落不重复",
+        "ok": true
+      },
+      {
+        "label": "进程重建后服务器配置仍挂起，缓存型号已可见",
+        "ok": true
+      },
+      {
+        "label": "界面说明仍在同步，没有把缓存当作服务器已连接",
+        "ok": true
+      },
+      {
+        "label": "切换账号后即使服务器配置挂起，也不显示上个账号的缓存型号",
+        "ok": true
+      },
+      {
+        "label": "浏览器没有脚本错误或未处理拒绝",
+        "ok": true
+      }
+    ],
+    "errors": []
+  },
+  "heldCandidates": [
+    {
+      "version": "1.0.444",
+      "published": false,
+      "reason": "补充调用链测试复现旧登录换发误判账号切换，取消构建后修复"
+    },
+    {
+      "version": "1.0.445",
+      "published": false,
+      "reason": "新增检查硬编码旧工具标签误拦；APK原证书和完整性均正确，已修复兼容并补6项回归"
+    }
+  ],
+  "userServerDeployed": false,
+  "realDevicesTested": false
+}

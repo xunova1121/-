@@ -1,0 +1,225 @@
+{
+  "version": "1.0.459",
+  "build": "e08cb8f35e64185377070f78e7b2cf027a742a00",
+  "frozen": "99280225e8436629638bd5e3627623e2d3265ed5",
+  "publishedUtc": "2026-11-17T07:16:43Z",
+  "release": "https://github.com/xunova1121/weiyang-release/releases/tag/desktop-v1.0.459",
+  "workflow": {
+    "id": 44034435225,
+    "url": "https://github.com/xunova1121/-/actions/runs/44034435225",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "id": 133873822611,
+        "name": "清理旧的构建产物",
+        "conclusion": "success"
+      },
+      {
+        "id": 133873824161,
+        "name": "同步现有安装包到公开仓库",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 133873889441,
+        "name": "建草稿发布",
+        "conclusion": "success"
+      },
+      {
+        "id": 133873957084,
+        "name": "打包安卓 App",
+        "conclusion": "success"
+      },
+      {
+        "id": 133873957151,
+        "name": "发布前完整验证",
+        "conclusion": "success"
+      },
+      {
+        "id": 133873957248,
+        "name": "打包 (windows-latest)",
+        "conclusion": "success"
+      },
+      {
+        "id": 133883496222,
+        "name": "发布到 Releases",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "checks": [
+    "完整正式CI成功且构建提交一致",
+    "源和公开两仓正式稳定发布",
+    "公开latest指向本版",
+    "两仓七件资源名称尺寸和摘要一致",
+    "实际下载六件资源逐字节摘要符合公开清单",
+    "服务器更新索引版本和摘要对应真实归档",
+    "服务器1005项冻结清单及1004原样源文件完整一致",
+    "Claude新增海报运行模块均在真实归档内",
+    "归档root属主且服务账号可读，版本正确",
+    "实际公开APK仍使用原证书",
+    "实际APK包名与新版版本号正确",
+    "实际APK客户端含云端源文件和预览去重修复",
+    "APK实际代码包含草图、卡槽计划和设计自审",
+    "APK实际代码包含图片表格专用还原及回读验收",
+    "Windows包具有实际PE入口和原生渲染依赖",
+    "Windows实际后端包含预检和新折行协议",
+    "Windows实际后端包含草图、卡槽计划和设计自审",
+    "Windows实际后端包含图片表格原生还原和单页高清复核",
+    "Windows实际ASAR版本及云端文件和预览修复正确",
+    "Windows实际ASAR包含图片表格专用还原",
+    "Windows更新索引包含实际安装器SHA512",
+    "两个固定latest入口均指向实际新版索引",
+    "七件公开资源URL均可访问且Content-Length匹配"
+  ],
+  "assets": [
+    {
+      "name": "Jarvis-1.0.459-android.apk",
+      "size": 18767017,
+      "digest": "sha256:4d28b0f3d63264646652debc09f38e81731d6f0fa637b7d1240f967a7c22c7b2"
+    },
+    {
+      "name": "Jarvis-1.0.459-win-x64.zip",
+      "size": 193754543,
+      "digest": "sha256:2b680296df58ebb1acd4f61242ee3388e37690d81ed6c59e998315fec1a7661f"
+    },
+    {
+      "name": "jarvis-server-1.0.459.tar.gz",
+      "size": 28683800,
+      "digest": "sha256:3baee75b79fe3dae81890509a9ef5102af03beab8c91352f4938d8d1c43e8155"
+    },
+    {
+      "name": "jarvis-server-latest.json",
+      "size": 136,
+      "digest": "sha256:6d7f3f108da27b66095c5719863496a90731b339bb52f11651d8fb44f56b8020"
+    },
+    {
+      "name": "Jarvis-Setup-1.0.459.exe",
+      "size": 152896509,
+      "digest": "sha256:7e3c61f3efbfc36d391732558070f5ed77a9b240e3731e584d77234098eb4e1c"
+    },
+    {
+      "name": "Jarvis-Setup-1.0.459.exe.blockmap",
+      "size": 162194,
+      "digest": "sha256:a38e5946277cf7c7bbb098bc84563fab31f917a216bfa152af0f301822ecf951"
+    },
+    {
+      "name": "latest.yml",
+      "size": 347,
+      "digest": "sha256:7c8feb141d5ffef9d565a0ed8e9074c2328c7dcca0ce904ebcd89af7f150f87c"
+    }
+  ],
+  "runtimeManifestFiles": 1005,
+  "actualSourceFiles": 1004,
+  "permissionEntries": 1181,
+  "apkCertificate": "56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6",
+  "serverDeployed": false,
+  "providerTested": false,
+  "deviceTested": false,
+  "publicDownloadChecks": [
+    {
+      "name": "Jarvis-1.0.459-android.apk",
+      "status": 200,
+      "bytes": 18767017
+    },
+    {
+      "name": "Jarvis-1.0.459-win-x64.zip",
+      "status": 200,
+      "bytes": 193754543
+    },
+    {
+      "name": "jarvis-server-1.0.459.tar.gz",
+      "status": 200,
+      "bytes": 28683800
+    },
+    {
+      "name": "jarvis-server-latest.json",
+      "status": 200,
+      "bytes": 136
+    },
+    {
+      "name": "Jarvis-Setup-1.0.459.exe",
+      "status": 200,
+      "bytes": 152896509
+    },
+    {
+      "name": "Jarvis-Setup-1.0.459.exe.blockmap",
+      "status": 200,
+      "bytes": 162194
+    },
+    {
+      "name": "latest.yml",
+      "status": 200,
+      "bytes": 347
+    }
+  ],
+  "assetDownloadOrigin": "由原仓草稿下载六件；正式发布后逐字节摘要与公开仓元数据一致；另逐件校验七个公开URL及实际下载两个固定latest索引",
+  "verifiedAtUtc": "2026-11-17T07:18:49.925099+00:00",
+  "officialUnitTests": {
+    "files": 484,
+    "tests": 4226,
+    "failed": 0,
+    "verifiedJobs": [
+      133873957084,
+      133873957151
+    ]
+  },
+  "localValidation": {
+    "capacityTests": 5,
+    "lint": "passed",
+    "fullGate": "stopped_after_identical_official_ci_succeeded",
+    "unitInitial": {
+      "passed": 4219,
+      "failed": 7,
+      "failureType": "5s timeout",
+      "files": [
+        "tests/docxPoster.test.js",
+        "tests/posterContrast.test.js"
+      ]
+    },
+    "unchangedTimeoutRecheck": {
+      "files": 2,
+      "tests": 21,
+      "failed": 0,
+      "command": "npx vitest run tests/docxPoster.test.js tests/posterContrast.test.js --fileParallelism=false"
+    },
+    "startedSteps": [
+      "完整单元测试",
+      "代码检查（没定义的变量、浏览器同名全局、格式）",
+      "验证评测入口与耗时统计",
+      "验证架构实测固定版本、隔离与实际文件验收",
+      "验证项目菜单确认与隔离预览",
+      "验证Claude协议完成与断流取消",
+      "验证代码隔离与取消",
+      "验证四格式结构编辑与目录连续分页",
+      "验证Word、PPT、Excel真实转PDF",
+      "验证PPT和Excel字号及Word97转换",
+      "验证Word字体字号与有界真实分页",
+      "验证四种PPT风格、可编辑元素与真实PDF",
+      "验证政企汇报风格、原生渐变与真实PDF",
+      "验证六份PPT图片美学版式、真实PDF与逐页截图",
+      "验证中文图片程序排字、三格式交付与真实浏览器及Office渲染",
+      "验证4K大屏同设计PNG与离线交互Demo",
+      "验证分层海报、同稿Demo、中文可读性与Office真实导出",
+      "验证海报手机整图字号、三种结构、素材用途与真实Office导出",
+      "验证Canvas原图卡槽填字、零遮挡、可编辑PPTX及压缩编辑器",
+      "验证沉浸海报连续渐变、中文与可编辑PPTX",
+      "验证分享返回状态、原字节和同账号会话恢复（原生事件模拟）",
+      "验证四种Excel样式、公式筛选与真实PDF",
+      "验证图片表格网格合并、原文留空、旋转照片与真实Excel打印",
+      "验证文档场景模板、精确修改及真实PDF逐页检查"
+    ],
+    "fullGateAllGreen": false
+  },
+  "apkFullVerification": {
+    "source": "official CI scripts/check-apk-signature.py",
+    "jobId": 133873957084,
+    "v2Verified": true,
+    "certificateSha256": "56e3579b63f41dc9d3f083b2e10bcdad40ded5503f520fa23413870964e363d6"
+  },
+  "additionalBoundaries": [
+    "真实模型构思/草图/审美尚未验收",
+    "GPT卡槽位置服从性尚未验收",
+    "手机卡片自审预览为近似布局，不是浏览器截图",
+    "未将测试夹具当用户原图验收"
+  ]
+}

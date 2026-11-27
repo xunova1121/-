@@ -1,0 +1,14 @@
+# syntax=docker/dockerfile:1
+# Archify的finalize/browser-check额外需要真实Chromium；外层Docker隔离限制保持。
+# 默认扩展已安装技能镜像；测试可指定公开Node基础镜像，不在宿主机运行技能。
+ARG BASE=jarvis-skill-runner
+FROM ${BASE}
+RUN --mount=type=secret,id=proxy_ca \
+    set -eu; \
+    command -v apt-get >/dev/null || { echo '浏览器增强镜像需要Debian/Ubuntu基础技能镜像'; exit 1; }; \
+    if [ -f /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
+    apt-get update \
+    && apt-get install -y --no-install-recommends chromium fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+# 浏览器的用户命名空间沙箱在受限容器中不可用；仍由非root/只读/无特权Docker边界隔离。
+ENV ARCHIFY_CHROME_NO_SANDBOX=1

@@ -1,0 +1,1502 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="others" content="页面生成时间 2024-01-19 09:30:40" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>全国公共资源交易平台</title>
+  <link type="text/css" href="/assets/css/main.css" rel="stylesheet">
+  <link type="text/css" href="/assets/css/index.css" rel="stylesheet">
+  <link type="text/css" href="/assets/css/font-awesome.min.css" rel="stylesheet">
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <script src="/assets/js/jquery-3.7.1.min.js"></script>
+  <script src="/assets/js/echarts/echarts.js"></script>
+  <script src="/assets/js/index.js"></script>
+
+  <script type="text/javascript">
+    require.config({
+      paths: {
+        echarts: '/assets/js/echarts'
+      }
+    });
+  </script>
+  <script>
+    var geoJson = {};
+    var markJson = {};
+    var mapDataParams;
+    var mybasepath = '/information';
+    var areaJson = {};
+    var cityJson = {};
+    var todayCountJson = {};
+    var platformJson = null;
+    var ecConfig;
+    var zrEvent;
+    var ttlDiv = 11
+    var defaultDiv = 5;
+    var nowDiv = defaultDiv;
+  </script>
+</head>
+
+<body>
+<style>
+.banner {
+  position: relative;
+}
+.search-component {
+  width: 500px;
+  display: flex;
+  align-items: center;
+  margin: 10px 0;
+  padding: 0 20px;
+  position: absolute;
+  right: 50px;
+  top: 0px;
+}
+
+.search-type-select {
+  width: 120px;
+  height: 38px;
+  border: 1px solid #ddd;
+  border-right: none;
+  border-radius: 4px 0 0 4px;
+  padding: 0 10px;
+  background: white;
+  outline: none; /* 去除默认焦点边框 */
+  appearance: none; /* 去除默认样式 */
+}
+
+
+/* 选中选项的样式 */
+.search-type-select:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+/* 下拉菜单选项样式 */
+.search-type-select option {
+  padding: 8px 10px;
+}
+
+
+.search-input {
+  flex: 1;
+  height: 36px;
+  border: 1px solid #ddd;
+  padding: 0 15px;
+  outline: none;
+}
+
+.search-button {
+  height: 38px;
+  background: #007bff;
+  color: white;
+  border: 1px solid #007bff;
+  border-radius: 0 4px 4px 0;
+  padding: 0 20px;
+  cursor: pointer;
+}
+
+.search-button:hover {
+  background: #0069d9;
+}
+
+/* 消息提示框样式 */
+.message-tooltip {
+  position: fixed;
+  top: 20%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 15px 25px;
+  border-radius: 4px;
+  z-index: 9999;
+  font-size: 14px;
+  display: none;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+}
+
+.message-tooltip.show {
+  display: block;
+}
+
+</style>
+
+<div class="header">
+  <div class="header_top">
+    <p class="p_fliat">
+      <a href="/SIC/web/govreport.po" target="_blank">政府网站工作年度报表</a>
+    </p>
+    <div id="addNewSearch">
+      <div class="p_last" style="margin-right:0px;"><a href="/serve/wechat/wechat.html" target="_blank"><img
+              src="/assets/images/weixin.png" id="weixin"></a></div>
+    </div>
+    <div id="ewm">
+      <div class="arrows"><img src="/assets/images/ewm.png"></div>
+      <div class="div">
+        <div class="div_on"><img src="/assets/images/wechatserve.jpg" width="100" height="100">
+          <p>服务号</p>
+        </div>
+        <!--     <div class="div_tw"><img src="/assets/images/wechatdy.jpg" width="100" height="100"><p>订阅号</p></div> -->
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+    $(function () {
+        $("#weixin").hover(function () {
+            $("#ewm").slideDown();
+        }, function () {
+            var timeutId = setTimeout(function () {
+                $("#ewm").slideUp();
+            }, 100);
+            $("#ewm").hover(function () {
+                clearTimeout(timeutId);
+            }, function () {
+                $(this).slideUp();
+            });
+        });
+    });
+</script>
+<div id="messageTooltip" class="message-tooltip"></div>
+<div class="banner">
+    <div class="search-component">
+      <select id="mySelect" class="search-type-select">
+        <option value="jygg">交易公告</option>
+        <option value="jycx">交易诚信</option>
+        <option value="zcfg">政策法规</option>
+      </select>
+      <input type="text" class="search-input" placeholder="请输入搜索内容">
+      <button class="search-button">搜索</button>
+    </div>
+</div>
+<div class="nav_bj">
+  <div class="nav">
+    <ul class="nav_ul">
+      <li class="nav_stair nav_first"><a href="/">首页</a></li>
+      <li class="nav_stair"><a href="/SIC/web/govfunc.po">机构职能</a></li>
+      <li class="nav_stair"><a href="/deal/dealList.html">交易公开</a>
+        <ul class="nav_second nav_special">
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=01">工程建设</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=02">政府采购</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=03">土地使用权</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=04">矿业权</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=05">国有产权</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=21">碳排放权</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=22">排污权</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=23">药品采购</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=24">二类疫苗</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=25">林权</a></li>
+          <li><a href="/deal/dealList.html?HEADER_DEAL_TYPE=90">其他</a></li>
+        </ul>
+      </li>
+      <li class="nav_stair"><a href="/deal/creditList.html">交易诚信</a>
+        <ul class="nav_second">
+          <li><a href="/deal/creditList.html?SHOWTYPE=1">违法违规</a></li>
+          <li><a href="/deal/creditList.html?SHOWTYPE=2">奖励信息</a></li>
+        </ul>
+      </li>
+      <li class="nav_stair"><a href="https://data.ggzy.gov.cn/">数据服务</a></li>
+      <li class="nav_stair"><a href="/dealCollect/dealCollect.html">交易统计</a></li>
+      <li class="nav_stair"><a href="/SIC/web/platform.po">平台导航</a></li>
+      <li class="nav_stair"><a href="/SIC/web/policyFileList.po">政策法规</a>
+        <ul class="nav_second">
+          <li><a href="/SIC/web/policyFileList.po">政策法规文件</a></li>
+          <li><a href="/SIC/web/policyReadList.po">政策法规解读</a></li>
+        </ul>
+      </li>
+      <!-- <li class="nav_stair"><a href="http://data.ggzy.gov.cn/portal_legal/cxcg/index.html" target="_blank">培训交流</a></li>-->
+      <!--     <li class="nav_stair"><a href="https://59.252.80.14/reTurnUrl" target="_blank">统一认证</a></li>-->
+      <li class="nav_stair"><a href="/serve/service.html">服务中心</a>
+        <ul class="nav_second">
+          <li><a href="http://data.ggzy.gov.cn/portal_legal/cxcg/index.html" target="_blank">培训交流</a></li>
+          <li><a href="/serve/wechat/wechat.html">微信订阅</a></li>
+          <li><a href="/SIC/web/opinion.po">意见建议</a></li>
+          <li><a href="/SIC/web/collectList.po">调查征集</a></li>
+          <li><a href="/serve/regards/regards.html">关于我们</a></li>
+        </ul>
+      </li>
+    </ul>
+  </div>
+</div>
+
+
+<script>
+    $(document).ready(function() {
+      // 移除 select 获得焦点时的默认样式
+      $('.search-type-select').focus(function() {
+        $(this).css('outline', 'none');
+      });
+
+      // 处理选项选中时的样式
+      $('.search-type-select').change(function() {
+        $(this).blur(); // 失去焦点，避免出现默认的选中边框
+      });
+    });
+
+    $(document).ready(function() {
+      // 显示消息提示框函数
+      function showMessage(message) {
+        const tooltip = $('#messageTooltip');
+        tooltip.text(message);
+        tooltip.addClass('show');
+
+        // 2秒后自动隐藏
+        setTimeout(function() {
+          tooltip.removeClass('show');
+        }, 2000);
+      }
+
+      // 搜索按钮点击事件
+      $('.search-button').click(function() {
+        const searchType = $('.search-type-select').val();
+        const searchKeyword = $('.search-input').val();
+
+        if (searchKeyword.trim() === '') {
+          showMessage('请输入搜索内容');
+          return;
+        }
+
+        // 根据不同类型执行不同搜索逻辑
+        switch(searchType) {
+          case 'jygg':
+            window.location.href = `/deal/dealList.html?DEAL_TIME=05&FINDTXT=${encodeURIComponent(searchKeyword)}`;
+            break;
+          case 'jycx':
+            window.location.href = `/deal/creditList.html?FINDTXT=${encodeURIComponent(searchKeyword)}`;
+            break;
+          case 'zcfg':
+            window.location.href = `/SIC/web/policyFileList.po?flag=index&qt=${encodeURIComponent(searchKeyword)}`;
+            break;
+          default:
+            window.location.href = `/deal/dealList.html?DEAL_TIME=05&FINDTXT=${encodeURIComponent(searchKeyword)}`;
+        }
+      });
+
+      // 回车键触发搜索
+      $('.search-input').keypress(function(e) {
+        if (e.which === 13) {
+          $('.search-button').click();
+        }
+      });
+    });
+</script>
+<div class="lunbo">
+  <div class="lunbo_on" id="lunbo">
+    <ul class="pic" id="pic">
+
+              <li style="display:block;">
+          <a href="/SIC/web/details.po?id=b2ddf3d3-e918-4bc9-9afb-084aa2473668" target="_blank">
+            <img src="/data/lunbo/2505280001.jpg">
+          </a>
+        </li>
+        <li style="display:block;">
+          <a href="/SIC/web/details.po?id=55f6754d-0d20-4fc9-bb9b-40c05b86b1a5" target="_blank">
+            <img src="/data/lunbo/2406040003.png">
+          </a>
+        </li>
+        <li style="display:block;">
+          <a href="/SIC/web/details.po?id=de822e65-97f3-41f1-a3b2-d46548b19db4" target="_blank">
+            <img src="/data/lunbo/2406040002.png">
+          </a>
+        </li>
+    </ul>
+    <div class="mark"></div>
+    <ul class="txt" id="txt">
+
+        <li><a href="/SIC/web/details.po?id=b2ddf3d3-e918-4bc9-9afb-084aa2473668"
+               target="_blank">
+              “@国务院 我为政府工作报告提建议”网民建言征集活动开始
+          </a>
+        </li>
+        <li><a href="/SIC/web/details.po?id=55f6754d-0d20-4fc9-bb9b-40c05b86b1a5"
+               target="_blank">
+              国家发展改革委法规司组织召开全国公共资源交易平台整合共享...
+          </a>
+        </li>
+        <li><a href="/SIC/web/details.po?id=de822e65-97f3-41f1-a3b2-d46548b19db4"
+               target="_blank">
+              国家发展改革委组织召开公共资源交易平台整合工作部际联席会...
+          </a>
+        </li>
+    </ul>
+    <ul class="ico" id="ico">
+      <li class="hover"></li>
+      <li class=""></li>
+      <li class=""></li>
+    </ul>
+  </div>
+  <div class="lunbo_twBox">
+    <div class="lunbo_tw">
+      <h4>
+        <ul>
+          <li class="active">政策法规</li>
+          <li>统计分析</li>
+        </ul>
+        <span><a href="/SIC/web/policyFileList.po" target="_blank">&gt;&gt;更多</a></span>
+        <span style="display:none;"><a href="/dealCollect/dealCollect.html" target="_blank">&gt;&gt;更多</a></span>
+      </h4>
+      <ul class="show" id="homePolicyArea">
+          <li>
+            <a href="/SIC/web/details.po?id=84c4e53d-f673-4699-9099-5983ce30350d" target="_blank">
+                《招标投标领域信用管理暂行办法》 2026年第44号令
+            </a>
+
+            <span>2026-07-17</span>
+          </li>
+          <li>
+            <a href="/SIC/web/details.po?id=f376fdc7-dc9f-4960-a80b-80d1cc1d60ee" target="_blank">
+                国家发展改革委有关负责同志就《招标投标领域信用管理暂行办...
+            </a>
+
+            <span>2026-07-17</span>
+          </li>
+          <li>
+            <a href="/SIC/web/details.po?id=ac477c45-abba-4533-972d-9bc212e98046" target="_blank">
+                《公共资源交易中心招标投标现场管理暂行办法》 2026年...
+            </a>
+
+            <span>2026-07-15</span>
+          </li>
+          <li>
+            <a href="/SIC/web/details.po?id=032e05af-5774-4cfa-afc6-2346003181fa" target="_blank">
+                国家发展改革委有关负责同志就《公共资源交易中心招标投标现...
+            </a>
+
+            <span>2026-07-15</span>
+          </li>
+          <li>
+            <a href="/SIC/web/details.po?id=14f68de5-3773-4f15-9a22-0c3181cb46bd" target="_blank">
+                国家发展改革委发布《中国营商环境发展报告（2026）》
+            </a>
+
+            <span>2026-05-08</span>
+          </li>
+          <li>
+            <a href="/SIC/web/details.po?id=dac291f8-ca99-4255-9682-70c17d9e1bd2" target="_blank">
+                国务院办公厅关于深化投资审批制度改革的意见
+            </a>
+
+            <span>2026-04-15</span>
+          </li>
+          <li>
+            <a href="/SIC/web/details.po?id=bc4cbf97-b782-4c9b-b006-1b864f2c32e1" target="_blank">
+                关于加快招标投标领域人工智能推广应用的实施意见(发改法规...
+            </a>
+
+            <span>2026-02-12</span>
+          </li>
+          <li>
+            <a href="/SIC/web/details.po?id=d7035d31-b851-4173-a012-c126e3e078d5" target="_blank">
+                国家发展改革委新闻发言人就《国家发展改革委等部门关于加快...
+            </a>
+
+            <span>2026-02-12</span>
+          </li>
+          <li>
+            <a href="/SIC/web/details.po?id=303b9ddb-e051-4c5f-ae0d-047e7ab49fae" target="_blank">
+                自然资源部办公厅关于矿业权出让底价有关事项的通知
+            </a>
+
+            <span>2025-12-02</span>
+          </li>
+          <li>
+            <a href="/SIC/web/details.po?id=376f62b6-b070-494f-81d8-f5ed43d1a991" target="_blank">
+                关于印发《招标人主体责任履行指引》的通知
+            </a>
+
+            <span>2025-11-11</span>
+          </li>
+          <li>
+            <a href="/SIC/web/details.po?id=51936246-a76a-4fb1-9781-8c7c275fd09b" target="_blank">
+                关于《工程建设项目招标代理机构管理暂行办法》的解读
+            </a>
+
+            <span>2025-10-30</span>
+          </li>
+      </ul>
+      <script type="text/javascript">
+        $("#homePolicyArea li").each(function (i, elem) {
+          if (i > 2) {
+            return;
+          }
+          $(elem).addClass("on");
+          $(elem).children("span").last().before('<img src="/assets/images/new_on.png">');
+        });
+      </script>
+      <ul class="statistics">
+        <li>
+          <a href="/dealCollect/dealCollect.html?type=0">
+            <img src="/assets/images/statistics1.png" alt="">
+            <span>有效期内公告数量统计</span>
+          </a>
+        </li>
+        <li>
+          <a href="/dealCollect/dealCollect.html?type=1">
+            <img src="/assets/images/statistics2.png" alt="">
+            <span>全国各省交易量对比</span>
+          </a>
+        </li>
+        <li>
+          <a href="/dealCollect/dealCollect.html?type=2">
+            <img src="/assets/images/statistics3.png" alt="">
+            <span>全国各类型交易量对比</span>
+          </a>
+        </li>
+        <li>
+          <a href="/dealCollect/dealCollect.html?type=3">
+            <img src="/assets/images/statistics4.png" alt="">
+            <span>近一年交易量走势统计</span>
+          </a>
+        </li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="main_list">
+  <div class="main_list_on">
+    <h4>交易公告<span><a onclick="cmd_submitFindMore('00','0001');" target="_blank">&gt;&gt;更多</a></span></h4>
+    <ul>
+          <li class="on">
+        <a href="/information/deal/html/a/420000/0101/20261111/004267fa09abe7d64bd29989c05e192ae8d7.html" target="_blank">
+            老泵站河区域面源及溢流污染控制(调蓄池+配套管网)EPC...
+        </a>
+          <img src="/assets/images/new_on.png">
+        <span>2026-11-11</span>
+        </li>
+          <li class="on">
+        <a href="/information/deal/html/a/420000/0101/20261111/0042b9bc7ba91f3942468810d9931af0ce57.html" target="_blank">
+            黄陂区中小河流清淤疏浚工程勘察服务(初步设计阶段、招标设...
+        </a>
+          <img src="/assets/images/new_on.png">
+        <span>2026-11-11</span>
+        </li>
+          <li class="on">
+        <a href="/information/deal/html/a/530000/0101/20261111/0053c9b4d1d648d740609a3468fc20769afa.html" target="_blank">
+            云南农垦孟连农场集团有限责任公司天然橡胶生产能力建设项目...
+        </a>
+          <img src="/assets/images/new_on.png">
+        <span>2026-11-11</span>
+        </li>
+          <li>
+        <a href="/information/deal/html/a/530000/0101/20261111/00532073d9dc9f3844d8bdf1e582067d50cc.html" target="_blank">
+            施甸县屋顶分布式光伏发电项目招标公告
+        </a>
+        <span>2026-11-11</span>
+        </li>
+          <li>
+        <a href="/information/deal/html/a/530000/0101/20261111/0053d3d6f7061305406c8f44e50874d32cb3.html" target="_blank">
+            沪昆线桥梁作业通道及墩台吊篮改造工程施工单价承包(二次)...
+        </a>
+        <span>2026-11-11</span>
+        </li>
+          <li>
+        <a href="/information/deal/html/a/530000/0101/20261111/0053752f977aaf57454386a322d278d1f047.html" target="_blank">
+            滇池卫城小区老旧电梯更新更换项目（第二标段） 招标公告
+        </a>
+        <span>2026-11-11</span>
+        </li>
+          <li>
+        <a href="/information/deal/html/a/460000/0101/20261111/00469fdf405167464dcebf7725c302e0fbbe.html" target="_blank">
+            澄迈县2026年加乐镇、中兴镇、仁兴镇高标准农田新建项目...
+        </a>
+        <span>2026-11-11</span>
+        </li>
+          <li>
+        <a href="/information/deal/html/a/460000/0101/20261111/00460b9b083990114e3aa5724c7b39521499.html" target="_blank">
+            澄迈县2026年加乐镇、中兴镇、仁兴镇高标准农田新建项目...
+        </a>
+        <span>2026-11-11</span>
+        </li>
+          <li>
+        <a href="/information/deal/html/a/530000/0101/20261111/005396401609dba74f6db62f15b9ef2a155b.html" target="_blank">
+            昆明长水国际机场改扩建工程环保噪声防治措施实施项目（一标...
+        </a>
+        <span>2026-11-11</span>
+        </li>
+          <li>
+        <a href="/information/deal/html/a/530000/0101/20261111/00538d27071825ab4a719978289c79ed6481.html" target="_blank">
+            昆明长水国际机场改扩建工程环保噪声防治措施实施项目监理招...
+        </a>
+        <span>2026-11-11</span>
+        </li>
+          <li>
+        <a href="/information/deal/html/a/530000/0101/20261111/005387afda0d2c8741d3b33a07f8a1a64bdb.html" target="_blank">
+            云南省昆明监狱警戒设施改造及挡墙建设工程施工招标公告
+        </a>
+        <span>2026-11-11</span>
+        </li>
+          <li>
+        <a href="/information/deal/html/a/530000/0101/20261111/00532e697842af43476a9dfbffb48e17d395.html" target="_blank">
+            昆明长水国际机场改扩建工程环保噪声防治措施实施项目（一标...
+        </a>
+        <span>2026-11-11</span>
+        </li>
+    </ul>
+  </div>
+
+  <div class="main_list_on main_list_tw">
+    <h4>成交公示<span><a onclick="cmd_submitFindMore('00','0002');" target="_blank">&gt;&gt;更多</a></span></h4>
+    <ul>
+
+
+          <li class="on">
+
+        <a href="/information/deal/html/a/530000/0104/20261111/00532c4f511f506746cc93944bf3c620b9fd.html" target="_blank">
+            凤庆县2026年安全生命防护及危桥改造工程(二次)
+        </a>
+          <img src="/assets/images/new_on.png">
+        <span>2026-11-11</span>
+        </li>
+
+          <li class="on">
+
+        <a href="/information/deal/html/a/620000/0104/20261111/0062dea5bbf7fa354e259c49fbb54345f63c.html" target="_blank">
+            甘肃省徽县孙家沟金锑矿普查（2026年续作）钻探施工项目...
+        </a>
+          <img src="/assets/images/new_on.png">
+        <span>2026-11-11</span>
+        </li>
+
+          <li class="on">
+
+        <a href="/information/deal/html/a/620000/0104/20261111/0062596fe69f1a06462fa5df966c19b65365.html" target="_blank">
+            景泰县工业集中区现代循环产业园地下综合管线（一期）建设项...
+        </a>
+          <img src="/assets/images/new_on.png">
+        <span>2026-11-11</span>
+        </li>
+
+          <li>
+
+        <a href="/information/deal/html/a/530000/0104/20261111/0053abca96a9eb9c4ce2985ed490d2ee392d.html" target="_blank">
+            澜沧县上允至安康农村道路改造工程可行性研究报告及施工图勘...
+        </a>
+        <span>2026-11-11</span>
+        </li>
+
+          <li>
+
+        <a href="/information/deal/html/a/0067/0104/20261111/0067c5b2c774f17a44cdb503a8c4e03edc4f.html" target="_blank">
+            安徽中烟工业有限责任公司蚌埠卷烟厂卷接包车间设备委外维修...
+        </a>
+        <span>2026-11-11</span>
+        </li>
+
+          <li>
+
+        <a href="/information/deal/html/a/530000/0104/20261111/0053f2a42bac847042cf80575f5c9dd0e558.html" target="_blank">
+            清水北部片区KCJ2025-15号地块土地平整工程
+        </a>
+        <span>2026-11-11</span>
+        </li>
+
+          <li>
+
+        <a href="/information/deal/html/a/530000/0104/20261111/005306eeed0a1ece4c4b86bae2e19fba8676.html" target="_blank">
+            石板冲风电场项目风力发电机组塔筒及附属设备采购
+        </a>
+        <span>2026-11-11</span>
+        </li>
+
+          <li>
+
+        <a href="/information/deal/html/a/0067/0104/20261111/0067a13f400aa8d240ba9969732b2df7ab65.html" target="_blank">
+            湖南中烟 2026-2029 年网络安全设备及系统维保服...
+        </a>
+        <span>2026-11-11</span>
+        </li>
+
+          <li>
+
+        <a href="/information/deal/html/a/530000/0104/20261111/00532933668ef52d4156933a67db7b889287.html" target="_blank">
+            （ZY）昆明市西山区2022年城市燃气管道老化更新改造项...
+        </a>
+        <span>2026-11-11</span>
+        </li>
+
+          <li>
+
+        <a href="/information/deal/html/a/530000/0104/20261111/00536295bac045af451f82fea24ad899a5b8.html" target="_blank">
+            宝秀集镇排水管网建设项目设计施工总承包
+        </a>
+        <span>2026-11-11</span>
+        </li>
+
+          <li>
+
+        <a href="/information/deal/html/a/0067/0104/20261111/00678c67b857b66e4b869c5a88dbdfbb85c7.html" target="_blank">
+            黑龙江省烟草公司佳木斯市公司2027年度建三江食堂原材料...
+        </a>
+        <span>2026-11-11</span>
+        </li>
+
+          <li>
+
+        <a href="/information/deal/html/a/530000/0104/20261111/00533e5e7c631f894fdea8932415a1b094ce.html" target="_blank">
+            大理州祥云县禾甸镇下莲村黑泥箐土地整治（补充耕地）项目 ...
+        </a>
+        <span>2026-11-11</span>
+        </li>
+
+    </ul>
+  </div>
+</div>
+
+<div class="statistical">
+  <h4>交易公开</h4>
+  <div class="statistical_togg" id="stati">
+    <div class="div_left">
+      <div class="div_on" id="map_on"></div>
+      <div class="div_hidden" id="div_hidden">
+        <span><img src="/assets/images/map.png" width="70" height="50"></span>
+      </div>
+      <div class="div_on" id="map_child" style="display:none;"></div>
+      <div class="div_child_qty_div" id="div_child_qty_div" style="display: none;">
+        <span id="div_child_qty_show" onclick="showProvinceCityShow()"></span>
+      </div>
+    </div>
+    <div class="div_tw">
+      <div class="div_tw_on">
+        <h3><label id="right_top_title">全国</label>今日公告数量</h3>
+        <div class="righttop">
+          <a class="righttop_top"></a>
+          <a class="righttop_bottom"></a>
+          <div style="margin-top:12px; position:relative; overflow:hidden; height:200px;">
+            <div class="righttopcon">
+              <div class="mapright">
+                <h5>工程建设</h5>
+                <ul>
+                  <li>招标/资审公告：<span><a style="cursor: pointer;" id="r_0101"
+                                             onclick="cmd_submitFindMore('01','0101');">0</a></span></li>
+                  <li>交易结果公示：<span><a style="cursor: pointer;" id="r_0104"
+                                            onclick="cmd_submitFindMore('01','0104');">0</a></span></li>
+                </ul>
+              </div>
+              <div class="mapright">
+                <h5>政府采购</h5>
+                <ul>
+                  <li>采购/资审公告：<span><a style="cursor: pointer;" id="r_0201"
+                                             onclick="cmd_submitFindMore('02','0201');">0</a></span></li>
+                  <li>中标公告：<span><a style="cursor: pointer;" id="r_0202"
+                                        onclick="cmd_submitFindMore('02','0202');">0</a></span></li>
+                </ul>
+              </div>
+              <div class="mapright">
+                <h5>土地使用权</h5>
+                <ul>
+                  <li>出让公示：<span><a style="cursor: pointer;" id="r_0301"
+                                        onclick="cmd_submitFindMore('03','0301');">0</a></span></li>
+                  <li>成交宗地：<span><a style="cursor: pointer;" id="r_0302"
+                                        onclick="cmd_submitFindMore('03','0302');">0</a></span></li>
+                </ul>
+              </div>
+              <div class="mapright">
+                <h5>矿业权</h5>
+                <ul>
+                  <li>出让公告：<span><a style="cursor: pointer;" id="r_0401"
+                                        onclick="cmd_submitFindMore('04','0401');">0</a></span></li>
+                  <li>出让结果：<span><a style="cursor: pointer;" id="r_0402"
+                                        onclick="cmd_submitFindMore('04','0402');">0</a></span></li>
+                </ul>
+              </div>
+              <div class="mapright">
+                <h5>国有产权</h5>
+                <ul>
+                  <li>挂牌披露：<span><a style="cursor: pointer;" id="r_0501"
+                                        onclick="cmd_submitFindMore('05','0501');">0</a></span></li>
+                  <li>交易结果：<span><a style="cursor: pointer;" id="r_0502"
+                                        onclick="cmd_submitFindMore('05','0502');">0</a></span></li>
+                </ul>
+              </div>
+              <div class="mapright">
+                <h5>碳排放权</h5>
+                <ul>
+                  <li>出售公告：<span><a style="cursor: pointer;" id="r_2101"
+                                        onclick="cmd_submitFindMore('21','2101');">0</a></span></li>
+                  <li>结果公示：<span><a style="cursor: pointer;" id="r_2102"
+                                        onclick="cmd_submitFindMore('21','2102');">0</a></span></li>
+                </ul>
+              </div>
+              <div class="mapright">
+                <h5>排污权</h5>
+                <ul>
+                  <li>交易公告：<span><a style="cursor: pointer;" id="r_2201"
+                                        onclick="cmd_submitFindMore('22','2201');">0</a></span></li>
+                  <li>结果公示：<span><a style="cursor: pointer;" id="r_2202"
+                                        onclick="cmd_submitFindMore('22','2202');">0</a></span></li>
+                </ul>
+              </div>
+              <div class="mapright">
+                <h5>药品采购</h5>
+                <ul>
+                  <li>交易公告：<span><a style="cursor: pointer;" id="r_2302"
+                                        onclick="cmd_submitFindMore('23','2302');">0</a></span></li>
+                </ul>
+              </div>
+              <div class="mapright">
+                <h5>二类疫苗</h5>
+                <ul>
+                  <li>交易公告：<span><a style="cursor: pointer;" id="r_2402"
+                                        onclick="cmd_submitFindMore('24','2402');">0</a></span></li>
+                </ul>
+              </div>
+              <div class="mapright">
+                <h5>林权</h5>
+                <ul>
+                  <li>信息披露：<span><a style="cursor: pointer;" id="r_2501"
+                                        onclick="cmd_submitFindMore('25','2501');">0</a></span></li>
+                  <li>成交公告：<span><a style="cursor: pointer;" id="r_2502"
+                                        onclick="cmd_submitFindMore('25','2502');">0</a></span></li>
+                </ul>
+              </div>
+              <div class="mapright">
+                <h5>其他</h5>
+                <ul>
+                  <li>交易公告：<span><a style="cursor: pointer;" id="r_9001"
+                                        onclick="cmd_submitFindMore('90','9001');">0</a></span></li>
+                  <li>成交公示：<span><a style="cursor: pointer;" id="r_9002"
+                                        onclick="cmd_submitFindMore('90','9002');">0</a></span></li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="div_tw_tw">
+        <h3><label id="right_next_title">全国</label>交易查询</h3>
+        <div class="righttop">
+          <div class="inquire">
+            <h5>查询范围：</h5>
+            <ul>
+              <li id="provinceLi">
+                省份：
+                <select id="provinceId">
+                  <option value="0">全国</option>
+                  <option value="110000">北京</option>
+                  <option value="120000">天津</option>
+                  <option value="130000">河北</option>
+                  <option value="140000">山西</option>
+                  <option value="150000">内蒙古</option>
+                  <option value="210000">辽宁</option>
+                  <option value="220000">吉林</option>
+                  <option value="230000">黑龙江</option>
+                  <option value="310000">上海</option>
+                  <option value="320000">江苏</option>
+                  <option value="330000">浙江</option>
+                  <option value="340000">安徽</option>
+                  <option value="350000">福建</option>
+                  <option value="360000">江西</option>
+                  <option value="370000">山东</option>
+                  <option value="410000">河南</option>
+                  <option value="420000">湖北</option>
+                  <option value="430000">湖南</option>
+                  <option value="440000">广东</option>
+                  <option value="450000">广西</option>
+                  <option value="460000">海南</option>
+                  <option value="500000">重庆</option>
+                  <option value="510000">四川</option>
+                  <option value="520000">贵州</option>
+                  <option value="530000">云南</option>
+                  <option value="540000">西藏</option>
+                  <option value="610000">陕西</option>
+                  <option value="620000">甘肃</option>
+                  <option value="630000">青海</option>
+                  <option value="640000">宁夏</option>
+                  <option value="650000">新疆</option>
+                  <option value="660000">兵团</option>
+                </select>
+              </li>
+              <li id="cityLi" style="display: none">
+                <label style="margin-left: 14px;">市：</label>
+                <select id="cityId">
+                  <option></option>
+                </select>
+              </li>
+              <li id="platformLi" style="display: none">
+                交易平台：
+                <select id="platformId">
+                  <option></option>
+                </select>
+              </li>
+            </ul>
+          </div>
+          <div class="inquire">
+            <h5>业务类型：</h5>
+            <ul>
+              <li id="classifyLi">
+                <select id="classifyId" style="margin-left: 46px;">
+                  <option value="00">不限</option>
+                  <option value="01">工程建设</option>
+                  <option value="02">政府采购</option>
+                  <option value="03">土地使用权</option>
+                  <option value="04">矿业权</option>
+                  <option value="05">国有产权</option>
+                  <option value="21">碳排放权</option>
+                  <option value="22">排污权</option>
+                  <option value="23">药品采购</option>
+                  <option value="24">二类疫苗</option>
+                  <option value="25">林权</option>
+                  <option value="90">其他</option>
+                </select>
+              </li>
+            </ul>
+          </div>
+          <div class="inquire" id='choose_classify_00_show'>
+            <h5>信息类型：</h5>
+            <ul>
+              <li id="choose_stage_0000" class="toggle"><a href="javascript:;">不限</a></li>
+              <li id="choose_stage_0001"><a href="javascript:;">交易公告</a></li>
+              <li id="choose_stage_0002"><a href="javascript:;">成交公示</a></li>
+            </ul>
+          </div>
+          <div class="inquire" id='choose_classify_01_show' style="display:none;">
+            <h5>信息类型：</h5>
+            <ul>
+              <li id="choose_stage_0100"><a href="javascript:;">不限</a></li>
+              <li id="choose_stage_0101"><a href="javascript:;">招标/资审公告</a></li>
+              <li id="choose_stage_0102"><a href="javascript:;">开标记录</a></li>
+              <li id="choose_stage_0104"><a href="javascript:;">交易结果公示</a></li>
+              <li id="choose_stage_0105"><a href="javascript:;">招标/资审文件澄清</a></li>
+            </ul>
+          </div>
+          <div class="inquire" id='choose_classify_02_show' style="display:none;">
+            <h5>信息类型：</h5>
+            <ul>
+              <li id="choose_stage_0200"><a href="javascript:;">不限</a></li>
+              <li id="choose_stage_0201"><a href="javascript:;">采购/资审公告</a></li>
+              <li id="choose_stage_0202"><a href="javascript:;">中标公告</a></li>
+              <li id="choose_stage_0203"><a href="javascript:;">采购合同</a></li>
+              <li id="choose_stage_0204"><a href="javascript:;">更正事项</a></li>
+            </ul>
+          </div>
+          <div class="inquire" id='choose_classify_03_show' style="display:none;">
+            <h5>信息类型：</h5>
+            <ul>
+              <li id="choose_stage_0300"><a href="javascript:;">不限</a></li>
+              <li id="choose_stage_0301"><a href="javascript:;">出让公示</a></li>
+              <li id="choose_stage_0302"><a href="javascript:;">成交宗地</a></li>
+            </ul>
+          </div>
+          <div class="inquire" id='choose_classify_04_show' style="display:none;">
+            <h5>信息类型：</h5>
+            <ul>
+              <li id="choose_stage_0400"><a href="javascript:;">不限</a></li>
+              <li id="choose_stage_0401"><a href="javascript:;">出让公告</a></li>
+              <li id="choose_stage_0402"><a href="javascript:;">出让结果</a></li>
+              <li id="choose_stage_0403"><a href="javascript:;">公开信息</a></li>
+              <li id="choose_stage_0404"><a href="javascript:;">登记公告信息</a></li>
+            </ul>
+          </div>
+          <div class="inquire" id='choose_classify_05_show' style="display:none;">
+            <h5>信息类型：</h5>
+            <ul>
+              <li id="choose_stage_0500"><a href="javascript:;">不限</a></li>
+              <li id="choose_stage_0501"><a href="javascript:;">挂牌披露</a></li>
+              <li id="choose_stage_0502"><a href="javascript:;">交易结果</a></li>
+            </ul>
+          </div>
+          <div class="inquire" id='choose_classify_21_show' style="display:none;">
+            <h5>信息类型：</h5>
+            <ul>
+              <li id="choose_stage_2100"><a href="javascript:;">不限</a></li>
+              <li id="choose_stage_2101"><a href="javascript:;">出售公告</a></li>
+              <li id="choose_stage_2102"><a href="javascript:;">结果公示</a></li>
+            </ul>
+          </div>
+          <div class="inquire" id='choose_classify_22_show' style="display:none;">
+            <h5>信息类型：</h5>
+            <ul>
+              <li id="choose_stage_2200"><a href="javascript:;">不限</a></li>
+              <li id="choose_stage_2201"><a href="javascript:;">交易公告</a></li>
+              <li id="choose_stage_2202"><a href="javascript:;">结果公示</a></li>
+            </ul>
+          </div>
+          <div class="inquire" id='choose_classify_23_show' style="display:none;">
+            <h5>信息类型：</h5>
+            <ul>
+              <li id="choose_stage_2300"><a href="javascript:;">不限</a></li>
+              <li id="choose_stage_2302"><a href="javascript:;">交易公告</a></li>
+              <li id="choose_stage_2303"><a href="javascript:;">交易目录</a></li>
+              <li id="choose_stage_2304"><a href="javascript:;">变更公告</a></li>
+            </ul>
+          </div>
+          <div class="inquire" id='choose_classify_24_show' style="display:none;">
+            <h5>信息类型：</h5>
+            <ul>
+              <li id="choose_stage_2400"><a href="javascript:;">不限</a></li>
+              <li id="choose_stage_2402"><a href="javascript:;">交易公告</a></li>
+              <li id="choose_stage_2403"><a href="javascript:;">交易目录</a></li>
+              <li id="choose_stage_2404"><a href="javascript:;">变更公告</a></li>
+            </ul>
+          </div>
+          <div class="inquire" id='choose_classify_25_show' style="display:none;">
+            <h5>信息类型：</h5>
+            <ul>
+              <li id="choose_stage_2500"><a href="javascript:;">不限</a></li>
+              <li id="choose_stage_2501"><a href="javascript:;">信息披露</a></li>
+              <li id="choose_stage_2502"><a href="javascript:;">成交公告</a></li>
+            </ul>
+          </div>
+          <div class="inquire" id='choose_classify_90_show' style="display:none;">
+            <h5>信息类型：</h5>
+            <ul>
+              <li id="choose_stage_9000"><a href="javascript:;">不限</a></li>
+              <li id="choose_stage_9001"><a href="javascript:;">交易公告</a></li>
+              <li id="choose_stage_9002"><a href="javascript:;">成交公示</a></li>
+            </ul>
+          </div>
+          <div class="inquire">
+            <h5>发布时间：</h5>
+            <ul>
+              <li id="choose_time_01" class="toggle"><a href="javascript:;">当天</a></li>
+              <li id="choose_time_02"><a href="javascript:;">近三天</a></li>
+              <li id="choose_time_03"><a href="javascript:;">近十天</a></li>
+              <li id="choose_time_04"><a href="javascript:;">近一月</a></li>
+              <li id="choose_time_05"><a href="javascript:;">近三月</a></li>
+            </ul>
+          </div>
+          <form id="FIND" name="FIND" action="/deal/dealList.html" target="_blank"
+                method="post">
+            <input type="hidden" id="DEAL_PROVINCE" name="DEAL_PROVINCE" value="0">
+            <input type="hidden" id="DEAL_CITY" name="DEAL_CITY" value="0">
+            <input type="hidden" id="DEAL_PLATFORM" name="DEAL_PLATFORM" value="0">
+            <input type="hidden" id="DEAL_TIME" name="DEAL_TIME" value="01">
+            <input type="hidden" id="DEAL_CLASSIFY" name="DEAL_CLASSIFY" value="00">
+            <input type="hidden" id="DEAL_STAGE" name="DEAL_STAGE" value="0000">
+            <div class="maprightbottom">
+              <input type="text" id="FINDTXT" name="FINDTXT" value="" onkeypress="txtsearch(event)"
+                     placeholder="请输入关键字" class="input_on"><input type="button" id="searchButton" onclick="cmd_find(1);"
+                                                                        value="搜索" class="input_tw"><span><a href="javascript:;" onclick="cmd_find(2);">高级搜索</a></span>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="content">
+  <div class="cont_on">
+    <h4 class="h4">交易诚信<span><a href="/deal/creditList.html?SHOWTYPE=1" target="_blank">&gt;&gt;更多</a></span></h4>
+    <div class="cont-padiv">
+      <ul id="asas" class="paul">
+        <li class="toggle">
+          <p>违<br>法<br>违<br>规</p>
+        </li>
+        <li>
+          <p>奖<br>励<br>信<br>息</p>
+        </li>
+      </ul>
+
+      <div class="patogg" style="display:block;">
+        <ul>
+          <li>
+            <h4><a href="/deal/creditDetailILLEGAL.html?sid=0037e547190e9d3c4b1d9a9871ab63f36b8f"
+                   title="【山东】存在“擅自变更、中止或者终止政府采购合同”的情形" target="_blank"  class="text-ellipsis-100">【山东】存在“擅自变更、中止或者终止政府采购合同”的情形</a></h4><span><strong>日期</strong>2026-11-03</span>
+            <p><a href="/deal/creditDetailILLEGAL.html?sid=0037e547190e9d3c4b1d9a9871ab63f36b8f"
+                  target="_blank" class="text-ellipsis-150">问题内容： 经查，青岛万祺工贸有限公司在青岛市教育后勤服务保障中心全市义务教育段中小学免费作业本（2025-2026学年）（项目编号：SDGP370200000202502001232，第2包：市北区义务教育段作业本采购）履约过程中，存在“擅自变更、中止或者终止政府采购合同”的情形。</a></p>
+          </li>
+          <li>
+            <h4><a href="/deal/creditDetailILLEGAL.html?sid=0037785c9ec2d99b4061809cf98abb643e37"
+                   title="【山东】与其他供应商恶意串通" target="_blank"  class="text-ellipsis-100">【山东】与其他供应商恶意串通</a></h4><span><strong>日期</strong>2026-11-03</span>
+            <p><a href="/deal/creditDetailILLEGAL.html?sid=0037785c9ec2d99b4061809cf98abb643e37"
+                  target="_blank" class="text-ellipsis-150">问题内容：经查，济南玉泉医疗科技有限公司在参与青岛市妇女儿童医院2025年医疗设备采购项目（十五）（项目编号：SDGP370200000202502001263，第3包）时，存在“与其他供应商恶意串通”的情形。</a></p>
+          </li>
+          <li>
+            <h4><a href="/deal/creditDetailILLEGAL.html?sid=0037827d413882844ec4a59619c602f7bdf2"
+                   title="【山东】提供虚假材料谋取中标、成交的" target="_blank"  class="text-ellipsis-100">【山东】提供虚假材料谋取中标、成交的</a></h4><span><strong>日期</strong>2026-11-03</span>
+            <p><a href="/deal/creditDetailILLEGAL.html?sid=0037827d413882844ec4a59619c602f7bdf2"
+                  target="_blank" class="text-ellipsis-150">问题内容：当事人违反了《中华人民共和国政府采购法（2014修正）》第三条“诚实信用原则”的规定，构成《中华人民共和国政府采购法（2014修正）》第七十七条第一款第（一）项“提供虚假材料谋取中标、成交的”之情形。</a></p>
+          </li>
+          <li>
+            <h4><a href="/deal/creditDetailILLEGAL.html?sid=0037aee75ef130b84bd5bab5de58bb4d3315"
+                   title="【山东】违反《中华人民共和国政府采购法》第七十七条规定" target="_blank"  class="text-ellipsis-100">【山东】违反《中华人民共和国政府采购法》第七十七条规定</a></h4><span><strong>日期</strong>2026-11-03</span>
+            <p><a href="/deal/creditDetailILLEGAL.html?sid=0037aee75ef130b84bd5bab5de58bb4d3315"
+                  target="_blank" class="text-ellipsis-150">问题内容：当事人武城县贝州有限责任会计师事务所在临邑县国有企业审计项目中，存在违反《中华人民共和国政府采购法》第七十七条规定的行为。</a></p>
+          </li>
+          <li>
+            <h4><a href="/deal/creditDetailILLEGAL.html?sid=0052dfb8d01cd211459f9a367b8c716a219e"
+                   title="【贵州】凯里市下司镇2026年第三期鸭产业建设项目（二次）" target="_blank"  class="text-ellipsis-100">【贵州】凯里市下司镇2026年第三期鸭产业建设项目（二次）</a></h4><span><strong>日期</strong>2026-10-29</span>
+            <p><a href="/deal/creditDetailILLEGAL.html?sid=0052dfb8d01cd211459f9a367b8c716a219e"
+                  target="_blank" class="text-ellipsis-150">问题内容：印发《黔东南州公共资源交易代理机构代理服务行为考评实施细则》的通知</a></p>
+          </li>
+
+        </ul>
+      </div>
+      <div class="patogg">
+        <ul>
+          <li>
+            <h4><a href="/deal/creditDetailReword.html?sid=0062e95f6466148545a3acb1dfb9b3590d92"
+                   title="【甘肃】张明虎"  class="text-ellipsis-100" target="_blank">【甘肃】张明虎</a></h4>
+            <span><strong>日期</strong>2026-11-05</span>
+            <p><a href="/deal/creditDetailReword.html?sid=0062e95f6466148545a3acb1dfb9b3590d92"
+                  target="_blank"  class="text-ellipsis-150">问题内容：认真严谨，公平公正</a></p>
+          </li>
+          <li>
+            <h4><a href="/deal/creditDetailReword.html?sid=0062b88985a8fdef40c8a01840db509b1d0e"
+                   title="【甘肃】王兰桂"  class="text-ellipsis-100" target="_blank">【甘肃】王兰桂</a></h4>
+            <span><strong>日期</strong>2026-11-05</span>
+            <p><a href="/deal/creditDetailReword.html?sid=0062b88985a8fdef40c8a01840db509b1d0e"
+                  target="_blank"  class="text-ellipsis-150">问题内容：认真严谨，公平公正</a></p>
+          </li>
+          <li>
+            <h4><a href="/deal/creditDetailReword.html?sid=006237c597ba657a4e1f8fd6dbdd36a6301b"
+                   title="【甘肃】陈莉娅"  class="text-ellipsis-100" target="_blank">【甘肃】陈莉娅</a></h4>
+            <span><strong>日期</strong>2026-11-05</span>
+            <p><a href="/deal/creditDetailReword.html?sid=006237c597ba657a4e1f8fd6dbdd36a6301b"
+                  target="_blank"  class="text-ellipsis-150">问题内容：认真严谨，公平公正</a></p>
+          </li>
+          <li>
+            <h4><a href="/deal/creditDetailReword.html?sid=00625a1343f96b404bb58247e0050a7e5350"
+                   title="【甘肃】姜晶"  class="text-ellipsis-100" target="_blank">【甘肃】姜晶</a></h4>
+            <span><strong>日期</strong>2026-11-05</span>
+            <p><a href="/deal/creditDetailReword.html?sid=00625a1343f96b404bb58247e0050a7e5350"
+                  target="_blank"  class="text-ellipsis-150">问题内容：认真严谨，公平公正</a></p>
+          </li>
+          <li>
+            <h4><a href="/deal/creditDetailReword.html?sid=0062fcd18e1cd2244fd18d66231c6d712b22"
+                   title="【甘肃】魏云花"  class="text-ellipsis-100" target="_blank">【甘肃】魏云花</a></h4>
+            <span><strong>日期</strong>2026-11-05</span>
+            <p><a href="/deal/creditDetailReword.html?sid=0062fcd18e1cd2244fd18d66231c6d712b22"
+                  target="_blank"  class="text-ellipsis-150">问题内容：认真严谨，公平公正</a></p>
+          </li>
+
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="cont_tw">
+    <!-- <h4 class="h4">交易订阅<span><a href="http://subscribe.ggzy.gov.cn/subs/subscribe/subscribeguide.jsp" target="_blank">&gt;&gt;更多</a></span></h4>
+          <ul>
+          <li><h4><a href="http://subscribe.ggzy.gov.cn/subs/subscribe/subscribeguide.jsp?type=0"  target="_blank">网站订阅用户注册流程</a></h4><p><a href="http://subscribe.ggzy.gov.cn/subs/subscribe/subscribeguide.jsp?type=0"  target="_blank">1、登录全国公共资源交易平台官网：www.ggzy.gov.cn。...</a></p></li>
+          <!//-- 	<li><h4><a href="http://subscribe.ggzy.gov.cn/subs/subscribe/subscribeguide.jsp?type=1"  target="_blank">微信公共订阅号介绍</a></h4><p><a href="http://subscribe.ggzy.gov.cn/subs/subscribe/subscribeguide.jsp?type=1"  target="_blank">全国公共资源交易平台订阅号旨在为社会公众和市场主体提供全方位的公共资源交...</a></p></li> --//>
+          <li><h4><a href="http://subscribe.ggzy.gov.cn/subs/subscribe/subscribeguide.jsp?type=1"  target="_blank">微信公共服务号介绍</a></h4><p><a href="http://subscribe.ggzy.gov.cn/subs/subscribe/subscribeguide.jsp?type=1"  target="_blank">全国公共资源交易平台服务号支持注册用户订阅，为其提供高效、便捷、个性化的...</a></p></li>
+          <li><h4><a href="http://subscribe.ggzy.gov.cn/subs/subscribe/subscribeguide.jsp?type=2"  target="_blank">公共资源交易数据邮件订阅流程</a></h4><p><a href="http://subscribe.ggzy.gov.cn/subs/subscribe/subscribeguide.jsp?type=2"  target="_blank">1、登录全国公共资源交易平台官网：www.ggzy.gov.cn，进入邮件订阅栏目。...</a></p></li>
+          <li><h4><a href="http://subscribe.ggzy.gov.cn/subs/subscribe/subscribeguide.jsp?type=3"  target="_blank">公共资源交易数据在线订阅流程</a></h4><p><a href="http://subscribe.ggzy.gov.cn/subs/subscribe/subscribeguide.jsp?type=3"  target="_blank">1、登录全国公共资源交易平台官网：www.ggzy.gov.cn，进入在线订阅栏目。 ...</a></p></li>
+          <li><h4><a href="http://subscribe.ggzy.gov.cn/subs/subscribe/subscribeguide.jsp?type=4"  target="_blank">公共资源交易数据RSS订阅流程</a></h4><p><a href="http://subscribe.ggzy.gov.cn/subs/subscribe/subscribeguide.jsp?type=4"  target="_blank">方式一、通过RSS阅读器订阅 ...</a></p></li>
+          </ul>-->
+    <h4 class="h4">数据服务</h4>
+    <div class="index_datafw">
+      <div class="info-container">中标（成交）查询</div>
+      <div class="search-container home">
+        <div class="input-container">
+          <input placeholder="请输入主体名称、统一社会信用代码" onkeypress="datafw_find(event)" id="datafw_input" type="text">
+        </div>
+        <div class="btn" onclick="datafw_find();">查询</div>
+      </div>
+      <div class="service-container">
+        <div class="service-item">
+          <div class="wrap"><a href="https://data.ggzy.gov.cn/#/rank" target="_blank"><img
+                      src="/assets/images/datafwlh.png" alt="交易龙虎榜">
+              <div>交易龙虎榜</div>
+            </a></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="platform">
+  <div class="platform_on" style="padding-top: 96px;padding-bottom: 98px;">
+    <p>相<br>关<br>链<br>接</p>
+  </div>
+  <div class="platform_tw">
+    <div class="platform_th">
+      <ul>
+        <li><span></span></li>
+          <li><a href="https://www.gov.cn/" target="_blank">中国政府网</a></li>
+          <li><a href="https://www.ndrc.gov.cn/" target="_blank">国家发展和改革委员会</a></li>
+          <li><a href="http://www.mof.gov.cn/index.htm" target="_blank">财政部</a></li>
+          <li><a href="https://www.mnr.gov.cn/" target="_blank">自然资源部</a></li>
+          <li><a href="http://www.sasac.gov.cn/" target="_blank">国务院国有资产监督管理委员会</a></li>
+          <li><a href="https://www.miit.gov.cn/" target="_blank">工业和信息化部</a></li>
+          <li><a href="http://www.mee.gov.cn/" target="_blank">生态环境部</a></li>
+          <li><a href="http://www.nhc.gov.cn/" target="_blank">国家卫生健康委员会</a></li>
+          <li><a href="http://www.mohurd.gov.cn/" target="_blank">住房和城乡建设部</a></li>
+          <li><a href="http://www.mot.gov.cn/" target="_blank">交通运输部</a></li>
+          <li><a href="http://www.mwr.gov.cn/" target="_blank">水利部</a></li>
+          <li><a href="http://www.mofcom.gov.cn/" target="_blank">商务部</a></li>
+          <li><a href="http://www.chinatax.gov.cn/" target="_blank">国家税务总局</a></li>
+          <li><a href="http://www.forestry.gov.cn/" target="_blank">国家林业和草原局</a></li>
+          <li><a href="http://www.ggj.gov.cn/" target="_blank">国家机关事务管理局</a></li>
+          <li><a href="http://www.nra.gov.cn/" target="_blank">国家铁路局</a></li>
+          <li><a href="http://www.caac.gov.cn/" target="_blank">中国民用航空局</a></li>
+          <li><a href="http://www.sic.gov.cn/" target="_blank">国家信息中心</a></li>
+      </ul>
+      <ul>
+        <li><span></span></li>
+          <li><a href="http://www.tzxm.gov.cn/" target="_blank">投资项目在线审批监管平台</a></li>
+          <li><a href="http://www.creditchina.gov.cn/" target="_blank">信用中国</a></li>
+      </ul>
+      <ul>
+        <li><span></span></li>
+          <li><a href="http://www.cebpubservice.com/" target="_blank">中国招标投标公共服务平台</a></li>
+      </ul>
+    </div>
+    <div class="platone">
+      <ul>
+        <li><span>华北：</span></li>
+          <li><a href="http://ggzyfw.beijing.gov.cn/" target="_blank">北京</a></li>
+          <li><a href="http://ggzy.zwfwb.tj.gov.cn/" target="_blank">天津</a></li>
+          <li><a href="https://szj.hebei.gov.cn/hbggfwpt/" target="_blank">河北</a></li>
+          <li><a href="http://prec.sxzwfw.gov.cn" target="_blank">山西</a></li>
+          <li><a href="http://ggzyjy.nmg.gov.cn" target="_blank">内蒙古</a></li>
+
+      </ul>
+      <ul>
+        <li><span>华中：</span></li>
+          <li><a href="http://ggzy.fgw.henan.gov.cn/" target="_blank">河南</a></li>
+          <li><a href="http://www.hbggzyfwpt.cn/" target="_blank">湖北</a></li>
+          <li><a href="http://www.hnsggzy.com" target="_blank">湖南</a></li>
+      </ul>
+      <ul>
+        <li><span>西南：</span></li>
+          <li><a href="http://www.cqggzy.com/" target="_blank">重庆</a></li>
+          <li><a href="http://ggzyjy.sc.gov.cn" target="_blank">四川</a></li>
+          <li><a href="http://ggzy.guizhou.gov.cn" target="_blank">贵州</a></li>
+          <li><a href="https://ggzy.yn.gov.cn/#/homePage" target="_blank">云南</a></li>
+          <li><a href="http://ggzy.xizang.gov.cn/" target="_blank">西藏</a></li>
+      </ul>
+      <ul>
+        <li><span>东北：</span></li>
+          <li><a href="http://www.lnggzy.gov.cn/" target="_blank">辽宁</a></li>
+          <li><a href="http://www.jl.gov.cn/ggzy/" target="_blank">吉林</a></li>
+          <li><a href="https://ggzyjyw.hlj.gov.cn" target="_blank">黑龙江</a></li>
+      </ul>
+    </div>
+    <div class="plattwo">
+      <ul>
+        <li><span>华东：</span></li>
+          <li><a href="http://www.shggzy.com/" target="_blank">上海</a></li>
+          <li><a href="http://jsggzy.jszwfw.gov.cn/" target="_blank">江苏</a></li>
+          <li><a href="https://ggzy.zj.gov.cn" target="_blank">浙江</a></li>
+          <li><a href="http://ggzy.ah.gov.cn" target="_blank">安徽</a></li>
+          <li><a href="https://ggzyfw.fujian.gov.cn/" target="_blank">福建</a></li>
+          <li><a href="https://www.jxsggzy.cn/" target="_blank">江西</a></li>
+          <li><a href="https://ggzyjy.shandong.gov.cn/" target="_blank">山东</a></li>
+      </ul>
+      <ul>
+        <li><span>华南：</span></li>
+          <li><a href="https://ygp.gdzwfw.gov.cn/#/44/index" target="_blank">广东</a></li>
+          <li><a href="http://ggzy.jgswj.gxzf.gov.cn/gxggzy/" target="_blank">广西</a></li>
+          <li><a href="https://ggzy.hainan.gov.cn" target="_blank">海南</a></li>
+      </ul>
+      <ul>
+        <li><span>西北：</span></li>
+          <li><a href="http://www.sxggzyjy.cn/" target="_blank">陕西</a></li>
+          <li><a href="https://ggzyjy.gansu.gov.cn/" target="_blank">甘肃</a></li>
+          <li><a href="http://www.qhggzyjy.gov.cn/ggzy/" target="_blank">青海</a></li>
+          <li><a href="https://ggzyjy.fzggw.nx.gov.cn/" target="_blank">宁夏</a></li>
+          <li><a href="https://ggzy.xinjiang.gov.cn" target="_blank">新疆</a></li>
+          <li><a href="http://ggzy.xjbt.gov.cn/" target="_blank">兵团</a></li>
+      </ul>
+    </div>
+  </div>
+</div>
+<div class="popup">
+  <a target="_blank" href="/serve/wechat/wechat.html" style="margin-bottom:15px;padding-top:13px">
+    <img src="/assets/images/wechatserve.jpg" width="100" height="100">
+    <div>全国公共资源<br>交易服务号</div>
+  </a>
+  <!--  	<a target="_blank" href="http://data.ggzy.gov.cn/portal_legal/companyPer.html#/home" style="margin-bottom:15px;padding:20px 0px;background:#4F81BD" >
+<div style="margin:0 0 10px 0;line-height:30px;font-size:18px;color:#FFC000;font-weight:bold;">数据服务<br>栏目上线</div>
+<div style="margin:0;">成交记录查询<br>请点击</div>
+</a>-->
+  <a target="_blank" href="https://data.ggzy.gov.cn/#/home" style="margin-bottom:15px;background:#F2F2F2;">
+    <img src="/assets/images/homepop.png" width="100" height="100" style="margin-top:6px;">
+    <div style="color:#000;line-height:20px;">主体成交记录<br>查询</div>
+  </a>
+</div>
+<script>
+  function resizePopup() {
+    var winHeight = $(window).height();
+    var popHeight = $(".popup").height();
+    $(".popup").css("top", "35%");
+    var otop = parseInt($(".popup").css("top"), 10);
+    var top = winHeight - popHeight;
+    if (top >= 0 && top < otop) {
+      $(".popup").css("top", top);
+    } else if (top < 0) {
+      $(".popup").css("top", 0);
+    }
+    //alert(popHeight);
+    //alert(winHeight);
+    //alert(parseInt(otop,10));
+  }
+  resizePopup();
+  $(window).resize(function () {
+    resizePopup();
+  })
+  var platformotherHeight = $(".platform_tw").outerHeight() - 96;
+  var platformpaddingTop = parseInt(platformotherHeight / 2, 10) - 1;
+  var platformpaddingBottom = platformotherHeight - platformpaddingTop;
+  $(".platform_on").css("padding-top", platformpaddingTop);
+  $(".platform_on").css("padding-bottom", platformpaddingBottom);
+  //地图
+  var myChart_map;
+  var option_map;
+  var myChart_child;
+  var option_child;
+  require(
+          [
+            'echarts',
+            'echarts/chart/map'
+          ], function (echarts) {
+            myChart_map = echarts.init(document.getElementById('map_on'));
+            myChart_child = echarts.init(document.getElementById('map_child'));
+          }
+  );
+  //地图
+  option_map = {
+    title: {
+      text: "全国今日公告总数量：2166",
+      x: 'left',
+      padding: [16, 0, 0, 18],
+      textStyle: { fontSize: 16, fontFamily: "微软雅黑", color: "#185685" }
+    },
+    tooltip: {
+      trigger: 'item',
+      formatter: function (params, ticket, callback) {
+        var res = "公告总数量" + "<br>" + params.name + "：" + params.value;
+        return res;
+      },
+      position: function (suspend) {
+        return [suspend[0] - 10, suspend[1] + 40];
+      }
+    },
+    dataRange: {
+      splitNumber: 0,
+      min: 0,
+      max: 177,
+      x: 'left',
+      y: 'bottom',
+      color: ['#356DF0', '#A9C1FA'],
+      text: ['高', '低']
+    },
+    series: [
+      {
+        name: "==",
+        type: 'map',
+        mapType: 'china',
+        roam: false,
+        itemStyle: {
+          normal: {
+            label: {
+              show: true
+            },
+            borderColor: '#B2A471',
+            areaStyle: { color: '#BFD1FB' }
+          },
+          emphasis: {
+            label: {
+              show: true
+            },
+            areaStyle: {
+              color: "#0CF405"
+            },
+            borderColor: '#e1e1e1'
+          }
+        },
+        data: areaJson,
+        markPoint: {
+          symbolSize: function (v) {
+            var a = 16;
+            if (v < 10) {
+              a = 10;
+            } else if (v < 100) {
+              a = 12;
+            } else if (v < 1000) {
+              a = 15;
+            }
+            return a
+          },      // 标注大小，半宽（半径）参数，当图形为方向或菱形则总宽度为symbolSize * 2
+          itemStyle: {
+            normal: {
+              borderColor: 'rgba(146,208,80, 0.4)',
+              borderWidth: 4,
+              color: 'rgba(250,250,250,0.2)',
+              label: {
+                show: true,
+                textStyle: { color: 'rgba(0,0,0,0.6)' }
+              }
+            },
+            emphasis: {
+              borderColor: '#87cefa',
+              borderWidth: 5,
+              label: {
+                show: false
+              }
+            }
+          },
+          data: areaJson
+        },
+        geoCoord: []
+      }
+    ]
+  };
+  //地图
+  option_child = {
+    title: {
+      text: "",
+      x: 'left',
+      padding: [16, 0, 0, 110],
+      textStyle: { fontSize: 16, fontFamily: "微软雅黑", color: "#185685" }
+    },
+    tooltip: {
+      trigger: 'item',
+      formatter: function (params, ticket, callback) {
+        var res = "公告总数量" + "<br>" + params.name + "：" + params.value;
+        return res;
+      },
+      position: function (suspend) {
+        return [suspend[0] - 10, suspend[1] + 40];
+      }
+    },
+    dataRange: {
+      splitNumber: 0,
+      min: 0,
+      max: 39,
+      x: 'left',
+      y: 'bottom',
+      color: ['#356DF0', '#A9C1FA'],
+      text: ['高', '低']           // 文本，默认为数值文本
+    },
+    series: [
+      {
+        name: "===",
+        type: 'map',
+        mapType: 'china',
+        selectedMode: false,
+        roam: false,
+        itemStyle: {
+          normal: {
+            label: {
+              show: true
+            },
+            borderColor: '#B2A471',
+            areaStyle: { color: '#BFD1FB' }
+          },
+          emphasis: {
+            label: {
+              show: true
+            },
+            areaStyle: {
+              color: "#0CF405"
+            },
+            borderColor: '#e1e1e1'
+          }
+        },
+        mapLocation: {
+          y: '60px'
+        },
+        data: [],
+        markPoint: {
+          symbolSize: function (v) {
+            var a = 16;
+            if (v < 10) {
+              a = 10;
+            } else if (v < 100) {
+              a = 12;
+            } else if (v < 1000) {
+              a = 15;
+            }
+            return a
+          },      // 标注大小，半宽（半径）参数，当图形为方向或菱形则总宽度为symbolSize * 2
+          itemStyle: {
+            normal: {
+              borderColor: 'rgba(146,208,80, 0.4)',
+              borderWidth: 4,
+              color: 'rgba(250,250,250,0.2)',
+              label: {
+                show: true,
+                textStyle: { color: 'rgba(0,0,0,0.6)' }
+              }
+            },
+            emphasis: {
+              borderColor: '#87cefa',
+              borderWidth: 5,
+              label: {
+                show: false
+              }
+            }
+          },
+          data: []
+        },
+        geoCoord: []
+      }
+    ]
+  };
+  var cccccddddd = '2024-01-19 09:30:40';
+</script>
+<div class="foot">
+  <ul>
+    <li><a href="/home/webmap.html" target="_blank">网站地图</a><span>|</span></li>
+    <li><a href="/home/webStated.html" target="_blank">网站声明</a><span>|</span></li>
+    <li><a href="javascript:;" onclick="addFavorite();">添加收藏</a><span>|</span></li>
+    <li><a href="/home/contact.html" target="_blank">联系我们</a></li>
+  </ul>
+</div>
+<div class="footer">
+  <div class="footer_page" style="width:990px;">
+    <div style="float:left;margin-top:5px !important;">
+      <img onclick="linkto_jiucuo('bm04000008')" style="margin:0;border:0;cursor: pointer;"
+           src="/assets/images/jiucuo.png">
+    </div>
+    <div style="float:left;width:85px;height:85px;margin-top:-5px !important;">
+      <a href="https://bszs.conac.cn/sitename?method=show&id=59FE0779EB534910E053022E1AAC7D54" target="_blank">
+        <img id="imgConac" vspace="0" hspace="0" border="0" src="/assets/images/imgConac.png"
+             data-bd-imgshare-binded="1">
+      </a>
+    </div>
+    <div style="float:left;margin-left:20px;">
+      <p>主办：国家信息中心&nbsp;&nbsp;&nbsp;&nbsp;指导单位： 国家发展和改革委员会 </p>
+      <p style="display: flex; align-items: center;">网站标识码：bm04000008&nbsp;&nbsp;<a href="https://beian.miit.gov.cn/" target="_blank"
+                                             style="color:#000">京ICP备05052393号-9</a>&nbsp;&nbsp;
+        <img src="/assets/images/beianhao.png" width="14" height="14">
+        京公网安备11010202007733号 </p>
+      <p>地址：北京西城区三里河路58号&nbsp;&nbsp;&nbsp;&nbsp;邮政编码：100045</p>
+    </div>
+  </div>
+</div>
+<script type="text/javascript">
+    function linkto_jiucuo(site_code) {
+        //获取该站点需要纠错页面的url地址
+        var url = "";
+        if (parent !== window) {
+            try {
+                url = window.top.location.href;
+            } catch (e) {
+                url = window.top.document.referrer;
+            }
+        }
+        if (url.length == 0)
+            url = document.location.href;
+        //跳转至纠错系统填写页面
+        window.open("http://121.43.68.40/exposure/jiucuo.html?site_code=" + site_code + "&url=" + encodeURIComponent(url));
+    }
+
+    function addFavorite() {
+        var url = window.location;
+        var title = document.title;
+        var ua = navigator.userAgent.toLowerCase();
+        if (ua.indexOf("360se") > -1) {
+            alert("由于360浏览器功能限制，请按 Ctrl+D 手动收藏！");
+        } else if (ua.indexOf("msie 8") > -1) {
+            window.external.AddToFavoritesBar(url, title); //IE8
+        } else if (document.all) {
+            try {
+                window.external.addFavorite(url, title);
+            } catch (e) {
+                alert("您的浏览器不支持,请按 Ctrl+D 手动收藏!");
+            }
+        } else if (window.sidebar) {
+            window.sidebar.addPanel(title, url, "");
+        } else {
+            alert("您的浏览器不支持,请按 Ctrl+D 手动收藏!");
+        }
+    }
+</script>
+</body>
+
+</html>

@@ -1,0 +1,83 @@
+/* 以 941 × 1672 的同一幅画决定家具、角色、触点的位置。
+   用场景大小覆盖屏幕，不按电视、聊天内容或角色的姿势改变取景。 */
+.ws-nest-portrait-actor,.ws-nest-portrait-cat,.ws-nest-portrait-quilt { display:none; }
+.mobile-studio-sheet .work-studio-view[data-workshop] .ws-scene[data-room-view="nest"][data-nest-layout="portrait"] > .ws-floorplan {
+  top:50%; left:50%; width:100%; max-width:none; height:auto;
+  aspect-ratio:941 / 1672; transform:translate(-50%,-50%) scale(var(--ws-scene-scale,1)); transform-origin:50% 50%;
+  background:#423326; transition:none;
+}
+/* 加长手机只延展真正的天花/地板绘稿，保住完整窗台和两边的家具触点。 */
+@container (max-aspect-ratio:9/16) {
+  .mobile-studio-sheet .ws-scene[data-room-view="nest"][data-nest-layout="portrait"] > .ws-floorplan::before,
+  .mobile-studio-sheet .ws-scene[data-room-view="nest"][data-nest-layout="portrait"] > .ws-floorplan::after {
+    content:''; position:absolute; left:0; width:100%; height:auto; aspect-ratio:810 / 200;
+    pointer-events:none; background-size:100% 100%; background-repeat:no-repeat;
+  }
+  .ws-scene[data-nest-layout="portrait"] > .ws-floorplan::before { bottom:calc(100% - .5px); background-image:var(--nest-ceiling); }
+  .ws-scene[data-nest-layout="portrait"] > .ws-floorplan::after { top:calc(100% - .5px); background-image:var(--nest-floor); }
+}
+.ws-scene[data-room-view="nest"][data-nest-layout="portrait"] :is(.ws-nest-loveseat,.ws-nest-sofa-rest,.ws-nest-seat,.ws-nest-cat-motion,.nest-clock-dial) { display:none !important; }
+.ws-scene[data-room-view="nest"][data-nest-layout="portrait"] :is(.ws-nest-portrait-actor,.ws-nest-portrait-cat,.ws-nest-portrait-quilt):not([hidden]) {
+  display:block; position:absolute; pointer-events:none; object-fit:contain; user-select:none;
+  transform-origin:50% 92%; z-index:2;
+}
+/* 放大书桌处的人物，右手仍落在原画桌沿的 (80.4%, 44.0%)。 */
+.ws-nest-portrait-actor[data-picture="work"] { left:65.91%; top:35.72%; width:15.69%; height:auto; }
+.ws-nest-portrait-actor[data-picture="watch"] { left:35.707%; top:53.05%; width:44.633%; height:auto; }
+.ws-nest-portrait-actor[data-picture="read"] { left:54.41%; top:55.801%; width:23.911%; height:auto; }
+.ws-nest-portrait-actor[data-picture="sleep"] { left:31.35%; top:55.981%; width:51.753%; height:auto; }
+.ws-nest-portrait-actor[data-picture="pet"] { left:21.4%; top:57.4%; width:16.8%; height:auto; }
+.ws-nest-portrait-quilt { left:59.299%; top:65.251%; width:28.480%; height:auto; }
+.ws-nest-portrait-cat[data-picture="cat"] { left:6.27%; top:55.443%; width:25.611%; height:auto; }
+.ws-nest-portrait-cat[data-picture="cat-sleep"] { left:9.883%; top:64.414%; width:18.066%; height:auto; }
+.ws-nest-portrait-cat[data-picture="cat-groom"] { left:7.9%; top:60.35%; width:23.5%; height:auto; }
+.ws-nest-portrait-cat[data-picture="cat-sniff"] { left:7.1%; top:60.8%; width:24%; height:auto; }
+.ws-scene[data-nest-pose="cat"] .ws-nest-portrait-cat[data-picture="cat-sniff"] { left:5.8%; }
+.ws-scene[data-nest-layout="portrait"][data-nest-light="off"] :is(.ws-nest-portrait-actor,.ws-nest-portrait-cat,.ws-nest-portrait-quilt) { filter:brightness(.65) saturate(.82); }
+.ws-scene[data-room-view="nest"][data-nest-layout="portrait"][data-sofa-walk] .ws-nest-sofa-walk { width:26%; }
+.ws-scene[data-nest-layout="portrait"] .ws-nest-living { z-index:2; }
+.ws-scene[data-nest-layout="portrait"] .nest-wall-clock { left:28.9%; top:22.7%; width:7%; height:3.95%; }
+.ws-scene[data-nest-layout="portrait"] .nest-wall-photo {
+  left:17.95%; top:30.45%; width:12.4%; height:3.64%; clip-path:polygon(0 0,100% 4%,100% 100%,0 98%);
+}
+/* 保留原画窗框和中间的竖梃，开窗时只透出两扇窗里的景色。 */
+.ws-scene[data-nest-layout="portrait"] .nest-window-glass {
+  left:63%; top:22%; width:36%; height:17.4%;
+  clip-path:polygon(1% 15%,45% 7%,45% 98%,1% 98%,1% 15%,48% 7%,99% 0,99% 95%,48% 98%,48% 7%);
+}
+.ws-scene[data-nest-layout="portrait"] .nest-window-glass img { object-fit:cover; }
+.ws-scene[data-nest-layout="portrait"] .nest-window-drape { display:none; }
+.ws-scene[data-room-view="nest"][data-nest-layout="portrait"] .ws-furniture-controls [data-furniture="lamp"]   { left:47.4%; top:24.4%; width:8%; height:7%; }
+.ws-scene[data-room-view="nest"][data-nest-layout="portrait"] .ws-furniture-controls [data-furniture="cup"]    { left:92.4%; top:45.1%; width:11%; height:4%; }
+.ws-scene[data-room-view="nest"][data-nest-layout="portrait"] .ws-furniture-controls [data-furniture="sofa"]   { left:65%; top:70%; width:52%; height:17%; }
+.ws-scene[data-room-view="nest"][data-nest-layout="portrait"] .ws-furniture-controls [data-furniture="folder"] { left:66.8%; top:40.4%; width:9%; height:5%; }
+.ws-scene[data-room-view="nest"][data-nest-layout="portrait"] .ws-furniture-controls [data-furniture="draft"]  { left:83%; top:44.4%; width:12%; height:4%; }
+.ws-scene[data-room-view="nest"][data-nest-layout="portrait"] .ws-furniture-controls [data-furniture="cat"]    { left:18.5%; top:66.5%; width:25%; height:12%; }
+.ws-scene[data-room-view="nest"][data-nest-layout="portrait"] .ws-furniture-controls [data-furniture="window"] { left:80%; top:31%; width:28%; height:13%; }
+.ws-scene[data-room-view="nest"][data-nest-layout="portrait"] .ws-furniture-controls [data-furniture="photo"]  { left:24.3%; top:32.3%; width:14%; height:5%; }
+.ws-scene[data-room-view="nest"][data-nest-layout="portrait"] .ws-furniture-controls [data-furniture="radio"]  { left:31.1%; top:43.1%; width:8%; height:3.8%; }
+.ws-scene[data-room-view="nest"][data-nest-layout="portrait"] .ws-device[data-media-device="tv"]      { left:14.6%; top:40.8%; width:23%; height:10%; }
+.ws-scene[data-room-view="nest"][data-nest-layout="portrait"] .ws-device[data-media-device="monitor"] { left:91.7%; top:40.8%; width:11.4%; height:5.8%; }
+/* 杯壶放在真实桌面；固定桌面已画在竖幅房间。 */
+.ws-scene[data-room-view="nest"][data-nest-layout="portrait"] .ws-nest-coffee-table {
+  left:82.4%; top:44.1%; width:14%; height:6.5%; background:none;
+}
+.ws-scene[data-nest-layout="portrait"] .ws-nest-coffee-table::after { top:-18%; left:2%; width:69%; height:39%; }
+.ws-scene[data-nest-layout="portrait"] .ws-nest-coffee { left:66%; top:36.5%; width:24%; height:10.2%; }
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"][data-nest-layout="portrait"][data-nest-sprite] .ws-life-actor {
+  left:53%; width:27%; bottom:37%;
+}
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"][data-nest-layout="portrait"][data-nest-pose="archive"] .ws-floorplan > .ws-actor {
+  left:56%; bottom:54%; width:18%;
+}
+.ws-scene[data-nest-layout="portrait"][data-sofa-walk] :is(.ws-life-actor,.ws-nest-coffee,.ws-actor) { visibility:hidden !important; }
+@keyframes nest-pet-breathe { 50% { transform:scaleY(1.014); } }
+@keyframes nest-pet-nuzzle { 55% { transform:rotate(-2deg) translateY(-1%); } }
+@media (prefers-reduced-motion:no-preference) {
+  :root:not(.safe-render) body:not(.reduced-motion) .work-studio-view[data-visible="true"] .ws-scene:not([data-media-device="tv"]) :is(.ws-nest-portrait-actor,.ws-nest-portrait-cat) {
+    animation:nest-pet-breathe 5s ease-in-out infinite;
+  }
+  :root:not(.safe-render) body:not(.reduced-motion) .work-studio-view[data-visible="true"] .ws-scene:not([data-media-device="tv"]):is([data-cat-state="pet"],[data-cat-state="welcome"],[data-cat-state="sniff"]) .ws-nest-portrait-cat {
+    animation:nest-pet-nuzzle 1.6s ease-in-out infinite;
+  }
+}

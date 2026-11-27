@@ -1,0 +1,59 @@
+{
+  "provenance": {
+    "url": "https://bifen4pc.qiumibao.com/json/list.htm",
+    "capturedAt": "2026-10-30T10:02:00Z",
+    "originalCount": 79,
+    "originalSha256": "b8bea0048db85bd64bf366ec1d752f7ef028c93e2f6d9c799f2d4e36d6a9ef2e",
+    "redactions": "只保留足球样本；队名和比赛ID替换为虚构值，其余保留真实字段/数值；不包含客户材料"
+  },
+  "list": [
+    {
+      "id": "fixture-1",
+      "leagueid": "10001990",
+      "sdate": "2026-10-30",
+      "time": "16:20",
+      "type": "football",
+      "start": "2026-10-30 16:20",
+      "home_team": "合成主队1",
+      "visit_team": "合成客队1",
+      "rightishome": "0",
+      "home_score": "3",
+      "visit_score": "0",
+      "period_cn": "77′",
+      "state": "2",
+      "is_jingcai": 0
+    },
+    {
+      "id": "fixture-2",
+      "leagueid": "198",
+      "sdate": "2026-10-30",
+      "time": "18:00",
+      "type": "football",
+      "start": "2026-10-30 18:00",
+      "home_team": "合成主队2",
+      "visit_team": "合成客队2",
+      "rightishome": "0",
+      "home_score": "",
+      "visit_score": "",
+      "period_cn": "未赛",
+      "state": "1",
+      "is_jingcai": 0
+    },
+    {
+      "id": "fixture-3",
+      "leagueid": "34",
+      "sdate": "2026-10-30",
+      "time": "02:00",
+      "type": "football",
+      "start": "2026-10-30 02:00",
+      "home_team": "合成主队3",
+      "visit_team": "合成客队3",
+      "rightishome": "0",
+      "home_score": "2",
+      "visit_score": "3",
+      "period_cn": "完赛",
+      "state": "3",
+      "is_jingcai": 0
+    }
+  ]
+}

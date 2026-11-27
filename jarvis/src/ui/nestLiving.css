@@ -1,0 +1,89 @@
+/* 房间与家具保持静止，只有角色所在的小块原画在原来的座位上改变姿势。 */
+.ws-nest-living { position:absolute; inset:0; pointer-events:none; z-index:1; }
+.ws-nest-living[hidden], .ws-scene[data-room-view="floor"] .ws-nest-living { display:none!important; }
+.ws-nest-idle-patch,.ws-nest-idle-detail { display:none; position:absolute; overflow:hidden; }
+.ws-nest-living[data-idle-pose] :is(.ws-nest-idle-patch,.ws-nest-idle-detail) {
+  display:block; mask-image:radial-gradient(ellipse closest-side,#000 76%,transparent);
+  -webkit-mask-image:radial-gradient(ellipse closest-side,#000 76%,transparent);
+}
+.ws-nest-idle-paint { display:block; width:100%; height:100%; background-repeat:no-repeat; }
+.ws-nest-idle-patch .ws-nest-idle-paint {
+  transform-origin:49% 83%; animation:nest-desk-breath 6.4s ease-in-out infinite;
+}
+.ws-nest-idle-detail .ws-nest-idle-paint {
+  transform-origin:16% 73%; animation:nest-handwrite 4.6s ease-in-out infinite;
+}
+.ws-nest-living[data-idle-pose="news"] .ws-nest-idle-detail .ws-nest-idle-paint { animation-duration:9.6s; }
+.ws-nest-living[data-idle-pose="sleep"] .ws-nest-idle-patch .ws-nest-idle-paint {
+  animation:nest-sleep-breath 4.9s ease-in-out infinite; transform-origin:38% 76%;
+}
+.ws-nest-living[data-idle-pose="sleep"] .ws-nest-idle-detail .ws-nest-idle-paint {
+  animation:nest-quilt-rise 4.9s ease-in-out infinite; transform-origin:59% 87%;
+}
+.ws-scene[data-nest-viewing] .ws-nest-living { display:none; }
+@keyframes nest-desk-breath {
+  0%,100% { transform:none; } 28% { transform:scaleY(1.022) rotate(-.85deg); }
+  62% { transform:rotate(1.6deg); } 78% { transform:scaleY(1.012) rotate(.7deg); }
+}
+@keyframes nest-handwrite {
+  0%,20%,86%,100% { transform:none; } 33%,53% { transform:rotate(3deg) translateX(1%); }
+  42%,67% { transform:rotate(-2deg) translateX(1.5%); }
+}
+@keyframes nest-sleep-breath { 0%,100% { transform:none; } 43% { transform:scaleY(1.018) rotate(-.6deg); } }
+@keyframes nest-quilt-rise { 0%,100% { transform:none; } 43% { transform:scaleY(1.038) rotate(-.3deg); } }
+/* 茶桌在书桌前、椅子右手边。水壶和杯平时放在桌面，泡咖啡时由同位置的动作帧接手。 */
+.ws-nest-coffee-table { display:none; }
+.ws-scene[data-room-view="nest"] .ws-nest-coffee-table {
+  display:block; position:absolute; pointer-events:none; z-index:1;
+  left:64.323%; top:49.707%; width:18.164%; height:25.35%;
+  background:url('./assets/nestRoom/tea-table.webp') center / 100% 100% no-repeat;
+}
+.ws-nest-coffee-table::after {
+  content:''; position:absolute; left:5%; top:-18.1%; width:41.94%; height:31.2%;
+  background:url('./assets/nestRoom/tea-service.webp') center / 100% 100% no-repeat;
+}
+.ws-scene[data-nest-pose="coffee"] .ws-nest-coffee-table::after { display:none; }
+.ws-scene[data-nest-light="off"] .ws-nest-coffee-table { background-image:url('./assets/nestRoom/tea-table-off.webp'); }
+.ws-scene[data-nest-light="off"] .ws-nest-coffee-table::after { background-image:url('./assets/nestRoom/tea-service-off.webp'); }
+/* 四帧分别带有实绘的手、壶、杯和水线，臀部对齐椅垫，杯底对齐桌面。 */
+.ws-nest-coffee {
+  display:none; position:absolute; left:56.966%; top:34.18%; width:16.21%; height:22.66%;
+  background:url('./assets/nestRoom/desk-coffee.webp') 0 0 / 200% 200% no-repeat;
+}
+.ws-scene[data-nest-pose="coffee"] .ws-nest-living[data-coffee-phase] .ws-nest-coffee { display:block; }
+.ws-nest-living[data-coffee-phase="pour"] .ws-nest-coffee { background-position:100% 0; }
+.ws-nest-living:is([data-coffee-phase="set-down"],[data-coffee-phase="hold"]) .ws-nest-coffee { background-position:0 100%; }
+.ws-nest-living[data-coffee-phase="sip"] .ws-nest-coffee { background-position:100% 100%; }
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"][data-nest-pose="coffee"] .ws-floorplan > .ws-life-actor { display:none; }
+.ws-scene[data-nest-light="off"] .ws-nest-coffee { background-image:url('./assets/nestRoom/desk-coffee-off.webp'); }
+.ws-nest-living[data-coffee-phase="pour"] .ws-nest-coffee::after {
+  content:''; position:absolute; left:81%; top:58%; width:1.1%; height:2.2%;
+  border-radius:50%; background:#f6f3dc; box-shadow:0 .5px 1px #f8e4b8;
+  animation:nest-water-glint .59s ease-in infinite;
+}
+.ws-nest-living:is([data-coffee-phase="hold"],[data-coffee-phase="set-down"]) .ws-nest-coffee::after {
+  content:''; position:absolute; left:83%; top:58%; height:12%; width:3.8%;
+  border-radius:55%; border-inline-start:1px solid #fff2ce; filter:blur(.65px);
+  animation:nest-coffee-steam 2.6s ease-out infinite;
+}
+@keyframes nest-water-glint {
+  0% { transform:translate(0,0); opacity:0; } 28% { opacity:.9; }
+  80% { opacity:.72; } 100% { transform:translate(380%,480%); opacity:0; }
+}
+@keyframes nest-coffee-steam { 0%,100% { opacity:0; } 40% { opacity:.55; } 100% { transform:translate(24%,-34%) scaleY(1.2); } }
+@media(prefers-reduced-motion:reduce) {
+  .ws-nest-idle-paint,.ws-nest-coffee::after { animation:none!important; }
+}
+.reduced-motion .ws-nest-idle-paint,.reduced-motion .ws-nest-coffee::after { animation:none!important; }
+/* 横幅睡姿使用与观影相同的前排坐垫；呼吸只作用在透明的被子和人物上。 */
+.ws-nest-living[data-sleep-seat="front"] { z-index:3; }
+.ws-nest-living[data-sleep-seat="front"] .ws-nest-idle-patch { display:none; }
+.ws-nest-living[data-sleep-seat="front"] .ws-nest-idle-detail {
+  left:5%; top:53%; width:23%; height:22%; mask-image:none; -webkit-mask-image:none;
+}
+.ws-nest-living[data-sleep-seat="front"] .ws-nest-idle-paint {
+  background-size:contain; background-position:center; transform-origin:64% 85%;
+}
+.ws-scene[data-nest-light="off"] .ws-nest-living[data-sleep-seat="front"] .ws-nest-idle-paint {
+  filter:brightness(.58) saturate(.78);
+}

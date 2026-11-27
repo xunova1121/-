@@ -1,0 +1,96 @@
+{
+  "realAndroid": false,
+  "realUserServer": false,
+  "syntheticHTTP": true,
+  "resumeMs": 10,
+  "cachedMs": 242,
+  "checks": [
+    {
+      "label": "联网成功后模型选择器显示服务器型号",
+      "ok": true
+    },
+    {
+      "label": "持久化预览不含模型Key、访问Token或上游URL",
+      "ok": true
+    },
+    {
+      "label": "前台立即续接同一任务，不等10秒轮询或45秒失活",
+      "ok": true
+    },
+    {
+      "label": "前台/焦点双事件只续接一次，任务没有重复提交",
+      "ok": true
+    },
+    {
+      "label": "结果完整续回且旧段落不重复",
+      "ok": true
+    },
+    {
+      "label": "进程重建后服务器配置仍挂起，缓存型号已可见",
+      "ok": true
+    },
+    {
+      "label": "界面说明仍在同步，没有把缓存当作服务器已连接",
+      "ok": true
+    },
+    {
+      "label": "切换账号后即使服务器配置挂起，也不显示上个账号的缓存型号",
+      "ok": true
+    },
+    {
+      "label": "浏览器没有脚本错误或未处理拒绝",
+      "ok": true
+    }
+  ],
+  "errors": [],
+  "runtimeRevision": "377898555a7cd58cf1f5df76b405f9b69a2b38af",
+  "runtimeFiles": 983,
+  "status": "released",
+  "heldCandidate": {
+    "version": "1.0.444",
+    "runId": 43717899068,
+    "status": "cancelled_not_published",
+    "reason": "新增调用链断言复现旧登录首次换发误判切账号；已修复并经77项专项与最终手机浏览器9项通过"
+  },
+  "limitations": [
+    "原7db2e10的4055单测与大量原成品门禁通过，但不能代替最终3778985的完整CI",
+    "未测Android/Windows真机、实际VPN/WiFi/流量切换或用户服务器；不保证永久在线",
+    "草稿发布读取返回404；正式CI将以apksigner验证完整性及原证书，公开后实际下载核对"
+  ],
+  "held445": {
+    "runId": 43719101970,
+    "published": false,
+    "reason": "新增签名校验误拦V2 Signer格式",
+    "originalCertificateConfirmed": true,
+    "apksignerIntegrityPassed": true,
+    "signatureRegressionTests": 6
+  },
+  "localLoadTimeout": {
+    "test": "taskRequirementsIntegration",
+    "originalDeadlineMs": 5000,
+    "isolatedOriginalSixPassed": true,
+    "ci445All4055Passed": true
+  },
+  "version": "1.0.446",
+  "buildRevision": "8928acd54c6253e043fe72fbdc8104c27f53a0f8",
+  "runId": 43720404316,
+  "publishedAt": "2026-11-15T14:10:40Z",
+  "finalRecord": "验收记录/1.0.446-20261115.json",
+  "localGate": {
+    "status": "completed_with_environment_failures_rechecked",
+    "passedSteps": 28,
+    "failedSteps": 2,
+    "skippedSteps": 7,
+    "runtimeRevision": "377898555a7cd58cf1f5df76b405f9b69a2b38af",
+    "unitFiles": 468,
+    "unitPassed": 4054,
+    "unitTimedOut": 1,
+    "originalTeamSixRecheckPassed": true,
+    "standaloneOriginalFourteenRecheckPassed": true,
+    "notes": [
+      "原团队用例在本机并发时超过原5秒期限；未改断言/期限，原6项独立通过，最终CI全部4061通过",
+      "单文件模拟.test网关两项在环境代理开启时失败，NODE_USE_ENV_PROXY=0按原14项通过；产品代码未因此修改",
+      "本机完整脚本不称全绿；完整最终CI全项成功另计"
+    ]
+  }
+}

@@ -1,0 +1,106 @@
+import { it, expect, beforeEach, afterEach, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import JSZip from 'jszip';
+import { createFileStore } from '../server/fileStore.mjs';
+import { useBackend } from '../src/agent/store.js';
+import * as ws from '../src/agent/workspace.js';
+import { createDocumentGenerateTool } from '../src/agent/documentGenerateTool.js';
+import { inspectDocument } from '../src/agent/documentQuality.js';
+import { parseSlides } from '../src/agent/pptxWriter.js';
+import { readPresentationRecipe } from '../src/agent/presentationRecipe.js';
+import { requestedSlides, slideBudget } from '../src/agent/documentPageBudget.js';
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=', 'base64');
+let dir;
+beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ppt-live-regression-')); useBackend(createFileStore(dir)); });
+afterEach(() => { useBackend(null); fs.rmSync(dir, { recursive: true, force: true }); });
+it('明确分页时副标题留在原页，文字不丢；未分页仍按二级标题分', () => {
+  const pages = parseSlides('报告', '# 页一\n## 副标题\n全部内容\n\n---\n\n# 页二\n## 副标题二\n第二页内容');
+  expect(pages).toHaveLength(2);
+  expect(pages[0].blocks[0]).toMatchObject({ type: 'heading', level: 3 });
+  expect(JSON.stringify(pages)).toContain('全部内容');
+  expect(parseSlides('报告', '## 页一\n内容\n## 页二\n第二页')).toHaveLength(2);
+});
+it('最多六页不是必须六页，超上限仍拒绝；精确页数仍严格', () => {
+  expect(requestedSlides('PPT最多6页')).toBeNull();
+  expect(requestedSlides('PPT最多6页', true)).toBe(6);
+  expect(slideBudget(3, null, false, false, 6)).toMatchObject({ cover: true });
+  expect(slideBudget(6, null, false, false, 6)).toMatchObject({ cover: false });
+  expect(() => slideBudget(7, null, false, false, 6)).toThrow(/最多6页/);
+  expect(() => slideBudget(3, 6)).toThrow(/总共6页/);
+});
+it('原MD直接转Word不重抄，重复检查仍返回真实无横线事实', async () => {
+  await ws.write('原文.md', '# 赛程\n\n|编号|时间|\n|---|---|\n|赛事01|18:00|');
+  const tool = createDocumentGenerateTool({});
+  await tool.run({ format: 'docx', path: '赛程.docx', source_path: '原文.md', content: '错误改写', requirements: '不要横线' });
+  const report = await inspectDocument(await ws.readBlob('赛程.docx'), '赛程.docx');
+  expect(report.styleFacts.rules).toBe(0);
+  const zip = await JSZip.loadAsync(await (await ws.readBlob('赛程.docx')).arrayBuffer());
+  const text = await zip.file('word/document.xml').async('string');
+  expect(text).toContain('赛事01'); expect(text).not.toContain('错误改写');
+});
+it('绑定Word表格，其他字段一致时恢复被缩写编号，缺行仍拒绝', async () => {
+  const tool = createDocumentGenerateTool({});
+  const table = '|编号|时间|对阵|状态|\n|---|---|---|---|\n|赛事01|18:00|甲—乙|未开赛|\n|赛事02|18:30|丙—丁|未开赛|';
+  await tool.run({ format: 'docx', path: '来源.docx', content: table });
+  await tool.run({ format: 'pptx', path: '完整.pptx', source_path: '来源.docx', content: '## 赛程\n' + table.replaceAll('赛事', ''), requirements: 'PPT保留完整表格，不要封面' });
+  const zip = await JSZip.loadAsync(await (await ws.readBlob('完整.pptx')).arrayBuffer());
+  expect(await zip.file('ppt/slides/slide1.xml').async('string')).toContain('赛事01');
+  await expect(tool.run({ format: 'pptx', path: '缺行.pptx', source_path: '来源.docx', content: '## 赛程\n' + table.split('\n').slice(0, -1).join('\n'), requirements: 'PPT保留完整表格，不要封面' })).rejects.toMatchObject({ code: 'DOCUMENT_SOURCE' });
+  expect(await ws.exists('缺行.pptx')).toBe(false);
+});
+it('沿用真实PPT底稿一次批量配图，保留原件/正文/页数；重试复用图片', async () => {
+  const imageGen = vi.fn(async () => ({ blob: new Blob([png], { type: 'image/png' }) }));
+  const tool = createDocumentGenerateTool({ imageGen });
+  await tool.run({ format: 'pptx', path: '原件.pptx', title: '赛程', content: '## 概览\n20场赛事全部保留\n\n## 明细\n赛事01 18:00 甲对乙', requirements: 'PPT 3页，包含封面' });
+  const original = new Uint8Array(await (await ws.readBlob('原件.pptx')).arrayBuffer());
+  const args = { format: 'pptx', path: '配图.pptx', source_path: '原件.pptx', content: '不得采用的改写', requirements: 'PPT每页都有图，不删正文' };
+  await tool.run(args);
+  const result = await inspectDocument(await ws.readBlob('配图.pptx'), '配图.pptx', { requirements: '每页都有图' });
+  expect(result.slides).toBe(3); expect(result.presentation.imagePages).toBe(3);
+  expect(imageGen).toHaveBeenCalledTimes(3);
+  expect((await readPresentationRecipe(await ws.readBlob('配图.pptx'))).content).toContain('赛事01');
+  expect(new Uint8Array(await (await ws.readBlob('原件.pptx')).arrayBuffer())).toEqual(original);
+  await tool.run({ ...args, path: '配图再试.pptx' }); expect(imageGen).toHaveBeenCalledTimes(3);
+  const zip = await JSZip.loadAsync(original);
+  zip.file('ppt/slides/slide2.xml', (await zip.file('ppt/slides/slide2.xml').async('string')).replace('20场', '21场'));
+  await ws.write('被修改.pptx', new Blob([await zip.generateAsync({ type: 'uint8array' })]));
+  await expect(tool.run({ ...args, source_path: '被修改.pptx' })).rejects.toMatchObject({ code: 'PRESENTATION_RECIPE' });
+});
+it('显式分页的首段有正文时另有封面，补图必须覆盖封面且不把副标题拆成页', async () => {
+  const imageGen = vi.fn(async () => ({ blob: new Blob([png], { type: 'image/png' }) }));
+  const tool = createDocumentGenerateTool({ imageGen });
+  const content = '# 赛程\n## 晚间赛事\n这是虚构数据\n\n---\n\n# 明细\n## 完整编号\n赛事01 甲对乙';
+  await tool.run({ format: 'pptx', path: '显式.pptx', title: '赛程', content, requirements: 'PPT最多6页，包含封面' });
+  await tool.run({ format: 'pptx', path: '显式配图.pptx', source_path: '显式.pptx', content: '', requirements: 'PPT每页都有图' });
+  const actual = await inspectDocument(await ws.readBlob('显式配图.pptx'), '显式配图.pptx');
+  expect(actual.slides).toBe(3); expect(actual.presentation.imagePages).toBe(3);
+  expect(imageGen).toHaveBeenCalledTimes(3);
+});
+it('长表实际拆页后按真实分页补图，不按原Markdown段数误算', async () => {
+  const imageGen = vi.fn(async () => ({ blob: new Blob([png], { type: 'image/png' }) }));
+  const tool = createDocumentGenerateTool({ imageGen });
+  const table = '|编号|时间|对阵|\n|---|---|---|\n' + Array.from({length:20},(_,i)=>`|赛事${i+1}|18:00|队伍${i+1}对队伍${i+21}|`).join('\n');
+  await tool.run({ format:'pptx', path:'长表.pptx', title:'赛程', content:'## 明细\n'+table, requirements:'最多6页PPT' });
+  await tool.run({ format:'pptx', path:'长表配图.pptx', source_path:'长表.pptx', content:'', requirements:'PPT每页都有图，不删赛程' });
+  const actual=await inspectDocument(await ws.readBlob('长表配图.pptx'),'长表配图.pptx');
+  expect(actual.slides).toBe(3); expect(actual.presentation.imagePages).toBe(3);
+  const recipe=await readPresentationRecipe(await ws.readBlob('长表配图.pptx'));
+  for(let i=1;i<=20;i++)expect(recipe.content).toContain('赛事'+i);
+});
+it('一行多个数字转换为独立数字卡，副标题保留；日期不误分数字', async () => {
+ const {generate}=await import('../src/agent/docs.js');
+ const content='# 概览\n## 关键数字\n**20** 场赛事　 **6** 个时段　 **40** 支队伍　 **20** 场未开赛\n\n---\n# 明细\n赛事01';
+ const out=await generate('pptx',{title:'统计',content});
+ expect(out.info.layouts).toContain('stats');
+ const zip=await JSZip.loadAsync(await out.blob.arrayBuffer());
+ const text=(await Promise.all(Object.keys(zip.files).filter(p=>/^ppt\/slides\/slide\d+\.xml$/.test(p)).map(p=>zip.file(p).async('string')))).join('');
+ expect(text).toContain('关键数字');
+});
+it('表格容量建议不是实际溢出，不给出互相矛盾的精简指令', async () => {
+ const tool=createDocumentGenerateTool({});
+ const content='## 明细\n|编号|对阵|\n|---|---|\n'+Array.from({length:10},(_,i)=>`|赛事${i+1}|甲${i}对乙${i}|`).join('\n');
+ const receipt=await tool.run({format:'pptx',path:'建议.pptx',content,font_size:14});
+ expect(receipt).not.toContain('不能靠缩小字号');
+});

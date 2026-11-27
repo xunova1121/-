@@ -1,0 +1,97 @@
+/* 小窝以整幅 3:2 原画为坐标系。热区和照片随同一镜头缩放，媒体留在镜头外。 */
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] {
+  background: var(--ws-panel);
+  /* 小窝只裁画面，从不作为滚动区。近看时画外电视/工位即使获取焦点也不能挪动沙发。 */
+  overflow:clip;
+  aspect-ratio: 3 / 2;
+  --ws-aim-x: 61%; --ws-aim-y: 48%;
+}
+.wb-desk .work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] {
+  flex: 0 1 auto; width: min(100%,calc(133vh - 182px)); align-self: center;
+  min-height: 0; aspect-ratio: 3 / 2;
+}
+.mobile-studio-sheet .work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] {
+  flex: none; width: min(100%,70cqh); aspect-ratio: 3 / 2;
+}
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] > .ws-floorplan {
+  width: min(100%,150cqh); aspect-ratio: 3 / 2; height: auto;
+  top: 50%; bottom: auto; left: 50%; background: #3a3023;
+  transform: translate(-50%,-50%) scale(var(--ws-scene-scale,1));
+  /* 只按用户选择的倍率近看；坐下、看电视或回桌边时都共用同一镜头轴心。 */
+  translate:none !important;
+  transform-origin:50% 50%;
+}
+.ws-nest-art,.ws-nest-seat { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; user-select:none; }
+/* 小屋仍用原画坐标。座位图已经按原渐变烘出透明边缘，只上传这块家具的纹理。 */
+.ws-nest-seat {
+  inset: 24.90234375% auto auto 48.95833333%;
+  width: 27.08333333%; height: 44.3359375%;
+}
+.ws-scene[data-room-view="floor"] :is(.ws-nest-art,.ws-nest-seat,.ws-nest-hit,.nest-window-glass,.nest-wall-photo,.ws-nest-cat-patch),
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] > .ws-floorplan > :is(.ws-life-furniture,.ws-fixtures,.ws-room-light,.ws-actor,.ws-life-actor) { display:none; }
+/* 额外的日常活动沿用原先真正泡咖啡、吃饭、唱歌、碎纸的成套姿势和道具。 */
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"][data-nest-sprite] .ws-life-actor {
+  display:block; left:65%; width:18%; bottom:20%; z-index:3;
+}
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"][data-nest-sprite] .ws-life-actor[data-facing] { animation:none; }
+.ws-scene[data-room-view="nest"][data-nest-light="off"] :is(.ws-life-actor,.ws-actor) {
+  filter: brightness(.54) saturate(.76) drop-shadow(1px 3px 2px #0a0f184d);
+}
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"][data-nest-pose="archive"] .ws-life-actor { display:none; }
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"][data-nest-pose="archive"] .ws-floorplan > .ws-actor {
+  display:block; visibility:visible; left:50%; bottom:44%; width:17%; z-index:2;
+}
+.work-studio-view[data-workshop] .ws-scene[data-room-view="nest"]:is([data-nest-pose="cheer"],[data-nest-pose="stomp"],[data-nest-pose="stop"]) .ws-floorplan > .ws-actor {
+  display:block;visibility:visible;left:59%;bottom:22%;width:17%;z-index:2;
+}
+.ws-scene[data-room-view="nest"] .ws-furniture-controls button { touch-action:manipulation; }
+/* 低帧率电脑仍播放每个呼吸、转头和落笔关键帧；减少慢动作间重复合成相同像素。
+   行走、电视画面和点家具的反应继续按它们自己的时序播放。 */
+.wb-desk .ws-scene[data-room-view="nest"][data-paced-motion] :is(.ws-nest-cat-motion img,.ws-nest-idle-paint),
+body.wb-studio:has(.wb-desk .ws-scene[data-room-view="nest"][data-paced-motion]) .wy-mascot {
+  animation-timing-function: steps(3, end);
+}
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="lamp"] { left:49.2%; top:21.8%; width:6%; height:12%; cursor:ns-resize; touch-action:none; }
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="cup"] { left:71.5%; top:53.2%; width:14.4%; height:9.8%; z-index:1; }
+.work-studio-view .ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="cup"]:hover:not(:focus-visible) { background:transparent; box-shadow:none; }
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="sofa"] { left:34%; top:51.8%; width:32%; height:19%; }
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="folder"] { left:54.6%; top:40%; width:6%; height:10%; }
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="draft"] { left:70%; top:45.5%; width:10%; height:5%; }
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="cat"] { left:38%; top:74%; width:16%; height:15%; }
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="window"] { left:78.4%; top:18.3%; width:14%; height:14%; }
+.ws-scene[data-room-view="nest"] .ws-furniture-controls [data-furniture="photo"] { left:34.3%; top:27.6%; width:14%; height:15%; }
+.ws-nest-next { grid-column:1 / -1; padding:3px 7px 5px; color:#e4ddc5; line-height:1.4; font-size:11px; max-width:min(70cqw,260px); }
+.ws-scene[data-room-view="nest"] .ws-room-tools { z-index:6; }
+.ws-scene[data-room-view="nest"] .ws-room-menu {
+  grid-template-columns:repeat(3,max-content); max-width:calc(100cqw - 16px);
+  max-height:min(76cqh,260px); gap:2px; overscroll-behavior:contain;
+}
+.work-studio-view .ws-room-menu .ws-monitor-ticker {
+  position:static; display:flex; grid-column:1/-1; width:100%; max-width:100%; align-items:center;
+  gap:8px; overflow:hidden; padding:5px 9px; border:0; border-radius:6px; background:transparent;
+  box-shadow:none; color:inherit;
+}
+.work-studio-view .ws-room-menu .ws-monitor-ticker small { display:inline; color:inherit; font:inherit; }
+.work-studio-view .ws-room-menu .ws-monitor-ticker span { min-width:0; font-size:11px; }
+.work-studio-view .ws-floor-toggle {
+  flex:none; border:1px solid var(--ws-line); border-radius:7px; color:var(--ws-on-tint);
+  background:var(--ws-panel); font:550 12px/1.4 var(--font-ui,sans-serif); padding:4px 8px; margin-left:auto;
+}
+.wb-desk .work-studio-view .ws-floor-toggle + .ws-zoom-toggle,
+.mobile-studio-sheet .work-studio-view .ws-floor-toggle + .ws-zoom-toggle { margin-left:0; margin-inline-start:0; }
+.work-studio-view .ws-caption[data-nest-controls] > :not(.ws-nest-panel) { display:none; }
+.work-studio-view .ws-nest-panel:not([hidden]) {
+  display:flex; width:100%; min-width:0; align-items:center; gap:6px; color:var(--ws-ink);
+}
+.ws-nest-panel[hidden] { display:none; }
+.ws-nest-panel-body { flex:1; min-width:0; }
+.work-studio-view .ws-nest-panel button {
+  flex:none; font:550 13px/1.25 var(--font-ui,sans-serif); min-height:30px; padding:4px 9px;
+  color:var(--ws-on-tint); border:1px solid var(--ws-line); border-radius:7px; background:var(--ws-tint);
+}
+.work-studio-view .ws-nest-panel .nest-controls-close { min-width:32px; font-size:19px; background:transparent; }
+.ws-scene[data-room-view="nest"]:has(> .nest-window-view) > :not(.nest-window-view) { visibility:hidden; }
+.ws-scene > .nest-window-view { position:absolute; z-index:8; inset:0; width:100%; height:100%; }
+@container mobile-workroom (min-width:600px) and (min-aspect-ratio:1.25) {
+  .mobile-studio-sheet .work-studio-view[data-workshop] .ws-scene[data-room-view="nest"] {width:min(100%,calc(140cqh - 152px));}
+}

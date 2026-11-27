@@ -1,0 +1,32 @@
+.readiness-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.readiness-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border, #dbe2ec);
+  overflow-wrap: anywhere;
+}
+.readiness-row p,
+.readiness-row small {
+  grid-column: 1/-1;
+  margin: 0;
+  line-height: 1.6;
+}
+.readiness-row small,
+.readiness-row > span {
+  color: var(--muted, #657184);
+  font-size: 12px;
+}
+.readiness-row[data-readiness-status='missing'] > span,
+.readiness-row[data-readiness-status='unavailable'] > span {
+  color: #a64923;
+}
+.readiness-row[data-readiness-status='ready'] > span {
+  color: #187454;
+}
