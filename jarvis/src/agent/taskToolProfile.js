@@ -15,6 +15,11 @@ const BASIC = ['execution_capabilities', 'read_task_requirements', 'read_tool_re
 const MEMORY = ['recall', 'read_memory', 'remember', 'kb_search', 'search_conversations', 'read_conversation', 'list_my_messages', 'list_work_records'];
 const FILES = ['find_files', 'search_in_files', 'list_files', 'read_file', 'digest_document', 'open_archive', 'write_file', 'edit_file', 'preview', 'run_javascript', 'run_project_tests'];
 const SEARCH = ['web_search', 'fetch_url', 'read_evidence', 'fetch_json', 'reconcile_numbers'];
+// 带了图片：看图、认字、改图的工具 + 文件和搜索入口；其余按问题文字再加（做海报、写文档……）
+// 原来带图一律给全部常驻工具（约 62 个、近 3 万 token，是普通提问的 7 倍），2026-11-28 改为按需
+export const IMAGE_INPUT_TOOLS = ['inspect_image', 'read_image_text', 'process_image', 'generate_image', 'find_files', 'list_files', 'read_file', 'write_file', 'preview', 'web_search', 'fetch_url'];
+// 生成图片 / 唱歌 / 视频：只带这几样，画架构图、做海报等另有判断（DIAGRAM_REQUEST、textPosterRequest）
+export const MEDIA_TOOLS = ['generate_image', 'process_image', 'inspect_image', 'read_image_text', 'sing_song', 'generate_video', 'find_files', 'list_files', 'read_file', 'preview', 'web_search'];
 
 export function workspaceFileRemovalRequest(value) {
   const fileTarget = /文件|附件|海报|工作区|\.(?:docx?|xlsx?|pptx?|pdf|png|jpe?g|md|txt)\b/i.test(value);
@@ -25,6 +30,11 @@ export function workspaceFileRemovalRequest(value) {
 /** 只决定先展示哪些 schema；所有工具仍可通过目录发现、按名字直接调用，权限边界不变。 */
 export function taskToolCore(intent, text, { images = [], computerTask = false, strict = false } = {}) {
   if (computerTask) return CORE;
+  const core = textToolCore(intent, text, { strict });
+  return images.length ? new Set([...core, ...IMAGE_INPUT_TOOLS]) : core;
+}
+
+function textToolCore(intent, text, { strict = false } = {}) {
   const value = String(text || '');
   const names = new Set([...BASIC, ...MEMORY]);
   const add = list => list.forEach(name => names.add(name));
@@ -34,7 +44,7 @@ export function taskToolCore(intent, text, { images = [], computerTask = false, 
     return names;
   }
   if (visualSceneRequest(value)) { add(VISUAL_SCENE_TOOLS); return names; }
-  if (strict || images.length) return CORE;
+  if (strict) return CORE;
   if (isPhoneRequest(value)) { add(['phone_devices', 'phone_action', 'get_current_time', 'time_calc']); return names; }
   if (textPosterRequest(value)) { add(POSTER_TOOLS); return names; }
   if (intent?.category === 'code') { add(CODE_TASK_CORE); add(FILES); return names; }
@@ -42,7 +52,7 @@ export function taskToolCore(intent, text, { images = [], computerTask = false, 
   if (/Word|Excel|PPT|文档|表格|幻灯片|\.docx|\.xlsx|\.pptx/i.test(value)) return DIAGRAM_REQUEST.test(value) ? new Set([...DOCUMENT_TASK_CORE, ...DIAGRAM_TOOLS]) : DOCUMENT_TASK_CORE;
   if (DIAGRAM_REQUEST.test(value)) { add(DIAGRAM_TOOLS); return names; }
   if (DEMO_REQUEST.test(value)) { add(VISUAL_SCENE_TOOLS); return names; }
-  if (/生成图片|画图|图片|唱歌|歌曲|视频/.test(value)) return CORE;
+  if (/生成图片|画图|图片|照片|唱(?:一?首|个)?歌|歌曲|视频/.test(value)) { add(MEDIA_TOOLS); return names; }
   if (/招投标|招标|中标|采购公告|股东|股权|工商|查企业|查公司|对外投资/.test(value)) add(['search_tenders', 'read_tender_notice', 'lookup_company', 'time_calc', ...SEARCH]);
   if (/天气|温度|下雨|气温/.test(value)) add(['get_weather', 'get_current_time', ...SEARCH]);
   else if (/股价|行情|金价|汇率|大盘|美股|港股|油价|股票/.test(value)) add(['get_market_quote', 'get_stock_kline', 'verify_numbers', 'time_calc', 'list_holdings', 'holding_profit', ...SEARCH]);

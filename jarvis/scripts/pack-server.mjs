@@ -30,7 +30,9 @@ if (missing.length) { console.error(`package.json 里没有：${missing.join('�
 fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
   name: 'jarvis-server', version, private: true, type: pkg.type,
   scripts: { start: 'node server/server.mjs', 'eval:agent': 'node evals/runner.mjs', 'eval:check': 'node --test evals/checks.mjs' },
-  dependencies: Object.fromEntries(SERVER_DEPS.map((d) => [d, pkg.dependencies[d]]))
+  dependencies: Object.fromEntries(SERVER_DEPS.map((d) => [d, pkg.dependencies[d]])),
+  // 子依赖固定到已修漏洞的版本（hono、uuid 等，见 package.json）；不带过去服务器上装的还是旧版
+  ...(pkg.overrides ? { overrides: pkg.overrides } : {})
 }, null, 2));
 fs.writeFileSync(path.join(dir, 'VERSION'), `${version}\n`);
 // 1.0.419 事故根治：构建环境 umask 偏严时复制出来的文件是 0600，root 安装后 jarvis 服务账号读不了。

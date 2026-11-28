@@ -4,7 +4,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { validateCodeRuntimeManifest } from '../evals/code-runtime.mjs';
+import { validateCodeRuntimeManifest, CODE_RUNTIME_DATA_DIRS } from '../evals/code-runtime.mjs';
 import { RUNTIME_MAX_FILES } from '../evals/architecture-runtime-fetch.mjs';
 
 export async function generateCodeRuntimeManifest(cwd = process.cwd()) {
@@ -20,7 +20,8 @@ export async function generateCodeRuntimeManifest(cwd = process.cwd()) {
   })
     .split('\0')
     .filter(Boolean);
-  const selected = names.filter((name) => !/runtime-manifest\.json$/.test(name));
+  // 技能运行器用的数据目录不进清单（见 code-runtime.mjs 的 CODE_RUNTIME_DATA_DIRS）
+  const selected = names.filter((name) => !/runtime-manifest\.json$/.test(name) && !CODE_RUNTIME_DATA_DIRS.some((dir) => name.startsWith(dir + '/')));
   if (selected.length > RUNTIME_MAX_FILES) throw new Error(`代码清单超过${RUNTIME_MAX_FILES}文件`);
   const files = [];
   for (const name of selected) {

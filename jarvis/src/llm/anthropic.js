@@ -5,7 +5,6 @@
  *   - 支持服务端拒绝兜底（fallbacks: "default"）的型号会自动带上；
  *   - 工具轮内原样回传本轮 content（含思考块），跨轮只保留文本。
  */
-import Anthropic from '@anthropic-ai/sdk';
 import { nativeSearchAllowed } from './nativeSearch.js';
 import { readAnthropicStream } from './anthropicStream.js';
 import { stallGuard, isTransient, retryWait, retryAfterMs, sleep } from './openai.js';
@@ -43,7 +42,15 @@ export function toAnthropicMessages(messages) {
  * 被拒（400 / 404 / 422）且还没输出文字时，按顺序降级重试：先去掉新参数，最后才去掉联网搜索；记住能用的档位。
  */
 export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = true, webSearch = false, compat = false, client: injected }) {
-  const client = injected ?? new Anthropic({ maxRetries: 0, apiKey: apiKey || 'use-gateway-key', ...(baseURL && { baseURL }), ...(headers && { defaultHeaders: headers }), dangerouslyAllowBrowser: browser });
+  // 官方 SDK 第一次发请求时才加载：网页首屏主包少约 800K（连云服务器、用 OpenAI 格式的模型时根本用不到它）
+  let client = injected ?? null;
+  const getClient = async () => {
+    if (!client) {
+      const { default: Anthropic } = await import('@anthropic-ai/sdk');
+      client ??= new Anthropic({ maxRetries: 0, apiKey: apiKey || 'use-gateway-key', ...(baseURL && { baseURL }), ...(headers && { defaultHeaders: headers }), dangerouslyAllowBrowser: browser });
+    }
+    return client;
+  };
   let level = 0; // 0 全部参数；1 去掉新参数；2 再去掉联网搜索（只在 compat 时降级）
   const maxLevel = !compat ? 0 : webSearch ? 2 : 1;
   const usesNativeSearch = (options, lvl = level) => nativeSearchAllowed({ ...options, enabled: webSearch && lvl < 2 });
@@ -72,7 +79,7 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
     // 卡住检测：中转站挂住不回时断开，交给上层换备用模型或重试
     const guard = stallGuard(signal, stallTimeouts);
     try {
-      const stream = client.beta.messages.stream(params, { signal: guard.signal });
+      const stream = (await getClient()).beta.messages.stream(params, { signal: guard.signal });
       const { text, message: msg } = await readAnthropicStream(stream, {
         guard,
         signal,

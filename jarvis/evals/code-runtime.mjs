@@ -40,6 +40,10 @@ export function validateCodeRuntimeManifest(manifest) {
   return manifest;
 }
 
+// 随服务器带的技能文件（Anthropic docx/pptx/xlsx，173 个 Python 脚本和说明）只在 Docker 运行器里跑、Node 不 import，
+// 不算运行代码：不进清单、扫描时跳过。不跳过的话一个目录就占掉清单 1500 / 扫描 2000 上限的一成多。
+export const CODE_RUNTIME_DATA_DIRS = ['server/bundled-skills'];
+
 export async function checkCodeRuntime(manifest, directory) {
   validateCodeRuntimeManifest(manifest);
   const root = await fs.realpath(directory);
@@ -51,6 +55,7 @@ export async function checkCodeRuntime(manifest, directory) {
       throw error;
     })) {
       const name = relative + '/' + item.name;
+      if (CODE_RUNTIME_DATA_DIRS.includes(name)) continue;
       if (++visited > 2000 || item.isSymbolicLink()) throw invalid('CODE_RUNTIME_EXTRA', '代码目录出现未核验路径，未请求模型');
       if (item.isDirectory()) await scan(name);
       else if (!item.isFile() || !listed.has(name)) throw invalid('CODE_RUNTIME_EXTRA', '代码目录存在清单之外的文件，未请求模型：' + name);
